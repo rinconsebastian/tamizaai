@@ -1,0 +1,108 @@
+# Tamiza for KoboToolbox: self-hosted stack. Copy .env.example to .env, fill in the required values,
+# then run `docker compose up -d`. Keycloak is external and not part of this file.
+name: tamiza
+
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tamiza
+      POSTGRES_USER: ${POSTGRES_USER:-tamiza}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d tamiza"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${DB_MEMORY_LIMIT:-1024m}
+
+  api:
+    image: tamiza-api:${TAMIZA_VERSION:-dev}
+    build: ./tamiza-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Tamiza: "Host=db;Port=5432;Database=tamiza;Username=${POSTGRES_USER:-tamiza};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      TAMIZA_PUBLIC_URL: ${TAMIZA_PUBLIC_URL:?Set TAMIZA_PUBLIC_URL in .env}
+      TAMIZA_SUPERADMIN_EMAILS: ${TAMIZA_SUPERADMIN_EMAILS:-}
+      OIDC_AUTHORITY: ${OIDC_AUTHORITY:?Set OIDC_AUTHORITY in .env}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?Set OIDC_CLIENT_ID in .env}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:?Set OIDC_AUDIENCE in .env}
+      OIDC_METADATA_ADDRESS: ${OIDC_METADATA_ADDRESS:-}
+      OIDC_SCOPE: ${OIDC_SCOPE:-openid profile email}
+      OIDC_REQUIRE_HTTPS_METADATA: ${OIDC_REQUIRE_HTTPS_METADATA:-true}
+      Logging__LogLevel__Default: ${TAMIZA_LOG_LEVEL:-Information}
+    volumes:
+      - api-keys:/var/lib/tamiza/keys
+    # Lets OIDC_METADATA_ADDRESS point at a Keycloak running on the Docker host (built in on Docker Desktop).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: ${API_MEMORY_LIMIT:-512m}
+
+  analytics:
+    image: tamiza-analytics:${TAMIZA_VERSION:-dev}
+    build: ./tamiza-analytics
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      # libpq reads the password from PGPASSWORD, so it never needs escaping inside a URL.
+      TAMIZA_ANALYTICS_DATABASE_URL: "host=db port=5432 dbname=tamiza user=${POSTGRES_USER:-tamiza}"
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      TAMIZA_WORKER_POLL_SECONDS: ${TAMIZA_WORKER_POLL_SECONDS:-5}
+    healthcheck:
+      test: ["CMD", "python", "-m", "tamiza.health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: ${ANALYTICS_MEMORY_LIMIT:-1536m}
+
+  ui:
+    image: tamiza-ui:${TAMIZA_VERSION:-dev}
+    build: ./tamiza-ui
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    # The only published port. The API is reached through it under /api/.
+    ports:
+      - "${TAMIZA_HTTP_PORT:-8088}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: ${UI_MEMORY_LIMIT:-128m}
+
+volumes:
+  db-data:
+  api-keys:

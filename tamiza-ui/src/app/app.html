@@ -1,0 +1,14 @@
+<ng-container *transloco="let t">
+  <header class="top-bar">
+    <span class="brand">{{ t('app.name') }}</span>
+    @if (user(); as user) {
+      <div class="session">
+        <span class="user-name">{{ user.name }}</span>
+        <button type="button" class="sign-out" (click)="signOut()">{{ t('shell.signOut') }}</button>
+      </div>
+    }
+  </header>
+  <main class="content">
+    <router-outlet />
+  </main>
+</ng-container>

@@ -1,0 +1,110 @@
+schema: spec-driven
+
+# Project context: shown to the AI when it creates artifacts.
+# Source: docs/tamiza-brief.md, sections 1 to 4.
+context: |
+  # Tamiza — from survey to indicator
+
+  Domain: tamiza.ai. Tamiza is compatible with KoboToolbox but is not affiliated with Kobo.
+  "Kobo" is used only descriptively ("for KoboToolbox"), never as part of the product name.
+
+  ## 1. Purpose
+
+  Open source web application that complements KoboToolbox: it receives the data captured
+  in Kobo forms, runs Python scripts for cleaning, transformation and indicator
+  calculation, and presents the results in three dashboards.
+
+  It replaces today's manual flow: Kobo → Jupyter/pandas → indicators → Power BI/Excel/Word.
+
+  - Initial users: consultants and analysts who run population characterizations and
+    market studies with Kobo.
+  - License: MIT.
+  - Distribution: self-hosted package with Docker Compose and, later, a managed service.
+
+  ## 2. Architecture
+
+  ### 2.1 Containers (Docker Compose)
+
+  | Service     | Technology            | Responsibility |
+  |-------------|-----------------------|----------------|
+  | `ui`        | Angular               | User interface. Talks only to `api`. |
+  | `api`       | .NET (ASP.NET Core)   | Management backend: projects, users and roles, webhook intake, Kobo synchronization, run orchestration, dashboard queries. |
+  | `analytics` | Python                | Flattening of raw data and execution of user scripts. Not exposed outside the internal network. |
+  | `db`        | PostgreSQL + PostGIS  | Metadata, raw submissions (JSONB), script results and geospatial data. |
+
+  Keycloak is external: an existing instance is used through OIDC. It is not part of the
+  Compose stack.
+
+  ### 2.2 Communication
+
+  - `ui` → `api`: HTTP/JSON with a Keycloak OIDC token.
+  - `api` → `analytics`: job queue in PostgreSQL (table `runs`). The Python worker
+    claims jobs with `SELECT ... FOR UPDATE SKIP LOCKED`. No queue container in the MVP.
+  - `analytics` reads and writes `db` directly.
+  - `api` calls the KoboToolbox API v2 to synchronize.
+
+  ### 2.3 Result storage
+
+  Each project has its own PostgreSQL schemas:
+
+  - `p_<id>_raw`: flattened tables (main table + one table per repeat group, with a key
+    to the parent).
+  - `p_<id>_clean`: output of script 1.
+  - `p_<id>_output`: output of script 2.
+  - `p_<id>_indicators`: output of script 3.
+
+  Schema and table names are never built from user text without validation (allow list +
+  quoted identifiers).
+
+  ## 3. Conventions
+
+  - Technical product name: `tamiza` (repository, Docker images `tamiza-ui`, `tamiza-api`,
+    `tamiza-analytics`, .NET namespace `Tamiza.*`, Python package `tamiza`).
+  - Everything in English, with no exceptions: code, identifiers, database objects, API
+    names, script contracts, the UI (ready for i18n) and documentation (OpenSpec
+    artifacts, specs, READMEs, docs/).
+  - Versioned REST API (`/api/v1/...`), documented with OpenAPI.
+  - Database migrations with EF Core (`api` owns the metadata schema).
+  - Python 3.12, dependencies pinned in the image: pandas, numpy, polars, duckdb,
+    geopandas, openpyxl, psycopg.
+  - Secrets (Kobo tokens, webhook secrets) encrypted at rest with ASP.NET Data Protection.
+  - Every relevant operation leaves a record: who, what, when. The audit mechanism
+    arrives in the `add-audit-log` change; earlier changes do not record audit events.
+  - Tests: unit tests in .NET and Python; integration tests for the webhook,
+    synchronization and the script chain.
+
+  ## 4. Out of scope for the MVP
+
+  Do not propose or implement in the MVP:
+
+  - AI assistant.
+  - Strong sandbox for user code.
+  - Multi-tenant SaaS.
+  - Semantic layer.
+  - Word/Excel/PowerPoint templates.
+  - Power BI endpoint.
+  - S3 storage.
+  - Dedicated message queue.
+  - Visual block editor.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

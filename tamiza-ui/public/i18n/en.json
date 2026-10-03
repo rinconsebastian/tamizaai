@@ -1,0 +1,25 @@
+{
+  "app": {
+    "name": "Tamiza",
+    "tagline": "From survey to indicator"
+  },
+  "shell": {
+    "signOut": "Sign out"
+  },
+  "home": {
+    "welcome": "Welcome, {{ name }}",
+    "loading": "Loading your profile…",
+    "intro": "Tamiza turns KoboToolbox submissions into clean data and indicators. Projects arrive in a later release."
+  },
+  "authUnavailable": {
+    "title": "Sign-in is unavailable",
+    "unreachable": "The authentication service could not be reached. Try again in a few minutes, or contact your administrator if the problem continues.",
+    "insecureContext": "Sign-in needs a secure connection. Open Tamiza over HTTPS (or on localhost) and try again.",
+    "retry": "Try again"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "body": "This page does not exist, or it is not available yet.",
+    "home": "Go to the home page"
+  }
+}

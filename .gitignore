@@ -1,0 +1,30 @@
+# Claude Code
+.claude/
+
+# Environment and local development state (credentials, keys)
+.env
+.local/
+
+# .NET
+bin/
+obj/
+*.user
+TestResults/
+
+# Node / Angular
+node_modules/
+dist/
+.angular/
+coverage/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+
+# Editors and OS
+.vs/
+.idea/
+.DS_Store
