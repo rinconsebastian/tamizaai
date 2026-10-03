@@ -17,6 +17,12 @@ public static class KoboHttp
 {
     public const string ClientName = "kobo";
 
+    /// <summary>
+    /// Streams submission pages. It has no overall timeout because a page body can take longer than a form document;
+    /// each page is bounded by its own timeout and byte cap instead (see <c>KoboClient.ReadSubmissionsAsync</c>).
+    /// </summary>
+    public const string DataClientName = "kobo-data";
+
     public static IServiceCollection AddKoboHttpClient(this IServiceCollection services)
     {
         services.AddOptions<KoboHttpOptions>();
@@ -26,20 +32,25 @@ public static class KoboHttp
                 client.Timeout = options.Timeout;
                 client.MaxResponseContentBufferSize = options.MaxResponseBytes;
             })
-            .ConfigurePrimaryHttpMessageHandler(provider =>
-            {
-                var allowPrivate = provider.GetRequiredService<IOptions<TamizaOptions>>().Value.KoboAllowPrivateNetworks;
-                return new SocketsHttpHandler
-                {
-                    // A redirect could lead anywhere; a proxy would dial on our behalf and skip the address check.
-                    AllowAutoRedirect = false,
-                    UseProxy = false,
-                    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-                    ConnectCallback = allowPrivate ? null : ConnectToPublicAddressAsync,
-                };
-            })
+            .ConfigurePrimaryHttpMessageHandler(CreateHandler)
+            .RedactLoggedHeaders(_ => true);
+        services.AddHttpClient(DataClientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(CreateHandler)
             .RedactLoggedHeaders(_ => true);
         return services;
+    }
+
+    private static SocketsHttpHandler CreateHandler(IServiceProvider provider)
+    {
+        var allowPrivate = provider.GetRequiredService<IOptions<TamizaOptions>>().Value.KoboAllowPrivateNetworks;
+        return new SocketsHttpHandler
+        {
+            // A redirect could lead anywhere; a proxy would dial on our behalf and skip the address check.
+            AllowAutoRedirect = false,
+            UseProxy = false,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            ConnectCallback = allowPrivate ? null : ConnectToPublicAddressAsync,
+        };
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using DbUp;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Tamiza.Api.IntegrationTests.Infrastructure;
@@ -107,6 +108,38 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
         Assert.False(await TableExistsAsync(connectionString, SchemaMigrator.JournalTable));
         Assert.True(await TableExistsAsync(connectionString, SchemaMigrator.EfHistoryTable));
         Assert.False(await TableExistsAsync(connectionString, "projects"));
+    }
+
+    [Fact]
+    public async Task Ingestion_script_upgrades_a_database_at_the_initial_schema_and_schedules_existing_projects()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        var initial = DeployChanges.To
+            .PostgresqlDatabase(connectionString, SchemaMigrator.Schema)
+            .JournalToPostgresqlTable(SchemaMigrator.Schema, SchemaMigrator.JournalTable)
+            .WithScript(SchemaMigrator.InitialScript, ReadScript(SchemaMigrator.InitialScript))
+            .WithVariablesDisabled()
+            .Build()
+            .PerformUpgrade();
+        Assert.True(initial.Successful);
+        await ExecuteAsync(connectionString, """
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('00000000-0000-0000-0000-000000000001', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES (gen_random_uuid(), 'Existing', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(), '00000000-0000-0000-0000-000000000001', now(), now());
+            """);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        Assert.True(await TableExistsAsync(connectionString, "raw_submissions"));
+        Assert.True(await TableExistsAsync(connectionString, "syncs"));
+        // Existing projects are due for their first synchronization at once and reconcile a day later.
+        Assert.Equal("12 24 t t", await ScalarAsync<string>(connectionString, """
+            SELECT format('%s %s %s %s', sync_interval_hours, reconcile_interval_hours,
+                          next_sync_at <= now(), next_reconcile_at > now() + interval '23 hours')
+            FROM tamiza.projects
+            """));
     }
 
     private static string ReadScript(string name)

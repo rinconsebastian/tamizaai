@@ -19,6 +19,7 @@ export const routes: Routes = [
         children: [
           { path: '', pathMatch: 'full', redirectTo: 'overview' },
           { path: 'overview', loadComponent: () => import('./pages/projects/project-overview').then((m) => m.ProjectOverview) },
+          { path: 'data', loadComponent: () => import('./pages/projects/project-data').then((m) => m.ProjectData) },
           { path: 'members', loadComponent: () => import('./pages/projects/project-members').then((m) => m.ProjectMembers) },
           {
             path: 'sampling-frame',

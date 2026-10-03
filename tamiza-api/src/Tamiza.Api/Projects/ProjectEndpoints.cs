@@ -6,6 +6,7 @@ using Tamiza.Api.Auth;
 using Tamiza.Api.Configuration;
 using Tamiza.Api.Data;
 using Tamiza.Api.Http;
+using Tamiza.Api.Ingestion;
 using Tamiza.Api.Kobo;
 
 namespace Tamiza.Api.Projects;
@@ -54,7 +55,7 @@ public static partial class ProjectEndpoints
 
     private static async Task<Results<Created<CreatedProject>, ValidationProblem, ProblemHttpResult>> CreateAsync(
         CreateProjectRequest request, TamizaDbContext db, ICurrentUser user, KoboClient kobo, SecretProtector secrets,
-        IOptions<TamizaOptions> options, TimeProvider time, CancellationToken ct)
+        IOptions<TamizaOptions> options, TimeProvider time, IngestionSignal ingestion, CancellationToken ct)
     {
         var errors = new FieldErrors();
         var name = ValidateName(request.Name, errors);
@@ -100,6 +101,9 @@ public static partial class ProjectEndpoints
             FormName = asset!.Name,
             FormFields = asset.Fields.ToList(),
             FormCheckedAt = now,
+            // The first synchronization back-fills the form's existing submissions right away.
+            NextSyncAt = now,
+            NextReconcileAt = now.AddHours(24),
             CreatedBy = user.Id,
             CreatedAt = now,
             UpdatedAt = now,
@@ -107,6 +111,7 @@ public static partial class ProjectEndpoints
         db.Projects.Add(project);
         db.ProjectMembers.Add(new ProjectMember { ProjectId = project.Id, UserId = user.Id, Role = ProjectRole.Admin, CreatedAt = now });
         await db.SaveChangesAsync(ct);
+        ingestion.Wake();
 
         var details = ToDetails(project, ProjectRole.Admin, tokenUnreadable: false);
         var webhook = new WebhookSettings(WebhookUrl(options.Value, project.Id), WebhookSecret.Username, webhookSecret, false);
@@ -175,7 +180,7 @@ public static partial class ProjectEndpoints
         }
 
         project.EncryptedApiToken = secrets.Protect(token);
-        ApplySnapshot(project, asset!, time.GetUtcNow());
+        FormSnapshot.Apply(project, asset!, time.GetUtcNow());
         await db.SaveChangesAsync(ct);
         return TypedResults.Ok(ToDetails(project, http.GetProjectRole(), tokenUnreadable: false));
     }
@@ -186,7 +191,7 @@ public static partial class ProjectEndpoints
         var project = await db.Projects.SingleAsync(p => p.Id == projectId, ct);
         if (!secrets.TryUnprotect(project.EncryptedApiToken, out var token))
         {
-            return Problems.Kobo(new KoboError("kobo.token_unreadable", "The stored API token can no longer be read. A project admin must replace it."));
+            return Problems.Kobo(new KoboError(KoboErrorCodes.TokenUnreadable, "The stored API token can no longer be read. A project admin must replace it."));
         }
 
         var (asset, koboError) = await kobo.VerifyAccessAsync(project.KoboServerUrl, project.KoboAssetUid, token, ct);
@@ -195,7 +200,7 @@ public static partial class ProjectEndpoints
             return Problems.Kobo(koboError);
         }
 
-        ApplySnapshot(project, asset!, time.GetUtcNow());
+        FormSnapshot.Apply(project, asset!, time.GetUtcNow());
         await db.SaveChangesAsync(ct);
         return TypedResults.Ok(ToDetails(project, http.GetProjectRole(), tokenUnreadable: false));
     }
@@ -242,14 +247,6 @@ public static partial class ProjectEndpoints
         }
 
         return token;
-    }
-
-    private static void ApplySnapshot(Project project, KoboAsset asset, DateTimeOffset now)
-    {
-        project.FormName = asset.Name;
-        project.FormFields = asset.Fields.ToList();
-        project.FormCheckedAt = now;
-        project.UpdatedAt = now;
     }
 
     private static string WebhookUrl(TamizaOptions options, Guid projectId) =>

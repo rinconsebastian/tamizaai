@@ -1,6 +1,6 @@
 # Connecting a KoboToolbox form
 
-A Tamiza project is linked to exactly one KoboToolbox form. This guide covers finding the form's details in Kobo, creating the project, preparing Kobo's webhook, and the project settings that depend on the form.
+A Tamiza project is linked to exactly one KoboToolbox form. This guide covers finding the form's details in Kobo, creating the project, connecting Kobo's webhook, how submissions reach Tamiza, and the project settings that depend on the form.
 
 Tamiza is compatible with KoboToolbox but is not affiliated with it.
 
@@ -37,7 +37,7 @@ In Tamiza, open **Projects → New project** and fill in:
 | Form asset UID | From step 1. |
 | Kobo API token | From step 2. |
 
-Before saving, Tamiza checks that the token can read both the form and its submissions. If the check fails, nothing is saved and the page explains why (see [Troubleshooting](#troubleshooting)). After creation, Tamiza opens the project's webhook settings.
+Before saving, Tamiza checks that the token can read both the form and its submissions. If the check fails, nothing is saved and the page explains why (see [Troubleshooting](#troubleshooting)). After creation, Tamiza opens the project's webhook settings and, in the background, copies every submission the form already has (see [Submissions in Tamiza](#6-submissions-in-tamiza)).
 
 The server and the asset UID cannot be changed after creation; only the token can be replaced. To use another form, create another project. Several projects may use the same form.
 
@@ -48,12 +48,13 @@ The **Webhook** section of the project (admins only) shows three values: the end
 1. Open the form and go to **Settings → REST Services**.
 2. Choose **Register a new service** and give it a name, for example *Tamiza*.
 3. Paste the **endpoint URL**.
-4. Under **Security**, choose **Basic Authorization** and paste the username and the password.
-5. Save the service.
+4. Keep **JSON** as the type. Leave **Select fields subset** and **Custom wrapper** empty: Tamiza needs every submission whole, including Kobo's `_id` and `_uuid`.
+5. Under **Security**, choose **Basic Authorization** and paste the username and the password.
+6. Save the service.
 
-> Submissions start arriving through the webhook once ingestion is available in a later Tamiza release. Configuring the service now means no extra step later.
+From then on, Kobo sends each new submission to Tamiza as it arrives, and it shows up in the project's **Data** section within seconds. The **Webhook** section shows when the last delivery was received. Kobo's own REST Service page lists each delivery and whether it failed.
 
-If the secret is ever exposed, use **Regenerate secret** in Tamiza and update the password in Kobo's REST Service. Until you do, Kobo cannot deliver submissions.
+If the secret is ever exposed, use **Regenerate secret** in Tamiza and update the password in Kobo's REST Service. Until you do, Kobo's deliveries are refused; the next synchronization still picks those submissions up.
 
 ## 5. Check the form for the performance dashboard
 
@@ -70,13 +71,34 @@ To add the metadata fields, edit the form in Kobo's form builder, open **Layout 
 
 After changing and redeploying the form in Kobo, press **Re-check the form** (admins and analysts) so Tamiza reads the new version.
 
+## 6. Submissions in Tamiza
+
+The project's **Data** section shows how many submissions Tamiza holds, how many were deleted in Kobo, when the last webhook delivery arrived, and the synchronization log. Submissions reach Tamiza in three ways:
+
+- **Webhook.** Kobo sends each new submission right away (step 4). This is the normal path.
+- **Synchronization.** Every 12 hours, Tamiza asks Kobo's API for the submissions made since its last successful synchronization, with a one-hour margin, and stores any the webhook missed: for example while the REST Service was not configured yet, its password was out of date, or Tamiza was down. The project's first synchronization runs as soon as the project is created and copies every existing submission.
+- **Deletion check.** Once a day, Tamiza compares the list of submissions in Kobo with its own and marks the ones deleted in Kobo. Marked submissions are kept but left out of counts and, later, out of the analysis. A submission that reappears in Kobo is restored.
+
+Each submission is stored once, identified by Kobo's `_id`, however often it arrives. A submission edited in Kobo replaces the stored copy the next time it arrives.
+
+Admins and analysts have two buttons:
+
+- **Sync now** runs a synchronization at once, for example right after configuring the webhook or to check that recent submissions are complete.
+- **Full resync** re-reads every submission of the form and also checks for deletions. Use it after editing submissions in Kobo (for example, correcting answers in the data table), since a regular synchronization only reads recent submissions and may not see older ones that changed. On large forms it takes a few minutes.
+
+Only one synchronization of a project runs at a time; the buttons are disabled while one is queued or running, and the page updates by itself until it ends.
+
+Admins can change the schedule under **Schedule**: how often to synchronize and how often to check for deletions, each from 1 to 168 hours. A new interval counts from the start of the last run of that kind. When a scheduled synchronization fails, Tamiza tries again after an hour.
+
+Every synchronization records when it ran, what started it, how many submissions were new, updated or deleted, and the error if it failed. A submission received again with the same content counts as neither new nor updated.
+
 ## Members and roles
 
 | Role | Can |
 |---|---|
-| Admin | Everything below, plus project settings, the Kobo token, the webhook and members. |
-| Analyst | Edit the sampling frame and re-check the form. |
-| Viewer | Read the project. |
+| Admin | Everything below, plus project settings, the synchronization schedule, the Kobo token, the webhook and members. |
+| Analyst | Edit the sampling frame, re-check the form, and run **Sync now** and **Full resync**. |
+| Viewer | Read the project, including its Data section and synchronization log. |
 
 Admins add people in the **Members** section by email and role:
 
@@ -116,3 +138,16 @@ Tamiza connects to Kobo directly and does not use an outbound HTTP proxy (see [o
 | The Kobo server must use HTTPS | Use the server's `https://` address, or see the private-network setting above. |
 | …points to a private or local network… | The server resolves to a private address. See the private-network setting above. |
 | The saved API token can no longer be read… | The API's encryption keys changed (for example, the `api-keys` volume was lost). An admin must replace the token and regenerate the webhook secret. |
+
+**Webhook deliveries failing in Kobo.** Kobo's REST Service page shows the HTTP status of each failed delivery:
+
+| Status | Cause and fix |
+|---|---|
+| 401 | The username or password does not match. Copy both again from the project's **Webhook** section; after **Regenerate secret**, the old password stops working. |
+| 415 | The service sends XML. Edit it in Kobo and choose the JSON type. |
+| 400 | The submission has no `_id` or `_uuid`, usually because the service uses **Select fields subset** or a **Custom wrapper**. Clear both. |
+| 413 | The submission is larger than 10 MB. Attachments are not sent in the JSON, so this is rare; the next synchronization still stores the submission. |
+
+Missed deliveries are not lost: the next synchronization picks them up, or use **Sync now**.
+
+**Failed synchronizations.** The synchronization log shows the reason. Token, server and address messages mean the same as in the table above; fix the cause, then use **Sync now**. *Interrupted* means the API stopped while the synchronization was running, for example during an upgrade; the next one runs normally.

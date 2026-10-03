@@ -1,6 +1,6 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { signal } from '@angular/core';
+import { Provider, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, withComponentInputBinding } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
@@ -42,7 +42,7 @@ export const formFields: FormField[] = [
   { name: 'enumerator', xpath: 'enumerator', type: 'text', label: 'Enumerator' },
 ];
 
-export function configureApp() {
+export function configureApp(extraProviders: Provider[] = []) {
   TestBed.configureTestingModule({
     imports: [translocoTesting()],
     providers: [
@@ -51,14 +51,20 @@ export function configureApp() {
       provideHttpClientTesting(),
       provideVisibleElements(),
       { provide: AuthService, useValue: { status: signal('authenticated'), login: vi.fn(), unavailableReason: signal(null) } },
+      ...extraProviders,
     ],
   });
   return TestBed.inject(HttpTestingController);
 }
 
 /** Opens a project section the way the router would, answering the project and form-field requests. */
-export async function openProjectSection(section: string, role: ProjectRole, overrides: Partial<ProjectDetails> = {}) {
-  const http = configureApp();
+export async function openProjectSection(
+  section: string,
+  role: ProjectRole,
+  overrides: Partial<ProjectDetails> = {},
+  providers: Provider[] = [],
+) {
+  const http = configureApp(providers);
   const harness = await RouterTestingHarness.create();
   const navigation = harness.navigateByUrl(`/projects/${projectId}/${section}`);
   await settle(harness);

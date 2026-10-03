@@ -4,14 +4,14 @@
 
 Tamiza is compatible with KoboToolbox but is not affiliated with it.
 
-> **Status:** early development. Available: the self-hosted stack, sign-in through Keycloak, and projects linked to a Kobo form, with members, roles and a sampling frame ([docs/kobo.md](docs/kobo.md)). Ingestion of submissions, the script pipeline and the dashboards come next (see `docs/tamiza-brief.md`, section 8).
+> **Status:** early development. Available: the self-hosted stack, sign-in through Keycloak, projects linked to a Kobo form with members, roles and a sampling frame, and ingestion of submissions through Kobo's webhook plus scheduled synchronization ([docs/kobo.md](docs/kobo.md)). The script pipeline and the dashboards come next (see `docs/tamiza-brief.md`, section 8).
 
 ## Architecture
 
 | Service | Technology | Role |
 |---|---|---|
 | `ui` | Angular, served by nginx | User interface. The only service with a published port; proxies `/api/` to `api`. |
-| `api` | ASP.NET Core (.NET 10) | REST API under `/api/v1`, authentication, database migrations. |
+| `api` | ASP.NET Core (.NET 10) | REST API under `/api/v1`, authentication, database migrations, Kobo webhook intake and synchronization. |
 | `analytics` | Python 3.12 | Worker that will flatten submissions and run user scripts. Internal only. |
 | `db` | PostgreSQL 17 + PostGIS | Metadata, submissions and results. Internal only. |
 

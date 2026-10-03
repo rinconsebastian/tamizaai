@@ -1,13 +1,15 @@
+import { DatePipe } from '@angular/common';
 import { DOCUMENT, Component, inject, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
+import { IngestionService } from '../../core/projects/ingestion.service';
 import { ProjectsService, WebhookSettings } from '../../core/projects/projects.service';
 import { Alert, Button, Card, ConfirmDialog, Skeleton, ToastService } from '../../shared/ui';
 import { ProjectContext } from './project-context';
 
 @Component({
   selector: 'app-project-webhook',
-  imports: [TranslocoDirective, Alert, Button, Card, Skeleton],
+  imports: [DatePipe, TranslocoDirective, Alert, Button, Card, Skeleton],
   template: `
     <div class="grid gap-6 lg:grid-cols-5" *transloco="let t">
       <tmz-card [heading]="t('webhook.title')" class="lg:col-span-3">
@@ -52,13 +54,22 @@ import { ProjectContext } from './project-context';
             <li>{{ t('webhook.steps.' + step) }}</li>
           }
         </ol>
-        <p class="mt-4 text-sm text-body">{{ t('webhook.ingestionNote') }}</p>
+        @if (lastDelivery(); as delivery) {
+          <p class="mt-4 text-sm text-body" data-testid="last-delivery">
+            @if (delivery.at) {
+              {{ t('webhook.lastDelivery', { time: (delivery.at | date: 'medium') }) }}
+            } @else {
+              {{ t('webhook.noDelivery') }}
+            }
+          </p>
+        }
       </tmz-card>
     </div>
   `,
 })
 export class ProjectWebhook {
   private readonly service = inject(ProjectsService);
+  private readonly ingestion = inject(IngestionService);
   private readonly errors = inject(ApiErrors);
   private readonly toasts = inject(ToastService);
   private readonly transloco = inject(TranslocoService);
@@ -68,11 +79,17 @@ export class ProjectWebhook {
 
   protected readonly settings = signal<WebhookSettings | null>(null);
   protected readonly revealed = signal(false);
-  protected readonly steps = ['open', 'restServices', 'register', 'url', 'auth', 'save'];
+  protected readonly lastDelivery = signal<{ at: string | null } | null>(null);
+  protected readonly steps = ['open', 'restServices', 'register', 'url', 'type', 'auth', 'save'];
 
   constructor() {
-    this.service.webhook(this.context.project()!.id).subscribe({
+    const projectId = this.context.project()!.id;
+    this.service.webhook(projectId).subscribe({
       next: (settings) => this.settings.set(settings),
+      error: (error) => this.errors.report(error),
+    });
+    this.ingestion.status(projectId).subscribe({
+      next: (status) => this.lastDelivery.set({ at: status.lastWebhookAt }),
       error: (error) => this.errors.report(error),
     });
   }

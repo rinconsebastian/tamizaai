@@ -10,9 +10,16 @@ public static class KoboErrorCodes
     public const string FormNotFound = "kobo.form_not_found";
     public const string Unreachable = "kobo.unreachable";
     public const string UnexpectedResponse = "kobo.unexpected_response";
+    public const string TokenUnreadable = "kobo.token_unreadable";
 }
 
 public sealed record KoboError(string Code, string Message);
+
+/// <summary>Raised while streaming submissions from Kobo, where an error cannot be returned alongside each page.</summary>
+public sealed class KoboReadException(KoboError error) : Exception(error.Message)
+{
+    public KoboError Error { get; } = error;
+}
 
 /// <summary>Raised by the connect callback when every address of a Kobo host is outside the allowed ranges.</summary>
 public sealed class KoboAddressNotAllowedException(string host)

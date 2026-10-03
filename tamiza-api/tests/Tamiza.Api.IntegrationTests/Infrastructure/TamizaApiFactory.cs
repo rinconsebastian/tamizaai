@@ -29,6 +29,8 @@ public sealed class TamizaApiFactory(
             ["OIDC_AUTHORITY"] = TestTokens.Issuer,
             ["OIDC_CLIENT_ID"] = "tamiza-ui",
             ["OIDC_AUDIENCE"] = TestTokens.Audience,
+            // Background synchronization would call Kobo for every seeded project; ingestion tests turn it on.
+            ["Ingestion:SchedulerEnabled"] = "false",
         };
         foreach (var (key, value) in overrides ?? new Dictionary<string, string?>())
         {

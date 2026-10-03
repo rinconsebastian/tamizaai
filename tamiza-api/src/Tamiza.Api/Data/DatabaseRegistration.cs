@@ -58,12 +58,15 @@ public static class DatabaseRegistration
         ?? throw new InvalidOperationException($"ConnectionStrings__{ConnectionStringName} is not set.");
 }
 
-/// <summary>Records whether startup migrations have finished, for the readiness check.</summary>
+/// <summary>Records whether startup migrations have finished, for the readiness check and background services.</summary>
 public sealed class MigrationStatus
 {
-    private volatile bool _completed;
+    private readonly TaskCompletionSource _completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public bool Completed => _completed;
+    public bool Completed => _completed.Task.IsCompleted;
 
-    public void MarkCompleted() => _completed = true;
+    /// <summary>Completes once the schema is current; background work that touches the database waits for it.</summary>
+    public Task WhenCompleted => _completed.Task;
+
+    public void MarkCompleted() => _completed.TrySetResult();
 }

@@ -7,7 +7,8 @@ How to install, run and upgrade a self-hosted Tamiza. The quick start in the [RE
 - Docker Engine 24 or later with the Compose v2 plugin (`docker compose`).
 - About 4 GB of RAM. The default container limits add up to 3200 MiB (see [Memory](#memory)).
 - An existing Keycloak realm configured as described in [keycloak.md](keycloak.md).
-- **Outbound HTTPS from the `api` container** to the Kobo servers your projects use (for example `kf.kobotoolbox.org` or `eu.kobotoolbox.org`). Tamiza connects to Kobo directly and does not use an outbound HTTP proxy: a proxy would make the connection on Tamiza's behalf and bypass its check that Kobo addresses are public. Installations that can only reach the Internet through a proxy cannot connect to Kobo yet.
+- **Outbound HTTPS from the `api` container** to the Kobo servers your projects use (for example `kf.kobotoolbox.org` or `eu.kobotoolbox.org`). Besides the checks users start, `api` synchronizes every project on a schedule (by default every 12 hours, plus a daily deletion check), so this traffic happens without anyone signed in. Tamiza connects to Kobo directly and does not use an outbound HTTP proxy: a proxy would make the connection on Tamiza's behalf and bypass its check that Kobo addresses are public. Installations that can only reach the Internet through a proxy cannot connect to Kobo yet.
+- **Kobo must reach Tamiza** for the webhook: the `TAMIZA_PUBLIC_URL` must be reachable from the Kobo server (for kf or eu, from the Internet). If it is not, submissions still arrive, but only through the scheduled synchronization.
 - **HTTPS in front of Tamiza** for any address other than `localhost`. Browsers expose the WebCrypto API that sign-in (PKCE) needs only in a secure context, so plain HTTP on a server address breaks sign-in. Tamiza does not terminate TLS itself.
 
 ## Install
@@ -98,6 +99,20 @@ Change a value in `.env` and run `docker compose up -d` to recreate the affected
 
 **Kobo on a private network.** By default Tamiza only connects to Kobo servers that use HTTPS and resolve to public addresses. For a self-hosted Kobo on the same network, set `TAMIZA_KOBO_ALLOW_PRIVATE_NETWORKS=true` in `.env` and run `docker compose up -d api`. This also allows plain HTTP, and lets anyone who can create projects point the API at internal addresses, so enable it only when those users are trusted. See [kobo.md](kobo.md).
 
+**Synchronization tuning.** The defaults suit forms of up to 500,000 submissions on the reference VPS: a back-fill of that size takes about a minute and keeps `api` well under its memory limit. They can be changed with environment variables on the `api` service, for example in a `compose.override.yaml`:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `Ingestion__PageSize` | `500` | Submissions per request to Kobo. Lower it if synchronizations of a form with very large submissions fail with a message about the page size. |
+| `Ingestion__MaxPageBytes` | `52428800` | Largest page accepted from Kobo (50 MB). |
+| `Ingestion__PageTimeout` | `00:02:00` | Time allowed for one page. |
+| `Ingestion__MaxConcurrentRuns` | `2` | Synchronizations running at the same time across all projects. |
+| `Ingestion__Tick` | `00:00:30` | How often `api` looks for due synchronizations. |
+
+Projects' synchronization intervals are set per project by their admins, in the project's **Data** section.
+
+**One `api` replica.** Run a single `api` container. On startup it marks any synchronization left running as interrupted, which assumes no other `api` is running one.
+
 **Database password.** `POSTGRES_PASSWORD` is applied only when the database volume is first created. To change it later, update the role first, then `.env`:
 
 ```sh
@@ -114,7 +129,7 @@ Two named volumes hold everything that must survive container re-creation:
 
 | Volume | Contents |
 |---|---|
-| `tamiza_db-data` | The PostgreSQL database. |
+| `tamiza_db-data` | The PostgreSQL database, including the raw submissions received from Kobo. |
 | `tamiza_api-keys` | The key ring the API uses to encrypt stored secrets. Without it, encrypted values in the database cannot be read. |
 
 `docker compose down` keeps both volumes. `docker compose down -v` **deletes them irreversibly**.

@@ -77,6 +77,108 @@ public sealed class KoboClientTests(PostgresFixture postgres) : IDisposable
         Assert.Equal(KoboErrorCodes.Unreachable, error?.Code);
     }
 
+    private static SubmissionRead Read(DateTimeOffset? since = null, bool idsOnly = false, int pageSize = 3, long maxBytes = 1024 * 1024, TimeSpan? timeout = null) =>
+        new(since, idsOnly, pageSize, maxBytes, timeout ?? TimeSpan.FromSeconds(10));
+
+    private static async Task<List<SubmissionPage>> ReadAllAsync(KoboClient client, string url, SubmissionRead read)
+    {
+        var pages = new List<SubmissionPage>();
+        await foreach (var page in client.ReadSubmissionsAsync(url, KoboStub.AssetUid, KoboStub.Token, read, default))
+        {
+            pages.Add(page);
+        }
+
+        return pages;
+    }
+
+    [Fact]
+    public async Task Reads_submissions_in_id_pages_until_a_short_page()
+    {
+        _kobo.WithForm().WithSubmissions(KoboStub.MakeSubmissions(8, firstId: 101));
+        await using var factory = await FactoryAsync();
+
+        var pages = await ReadAllAsync(Client(factory), _kobo.Url, Read());
+
+        Assert.Equal([3, 3, 2], pages.Select(p => p.Rows.Count));
+        Assert.Equal(Enumerable.Range(101, 8).Select(i => (long)i), pages.SelectMany(p => p.Ids));
+        Assert.Equal([null, 103L, 106L], _kobo.DataRequests.Select(r => r.AfterId));
+        Assert.All(_kobo.DataRequests, r => Assert.Equal(3, r.Limit));
+        Assert.Equal("uuid-101", pages[0].Rows[0].KoboUuid);
+        AssertTokenNotLogged(factory);
+    }
+
+    [Fact]
+    public async Task A_full_last_page_is_followed_by_an_empty_one()
+    {
+        _kobo.WithForm().WithSubmissions(KoboStub.MakeSubmissions(6));
+        await using var factory = await FactoryAsync();
+
+        var pages = await ReadAllAsync(Client(factory), _kobo.Url, Read());
+
+        Assert.Equal([3, 3, 0], pages.Select(p => p.Rows.Count));
+    }
+
+    [Fact]
+    public async Task The_cutoff_filters_by_submission_time_and_ids_only_skips_the_records()
+    {
+        _kobo.WithForm().WithSubmissions([
+            KoboStub.Submission(1, "2026-09-01T08:00:00"), KoboStub.Submission(2, "2026-09-01T10:00:00"), KoboStub.Submission(3, "2026-09-02T00:00:00")]);
+        await using var factory = await FactoryAsync();
+        var client = Client(factory);
+
+        var recent = await ReadAllAsync(client, _kobo.Url, Read(since: new DateTimeOffset(2026, 9, 1, 9, 0, 0, TimeSpan.Zero)));
+        var ids = await ReadAllAsync(client, _kobo.Url, Read(idsOnly: true));
+
+        Assert.Equal([2L, 3L], recent.SelectMany(p => p.Ids));
+        Assert.Equal("2026-09-01T09:00:00", _kobo.DataRequests[0].SubmittedSince);
+        Assert.Equal([1L, 2L, 3L], ids.SelectMany(p => p.Ids));
+        Assert.Empty(ids.SelectMany(p => p.Rows));
+        Assert.True(_kobo.DataRequests[^1].IdsOnly);
+    }
+
+    [Fact]
+    public async Task A_page_over_the_byte_cap_fails_with_unexpected_response()
+    {
+        _kobo.WithForm().WithSubmissions(KoboStub.MakeSubmissions(3));
+        await using var factory = await FactoryAsync();
+
+        var error = await Assert.ThrowsAsync<KoboReadException>(() => ReadAllAsync(Client(factory), _kobo.Url, Read(maxBytes: 100)));
+
+        Assert.Equal(KoboErrorCodes.UnexpectedResponse, error.Error.Code);
+    }
+
+    [Fact]
+    public async Task A_slow_page_fails_as_unreachable()
+    {
+        _kobo.WithForm().WithSubmissions(KoboStub.MakeSubmissions(3));
+        _kobo.DataDelay = TimeSpan.FromSeconds(2);
+        await using var factory = await FactoryAsync();
+
+        var error = await Assert.ThrowsAsync<KoboReadException>(() => ReadAllAsync(Client(factory), _kobo.Url, Read(timeout: TimeSpan.FromMilliseconds(300))));
+
+        Assert.Equal(KoboErrorCodes.Unreachable, error.Error.Code);
+    }
+
+    [Fact]
+    public async Task A_rejection_mid_read_fails_after_the_pages_already_returned()
+    {
+        _kobo.WithForm().WithSubmissions(KoboStub.MakeSubmissions(9));
+        _kobo.DataFailure = request => request.Index == 1 ? 401 : null;
+        await using var factory = await FactoryAsync();
+        var pages = new List<SubmissionPage>();
+
+        var error = await Assert.ThrowsAsync<KoboReadException>(async () =>
+        {
+            await foreach (var page in Client(factory).ReadSubmissionsAsync(_kobo.Url, KoboStub.AssetUid, KoboStub.Token, Read(), default))
+            {
+                pages.Add(page);
+            }
+        });
+
+        Assert.Equal(KoboErrorCodes.Unauthorized, error.Error.Code);
+        Assert.Single(pages);
+    }
+
     [Fact]
     public async Task Unresolvable_host_is_unreachable()
     {

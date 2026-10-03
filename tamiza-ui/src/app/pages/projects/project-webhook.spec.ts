@@ -5,9 +5,10 @@ import { tick } from '../../../testing/cdk';
 describe('ProjectWebhook', () => {
   const settings = { url: 'https://tamiza.test/api/v1/webhooks/kobo/p1', username: 'tamiza', secret: 'first-secret', secretUnreadable: false };
 
-  async function open() {
+  async function open(lastWebhookAt: string | null = null) {
     const opened = await openProjectSection('webhook', 'admin');
     opened.http.expectOne(`/api/v1/projects/${projectId}/webhook`).flush(settings);
+    opened.http.expectOne(`/api/v1/projects/${projectId}/ingestion`).flush({ lastWebhookAt });
     await settle(opened.harness);
     return opened;
   }
@@ -25,6 +26,18 @@ describe('ProjectWebhook', () => {
 
     byTestId<HTMLButtonElement>(root, 'copy-secret')!.click();
     expect(writeText).toHaveBeenCalledWith('first-secret');
+  });
+
+  it('tells admins to keep the JSON type and shows whether deliveries arrived', async () => {
+    const { root } = await open();
+    expect(root.textContent).toContain('Keep JSON as the type');
+    expect(root.textContent).not.toContain('later Tamiza release');
+    expect(byTestId(root, 'last-delivery')?.textContent).toContain('No delivery received yet');
+  });
+
+  it('shows when the last delivery arrived', async () => {
+    const { root } = await open('2026-10-02T15:30:00Z');
+    expect(byTestId(root, 'last-delivery')?.textContent).toContain('Last delivery received: Oct 2, 2026');
   });
 
   it('regenerates the secret only after confirmation and shows the new one', async () => {

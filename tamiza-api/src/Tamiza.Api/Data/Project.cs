@@ -28,6 +28,21 @@ public sealed class Project
     /// <summary>XPath of the question that identifies the enumerator, when the form has no <c>username</c>.</summary>
     public string? EnumeratorField { get; set; }
 
+    /// <summary>Hours between scheduled synchronizations (1–168).</summary>
+    public int SyncIntervalHours { get; set; } = 12;
+
+    /// <summary>Hours between deletion reconciliations (1–168).</summary>
+    public int ReconcileIntervalHours { get; set; } = 24;
+
+    /// <summary>When the scheduler next queues a synchronization.</summary>
+    public DateTimeOffset NextSyncAt { get; set; }
+
+    /// <summary>When the scheduler next queues a reconciliation.</summary>
+    public DateTimeOffset NextReconcileAt { get; set; }
+
+    /// <summary>When the last webhook delivery was accepted.</summary>
+    public DateTimeOffset? LastWebhookAt { get; set; }
+
     public Guid CreatedBy { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }

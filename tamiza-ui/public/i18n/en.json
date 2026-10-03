@@ -44,6 +44,16 @@
       },
       "project": {
         "last_admin": "The project needs at least one admin. Make someone else admin first."
+      },
+      "sync": {
+        "in_progress": "A synchronization of this project is already in progress. Wait for it to finish.",
+        "interrupted": "The synchronization was interrupted because the server stopped. The next one runs normally.",
+        "failed": "The synchronization failed because of an unexpected error. An administrator can find the details in the API log."
+      },
+      "webhook": {
+        "unsupported_media_type": "Kobo sent the submission as XML. Edit the REST Service in Kobo and choose the JSON type.",
+        "invalid_submission": "Kobo sent a submission without its _id or _uuid. Leave the REST Service field subset and custom wrapper empty.",
+        "too_large": "The submission is larger than Tamiza accepts."
       }
     }
   },
@@ -90,6 +100,7 @@
     "notFoundBody": "It does not exist, or you are not a member of it.",
     "tabs": {
       "overview": "Overview",
+      "data": "Data",
       "members": "Members",
       "samplingFrame": "Sampling frame",
       "webhook": "Webhook"
@@ -125,9 +136,63 @@
     "perEnumerator": "Detail per enumerator",
     "coverage": "Sampling frame coverage"
   },
+  "data": {
+    "statusTitle": "Submissions",
+    "submissions": "Stored submissions",
+    "deleted": "Deleted in Kobo",
+    "lastWebhook": "Last webhook delivery",
+    "noWebhook": "None received yet",
+    "lastSync": "Last synchronization",
+    "never": "Never",
+    "nextSync": "Next synchronization",
+    "nextReconcile": "Next deletion check",
+    "activeSync": "{{ kind }} in progress. This page updates by itself.",
+    "syncNow": "Sync now",
+    "fullSync": "Full resync",
+    "syncQueued": "Synchronization started.",
+    "fullSyncQueued": "Full resynchronization started.",
+    "fullSyncTitle": "Re-read every submission?",
+    "fullSyncMessage": "A full resync reads every submission from Kobo again. It picks up edits made in Kobo that the webhook did not deliver, and marks submissions deleted in Kobo. Large forms can take several minutes.",
+    "scheduleTitle": "Schedule",
+    "syncInterval": "Synchronize every (hours)",
+    "intervalHint": "Catches submissions the webhook missed. From 1 to 168 hours.",
+    "reconcileInterval": "Check for deletions every (hours)",
+    "reconcileHint": "Marks submissions deleted in Kobo. From 1 to 168 hours.",
+    "everyHours": "Every {{ hours }} hours",
+    "scheduleSaved": "Schedule saved.",
+    "logTitle": "Synchronization log",
+    "logEmpty": "No synchronization has run yet.",
+    "countsSummary": "{{ created }} new, {{ updated }} updated, {{ deleted }} deleted",
+    "requestedByName": "Started by {{ name }}",
+    "columns": {
+      "started": "Started",
+      "kind": "Kind",
+      "status": "Status",
+      "created": "New",
+      "updated": "Updated",
+      "deleted": "Deleted",
+      "requestedBy": "Started by"
+    },
+    "kind": {
+      "incremental": "Synchronization",
+      "full": "Full resync",
+      "reconciliation": "Deletion check"
+    },
+    "trigger": {
+      "schedule": "Scheduled",
+      "manual": "Manual",
+      "initial": "First synchronization"
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed"
+    }
+  },
   "webhook": {
     "title": "Webhook settings",
-    "intro": "Kobo sends each new submission to this address. Enter these values in the form's REST Services.",
+    "intro": "Kobo sends each new submission to this address as it arrives. Enter these values in the form's REST Services.",
     "secretUnreadable": "The webhook secret can no longer be read. Regenerate it and update Kobo.",
     "url": "Endpoint URL",
     "username": "Username",
@@ -142,15 +207,17 @@
       "restServices": "Go to Settings → REST Services.",
       "register": "Choose Register a new service and give it a name.",
       "url": "Paste the endpoint URL.",
+      "type": "Keep JSON as the type. Leave the field subset and the custom wrapper empty.",
       "auth": "Under Security choose Basic Authorization and paste the username and password.",
       "save": "Save the service."
     },
-    "ingestionNote": "Submissions start arriving once ingestion is available in a later Tamiza release.",
     "copied": "Copied to the clipboard.",
     "copyFailed": "Could not copy. Select the text and copy it manually.",
     "regenerateTitle": "Regenerate the webhook secret?",
     "regenerateMessage": "Kobo stops being able to send submissions until you update the password in its REST Service.",
-    "regenerated": "New secret generated. Update it in Kobo."
+    "regenerated": "New secret generated. Update it in Kobo.",
+    "lastDelivery": "Last delivery received: {{ time }}",
+    "noDelivery": "No delivery received yet. Once the REST Service is saved in Kobo, new submissions appear in the Data section within seconds."
   },
   "members": {
     "inviteTitle": "Add a member",

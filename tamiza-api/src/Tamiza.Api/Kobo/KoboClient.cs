@@ -1,8 +1,16 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Tamiza.Api.Ingestion;
 
 namespace Tamiza.Api.Kobo;
+
+/// <summary>How to read submissions: since when (none reads all), whole records or only IDs, and per-page limits.</summary>
+public sealed record SubmissionRead(DateTimeOffset? SubmittedSince, bool IdsOnly, int PageSize, long MaxPageBytes, TimeSpan PageTimeout);
+
+/// <summary>One page of submissions in <c>_id</c> order. <see cref="Rows"/> is empty when only IDs were read.</summary>
+public sealed record SubmissionPage(IReadOnlyList<SubmissionRow> Rows, IReadOnlyList<long> Ids);
 
 /// <summary>Calls the KoboToolbox API v2. The token is sent in the Authorization header and never logged.</summary>
 public sealed class KoboClient(IHttpClientFactory httpClientFactory, ILogger<KoboClient> logger)
@@ -58,7 +66,109 @@ public sealed class KoboClient(IHttpClientFactory httpClientFactory, ILogger<Kob
         return null;
     }
 
-    private async Task<(HttpResponseMessage? Response, KoboError? Error)> SendAsync(string url, string serverUrl, string assetUid, string token, CancellationToken cancellationToken)
+    /// <summary>
+    /// Streams the form's submissions page by page, in <c>_id</c> order. Throws <see cref="KoboReadException"/> when a
+    /// page cannot be read; pages already returned stay valid.
+    /// </summary>
+    public async IAsyncEnumerable<SubmissionPage> ReadSubmissionsAsync(
+        string serverUrl, string assetUid, string token, SubmissionRead read, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        long? afterId = null;
+        while (true)
+        {
+            var url = KoboDataQuery.PageUrl(serverUrl, assetUid, read.SubmittedSince, afterId, read.IdsOnly, read.PageSize);
+            var page = await ReadPageAsync(url, serverUrl, assetUid, token, read, cancellationToken);
+            yield return page;
+
+            // A short page is the last one.
+            if (page.Ids.Count < read.PageSize)
+            {
+                yield break;
+            }
+
+            afterId = page.Ids.Max();
+        }
+    }
+
+    private async Task<SubmissionPage> ReadPageAsync(string url, string serverUrl, string assetUid, string token, SubmissionRead read, CancellationToken cancellationToken)
+    {
+        using var pageTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        pageTimeout.CancelAfter(read.PageTimeout);
+        try
+        {
+            var (response, error) = await SendAsync(url, serverUrl, assetUid, token, pageTimeout.Token, KoboHttp.DataClientName, HttpCompletionOption.ResponseHeadersRead);
+            if (error is not null)
+            {
+                throw new KoboReadException(error);
+            }
+
+            using (response)
+            {
+                await using var body = new LimitedReadStream(await response!.Content.ReadAsStreamAsync(pageTimeout.Token), read.MaxPageBytes);
+                using var document = await JsonDocument.ParseAsync(body, cancellationToken: pageTimeout.Token);
+                return ParsePage(document.RootElement, read.IdsOnly);
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning("Kobo server {Server} did not deliver a page of submissions within {Timeout}.", serverUrl, read.PageTimeout);
+            throw new KoboReadException(new KoboError(KoboErrorCodes.Unreachable, $"The Kobo server at {serverUrl} did not send a page of submissions in time."));
+        }
+        catch (LimitExceededException)
+        {
+            throw new KoboReadException(new KoboError(KoboErrorCodes.UnexpectedResponse,
+                $"A page of submissions from Kobo was larger than {read.MaxPageBytes / (1024 * 1024)} MB. Lower the Ingestion page size."));
+        }
+        catch (JsonException)
+        {
+            logger.LogWarning("Kobo server {Server} returned an unreadable page of submissions.", serverUrl);
+            throw new KoboReadException(new KoboError(KoboErrorCodes.UnexpectedResponse, "The Kobo server returned submissions Tamiza could not read."));
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException)
+        {
+            logger.LogWarning("Kobo server {Server} stopped sending submissions: {Reason}", serverUrl, exception.Message);
+            throw new KoboReadException(new KoboError(KoboErrorCodes.Unreachable, $"The connection to the Kobo server at {serverUrl} failed while reading submissions."));
+        }
+    }
+
+    private static SubmissionPage ParsePage(JsonElement page, bool idsOnly)
+    {
+        if (page.ValueKind != JsonValueKind.Object || !page.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
+        {
+            throw new KoboReadException(new KoboError(KoboErrorCodes.UnexpectedResponse, "The Kobo server returned a page of submissions without results."));
+        }
+
+        var rows = new List<SubmissionRow>();
+        var ids = new List<long>();
+        foreach (var result in results.EnumerateArray())
+        {
+            if (idsOnly)
+            {
+                if (result.ValueKind != JsonValueKind.Object || !result.TryGetProperty("_id", out var id) || !id.TryGetInt64(out var koboId))
+                {
+                    throw new KoboReadException(new KoboError(KoboErrorCodes.UnexpectedResponse, "The Kobo server returned a submission without a numeric _id."));
+                }
+
+                ids.Add(koboId);
+                continue;
+            }
+
+            var (row, error) = KoboSubmission.Parse(result);
+            if (row is null)
+            {
+                throw new KoboReadException(new KoboError(KoboErrorCodes.UnexpectedResponse, $"The Kobo server returned a submission Tamiza could not read: {error}"));
+            }
+
+            rows.Add(row);
+            ids.Add(row.KoboId);
+        }
+
+        return new SubmissionPage(rows, ids);
+    }
+
+    private async Task<(HttpResponseMessage? Response, KoboError? Error)> SendAsync(
+        string url, string serverUrl, string assetUid, string token, CancellationToken cancellationToken,
+        string clientName = KoboHttp.ClientName, HttpCompletionOption completion = HttpCompletionOption.ResponseContentRead)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Token", token);
@@ -67,7 +177,7 @@ public sealed class KoboClient(IHttpClientFactory httpClientFactory, ILogger<Kob
         HttpResponseMessage response;
         try
         {
-            response = await httpClientFactory.CreateClient(KoboHttp.ClientName).SendAsync(request, cancellationToken);
+            response = await httpClientFactory.CreateClient(clientName).SendAsync(request, completion, cancellationToken);
         }
         catch (HttpRequestException exception) when (exception.InnerException is KoboAddressNotAllowedException)
         {

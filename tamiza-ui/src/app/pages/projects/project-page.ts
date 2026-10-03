@@ -55,6 +55,7 @@ export class ProjectPage {
     const t = (key: string) => this.transloco.translate(key);
     const tabs: TabItem[] = [
       { label: t('project.tabs.overview'), link: `/projects/${id}/overview` },
+      { label: t('project.tabs.data'), link: `/projects/${id}/data` },
       { label: t('project.tabs.members'), link: `/projects/${id}/members` },
       { label: t('project.tabs.samplingFrame'), link: `/projects/${id}/sampling-frame` },
     ];
