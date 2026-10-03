@@ -92,12 +92,14 @@ Admins can change the schedule under **Schedule**: how often to synchronize and 
 
 Every synchronization records when it ran, what started it, how many submissions were new, updated or deleted, and the error if it failed. A submission received again with the same content counts as neither new nor updated.
 
+By default, a synchronization that brings new, changed or deleted submissions also runs the project's Python scripts, which clean the data and compute the indicators. See [scripts.md](scripts.md).
+
 ## Members and roles
 
 | Role | Can |
 |---|---|
-| Admin | Everything below, plus project settings, the synchronization schedule, the Kobo token, the webhook and members. |
-| Analyst | Edit the sampling frame, re-check the form, and run **Sync now** and **Full resync**. |
+| Admin | Everything below, plus project settings, the synchronization and script schedules, the Kobo token, the webhook and members. |
+| Analyst | Edit the sampling frame, re-check the form, run **Sync now** and **Full resync**, and write and run the [scripts](scripts.md). |
 | Viewer | Read the project, including its Data section and synchronization log. |
 
 Admins add people in the **Members** section by email and role:

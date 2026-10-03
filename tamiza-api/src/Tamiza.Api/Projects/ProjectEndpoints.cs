@@ -100,6 +100,7 @@ public static partial class ProjectEndpoints
             EncryptedWebhookSecret = secrets.Protect(webhookSecret),
             FormName = asset!.Name,
             FormFields = asset.Fields.ToList(),
+            FormChoices = asset.Choices.ToList(),
             FormCheckedAt = now,
             // The first synchronization back-fills the form's existing submissions right away.
             NextSyncAt = now,

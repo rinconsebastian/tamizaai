@@ -10,6 +10,7 @@ public static class FormSnapshot
     {
         project.FormName = asset.Name;
         project.FormFields = asset.Fields.ToList();
+        project.FormChoices = asset.Choices.ToList();
         project.FormCheckedAt = now;
         project.UpdatedAt = now;
     }

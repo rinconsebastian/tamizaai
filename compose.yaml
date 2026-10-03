@@ -72,6 +72,8 @@ services:
       TAMIZA_ANALYTICS_DATABASE_URL: "host=db port=5432 dbname=tamiza user=${POSTGRES_USER:-tamiza}"
       PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       TAMIZA_WORKER_POLL_SECONDS: ${TAMIZA_WORKER_POLL_SECONDS:-5}
+      TAMIZA_RUN_TIMEOUT_SECONDS: ${TAMIZA_RUN_TIMEOUT_SECONDS:-600}
+      TAMIZA_RUN_MEMORY_MB: ${TAMIZA_RUN_MEMORY_MB:-1024}
     healthcheck:
       test: ["CMD", "python", "-m", "tamiza.health"]
       interval: 10s

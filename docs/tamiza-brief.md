@@ -58,7 +58,7 @@ Schema and table names are never built from user text without validation (allow 
 - Everything in English: code, identifiers, database objects, API names, the UI and documentation. The UI is ready for i18n so other languages can be added later.
 - Versioned REST API (`/api/v1/...`), documented with OpenAPI.
 - Database migrations with DbUp: versioned SQL scripts in `tamiza-api/src/dbUp`; EF Core is only the data-access layer (`api` owns the metadata schema).
-- Python 3.12, dependencies pinned in the image: pandas, numpy, polars, duckdb, geopandas, openpyxl, psycopg.
+- Python 3.12, dependencies pinned in the image: pandas, pyarrow, numpy, polars, duckdb, geopandas, openpyxl, psycopg.
 - Secrets (Kobo tokens, webhook secrets) encrypted at rest with ASP.NET Data Protection.
 - Every relevant operation leaves a record: who, what, when. The audit mechanism arrives in `add-audit-log` (see section 8).
 - Tests: unit tests in .NET and Python; integration tests for the webhook, synchronization and the script chain.
@@ -278,7 +278,8 @@ Implement in this order, one change per line:
 1. `setup-foundation`: repository structure, Docker Compose with the 4 services, healthchecks, `.env.example`, OIDC integration with Keycloak in `api` and `ui`.
 2. `add-project-management`: projects, Kobo connection, members and roles, sampling frame.
 3. `add-kobo-ingestion`: webhook, periodic and manual synchronization, deletion reconciliation, synchronization log.
-4. `add-python-pipeline`: flattening, run queue, the three scripts, versioning, sample test run, atomic publishing, reference data.
+4. `add-python-pipeline`: flattening, run queue, the three scripts, versioning, atomic publishing, run triggers and limits.
+4b. `add-pipeline-authoring`: sample test run with preview, reference data available from `ctx`.
 5. `add-performance-dashboard`
 6. `add-clean-data-dashboard`
 7. `add-indicators-dashboard`

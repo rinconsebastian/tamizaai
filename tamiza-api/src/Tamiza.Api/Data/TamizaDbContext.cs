@@ -25,6 +25,12 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
 
     public DbSet<Sync> Syncs => Set<Sync>();
 
+    public DbSet<ScriptVersion> ScriptVersions => Set<ScriptVersion>();
+
+    public DbSet<Run> Runs => Set<Run>();
+
+    public DbSet<RunStep> RunSteps => Set<RunStep>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(Schema);
@@ -58,10 +64,13 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             project.Property(p => p.ReconcileIntervalHours).HasDefaultValue(24);
             project.Property(p => p.NextSyncAt).HasDefaultValueSql("now()");
             project.Property(p => p.NextReconcileAt).HasDefaultValueSql("(now() + interval '1 day')");
+            project.Property(p => p.RunAfterSync).HasDefaultValue(true);
+            project.Property(p => p.FormChoices).HasJsonColumn().HasDefaultValueSql("'[]'::jsonb");
             project.ToTable(table =>
             {
                 table.HasCheckConstraint("ck_projects_sync_interval_hours", "sync_interval_hours BETWEEN 1 AND 168");
                 table.HasCheckConstraint("ck_projects_reconcile_interval_hours", "reconcile_interval_hours BETWEEN 1 AND 168");
+                table.HasCheckConstraint("ck_projects_run_interval_hours", "run_interval_hours BETWEEN 1 AND 168");
             });
             project.HasOne<User>().WithMany().HasForeignKey(p => p.CreatedBy).OnDelete(DeleteBehavior.Restrict);
         });
@@ -137,6 +146,60 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             sync.HasIndex(s => new { s.ProjectId, s.QueuedAt }).IsDescending(false, true);
             sync.HasOne<Project>().WithMany().HasForeignKey(s => s.ProjectId).OnDelete(DeleteBehavior.Cascade);
             sync.HasOne(s => s.RequestedByUser).WithMany().HasForeignKey(s => s.RequestedBy).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        MapPipeline(modelBuilder);
+    }
+
+    private static void MapPipeline(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ScriptVersion>(version =>
+        {
+            version.ToTable("script_versions", table => table.HasCheckConstraint("ck_script_versions_kind", "kind IN ('clean', 'output', 'indicators')"));
+            version.HasKey(v => v.Id);
+            version.Property(v => v.Id).ValueGeneratedNever();
+            version.Property(v => v.Kind).HasConversion(LowercaseEnum<ScriptKind>()).HasMaxLength(16);
+            version.HasIndex(v => new { v.ProjectId, v.Kind, v.Number }).IsUnique();
+            version.HasOne<Project>().WithMany().HasForeignKey(v => v.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            version.HasOne(v => v.Author).WithMany().HasForeignKey(v => v.AuthorId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Run>(run =>
+        {
+            run.ToTable("runs", table =>
+            {
+                table.HasCheckConstraint("ck_runs_trigger", "trigger IN ('manual', 'sync', 'schedule')");
+                table.HasCheckConstraint("ck_runs_status", "status IN ('queued', 'running', 'succeeded', 'failed')");
+            });
+            run.HasKey(r => r.Id);
+            run.Property(r => r.Id).ValueGeneratedNever();
+            run.Property(r => r.Trigger).HasConversion(LowercaseEnum<RunTrigger>()).HasMaxLength(16);
+            run.Property(r => r.Status).HasConversion(LowercaseEnum<RunStatus>()).HasMaxLength(16);
+            run.Property(r => r.ErrorCode).HasMaxLength(64);
+            // At most one queued run per project; a running run may have one queued behind it.
+            run.HasIndex(r => r.ProjectId).IsUnique().HasFilter("status = 'queued'").HasDatabaseName("ix_runs_project_id_queued");
+            run.HasIndex(r => new { r.ProjectId, r.QueuedAt }).IsDescending(false, true);
+            run.HasOne<Project>().WithMany().HasForeignKey(r => r.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            run.HasOne(r => r.RequestedByUser).WithMany().HasForeignKey(r => r.RequestedBy).OnDelete(DeleteBehavior.Restrict);
+            // NO ACTION: a project's deletion cascades to runs and script versions in the same statement.
+            run.HasOne<ScriptVersion>().WithMany().HasForeignKey(r => r.CleanVersionId).OnDelete(DeleteBehavior.NoAction);
+            run.HasOne<ScriptVersion>().WithMany().HasForeignKey(r => r.OutputVersionId).OnDelete(DeleteBehavior.NoAction);
+            run.HasOne<ScriptVersion>().WithMany().HasForeignKey(r => r.IndicatorsVersionId).OnDelete(DeleteBehavior.NoAction);
+            run.HasMany(r => r.Steps).WithOne().HasForeignKey(s => s.RunId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RunStep>(step =>
+        {
+            step.ToTable("run_steps", table =>
+            {
+                table.HasCheckConstraint("ck_run_steps_step", "step IN ('flatten', 'clean', 'output', 'indicators')");
+                table.HasCheckConstraint("ck_run_steps_status", "status IN ('succeeded', 'failed', 'skipped')");
+            });
+            step.HasKey(s => new { s.RunId, s.Step });
+            step.Property(s => s.Step).HasConversion(LowercaseEnum<RunStepName>()).HasMaxLength(16);
+            step.Property(s => s.Status).HasConversion(LowercaseEnum<RunStepStatus>()).HasMaxLength(16);
+            step.Property(s => s.Tables).HasJsonColumn().HasDefaultValueSql("'[]'::jsonb");
+            step.Property(s => s.Log).HasDefaultValue("");
         });
     }
 

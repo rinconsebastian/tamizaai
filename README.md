@@ -4,7 +4,7 @@
 
 Tamiza is compatible with KoboToolbox but is not affiliated with it.
 
-> **Status:** early development. Available: the self-hosted stack, sign-in through Keycloak, projects linked to a Kobo form with members, roles and a sampling frame, and ingestion of submissions through Kobo's webhook plus scheduled synchronization ([docs/kobo.md](docs/kobo.md)). The script pipeline and the dashboards come next (see `docs/tamiza-brief.md`, section 8).
+> **Status:** early development. Available: the self-hosted stack, sign-in through Keycloak, projects linked to a Kobo form with members, roles and a sampling frame, ingestion of submissions through Kobo's webhook plus scheduled synchronization ([docs/kobo.md](docs/kobo.md)), and the Python script chain that flattens, cleans and computes indicators into per-project tables ([docs/scripts.md](docs/scripts.md)). The sample test run, reference data and the dashboards come next (see `docs/tamiza-brief.md`, section 8).
 
 ## Architecture
 
@@ -12,7 +12,7 @@ Tamiza is compatible with KoboToolbox but is not affiliated with it.
 |---|---|---|
 | `ui` | Angular, served by nginx | User interface. The only service with a published port; proxies `/api/` to `api`. |
 | `api` | ASP.NET Core (.NET 10) | REST API under `/api/v1`, authentication, database migrations, Kobo webhook intake and synchronization. |
-| `analytics` | Python 3.12 | Worker that will flatten submissions and run user scripts. Internal only. |
+| `analytics` | Python 3.12 | Worker that flattens submissions and runs the analysts' scripts. Internal only. |
 | `db` | PostgreSQL 17 + PostGIS | Metadata, submissions and results. Internal only. |
 
 Users sign in with an existing Keycloak instance over OpenID Connect. Keycloak is not part of the stack.
@@ -50,7 +50,7 @@ Prerequisites: .NET SDK 10, Node.js 24, [uv](https://docs.astral.sh/uv/) and Doc
 | Part | Commands |
 |---|---|
 | API (`tamiza-api/`) | `dotnet build`, `dotnet test`. The integration tests start PostgreSQL with Testcontainers, so Docker must be running. Database schema changes are SQL scripts; see [tamiza-api/src/dbUp/README.md](tamiza-api/src/dbUp/README.md). |
-| Analytics (`tamiza-analytics/`) | `uv sync`, `uv run pytest`, `uv run ruff check`, `uv run ruff format --check` |
+| Analytics (`tamiza-analytics/`) | `uv sync`, `uv run pytest`, `uv run ruff check`, `uv run ruff format --check`. The tests in `tests/integration` start PostgreSQL with Testcontainers and are skipped without Docker. |
 | UI (`tamiza-ui/`) | `npm ci`, `npm test -- --watch=false`, `npm run build`. `npm start` serves the UI on `http://localhost:4200` and proxies `/api` to a stack running on `http://localhost:8088`. |
 
 Planned work is tracked as OpenSpec changes in [openspec/](openspec/). The product brief is [docs/tamiza-brief.md](docs/tamiza-brief.md).
@@ -63,7 +63,7 @@ tamiza-api/                  ASP.NET Core API and its tests
 tamiza-analytics/            Python worker package (tamiza) and its tests
 tamiza-ui/                   Angular UI and nginx configuration
 scripts/                     Repository checks
-docs/                        Keycloak setup, Kobo guide, operations guide, product brief
+docs/                        Keycloak setup, Kobo guide, scripts guide, operations guide, product brief
 openspec/                    Specs and planned changes
 ```
 

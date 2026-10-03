@@ -43,6 +43,18 @@ public sealed class Project
     /// <summary>When the last webhook delivery was accepted.</summary>
     public DateTimeOffset? LastWebhookAt { get; set; }
 
+    /// <summary>Queue a pipeline run after each synchronization that changed submissions.</summary>
+    public bool RunAfterSync { get; set; } = true;
+
+    /// <summary>Hours between scheduled pipeline runs (1–168), or null for no schedule.</summary>
+    public int? RunIntervalHours { get; set; }
+
+    /// <summary>When the next scheduled run is due; null without a schedule.</summary>
+    public DateTimeOffset? NextRunAt { get; set; }
+
+    /// <summary>The form's choice lists, from the same snapshot as <see cref="FormFields"/>.</summary>
+    public List<FormChoice> FormChoices { get; set; } = [];
+
     public Guid CreatedBy { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
@@ -50,5 +62,11 @@ public sealed class Project
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-/// <summary>A field of the Kobo form, as read from the asset's <c>content.survey</c>.</summary>
-public sealed record FormField(string Name, string Xpath, string Type, string? Label);
+/// <summary>
+/// A field of the Kobo form, as read from the asset's <c>content.survey</c>. <see cref="ListName"/> names the choice list
+/// of select questions.
+/// </summary>
+public sealed record FormField(string Name, string Xpath, string Type, string? Label, string? ListName = null);
+
+/// <summary>A choice of one of the form's choice lists, as read from the asset's <c>content.choices</c>.</summary>
+public sealed record FormChoice(string ListName, string Name, string? Label);

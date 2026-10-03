@@ -19,6 +19,15 @@ const apiErrorCodes = [
   'webhook.unsupported_media_type',
   'webhook.invalid_submission',
   'webhook.too_large',
+  'run.already_queued',
+  'run.interrupted',
+  'limit.time',
+  'limit.memory',
+  'step.flatten',
+  'step.clean',
+  'step.output',
+  'step.indicators',
+  'script.not_set',
 ];
 
 function lookup(root: unknown, path: string): unknown {
@@ -28,6 +37,13 @@ function lookup(root: unknown, path: string): unknown {
 describe('English translations', () => {
   it.each(apiErrorCodes)('have a message for the API error code %s', (code) => {
     expect(typeof lookup(en.errors.codes, code)).toBe('string');
+  });
+
+  it('name every run trigger, status, step and step status', () => {
+    for (const key of ['manual', 'sync', 'schedule']) expect(typeof lookup(en.runs.triggers, key)).toBe('string');
+    for (const key of ['queued', 'running', 'succeeded', 'failed']) expect(typeof lookup(en.runs.status, key)).toBe('string');
+    for (const key of ['flatten', 'clean', 'output', 'indicators']) expect(typeof lookup(en.runs.steps, key)).toBe('string');
+    for (const key of ['succeeded', 'failed', 'skipped']) expect(typeof lookup(en.runs.stepStatus, key)).toBe('string');
   });
 
   it('name every synchronization kind, trigger and status', () => {

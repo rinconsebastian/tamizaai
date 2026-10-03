@@ -20,6 +20,12 @@ export const routes: Routes = [
           { path: '', pathMatch: 'full', redirectTo: 'overview' },
           { path: 'overview', loadComponent: () => import('./pages/projects/project-overview').then((m) => m.ProjectOverview) },
           { path: 'data', loadComponent: () => import('./pages/projects/project-data').then((m) => m.ProjectData) },
+          {
+            path: 'scripts',
+            loadComponent: () => import('./pages/projects/project-scripts').then((m) => m.ProjectScripts),
+            // Inline rather than imported from the page, so the editor's chunk stays lazy.
+            canDeactivate: [(component: { confirmDiscard(): Promise<boolean> }) => component.confirmDiscard()],
+          },
           { path: 'members', loadComponent: () => import('./pages/projects/project-members').then((m) => m.ProjectMembers) },
           {
             path: 'sampling-frame',

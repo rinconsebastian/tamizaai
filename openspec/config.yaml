@@ -69,7 +69,7 @@ context: |
   - Versioned REST API (`/api/v1/...`), documented with OpenAPI.
   - Database migrations with DbUp: versioned SQL scripts in `tamiza-api/src/dbUp`; EF Core is only the
     data-access layer (`api` owns the metadata schema).
-  - Python 3.12, dependencies pinned in the image: pandas, numpy, polars, duckdb,
+  - Python 3.12, dependencies pinned in the image: pandas, pyarrow, numpy, polars, duckdb,
     geopandas, openpyxl, psycopg.
   - Secrets (Kobo tokens, webhook secrets) encrypted at rest with ASP.NET Data Protection.
   - Every relevant operation leaves a record: who, what, when. The audit mechanism

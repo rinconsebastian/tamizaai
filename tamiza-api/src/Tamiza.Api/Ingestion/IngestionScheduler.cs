@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.Options;
 using Tamiza.Api.Data;
+using Tamiza.Api.Pipeline;
 
 namespace Tamiza.Api.Ingestion;
 
@@ -54,6 +55,12 @@ public sealed class IngestionScheduler(
             {
                 running.RemoveAll(task => task.IsCompleted);
                 await WithQueueAsync(queue => queue.EnqueueDueAsync(time.GetUtcNow(), stoppingToken));
+                await using (var scope = scopes.CreateAsyncScope())
+                {
+                    // Scheduled pipeline runs; the analytics worker executes them.
+                    await scope.ServiceProvider.GetRequiredService<RunQueue>().EnqueueScheduledAsync(time.GetUtcNow(), stoppingToken);
+                }
+
                 while (running.Count < settings.MaxConcurrentRuns)
                 {
                     ClaimedSync? claimed = null;

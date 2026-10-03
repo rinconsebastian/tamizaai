@@ -54,6 +54,23 @@
         "unsupported_media_type": "Kobo sent the submission as XML. Edit the REST Service in Kobo and choose the JSON type.",
         "invalid_submission": "Kobo sent a submission without its _id or _uuid. Leave the REST Service field subset and custom wrapper empty.",
         "too_large": "The submission is larger than Tamiza accepts."
+      },
+      "run": {
+        "already_queued": "A run of this project is already waiting to start.",
+        "interrupted": "The run was interrupted because the analytics worker stopped. The next run proceeds normally."
+      },
+      "limit": {
+        "time": "A script exceeded the time limit and was stopped.",
+        "memory": "A script exceeded the memory limit and was stopped."
+      },
+      "step": {
+        "flatten": "Flattening the submissions failed.",
+        "clean": "Script 1 (clean) failed:",
+        "output": "Script 2 (output) failed:",
+        "indicators": "Script 3 (indicators) failed:"
+      },
+      "script": {
+        "not_set": "There is no script to remove."
       }
     }
   },
@@ -101,6 +118,7 @@
     "tabs": {
       "overview": "Overview",
       "data": "Data",
+      "scripts": "Scripts",
       "members": "Members",
       "samplingFrame": "Sampling frame",
       "webhook": "Webhook"
@@ -189,6 +207,98 @@
       "succeeded": "Succeeded",
       "failed": "Failed"
     }
+  },
+  "scripts": {
+    "title": "Scripts",
+    "kinds": {
+      "clean": "1. Clean",
+      "output": "2. Output",
+      "indicators": "3. Indicators"
+    },
+    "contracts": {
+      "clean": "clean(raw, ctx) receives the flattened tables and returns the cleaned ones. Without it, the flattened tables are the clean data.",
+      "output": "prepare_output(cleaned, ctx) returns the tables for the clean-data dashboard. Optional.",
+      "indicators": "compute_indicators(cleaned, ctx) returns one table with indicator, disaggregation, value, numerator and denominator. Optional."
+    },
+    "notSet": "not set",
+    "removedBadge": "removed",
+    "versionShort": "v{{ number }}",
+    "versionNumber": "Version {{ number }}",
+    "editorLabel": "Python code of script {{ kind }}",
+    "save": "Save",
+    "template": "Insert template",
+    "upload": "Upload .py",
+    "remove": "Remove script",
+    "unsaved": "Unsaved changes",
+    "saved": "Version {{ number }} saved. It is used from the next run.",
+    "removed": "Script removed (version {{ number }}). The next run uses the default behavior.",
+    "restored": "Restored as version {{ number }}.",
+    "tooLarge": "The script is larger than 200 KB.",
+    "versionsTitle": "Versions",
+    "noVersions": "No versions saved yet.",
+    "viewingVersion": "Viewing version {{ number }} by {{ author }}. It is read-only.",
+    "backToCurrent": "Back to the current version",
+    "restore": "Restore version {{ number }}",
+    "removeTitle": "Remove this script?",
+    "removeMessage": {
+      "clean": "From the next run, the flattened tables are published as the clean data. Earlier versions stay in the history.",
+      "output": "From the next run, no output tables are published. Earlier versions stay in the history.",
+      "indicators": "From the next run, no indicator table is published. Earlier versions stay in the history."
+    },
+    "discardTitle": "Discard unsaved changes?",
+    "discardMessage": "The edits to this script have not been saved.",
+    "discard": "Discard"
+  },
+  "runs": {
+    "title": "Runs",
+    "runNow": "Run now",
+    "started": "Run queued. It starts within seconds.",
+    "empty": "No runs yet. A run starts after a synchronization with new data, on the schedule, or with Run now.",
+    "details": "Details",
+    "detailsTitle": "Run details",
+    "close": "Close",
+    "rows": "{{ input }} rows in, {{ output }} out",
+    "tables": "Tables:",
+    "columns": {
+      "started": "Started",
+      "status": "Status",
+      "steps": "Steps",
+      "versions": "Script versions",
+      "duration": "Duration"
+    },
+    "triggers": {
+      "manual": "Manual",
+      "sync": "After synchronization",
+      "schedule": "Scheduled"
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed"
+    },
+    "steps": {
+      "flatten": "Flatten",
+      "clean": "Clean",
+      "output": "Output",
+      "indicators": "Indicators"
+    },
+    "stepStatus": {
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "skipped": "Skipped"
+    }
+  },
+  "pipeline": {
+    "settingsTitle": "When scripts run",
+    "runAfterSync": "Run after each synchronization that brings new, changed or deleted submissions",
+    "interval": "Also run every (hours)",
+    "intervalHint": "From 1 to 168 hours. Leave empty for no schedule.",
+    "noSchedule": "No schedule",
+    "yes": "Yes",
+    "no": "No",
+    "nextRun": "Next scheduled run: {{ time }}",
+    "settingsSaved": "Run settings saved."
   },
   "webhook": {
     "title": "Webhook settings",

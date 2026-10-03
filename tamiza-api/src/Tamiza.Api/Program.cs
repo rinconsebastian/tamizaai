@@ -3,6 +3,7 @@ using Tamiza.Api.Configuration;
 using Tamiza.Api.Data;
 using Tamiza.Api.Health;
 using Tamiza.Api.Ingestion;
+using Tamiza.Api.Pipeline;
 using Tamiza.Api.Projects;
 using Tamiza.Api.Security;
 using Tamiza.Api.SystemInfo;
@@ -18,6 +19,7 @@ builder.Services.AddTamizaAuthentication();
 builder.Services.AddTamizaHealthChecks();
 builder.Services.AddTamizaProjects();
 builder.Services.AddTamizaIngestion();
+builder.Services.AddTamizaPipeline();
 
 var app = builder.Build();
 
@@ -38,6 +40,8 @@ api.MapMemberEndpoints();
 api.MapSamplingFrameEndpoints();
 api.MapWebhookEndpoints();
 api.MapIngestionEndpoints();
+api.MapScriptEndpoints();
+api.MapRunEndpoints();
 
 if (!await app.MigrateDatabaseAsync())
 {

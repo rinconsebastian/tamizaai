@@ -200,6 +200,26 @@ public sealed class ProjectsApiTests(PostgresFixture postgres) : IDisposable
     }
 
     [Fact]
+    public async Task Creation_and_recheck_keep_the_form_choice_lists()
+    {
+        var (factory, db) = await FactoryAsync();
+        await using var owner = factory;
+        using var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
+        var id = (await CreateProjectAsync(admin)).GetProperty("project").GetProperty("id").GetGuid();
+
+        Assert.Equal("Cali", await TestData.ScalarAsync<string>(db,
+            "SELECT c->>'label' FROM tamiza.projects, jsonb_array_elements(form_choices) c WHERE c->>'listName' = 'municipalities' AND c->>'name' = 'cali'"));
+        Assert.Equal("municipalities", await TestData.ScalarAsync<string>(db,
+            "SELECT f->>'listName' FROM tamiza.projects, jsonb_array_elements(form_fields) f WHERE f->>'name' = 'municipality'"));
+
+        _kobo.WithForm(KoboStub.FormJson.Replace("\"Cali\"", "\"Santiago de Cali\""));
+        (await admin.PostAsync($"/api/v1/projects/{id}/kobo-check", null)).EnsureSuccessStatusCode();
+
+        Assert.Equal("Santiago de Cali", await TestData.ScalarAsync<string>(db,
+            "SELECT c->>'label' FROM tamiza.projects, jsonb_array_elements(form_choices) c WHERE c->>'name' = 'cali'"));
+    }
+
+    [Fact]
     public async Task Recheck_refreshes_the_form_snapshot_and_viewers_cannot_recheck()
     {
         var (factory, db) = await FactoryAsync();

@@ -26,6 +26,12 @@ public sealed class KoboStub : IDisposable
               { "type": "select_one municipalities", "name": "municipality", "$xpath": "municipality", "label": ["Municipality"] },
               { "type": "select_one sex", "name": "sex", "$xpath": "sex", "label": ["Sex"] },
               { "type": "text", "name": "enumerator", "$xpath": "enumerator", "label": ["Enumerator"] }
+            ],
+            "choices": [
+              { "list_name": "municipalities", "name": "cali", "label": ["Cali"] },
+              { "list_name": "municipalities", "name": "palmira", "label": ["Palmira"] },
+              { "list_name": "sex", "name": "f", "label": ["Female"] },
+              { "list_name": "sex", "name": "m", "label": ["Male"] }
             ]
           }
         }

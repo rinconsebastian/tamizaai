@@ -3,7 +3,8 @@ import { Directive, computed, input } from '@angular/core';
 export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
 export type ButtonSize = 'sm' | 'md';
 
-// Flowbite button styles (MIT). Kept on native <button>/<a> elements for keyboard and screen-reader support.
+// Flowbite button styles (MIT). Kept on native <button>/<a> elements for keyboard and screen-reader support; a <label>
+// styled as a button opens a visually hidden file input.
 const base =
   'inline-flex items-center justify-center gap-2 box-border border font-medium leading-5 rounded-base shadow-xs ' +
   'focus:outline-none focus:ring-4 disabled:cursor-not-allowed disabled:opacity-50 min-h-10';
@@ -17,7 +18,7 @@ const variants: Record<ButtonVariant, string> = {
 const sizes: Record<ButtonSize, string> = { sm: 'text-sm px-3 py-2', md: 'text-sm px-4 py-2.5' };
 
 @Directive({
-  selector: 'button[tmzButton], a[tmzButton]',
+  selector: 'button[tmzButton], a[tmzButton], label[tmzButton]',
   host: { '[class]': 'classes()' },
 })
 export class Button {

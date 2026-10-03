@@ -114,14 +114,7 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
     public async Task Ingestion_script_upgrades_a_database_at_the_initial_schema_and_schedules_existing_projects()
     {
         var connectionString = await postgres.CreateDatabaseAsync();
-        var initial = DeployChanges.To
-            .PostgresqlDatabase(connectionString, SchemaMigrator.Schema)
-            .JournalToPostgresqlTable(SchemaMigrator.Schema, SchemaMigrator.JournalTable)
-            .WithScript(SchemaMigrator.InitialScript, ReadScript(SchemaMigrator.InitialScript))
-            .WithVariablesDisabled()
-            .Build()
-            .PerformUpgrade();
-        Assert.True(initial.Successful);
+        ApplyScripts(connectionString, SchemaMigrator.InitialScript);
         await ExecuteAsync(connectionString, """
             INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('00000000-0000-0000-0000-000000000001', 'sub-1', 'Ada', now(), now());
             INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
@@ -140,6 +133,49 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
                           next_sync_at <= now(), next_reconcile_at > now() + interval '23 hours')
             FROM tamiza.projects
             """));
+    }
+
+    [Fact]
+    public async Task Pipeline_script_upgrades_a_database_at_the_ingestion_schema()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql");
+        await ExecuteAsync(connectionString, """
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('00000000-0000-0000-0000-000000000001', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES (gen_random_uuid(), 'Existing', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(), '00000000-0000-0000-0000-000000000001', now(), now());
+            """);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        foreach (var table in new[] { "script_versions", "runs", "run_steps" })
+        {
+            Assert.True(await TableExistsAsync(connectionString, table), table);
+        }
+
+        // Existing projects run after each synchronization, with no schedule and no choices until the next snapshot.
+        Assert.Equal("t <NULL> <NULL> []", await ScalarAsync<string>(connectionString, """
+            SELECT format('%s %s %s %s', run_after_sync, coalesce(run_interval_hours::text, '<NULL>'),
+                          coalesce(next_run_at::text, '<NULL>'), form_choices)
+            FROM tamiza.projects
+            """));
+    }
+
+    /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>
+    private static void ApplyScripts(string connectionString, params string[] names)
+    {
+        var builder = DeployChanges.To
+            .PostgresqlDatabase(connectionString, SchemaMigrator.Schema)
+            .JournalToPostgresqlTable(SchemaMigrator.Schema, SchemaMigrator.JournalTable)
+            .WithVariablesDisabled();
+        foreach (var name in names)
+        {
+            builder = builder.WithScript(name, ReadScript(name));
+        }
+
+        Assert.True(builder.Build().PerformUpgrade().Successful);
     }
 
     private static string ReadScript(string name)

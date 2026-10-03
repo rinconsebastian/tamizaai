@@ -111,6 +111,10 @@ Change a value in `.env` and run `docker compose up -d` to recreate the affected
 
 Projects' synchronization intervals are set per project by their admins, in the project's **Data** section.
 
+**Script limits.** Each analyst script runs with a time limit and a memory limit, set by `TAMIZA_RUN_TIMEOUT_SECONDS` (default `600`) and `TAMIZA_RUN_MEMORY_MB` (default `1024`) in `.env`. Apply changes with `docker compose up -d analytics`. The script runs next to the analytics worker, which needs a few hundred MB of its own while it flattens and publishes, so raise `ANALYTICS_MEMORY_LIMIT` together with `TAMIZA_RUN_MEMORY_MB` and keep at least 512 MB between them.
+
+**Per-project tables.** The pipeline publishes each project's results in PostgreSQL schemas named `p_<project id without dashes>_raw`, `_clean`, `_output` and `_indicators` (see [scripts.md](scripts.md)). They are rebuilt by every run. To remove a project's tables by hand, drop its four schemas, for example `DROP SCHEMA p_01a0ffdc120470188195fe685d20c5c9_raw CASCADE;`; the next run creates them again.
+
 **One `api` replica.** Run a single `api` container. On startup it marks any synchronization left running as interrupted, which assumes no other `api` is running one.
 
 **Database password.** `POSTGRES_PASSWORD` is applied only when the database volume is first created. To change it later, update the role first, then `.env`:
@@ -139,4 +143,4 @@ Two named volumes hold everything that must survive container re-creation:
 These arrive in later changes (see `docs/tamiza-brief.md`, section 8):
 
 - **Backup and restore scripts** (`add-backup-restore`). Until then, protect both volumes above together. A database dump without the key ring cannot decrypt the stored Kobo tokens and webhook secrets; after such a loss, project admins must replace each token and regenerate each webhook secret.
-- **Per-service database roles and network isolation for `analytics`** (`harden-deployment`). Today `api` and `analytics` share the database role from `.env`, and `analytics` can reach the Internet.
+- **Per-service database roles and network isolation for `analytics`** (`harden-deployment`). Today `api` and `analytics` share the database role from `.env`, and `analytics` can reach the Internet. Analysts' scripts run inside `analytics` without the database credentials in their environment, but they are not sandboxed, so give the analyst and admin roles only to people you trust with the server.

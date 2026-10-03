@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Tamiza.Api.Data;
 using Tamiza.Api.Kobo;
+using Tamiza.Api.Pipeline;
 using Tamiza.Api.Projects;
 
 namespace Tamiza.Api.Ingestion;
@@ -13,6 +14,7 @@ namespace Tamiza.Api.Ingestion;
 public sealed class SyncRunner(
     TamizaDbContext db,
     SyncQueue queue,
+    RunQueue runs,
     SubmissionStore store,
     KoboClient kobo,
     SecretProtector secrets,
@@ -48,11 +50,29 @@ public sealed class SyncRunner(
         if (errorCode is null)
         {
             logger.LogInformation("Synchronization {SyncId} ({Kind}) of project {ProjectId} succeeded.", claimed.Id, claimed.Kind, claimed.ProjectId);
+            await QueueRunAsync(claimed);
         }
         else
         {
             logger.LogWarning("Synchronization {SyncId} ({Kind}) of project {ProjectId} failed: {ErrorCode} {Error}",
                 claimed.Id, claimed.Kind, claimed.ProjectId, errorCode, error);
+        }
+    }
+
+    /// <summary>A synchronization that changed submissions starts the pipeline, when the project wants that.</summary>
+    private async Task QueueRunAsync(ClaimedSync claimed)
+    {
+        try
+        {
+            var changes = await db.Syncs.AsNoTracking()
+                .Where(s => s.Id == claimed.Id)
+                .Select(s => s.CreatedCount + s.UpdatedCount + s.DeletedCount)
+                .SingleAsync(CancellationToken.None);
+            await runs.EnqueueAfterSyncAsync(claimed.ProjectId, changes, time.GetUtcNow(), CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Could not queue a pipeline run after synchronization {SyncId}.", claimed.Id);
         }
     }
 
