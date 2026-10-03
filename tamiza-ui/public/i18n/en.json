@@ -4,12 +4,11 @@
     "tagline": "From survey to indicator"
   },
   "shell": {
-    "signOut": "Sign out"
-  },
-  "home": {
-    "welcome": "Welcome, {{ name }}",
-    "loading": "Loading your profile…",
-    "intro": "Tamiza turns KoboToolbox submissions into clean data and indicators. Projects arrive in a later release."
+    "signOut": "Sign out",
+    "projects": "Projects",
+    "menu": "Menu",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu"
   },
   "authUnavailable": {
     "title": "Sign-in is unavailable",
@@ -21,5 +20,198 @@
     "title": "Page not found",
     "body": "This page does not exist, or it is not available yet.",
     "home": "Go to the home page"
+  },
+  "errors": {
+    "generic": "Something went wrong. Try again.",
+    "network": "Tamiza could not reach the server. Check your connection and try again.",
+    "validation": "Some fields need attention.",
+    "codes": {
+      "kobo": {
+        "invalid_url": "Enter the server's full address, for example https://kf.kobotoolbox.org.",
+        "https_required": "The Kobo server must use HTTPS.",
+        "address_not_allowed": "This Kobo server's address points to a private or local network, which this installation does not allow.",
+        "unauthorized": "Kobo rejected the API token, or the token cannot read this form and its submissions.",
+        "form_not_found": "No form with this asset UID was found on the Kobo server.",
+        "unreachable": "The Kobo server could not be reached. Check the address and try again.",
+        "unexpected_response": "The Kobo server answered unexpectedly. Check the address and try again.",
+        "token_unreadable": "The saved API token can no longer be read. A project admin must replace it."
+      },
+      "member": {
+        "exists": "This person is already a member of the project."
+      },
+      "invitation": {
+        "exists": "This email already has a pending invitation."
+      },
+      "project": {
+        "last_admin": "The project needs at least one admin. Make someone else admin first."
+      }
+    }
+  },
+  "common": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "loading": "Loading…"
+  },
+  "roles": {
+    "admin": "Admin",
+    "analyst": "Analyst",
+    "viewer": "Viewer"
+  },
+  "projects": {
+    "title": "Projects",
+    "new": "New project",
+    "emptyTitle": "No projects yet",
+    "emptyBody": "A project links Tamiza to one KoboToolbox form. Create one to start, or ask a project admin to invite you.",
+    "createFirst": "Create a project"
+  },
+  "createProject": {
+    "title": "New project",
+    "intro": "Connect a KoboToolbox form. Tamiza checks that the token can read the form and its submissions before saving.",
+    "name": "Project name",
+    "server": "Kobo server",
+    "servers": {
+      "kf": "kf.kobotoolbox.org",
+      "eu": "eu.kobotoolbox.org",
+      "custom": "Other server"
+    },
+    "serverUrl": "Server address",
+    "serverUrlHint": "The full HTTPS address of your Kobo server.",
+    "assetUid": "Form asset UID",
+    "assetUidHint": "In Kobo, open the form: it is the code after /forms/ in the address, for example aBcD1234eFgH.",
+    "apiToken": "Kobo API token",
+    "apiTokenHint": "In Kobo: Account settings → Security → API key. It is stored encrypted and never shown again.",
+    "checking": "Checking the Kobo connection…",
+    "submit": "Create project",
+    "created": "Project {{ name }} created. Now connect Kobo's webhook."
+  },
+  "project": {
+    "sections": "Project sections",
+    "notFoundTitle": "Project not found",
+    "notFoundBody": "It does not exist, or you are not a member of it.",
+    "tabs": {
+      "overview": "Overview",
+      "members": "Members",
+      "samplingFrame": "Sampling frame",
+      "webhook": "Webhook"
+    }
+  },
+  "overview": {
+    "tokenUnreadable": "The saved Kobo API token can no longer be read (the encryption keys changed). Replace the token and regenerate the webhook secret.",
+    "formTitle": "Kobo form",
+    "formName": "Form",
+    "server": "Server",
+    "assetUid": "Asset UID",
+    "checkedAt": "Last checked",
+    "recheck": "Re-check the form",
+    "replaceToken": "Replace API token",
+    "saveToken": "Save token",
+    "checkTitle": "Performance dashboard",
+    "checkIntro": "Which field metrics the form allows. Missing fields can be added to the form in Kobo.",
+    "available": "Available",
+    "unavailable": "Unavailable",
+    "missing": "Missing in the form: {{ fields }}",
+    "enumeratorField": "Enumerator question",
+    "enumeratorHint": "The question that identifies who collected each submission.",
+    "noEnumerator": "None",
+    "settingsTitle": "Project settings",
+    "rechecked": "Form checked.",
+    "tokenReplaced": "API token replaced.",
+    "enumeratorSaved": "Enumerator question saved.",
+    "renamed": "Project renamed."
+  },
+  "metrics": {
+    "dailyEvolution": "Submissions per day",
+    "completionTime": "Completion time",
+    "perEnumerator": "Detail per enumerator",
+    "coverage": "Sampling frame coverage"
+  },
+  "webhook": {
+    "title": "Webhook settings",
+    "intro": "Kobo sends each new submission to this address. Enter these values in the form's REST Services.",
+    "secretUnreadable": "The webhook secret can no longer be read. Regenerate it and update Kobo.",
+    "url": "Endpoint URL",
+    "username": "Username",
+    "secret": "Password (secret)",
+    "hide": "Hide",
+    "show": "Show",
+    "copy": "Copy",
+    "regenerate": "Regenerate secret",
+    "stepsTitle": "Set it up in Kobo",
+    "steps": {
+      "open": "Open the form in KoboToolbox.",
+      "restServices": "Go to Settings → REST Services.",
+      "register": "Choose Register a new service and give it a name.",
+      "url": "Paste the endpoint URL.",
+      "auth": "Under Security choose Basic Authorization and paste the username and password.",
+      "save": "Save the service."
+    },
+    "ingestionNote": "Submissions start arriving once ingestion is available in a later Tamiza release.",
+    "copied": "Copied to the clipboard.",
+    "copyFailed": "Could not copy. Select the text and copy it manually.",
+    "regenerateTitle": "Regenerate the webhook secret?",
+    "regenerateMessage": "Kobo stops being able to send submissions until you update the password in its REST Service.",
+    "regenerated": "New secret generated. Update it in Kobo."
+  },
+  "members": {
+    "inviteTitle": "Add a member",
+    "inviteIntro": "Enter the email the person uses in Keycloak. If they have not signed in to Tamiza yet, the invitation waits until they do with that email verified. Tamiza does not send email: let them know.",
+    "email": "Email",
+    "role": "Role",
+    "invite": "Add",
+    "title": "Members",
+    "actionsFor": "Actions for {{ name }}",
+    "name": "Name",
+    "actions": "Actions",
+    "pendingTitle": "Pending invitations",
+    "pendingRole": "Invited as {{ role }}",
+    "revoke": "Revoke",
+    "noPending": "No pending invitations.",
+    "makeRole": {
+      "admin": "Make admin",
+      "analyst": "Make analyst",
+      "viewer": "Make viewer"
+    },
+    "remove": "Remove from project",
+    "added": "{{ email }} is now a member.",
+    "invited": "Invitation saved. {{ email }} becomes a member on their first sign-in with that email verified.",
+    "removeTitle": "Remove {{ name }}?",
+    "removeMessage": "They lose access to this project immediately.",
+    "revokeTitle": "Revoke the invitation for {{ email }}?",
+    "revokeMessage": "Signing in with this email will no longer add them to the project."
+  },
+  "frame": {
+    "target": "Target",
+    "emptyViewer": "No sampling frame has been defined for this project yet.",
+    "importTitle": "Import from a file",
+    "importIntro": "Upload a CSV or XLSX file with one column per dimension and a target column, one combination per row. You can review it before saving.",
+    "previewSummary": "{{ rows }} rows and {{ dimensions }} dimensions found.",
+    "previewErrors": "Fix these rows in the file and import it again:",
+    "rowError": "Row {{ row }}: {{ message }}",
+    "mapField": "Form field for “{{ name }}”",
+    "chooseField": "Choose a form field",
+    "applyImport": "Load into the editor",
+    "dimensionsTitle": "Dimensions",
+    "dimensionsIntro": "Each dimension maps to a question of the form, for example municipality or sex.",
+    "dimensionName": "Name of dimension {{ n }}",
+    "dimensionField": "Form field of dimension {{ n }}",
+    "remove": "Remove",
+    "addDimension": "Add dimension",
+    "targetsTitle": "Targets",
+    "unnamed": "(unnamed)",
+    "actions": "Actions",
+    "cellLabel": "{{ name }}, row {{ row }}",
+    "targetLabel": "Target, row {{ row }}",
+    "removeRow": "Remove row {{ row }}",
+    "addRow": "Add row",
+    "previous": "Previous",
+    "next": "Next",
+    "pageInfo": "Rows {{ from }}–{{ to }} of {{ total }}",
+    "addDimensionFirst": "Add a dimension to start entering targets.",
+    "errorCount": "{{ count }} problems to fix before saving.",
+    "save": "Save sampling frame",
+    "saved": "Sampling frame saved.",
+    "importApplied": "The imported rows are in the editor. Review them and save.",
+    "chooseFile": "Choose a file",
+    "noFile": "No file chosen"
   }
 }

@@ -1,25 +1,23 @@
 import { DOCUMENT, Component, inject } from '@angular/core';
 import { TranslocoDirective } from '@jsverse/transloco';
 import { AuthService } from '../../core/auth/auth.service';
+import { Alert, Button } from '../../shared/ui';
 
 @Component({
   selector: 'app-auth-unavailable',
-  imports: [TranslocoDirective],
+  imports: [TranslocoDirective, Alert, Button],
   template: `
-    <section class="notice" role="alert" *transloco="let t">
-      <h1>{{ t('authUnavailable.title') }}</h1>
-      @if (reason() === 'insecure-context') {
-        <p>{{ t('authUnavailable.insecureContext') }}</p>
-      } @else {
-        <p>{{ t('authUnavailable.unreachable') }}</p>
-      }
-      <button type="button" (click)="retry()">{{ t('authUnavailable.retry') }}</button>
+    <section class="mx-auto max-w-xl py-8" *transloco="let t">
+      <h1 class="mb-4 text-2xl font-semibold text-heading">{{ t('authUnavailable.title') }}</h1>
+      <tmz-alert tone="danger">
+        @if (reason() === 'insecure-context') {
+          {{ t('authUnavailable.insecureContext') }}
+        } @else {
+          {{ t('authUnavailable.unreachable') }}
+        }
+      </tmz-alert>
+      <button tmzButton class="mt-6" type="button" (click)="retry()">{{ t('authUnavailable.retry') }}</button>
     </section>
-  `,
-  styles: `
-    .notice {
-      max-width: 40rem;
-    }
   `,
 })
 export class AuthUnavailablePage {

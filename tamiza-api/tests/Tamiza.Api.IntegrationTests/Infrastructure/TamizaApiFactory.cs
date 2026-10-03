@@ -3,14 +3,21 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Tamiza.Api.IntegrationTests.Infrastructure;
 
 /// <summary>Runs the API in memory against a test database, with the settings Compose would provide.</summary>
-public sealed class TamizaApiFactory(string connectionString, IReadOnlyDictionary<string, string?>? overrides = null)
+public sealed class TamizaApiFactory(
+    string connectionString,
+    IReadOnlyDictionary<string, string?>? overrides = null,
+    Action<IServiceCollection>? configureServices = null)
     : WebApplicationFactory<Program>
 {
     public string KeysPath { get; } = Directory.CreateTempSubdirectory("tamiza-keys-").FullName;
+
+    /// <summary>Every log line written while the API runs.</summary>
+    public CapturingLoggerProvider Logs { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -33,8 +40,12 @@ public sealed class TamizaApiFactory(string connectionString, IReadOnlyDictionar
             builder.UseSetting(key, value);
         }
 
+        builder.ConfigureLogging(logging => logging.AddProvider(Logs).SetMinimumLevel(LogLevel.Trace));
         builder.ConfigureTestServices(services =>
-            services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, TestTokens.TrustTestKey));
+        {
+            services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, TestTokens.TrustTestKey);
+            configureServices?.Invoke(services);
+        });
     }
 
     protected override void Dispose(bool disposing)

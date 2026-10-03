@@ -19,6 +19,13 @@ public sealed class TamizaOptions
     [ConfigurationKeyName("TAMIZA_MIGRATE_ON_STARTUP")]
     public bool MigrateOnStartup { get; set; } = true;
 
+    /// <summary>
+    /// Allows Kobo servers on private networks and over plain HTTP, for a self-hosted Kobo next to Tamiza.
+    /// Off by default so the API cannot be pointed at internal services.
+    /// </summary>
+    [ConfigurationKeyName("TAMIZA_KOBO_ALLOW_PRIVATE_NETWORKS")]
+    public bool KoboAllowPrivateNetworks { get; set; }
+
     [Required]
     [ConfigurationKeyName("TAMIZA_DATA_PROTECTION_KEYS_PATH")]
     public string DataProtectionKeysPath { get; set; } = DefaultDataProtectionKeysPath;

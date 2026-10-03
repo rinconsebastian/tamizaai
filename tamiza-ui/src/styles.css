@@ -1,30 +1,35 @@
-:root {
-  --tamiza-text: #1f2933;
-  --tamiza-background: #f7f8fa;
-  --tamiza-surface: #ffffff;
-  --tamiza-border: #d9dee5;
-  --tamiza-accent: #1d6f63;
-  color: var(--tamiza-text);
-  background: var(--tamiza-background);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.5;
+/*
+ * Tailwind CSS 4 with Flowbite's design tokens and plugin. Flowbite's JavaScript is not used: behavior comes
+ * from Angular and the Angular CDK (see src/app/shared/ui).
+ */
+@import 'tailwindcss';
+@import 'flowbite/src/themes/default';
+@plugin 'flowbite/plugin';
+@import '@angular/cdk/overlay-prebuilt.css';
+@import '@angular/cdk/a11y-prebuilt.css';
+
+/* Tamiza overrides: teal brand and the system font stack (the CSP blocks web fonts). */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --font-body: var(--font-sans);
+  --color-brand-softer: var(--color-teal-50);
+  --color-brand-soft: var(--color-teal-100);
+  --color-brand-medium: var(--color-teal-200);
+  --color-brand-subtle: var(--color-teal-200);
+  --color-brand-light: var(--color-teal-600);
+  --color-brand: var(--color-teal-700);
+  --color-brand-strong: var(--color-teal-800);
+  --color-fg-brand-subtle: var(--color-teal-200);
+  --color-fg-brand: var(--color-teal-700);
+  --color-fg-brand-strong: var(--color-teal-900);
 }
 
-body {
-  margin: 0;
-}
+@layer base {
+  html {
+    @apply bg-neutral-secondary-soft text-body antialiased;
+  }
 
-button {
-  font: inherit;
-  padding: 0.375rem 0.875rem;
-  border: 1px solid var(--tamiza-accent);
-  border-radius: 0.375rem;
-  background: var(--tamiza-surface);
-  color: var(--tamiza-accent);
-  cursor: pointer;
-}
-
-button:hover {
-  background: var(--tamiza-accent);
-  color: var(--tamiza-surface);
+  body {
+    @apply min-h-screen font-sans;
+  }
 }

@@ -12,6 +12,9 @@ public sealed class User
 
     public string? Email { get; set; }
 
+    /// <summary>Whether Keycloak marked the email as verified in the latest token. Invitations only match verified emails.</summary>
+    public bool EmailVerified { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }

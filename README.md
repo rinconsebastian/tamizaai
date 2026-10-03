@@ -4,7 +4,7 @@
 
 Tamiza is compatible with KoboToolbox but is not affiliated with it.
 
-> **Status:** early development. This release contains the foundation: the self-hosted stack, sign-in through Keycloak and the service skeletons. Kobo projects, ingestion, the script pipeline and the dashboards come next (see `docs/tamiza-brief.md`, section 8).
+> **Status:** early development. Available: the self-hosted stack, sign-in through Keycloak, and projects linked to a Kobo form, with members, roles and a sampling frame ([docs/kobo.md](docs/kobo.md)). Ingestion of submissions, the script pipeline and the dashboards come next (see `docs/tamiza-brief.md`, section 8).
 
 ## Architecture
 
@@ -39,7 +39,7 @@ Then start the stack (the first build takes a few minutes):
 docker compose up -d --build --wait
 ```
 
-Open `TAMIZA_PUBLIC_URL` in a browser and sign in. Every variable is documented in [.env.example](.env.example).
+Open `TAMIZA_PUBLIC_URL` in a browser, sign in and create a project from a Kobo form, following [docs/kobo.md](docs/kobo.md). Every variable is documented in [.env.example](.env.example).
 
 Outside `localhost`, serve Tamiza over HTTPS through a reverse proxy, because browsers only allow the sign-in flow in a secure context. [docs/operations.md](docs/operations.md) covers HTTPS, upgrades, memory limits and day-to-day operation.
 
@@ -63,7 +63,7 @@ tamiza-api/                  ASP.NET Core API and its tests
 tamiza-analytics/            Python worker package (tamiza) and its tests
 tamiza-ui/                   Angular UI and nginx configuration
 scripts/                     Repository checks
-docs/                        Keycloak setup, operations guide, product brief
+docs/                        Keycloak setup, Kobo guide, operations guide, product brief
 openspec/                    Specs and planned changes
 ```
 

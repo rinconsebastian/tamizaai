@@ -7,6 +7,7 @@ How to install, run and upgrade a self-hosted Tamiza. The quick start in the [RE
 - Docker Engine 24 or later with the Compose v2 plugin (`docker compose`).
 - About 4 GB of RAM. The default container limits add up to 3200 MiB (see [Memory](#memory)).
 - An existing Keycloak realm configured as described in [keycloak.md](keycloak.md).
+- **Outbound HTTPS from the `api` container** to the Kobo servers your projects use (for example `kf.kobotoolbox.org` or `eu.kobotoolbox.org`). Tamiza connects to Kobo directly and does not use an outbound HTTP proxy: a proxy would make the connection on Tamiza's behalf and bypass its check that Kobo addresses are public. Installations that can only reach the Internet through a proxy cannot connect to Kobo yet.
 - **HTTPS in front of Tamiza** for any address other than `localhost`. Browsers expose the WebCrypto API that sign-in (PKCE) needs only in a secure context, so plain HTTP on a server address breaks sign-in. Tamiza does not terminate TLS itself.
 
 ## Install
@@ -85,6 +86,8 @@ Change a value in `.env` and run `docker compose up -d` to recreate the affected
 
 **Superadmins.** Edit `TAMIZA_SUPERADMIN_EMAILS` in `.env`, then recreate `api` with `docker compose up -d api`. The list is read at startup.
 
+**Kobo on a private network.** By default Tamiza only connects to Kobo servers that use HTTPS and resolve to public addresses. For a self-hosted Kobo on the same network, set `TAMIZA_KOBO_ALLOW_PRIVATE_NETWORKS=true` in `.env` and run `docker compose up -d api`. This also allows plain HTTP, and lets anyone who can create projects point the API at internal addresses, so enable it only when those users are trusted. See [kobo.md](kobo.md).
+
 **Database password.** `POSTGRES_PASSWORD` is applied only when the database volume is first created. To change it later, update the role first, then `.env`:
 
 ```sh
@@ -110,5 +113,5 @@ Two named volumes hold everything that must survive container re-creation:
 
 These arrive in later changes (see `docs/tamiza-brief.md`, section 8):
 
-- **Backup and restore scripts** (`add-backup-restore`). Until then, protect both volumes above together. A database dump without the key ring cannot decrypt stored secrets. This installation stores no secrets yet; the first ones (Kobo tokens) arrive with project management.
+- **Backup and restore scripts** (`add-backup-restore`). Until then, protect both volumes above together. A database dump without the key ring cannot decrypt the stored Kobo tokens and webhook secrets; after such a loss, project admins must replace each token and regenerate each webhook secret.
 - **Per-service database roles and network isolation for `analytics`** (`harden-deployment`). Today `api` and `analytics` share the database role from `.env`, and `analytics` can reach the Internet.

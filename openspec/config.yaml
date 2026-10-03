@@ -63,6 +63,9 @@ context: |
   - Everything in English, with no exceptions: code, identifiers, database objects, API
     names, script contracts, the UI (ready for i18n) and documentation (OpenSpec
     artifacts, specs, READMEs, docs/).
+  - UI built with Tailwind CSS 4 and Flowbite component designs (MIT), implemented as our own
+    Angular components with Angular CDK for behavior; Flowbite's JavaScript is not used.
+    Every screen is responsive (mobile-first), from phone width to desktop.
   - Versioned REST API (`/api/v1/...`), documented with OpenAPI.
   - Database migrations with EF Core (`api` owns the metadata schema).
   - Python 3.12, dependencies pinned in the image: pandas, numpy, polars, duckdb,

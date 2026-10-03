@@ -1,14 +1,69 @@
 <ng-container *transloco="let t">
-  <header class="top-bar">
-    <span class="brand">{{ t('app.name') }}</span>
-    @if (user(); as user) {
-      <div class="session">
-        <span class="user-name">{{ user.name }}</span>
-        <button type="button" class="sign-out" (click)="signOut()">{{ t('shell.signOut') }}</button>
-      </div>
-    }
-  </header>
-  <main class="content">
+  <nav class="sticky top-0 z-20 bg-neutral-primary border-b border-default">
+    <div class="mx-auto flex max-w-screen-xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <a routerLink="/projects" class="text-lg font-semibold text-heading" data-testid="brand">{{ t('app.name') }}</a>
+      @if (user(); as user) {
+        <div class="hidden items-center gap-6 md:flex">
+          <a
+            routerLink="/projects"
+            routerLinkActive="text-fg-brand"
+            class="text-sm font-medium text-body hover:text-fg-brand"
+            >{{ t('shell.projects') }}</a
+          >
+          <span class="text-sm text-heading" data-testid="user-name">{{ user.name }}</span>
+          <button tmzButton variant="secondary" size="sm" type="button" (click)="signOut()" data-testid="sign-out">
+            {{ t('shell.signOut') }}
+          </button>
+        </div>
+        <button
+          type="button"
+          class="inline-flex min-h-10 min-w-10 items-center justify-center rounded-base text-body hover:bg-neutral-secondary-medium focus:outline-none focus:ring-4 focus:ring-neutral-tertiary md:hidden"
+          [attr.aria-label]="t('shell.openMenu')"
+          aria-haspopup="dialog"
+          [attr.aria-expanded]="menuOpen()"
+          (click)="openMenu()"
+          data-testid="menu-button"
+        >
+          <svg aria-hidden="true" class="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+      }
+    </div>
+  </nav>
+
+  <main class="mx-auto max-w-screen-xl px-4 py-6 sm:px-6">
     <router-outlet />
   </main>
+
+  <tmz-toast-region />
+
+  <ng-template #drawer>
+    <div class="flex h-full flex-col gap-6 overflow-y-auto border-s border-default bg-neutral-primary-soft p-4" data-testid="drawer">
+      <div class="flex items-center justify-between">
+        <h2 id="tmz-drawer-title" class="text-lg font-semibold text-heading">{{ t('shell.menu') }}</h2>
+        <button
+          type="button"
+          class="inline-flex min-h-10 min-w-10 items-center justify-center rounded-base text-body hover:bg-neutral-secondary-medium"
+          [attr.aria-label]="t('shell.closeMenu')"
+          (click)="closeMenu()"
+        >
+          <svg aria-hidden="true" class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+      <a routerLink="/projects" class="rounded-base px-3 py-2 text-sm font-medium text-heading hover:bg-neutral-secondary-medium">{{
+        t('shell.projects')
+      }}</a>
+      @if (user(); as user) {
+        <div class="mt-auto flex flex-col gap-3 border-t border-default pt-4">
+          <span class="text-sm text-heading">{{ user.name }}</span>
+          <button tmzButton variant="secondary" type="button" (click)="signOut()" data-testid="drawer-sign-out">
+            {{ t('shell.signOut') }}
+          </button>
+        </div>
+      }
+    </div>
+  </ng-template>
 </ng-container>

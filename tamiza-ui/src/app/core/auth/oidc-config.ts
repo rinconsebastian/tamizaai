@@ -14,6 +14,8 @@ export function buildOpenIdConfiguration(config: SystemConfig, origin: string): 
     responseType: 'code',
     silentRenew: true,
     useRefreshToken: true,
+    // Keycloak issues refresh tokens for the code flow without the offline_access scope.
+    disableRefreshTokenOfflineAccessScopeWarning: true,
     renewTimeBeforeTokenExpiresInSeconds: 30,
     ignoreNonceAfterRefresh: true,
     startCheckSession: false,

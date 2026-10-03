@@ -2,6 +2,7 @@ using Tamiza.Api.Auth;
 using Tamiza.Api.Configuration;
 using Tamiza.Api.Data;
 using Tamiza.Api.Health;
+using Tamiza.Api.Projects;
 using Tamiza.Api.Security;
 using Tamiza.Api.SystemInfo;
 
@@ -14,6 +15,7 @@ builder.Services.AddTamizaDatabase();
 builder.Services.AddTamizaDataProtection();
 builder.Services.AddTamizaAuthentication();
 builder.Services.AddTamizaHealthChecks();
+builder.Services.AddTamizaProjects();
 
 var app = builder.Build();
 
@@ -29,6 +31,9 @@ app.MapOpenApi("/api/v1/openapi.json").AllowAnonymous();
 var api = app.MapGroup("/api/v1");
 api.MapSystemEndpoints();
 api.MapMeEndpoints();
+api.MapProjectEndpoints();
+api.MapMemberEndpoints();
+api.MapSamplingFrameEndpoints();
 
 if (!await app.MigrateDatabaseAsync())
 {
