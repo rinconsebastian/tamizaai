@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Tamiza.DbUp</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="dbup-postgresql" Version="7.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Logging comes from the shared framework, as in the API, so the runner also starts from the API image. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The journal records the bare file name, so moving the folder or renaming the namespace never re-runs a script. -->
+    <EmbeddedResource Include="Scripts/*.sql" LogicalName="%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tamiza.Api.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

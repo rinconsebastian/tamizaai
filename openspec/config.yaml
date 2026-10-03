@@ -67,7 +67,8 @@ context: |
     Angular components with Angular CDK for behavior; Flowbite's JavaScript is not used.
     Every screen is responsive (mobile-first), from phone width to desktop.
   - Versioned REST API (`/api/v1/...`), documented with OpenAPI.
-  - Database migrations with EF Core (`api` owns the metadata schema).
+  - Database migrations with DbUp: versioned SQL scripts in `tamiza-api/src/dbUp`; EF Core is only the
+    data-access layer (`api` owns the metadata schema).
   - Python 3.12, dependencies pinned in the image: pandas, numpy, polars, duckdb,
     geopandas, openpyxl, psycopg.
   - Secrets (Kobo tokens, webhook secrets) encrypted at rest with ASP.NET Data Protection.

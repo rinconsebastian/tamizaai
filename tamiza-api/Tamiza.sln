@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tamiza.Api.UnitTests", "tes
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tamiza.Api.IntegrationTests", "tests\Tamiza.Api.IntegrationTests\Tamiza.Api.IntegrationTests.csproj", "{52B403FD-51D6-4D66-8753-532201CFFDCD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tamiza.DbUp", "src\dbUp\Tamiza.DbUp.csproj", "{2F02A68E-68CC-4129-B0B5-C0E75FA686F6}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -59,6 +61,18 @@ Global
 		{52B403FD-51D6-4D66-8753-532201CFFDCD}.Release|x64.Build.0 = Release|Any CPU
 		{52B403FD-51D6-4D66-8753-532201CFFDCD}.Release|x86.ActiveCfg = Release|Any CPU
 		{52B403FD-51D6-4D66-8753-532201CFFDCD}.Release|x86.Build.0 = Release|Any CPU
+		{2F02A68E-68CC-4129-B0B5-C0E75FA686F6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2F02A68E-68CC-4129-B0B5-C0E75FA686F6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2F02A68E-68CC-4129-B0B5-C0E75FA686F6}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2F02A68E-68CC-4129-B0B5-C0E75FA686F6}.Debug|x64.Build.0 = Debug|Any CPU
+		{2F02A68E-68CC-4129-B0B5-C0E75FA686F6}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2F02A68E-68CC-4129-B0B5-C0E75FA686F6}.Debug|x86.Build.0 = Debug|Any CPU
+		{2F02A68E-68CC-4129-B0B5-C0E75FA686F6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2F02A68E-68CC-4129-B0B5-C0E75FA686F6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2F02A68E-68CC-4129-B0B5-C0E75FA686F6}.Release|x64.ActiveCfg = Release|Any CPU
+		{2F02A68E-68CC-4129-B0B5-C0E75FA686F6}.Release|x64.Build.0 = Release|Any CPU
+		{2F02A68E-68CC-4129-B0B5-C0E75FA686F6}.Release|x86.ActiveCfg = Release|Any CPU
+		{2F02A68E-68CC-4129-B0B5-C0E75FA686F6}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -67,5 +81,6 @@ Global
 		{8B63D7DE-CD06-4A17-A96E-60EC13FE132D} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{235F12EE-7C0B-4101-8AE9-A4BDC639C683} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{52B403FD-51D6-4D66-8753-532201CFFDCD} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{2F02A68E-68CC-4129-B0B5-C0E75FA686F6} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

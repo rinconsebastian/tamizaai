@@ -10,7 +10,10 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     private readonly PostgreSqlContainer _container = CreateContainer();
 
-    public static PostgreSqlContainer CreateContainer() => new PostgreSqlBuilder(Image).Build();
+    // Each test database keeps its idle pooled connections open for minutes after its test ends, so the suite
+    // needs more than PostgreSQL's default 100 connections.
+    public static PostgreSqlContainer CreateContainer() =>
+        new PostgreSqlBuilder(Image).WithCommand("-c", "max_connections=300").Build();
 
     public Task InitializeAsync() => _container.StartAsync();
 

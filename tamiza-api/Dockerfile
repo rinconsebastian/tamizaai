@@ -4,6 +4,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY global.json Directory.Build.props ./
 COPY src/Tamiza.Api/Tamiza.Api.csproj src/Tamiza.Api/
+COPY src/dbUp/Tamiza.DbUp.csproj src/dbUp/
 RUN dotnet restore src/Tamiza.Api/Tamiza.Api.csproj
 COPY src/ src/
 RUN dotnet publish src/Tamiza.Api/Tamiza.Api.csproj --configuration Release --no-restore --output /app

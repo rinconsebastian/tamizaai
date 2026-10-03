@@ -57,7 +57,7 @@ Schema and table names are never built from user text without validation (allow 
 - Technical product name: `tamiza` (repository, Docker images `tamiza-ui`, `tamiza-api`, `tamiza-analytics`, .NET namespace `Tamiza.*`, Python package `tamiza`).
 - Everything in English: code, identifiers, database objects, API names, the UI and documentation. The UI is ready for i18n so other languages can be added later.
 - Versioned REST API (`/api/v1/...`), documented with OpenAPI.
-- Database migrations with EF Core (`api` owns the metadata schema).
+- Database migrations with DbUp: versioned SQL scripts in `tamiza-api/src/dbUp`; EF Core is only the data-access layer (`api` owns the metadata schema).
 - Python 3.12, dependencies pinned in the image: pandas, numpy, polars, duckdb, geopandas, openpyxl, psycopg.
 - Secrets (Kobo tokens, webhook secrets) encrypted at rest with ASP.NET Data Protection.
 - Every relevant operation leaves a record: who, what, when. The audit mechanism arrives in `add-audit-log` (see section 8).

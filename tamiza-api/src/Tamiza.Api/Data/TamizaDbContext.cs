@@ -1,12 +1,13 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using Tamiza.DbUp;
 
 namespace Tamiza.Api.Data;
 
 public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) : DbContext(options)
 {
     /// <summary>Schema that holds the metadata tables owned by the API.</summary>
-    public const string Schema = "tamiza";
+    public const string Schema = SchemaMigrator.Schema;
 
     private const string RoleCheck = "role IN ('admin', 'analyst', 'viewer')";
 

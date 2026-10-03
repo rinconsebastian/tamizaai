@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Tamiza.Api.Configuration;
+using Tamiza.DbUp;
 
 namespace Tamiza.Api.Data;
 
@@ -12,27 +13,23 @@ public static class DatabaseRegistration
     {
         services.AddSingleton<MigrationStatus>();
         services.AddDbContext<TamizaDbContext>((provider, options) =>
-        {
-            var connectionString = provider.GetRequiredService<IConfiguration>().GetConnectionString(ConnectionStringName)
-                ?? throw new InvalidOperationException($"ConnectionStrings__{ConnectionStringName} is not set.");
-            Configure(options, connectionString);
-        });
+            Configure(options, GetConnectionString(provider.GetRequiredService<IConfiguration>())));
         return services;
     }
 
-    internal static void Configure(DbContextOptionsBuilder options, string connectionString) =>
-        options
-            .UseNpgsql(connectionString, npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history", TamizaDbContext.Schema))
-            .UseSnakeCaseNamingConvention();
+    /// <summary>EF Core settings for the metadata schema. The schema itself comes from the Tamiza.DbUp scripts.</summary>
+    public static void Configure(DbContextOptionsBuilder options, string connectionString) =>
+        options.UseNpgsql(connectionString).UseSnakeCaseNamingConvention();
 
     /// <summary>
-    /// Applies pending migrations when enabled. Returns false when they fail, so the process can exit
+    /// Applies pending DbUp scripts when enabled. Returns false when they fail, so the process can exit
     /// before it starts serving requests.
     /// </summary>
     public static async Task<bool> MigrateDatabaseAsync(this WebApplication app)
     {
         var status = app.Services.GetRequiredService<MigrationStatus>();
-        var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(DatabaseRegistration));
+        var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
+        var logger = loggerFactory.CreateLogger(typeof(DatabaseRegistration));
 
         if (!app.Services.GetRequiredService<IOptions<TamizaOptions>>().Value.MigrateOnStartup)
         {
@@ -43,9 +40,8 @@ public static class DatabaseRegistration
 
         try
         {
-            await using var scope = app.Services.CreateAsyncScope();
-            var db = scope.ServiceProvider.GetRequiredService<TamizaDbContext>();
-            await db.Database.MigrateAsync(app.Lifetime.ApplicationStopping);
+            await SchemaMigrator.MigrateAsync(
+                GetConnectionString(app.Configuration), loggerFactory.CreateLogger(typeof(SchemaMigrator)), app.Lifetime.ApplicationStopping);
             status.MarkCompleted();
             logger.LogInformation("Database schema is up to date.");
             return true;
@@ -56,6 +52,10 @@ public static class DatabaseRegistration
             return false;
         }
     }
+
+    private static string GetConnectionString(IConfiguration configuration) =>
+        configuration.GetConnectionString(ConnectionStringName)
+        ?? throw new InvalidOperationException($"ConnectionStrings__{ConnectionStringName} is not set.");
 }
 
 /// <summary>Records whether startup migrations have finished, for the readiness check.</summary>

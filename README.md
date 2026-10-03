@@ -49,7 +49,7 @@ Prerequisites: .NET SDK 10, Node.js 24, [uv](https://docs.astral.sh/uv/) and Doc
 
 | Part | Commands |
 |---|---|
-| API (`tamiza-api/`) | `dotnet build`, `dotnet test`. The integration tests start PostgreSQL with Testcontainers, so Docker must be running. |
+| API (`tamiza-api/`) | `dotnet build`, `dotnet test`. The integration tests start PostgreSQL with Testcontainers, so Docker must be running. Database schema changes are SQL scripts; see [tamiza-api/src/dbUp/README.md](tamiza-api/src/dbUp/README.md). |
 | Analytics (`tamiza-analytics/`) | `uv sync`, `uv run pytest`, `uv run ruff check`, `uv run ruff format --check` |
 | UI (`tamiza-ui/`) | `npm ci`, `npm test -- --watch=false`, `npm run build`. `npm start` serves the UI on `http://localhost:4200` and proxies `/api` to a stack running on `http://localhost:8088`. |
 

@@ -58,6 +58,16 @@ docker compose up -d --build --wait
 docker compose logs api
 ```
 
+Each migration is a SQL script that runs in its own transaction, so a failed script leaves no partial change and runs again on the next start. Applied scripts are recorded in the `tamiza.schema_versions` table:
+
+```sh
+docker compose exec db psql -U tamiza -d tamiza -c "SELECT scriptname, applied FROM tamiza.schema_versions ORDER BY scriptname"
+```
+
+Replace `tamiza` after `-U` with your `POSTGRES_USER` if you changed it.
+
+**Databases from early development builds.** Development builds that predate the SQL scripts tracked the schema in a `tamiza.__ef_migrations_history` table. On its first start, a newer `api` takes such a database over once: it keeps all data, records the initial script as applied and drops the old table. A database from an even older build is refused, and the `api` log says it must be recreated. Recreating deletes all data, including the encryption key ring: run `docker compose down -v`, then `docker compose up -d --build --wait`.
+
 ## Health and logs
 
 | Service | Healthy when |
