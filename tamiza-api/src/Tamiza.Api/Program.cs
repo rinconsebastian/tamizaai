@@ -42,6 +42,8 @@ api.MapWebhookEndpoints();
 api.MapIngestionEndpoints();
 api.MapScriptEndpoints();
 api.MapRunEndpoints();
+api.MapReferenceTableEndpoints();
+api.MapScriptTestEndpoints();
 
 if (!await app.MigrateDatabaseAsync())
 {

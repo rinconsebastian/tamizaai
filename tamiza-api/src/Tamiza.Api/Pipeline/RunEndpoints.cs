@@ -57,10 +57,11 @@ public static class RunEndpoints
         }
 
         var steps = await db.RunSteps.AsNoTracking().Where(s => s.RunId == runId).ToListAsync(ct);
+        var referenceTables = await db.Runs.Where(r => r.Id == runId).Select(r => r.ReferenceTables).SingleAsync(ct);
         return TypedResults.Ok(new RunDetails(summary, steps
             .OrderBy(s => s.Step)
             .Select(s => new StepDetails(s.Step, s.Status, s.StartedAt, s.FinishedAt, s.InputRows, s.OutputRows, s.Tables, s.Log, s.Error))
-            .ToList()));
+            .ToList(), referenceTables));
     }
 
     private static async Task<Ok<PipelineSettings>> GetSettingsAsync(Guid projectId, TamizaDbContext db, CancellationToken ct) =>

@@ -31,6 +31,12 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
 
     public DbSet<RunStep> RunSteps => Set<RunStep>();
 
+    public DbSet<ScriptTest> ScriptTests => Set<ScriptTest>();
+
+    public DbSet<ReferenceTable> ReferenceTables => Set<ReferenceTable>();
+
+    public DbSet<ReferenceTableContent> ReferenceTableContents => Set<ReferenceTableContent>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(Schema);
@@ -176,6 +182,7 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             run.Property(r => r.Trigger).HasConversion(LowercaseEnum<RunTrigger>()).HasMaxLength(16);
             run.Property(r => r.Status).HasConversion(LowercaseEnum<RunStatus>()).HasMaxLength(16);
             run.Property(r => r.ErrorCode).HasMaxLength(64);
+            run.Property(r => r.ReferenceTables).HasJsonColumn().HasDefaultValueSql("'[]'::jsonb");
             // At most one queued run per project; a running run may have one queued behind it.
             run.HasIndex(r => r.ProjectId).IsUnique().HasFilter("status = 'queued'").HasDatabaseName("ix_runs_project_id_queued");
             run.HasIndex(r => new { r.ProjectId, r.QueuedAt }).IsDescending(false, true);
@@ -200,6 +207,52 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             step.Property(s => s.Status).HasConversion(LowercaseEnum<RunStepStatus>()).HasMaxLength(16);
             step.Property(s => s.Tables).HasJsonColumn().HasDefaultValueSql("'[]'::jsonb");
             step.Property(s => s.Log).HasDefaultValue("");
+        });
+
+        modelBuilder.Entity<ScriptTest>(test =>
+        {
+            test.ToTable("script_tests", table =>
+            {
+                table.HasCheckConstraint("ck_script_tests_kind", "kind IN ('clean', 'output', 'indicators')");
+                table.HasCheckConstraint("ck_script_tests_status", "status IN ('queued', 'running', 'succeeded', 'failed')");
+                table.HasCheckConstraint("ck_script_tests_sample_size", "sample_size BETWEEN 1 AND 5000");
+            });
+            test.HasKey(t => t.Id);
+            test.Property(t => t.Id).ValueGeneratedNever();
+            test.Property(t => t.Kind).HasConversion(LowercaseEnum<ScriptKind>()).HasMaxLength(16);
+            test.Property(t => t.Status).HasConversion(LowercaseEnum<RunStatus>()).HasMaxLength(16);
+            test.Property(t => t.ErrorCode).HasMaxLength(64);
+            test.Property(t => t.Steps).HasJsonColumn().HasDefaultValueSql("'[]'::jsonb");
+            // At most one queued test per user and project; a new test replaces the queued one.
+            test.HasIndex(t => new { t.ProjectId, t.RequestedBy }).IsUnique().HasFilter("status = 'queued'")
+                .HasDatabaseName("ix_script_tests_project_id_requested_by_queued");
+            test.HasIndex(t => new { t.Status, t.QueuedAt });
+            test.HasIndex(t => t.FinishedAt);
+            test.HasOne<Project>().WithMany().HasForeignKey(t => t.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            test.HasOne<User>().WithMany().HasForeignKey(t => t.RequestedBy).OnDelete(DeleteBehavior.Restrict);
+            // NO ACTION: a project's deletion cascades to tests and script versions in the same statement.
+            test.HasOne<ScriptVersion>().WithMany().HasForeignKey(t => t.CleanVersionId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<ReferenceTable>(reference =>
+        {
+            reference.ToTable("reference_tables", table => table.HasCheckConstraint("ck_reference_tables_name", "name ~ '^[a-z][a-z0-9_]{0,62}$'"));
+            reference.HasKey(r => r.Id);
+            reference.Property(r => r.Id).ValueGeneratedNever();
+            reference.Property(r => r.Name).HasMaxLength(63);
+            reference.Property(r => r.FileName).HasMaxLength(255);
+            reference.Property(r => r.Columns).HasJsonColumn();
+            reference.HasIndex(r => new { r.ProjectId, r.Name }).IsUnique();
+            reference.HasOne<Project>().WithMany().HasForeignKey(r => r.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            reference.HasOne(r => r.UpdatedByUser).WithMany().HasForeignKey(r => r.UpdatedBy).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ReferenceTableContent>(content =>
+        {
+            content.ToTable("reference_table_contents");
+            content.HasKey(c => c.ReferenceTableId);
+            content.Property(c => c.Rows).HasColumnType("jsonb");
+            content.HasOne<ReferenceTable>().WithOne().HasForeignKey<ReferenceTableContent>(c => c.ReferenceTableId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 

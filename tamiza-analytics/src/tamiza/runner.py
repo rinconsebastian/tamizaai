@@ -1,8 +1,9 @@
 """Runs one user script in a child process: ``python -I -u -m tamiza.runner <step dir> <kind>``.
 
-The step directory holds ``script.py``, ``context.json`` and ``input/<table>.parquet``. The runner calls the script's
-contract function and writes ``output/<table>.parquet`` and ``result.json``. Everything the script prints, and its
-``ctx.log`` messages, go to stdout, which the worker captures as the step's log. The runner never touches the database.
+The step directory holds ``script.py``, ``context.json``, ``input/<table>.parquet`` and ``reference/<table>.parquet``.
+The runner calls the script's contract function and writes ``output/<table>.parquet`` and ``result.json``. Everything
+the script prints, and its ``ctx.log`` messages, go to stdout, which the worker captures as the step's log. The runner
+never touches the database.
 """
 
 import json
@@ -20,6 +21,7 @@ from tamiza import interchange, names
 FUNCTIONS = {"clean": "clean", "output": "prepare_output", "indicators": "compute_indicators"}
 INDICATOR_COLUMNS = ("indicator", "disaggregation", "value", "numerator", "denominator")
 SCRIPT_FILE = "script.py"
+REFERENCE_DIR = "reference"
 
 
 class ScriptError(Exception):
@@ -42,13 +44,59 @@ class Form:
         return None if list_name is None else self._labels.get((list_name, str(value)))
 
 
+class ReferenceTableNotFound(KeyError):
+    """Raised for a reference table the project does not have; the message lists the ones it has."""
+
+    def __init__(self, name: object, available: list[str]):
+        super().__init__(name)
+        self.name = name
+        self.available = available
+
+    def __str__(self) -> str:
+        if not self.available:
+            return f"There is no reference table {self.name!r}: the project has no reference tables."
+        return f"There is no reference table {self.name!r}. Available: {', '.join(self.available)}."
+
+
+class ReferenceTables(Mapping):
+    """
+    The project's reference tables by name (``ctx.reference["population"]``). Each table is read from its Parquet file
+    the first time a script asks for it, so scripts pay only for the tables they use.
+    """
+
+    def __init__(self, directory: Path):
+        files = sorted(directory.glob("*.parquet")) if directory.is_dir() else []
+        self._paths = {path.stem: path for path in files}
+        self._frames: dict[str, pd.DataFrame] = {}
+
+    def __getitem__(self, name: str) -> pd.DataFrame:
+        if name not in self._paths:
+            raise ReferenceTableNotFound(name, list(self._paths))
+        if name not in self._frames:
+            self._frames[name] = interchange.read_parquet(self._paths[name])
+        return self._frames[name]
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._paths
+
+    def __iter__(self):
+        return iter(self._paths)
+
+    def __len__(self) -> int:
+        return len(self._paths)
+
+    def __repr__(self) -> str:
+        return f"<reference tables: {', '.join(self._paths) or 'none'}>"
+
+
 class Context:
     """What a script receives besides its data."""
 
-    def __init__(self, project_name: str, form: Form, log: logging.Logger):
+    def __init__(self, project_name: str, form: Form, log: logging.Logger, reference: ReferenceTables | None = None):
         self.project_name = project_name
         self.form = form
         self.log = log
+        self.reference = reference if reference is not None else ReferenceTables(Path("/nonexistent"))
 
 
 def run_step(step_dir: Path, kind: str) -> dict:
@@ -80,7 +128,8 @@ def _context(step_dir: Path) -> Context:
     log.addHandler(handler)
     log.setLevel(logging.INFO)
     log.propagate = False
-    return Context(data.get("project_name", ""), Form(data.get("questions", []), data.get("choices", [])), log)
+    form = Form(data.get("questions", []), data.get("choices", []))
+    return Context(data.get("project_name", ""), form, log, ReferenceTables(step_dir / REFERENCE_DIR))
 
 
 def _load(path: Path, function_name: str):

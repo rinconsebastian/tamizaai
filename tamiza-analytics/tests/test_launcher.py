@@ -159,3 +159,28 @@ def test_a_result_naming_a_path_is_rejected(tmp_path, inputs):
 
     assert not outcome.succeeded
     assert "invalid table" in outcome.error
+
+
+def test_reference_tables_reach_the_script_as_copies(tmp_path, inputs):
+    source = tmp_path / "population.parquet"
+    interchange.write_parquet(pd.DataFrame({"n": [1, 2]}), source)
+
+    outcome = run_script(
+        tmp_path / "work",
+        "clean",
+        textwrap.dedent("""
+            def clean(raw, ctx):
+                print("rows:", len(ctx.reference["population"]))
+                open("reference/population.parquet", "wb").write(b"overwritten")
+                return raw
+        """),
+        inputs,
+        CONTEXT,
+        tmp_path / "out",
+        DEFAULT_LIMITS,
+        reference={"population": source},
+    )
+
+    assert outcome.succeeded, outcome.error
+    assert "rows: 2" in outcome.log
+    assert interchange.read_parquet(source)["n"].tolist() == [1, 2]

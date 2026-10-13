@@ -3,7 +3,7 @@
 import textwrap
 
 import pytest
-from helpers import add_script, add_submissions, queue_run, submission
+from helpers import add_reference_table, add_script, add_submissions, queue_run, submission
 
 from tamiza import pipeline
 from tamiza.names import schema_name
@@ -232,3 +232,88 @@ def test_claiming_a_run_moves_the_schedule_to_one_interval_after_its_start(datab
         " FROM tamiza.projects p JOIN tamiza.runs r ON r.id = %s",
         run_id,
     )
+
+
+PER_HOUSEHOLD = """
+import pandas as pd
+
+def compute_indicators(cleaned, ctx):
+    households = ctx.reference["households"]
+    counts = cleaned["main"].groupby("municipality").size().rename("n").reset_index()
+    merged = counts.merge(households, left_on="municipality", right_on="code")
+    return pd.DataFrame({
+        "indicator": "coverage",
+        "disaggregation": merged["municipality"],
+        "value": merged["n"] / merged["total"],
+        "numerator": merged["n"],
+        "denominator": merged["total"],
+    })
+"""
+
+
+def indicators(database, project) -> dict[str, int]:
+    rows = database.rows(
+        f'SELECT disaggregation, denominator FROM "{schema_name(project.id, "indicators")}".indicators'
+    )
+    return {disaggregation: int(denominator) for disaggregation, denominator in rows}
+
+
+def test_scripts_read_reference_tables_and_the_run_records_them(database, seeded, settings):
+    add_reference_table(
+        database, seeded, "households", [("code", "text"), ("total", "integer")], [["cali", 200], ["buga", 50]]
+    )
+    add_script(database, seeded, "indicators", code(PER_HOUSEHOLD))
+    run_id = queue_run(database, seeded)
+
+    assert process(database, settings)
+
+    assert run_status(database, run_id)[0] == "succeeded", steps(database, run_id)
+    assert indicators(database, seeded) == {"cali": 200, "buga": 50}
+    (recorded,) = database.scalar("SELECT reference_tables FROM tamiza.runs WHERE id = %s", run_id)
+    assert recorded["name"] == "households" and recorded["rows"] == 2 and recorded["updatedAt"]
+    assert "Reference tables: households (2 rows)." in steps(database, run_id)["flatten"][3]
+    assert not (settings.run_work_dir / str(run_id)).exists()
+
+
+def test_a_run_without_reference_tables_records_none(database, seeded, settings):
+    run_id = queue_run(database, seeded)
+
+    assert process(database, settings)
+
+    assert database.scalar("SELECT reference_tables FROM tamiza.runs WHERE id = %s", run_id) == []
+    assert "No reference tables." in steps(database, run_id)["flatten"][3]
+
+
+def test_a_table_replaced_during_a_run_is_seen_only_by_the_next_run(database, seeded, settings, monkeypatch):
+    table_id = add_reference_table(
+        database, seeded, "households", [("code", "text"), ("total", "integer")], [["cali", 200], ["buga", 50]]
+    )
+    add_script(database, seeded, "indicators", code(PER_HOUSEHOLD))
+    original = pipeline.flatten
+
+    def flatten_while_replacing(*args, **kwargs):
+        # The run has read its reference tables; an analyst replaces one now.
+        database.execute(
+            'UPDATE tamiza.reference_table_contents SET rows = \'[["cali", 400], ["buga", 80]]\' '
+            "WHERE reference_table_id = %s",
+            table_id,
+        )
+        database.execute(
+            "UPDATE tamiza.reference_tables SET updated_at = now() + interval '1 minute' WHERE id = %s", table_id
+        )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "flatten", flatten_while_replacing)
+    first = queue_run(database, seeded)
+    assert process(database, settings)
+    monkeypatch.setattr(pipeline, "flatten", original)
+
+    assert indicators(database, seeded) == {"cali": 200, "buga": 50}
+    first_updated = database.scalar("SELECT reference_tables->0->>'updatedAt' FROM tamiza.runs WHERE id = %s", first)
+
+    second = queue_run(database, seeded)
+    assert process(database, settings)
+
+    assert indicators(database, seeded) == {"cali": 400, "buga": 80}
+    second_updated = database.scalar("SELECT reference_tables->0->>'updatedAt' FROM tamiza.runs WHERE id = %s", second)
+    assert second_updated > first_updated

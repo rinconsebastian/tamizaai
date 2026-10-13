@@ -26,6 +26,7 @@ export const routes: Routes = [
             // Inline rather than imported from the page, so the editor's chunk stays lazy.
             canDeactivate: [(component: { confirmDiscard(): Promise<boolean> }) => component.confirmDiscard()],
           },
+          { path: 'reference', loadComponent: () => import('./pages/projects/project-reference').then((m) => m.ProjectReference) },
           { path: 'members', loadComponent: () => import('./pages/projects/project-members').then((m) => m.ProjectMembers) },
           {
             path: 'sampling-frame',

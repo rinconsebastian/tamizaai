@@ -1,6 +1,6 @@
 import en from '../../../../public/i18n/en.json';
 
-/** Codes the API returns in Problem Details or records on failed synchronizations. Each needs a message. */
+/** Codes the API returns in Problem Details or records on failed synchronizations, runs and tests. Each needs a message. */
 const apiErrorCodes = [
   'kobo.invalid_url',
   'kobo.https_required',
@@ -28,6 +28,9 @@ const apiErrorCodes = [
   'step.output',
   'step.indicators',
   'script.not_set',
+  'test.interrupted',
+  'reference.exists',
+  'reference.limit',
 ];
 
 function lookup(root: unknown, path: string): unknown {
@@ -44,6 +47,10 @@ describe('English translations', () => {
     for (const key of ['queued', 'running', 'succeeded', 'failed']) expect(typeof lookup(en.runs.status, key)).toBe('string');
     for (const key of ['flatten', 'clean', 'output', 'indicators']) expect(typeof lookup(en.runs.steps, key)).toBe('string');
     for (const key of ['succeeded', 'failed', 'skipped']) expect(typeof lookup(en.runs.stepStatus, key)).toBe('string');
+  });
+
+  it('name every column type of previews and reference tables', () => {
+    for (const key of ['integer', 'decimal', 'boolean', 'date', 'timestamp', 'text']) expect(typeof lookup(en.preview.types, key)).toBe('string');
   });
 
   it('name every synchronization kind, trigger and status', () => {

@@ -72,14 +72,16 @@ class Project:
     user_id: uuid.UUID
 
 
-def create_project(database: Database) -> Project:
-    """A project with a form, an author and no submissions yet."""
-    user_id, project_id = uuid.uuid4(), uuid.uuid4()
-    database.execute(
-        "INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) "
-        "VALUES (%s, 'sub', 'Ada', now(), now())",
-        user_id,
-    )
+def create_project(database: Database, user_id: uuid.UUID | None = None) -> Project:
+    """A project with a form and no submissions yet, by a new author unless ``user_id`` is given."""
+    project_id = uuid.uuid4()
+    if user_id is None:
+        user_id = uuid.uuid4()
+        database.execute(
+            "INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) "
+            "VALUES (%s, 'sub', 'Ada', now(), now())",
+            user_id,
+        )
     database.execute(
         """
         INSERT INTO tamiza.projects (
@@ -138,3 +140,28 @@ def queue_run(database: Database, project: Project, status: str = "queued") -> u
         status,
     )
     return run_id
+
+
+def add_reference_table(
+    database: Database, project: Project, name: str, columns: list[tuple[str, str]], rows: list[list]
+) -> uuid.UUID:
+    """Stores a reference table as the API does: ``columns`` are (name, type) pairs, rows are lists in column order."""
+    table_id = uuid.uuid4()
+    database.execute(
+        """
+        INSERT INTO tamiza.reference_tables
+            (id, project_id, name, file_name, columns, row_count, created_at, updated_by, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, now(), %s, now())
+        """,
+        table_id,
+        project.id,
+        name,
+        f"{name}.csv",
+        Jsonb([{"name": column, "header": column, "type": kind} for column, kind in columns]),
+        len(rows),
+        project.user_id,
+    )
+    database.execute(
+        "INSERT INTO tamiza.reference_table_contents (reference_table_id, rows) VALUES (%s, %s)", table_id, Jsonb(rows)
+    )
+    return table_id

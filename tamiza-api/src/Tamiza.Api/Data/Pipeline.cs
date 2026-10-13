@@ -60,6 +60,9 @@ public sealed class Run
 
     public string? Error { get; set; }
 
+    /// <summary>The reference tables the worker read when the run started.</summary>
+    public List<RunReferenceTable> ReferenceTables { get; set; } = [];
+
     public User? RequestedByUser { get; set; }
 
     public List<RunStep> Steps { get; set; } = [];

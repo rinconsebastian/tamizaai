@@ -64,6 +64,21 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
               </li>
             }
           </ol>
+          <section class="mt-5 border-t border-default pt-4" data-testid="run-reference">
+            <h3 class="mb-2 font-medium text-heading">{{ t('runs.referenceTitle') }}</h3>
+            @if (details.referenceTables.length) {
+              <ul class="flex flex-col gap-1 text-sm text-body">
+                @for (table of details.referenceTables; track table.name) {
+                  <li>
+                    <code class="text-heading">{{ table.name }}</code>
+                    {{ t('runs.referenceTable', { rows: table.rows, updated: (table.updatedAt | date: 'medium') }) }}
+                  </li>
+                }
+              </ul>
+            } @else {
+              <p class="text-sm text-body">{{ t('runs.noReference') }}</p>
+            }
+          </section>
         } @else {
           <div aria-busy="true" class="flex flex-col gap-3"><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div>
         }

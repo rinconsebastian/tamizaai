@@ -114,10 +114,61 @@ def compute_indicators(cleaned, ctx):
 | `ctx.form.questions` | DataFrame of the form's questions: `name`, `path`, `type`, `label`, `list_name`. |
 | `ctx.form.choices` | DataFrame of the choice lists: `list_name`, `name`, `label`. |
 | `ctx.form.label(question, value)` | The label of a choice, by question name or path; `None` if unknown. |
+| `ctx.reference` | The project's [reference tables](#reference-data) by name: `ctx.reference["population"]` is a DataFrame. `list(ctx.reference)` gives the names and `"population" in ctx.reference` checks one. |
 | `ctx.log` | A Python logger: `ctx.log.info(...)`, `ctx.log.warning(...)`. Messages appear in the run log. |
 | `ctx.project_name` | The project's name. |
 
 `print()` also writes to the run log. Labels come from the form's first language.
+
+Asking for a reference table the project does not have, such as `ctx.reference["populaton"]`, fails the step with a message that lists the tables it has.
+
+## Testing on a sample
+
+**Test on sample**, under the editor, runs the code in the editor on a sample of the project's submissions, whether you saved it or not. It is how to try a change before saving it: nothing is saved, no version is created, nothing is published and the test does not appear in **Runs**. Analysts and admins can test; viewers cannot.
+
+- **What runs.** The test flattens the sample, then runs the script you are editing. When that is script 2 or 3, the current saved version of script 1 runs first, as in a run (or the flattened tables are used when there is no script 1). To test a change to script 1 together with script 2, save script 1 first.
+- **The sample.** 500 submissions by default; choose from 1 to 5,000. They are spread across the whole project, not only the newest, and consecutive tests use the same submissions as long as the data does not change, so you can compare one attempt with the next. Submissions deleted in Kobo are left out. A project with fewer submissions than the sample size uses all of them.
+- **The same rules as a run.** The test uses the same contract, `ctx` (reference tables included), validation and time and memory limits. A test that passes predicts a run that passes, apart from problems that only appear with more data.
+- **Waiting.** Tests run in the same worker as runs, one job at a time. A test goes ahead of runs that are waiting, but waits for a run that has already started, which can take a few minutes on a large project; the panel says what it is waiting for. Starting another test replaces your test that has not started yet.
+- **The result.** Each step shows its status, duration, rows in and out, log and, if it failed, the error with the traceback. For each table a step produced you see its columns with their types (`integer`, `decimal`, `boolean`, `date`, `timestamp`, `text`) and its first 100 rows. Text longer than 500 characters is cut, and fewer rows are shown when 100 would exceed 1 MB; only the first 20 tables of a step are previewed. If you edit the code after testing, the panel says the result no longer matches the editor.
+- **How long it is kept.** Only you can see your tests, and each is deleted 24 hours after it ended.
+
+## Reference data
+
+Reference tables hold data that does not come from the form but that scripts need: population projections, municipality codes, price lists. They are per project, in the **Reference data** section. Every member can list them and preview their first 100 rows; analysts and admins upload, replace and delete them.
+
+**Uploading.** Choose a CSV or XLSX file of up to 10 MB and a name. The name is how scripts find the table (`ctx.reference["population"]`): lowercase letters, digits and underscores, starting with a letter, at most 63 characters, unique in the project. A project can have up to 50 reference tables.
+
+**Reading the file.**
+
+- The first non-empty row is the header. XLSX files are read from their first sheet; CSV files must be UTF-8, separated by commas or semicolons.
+- A file needs at least one row below the header, at most 200 columns and at most 5,000,000 values (rows times columns).
+- **Column names** are adjusted the same way question names are (`Municipality code` → `municipality_code`, `Población 2026` → `poblacion_2026`); an empty header becomes `column`, and repeated names get a number (`age`, `age_2`). The upload lists every column it renamed.
+- **Column types** come from the values. A column is `integer` when every value is a whole number, `decimal` when every value is a number, `date` when every value is a date (an Excel date or `2026-01-31`), and `text` otherwise. Empty cells are empty values and do not change the type.
+- Numbers use a dot as decimal separator; in files separated by semicolons, as Excel writes them in many Spanish-language settings, a comma also works (`12,5`). Thousands separators are not understood: `1.234.567` makes the column text.
+- **Codes keep their zeros.** A value that starts with `0` followed by more digits, such as the DANE code `05001`, is not a number, so its column stays text and the zero is kept. In Excel, store such codes as text.
+- One stray value (`n/a` in a column of numbers) makes the whole column text. Clean the file, or convert the column in your script.
+
+In pandas, `integer` columns arrive as the nullable `Int64` type, `decimal` as `float64`, `date` as `datetime64` and `text` as `str`, like the flattened tables.
+
+```python
+import pandas as pd
+
+
+def compute_indicators(cleaned, ctx):
+    population = ctx.reference["population"]  # columns municipality_code, population_2026
+    counts = cleaned["main"].groupby("municipality_code").size().rename("households").reset_index()
+    merged = counts.merge(population, on="municipality_code")
+    return pd.DataFrame({
+        "indicator": "households_per_1000_people",
+        "disaggregation": "municipality=" + merged["municipality_code"],
+        "value": merged["households"] / merged["population_2026"] * 1000,
+        "numerator": merged["households"],
+        "denominator": merged["population_2026"],
+    })
+```
+
+**Replacing and deleting.** **Replace** loads a new file into an existing table: it keeps its name, and its rows and columns become those of the new file. **Delete** removes it; scripts that still read it fail from the next run. A run reads every reference table once when it starts, so replacing a table during a run does not affect that run; the next run uses the new rows. The run's details list the reference tables it used, with their row counts and when each was last updated.
 
 ## Rules for what scripts return
 
@@ -147,11 +198,11 @@ Saving a script does not start a run; the next run uses the latest version. A ru
 - **Failed**, with the error. For an exception, the traceback shows the lines of your script that raised it.
 - **Skipped**, when the script does not exist or an earlier step failed.
 
-The log of each step holds your `ctx.log` messages and printed output, and for flattening the count of values that could not be read.
+The log of each step holds your `ctx.log` messages and printed output, and for flattening the reference tables the run read and the count of values that could not be read. Below the steps, **Reference data used** lists those tables with their row counts and when each was last updated.
 
 ## Limits
 
-- Each script may run for **10 minutes** and use **1024 MB** of memory, unless the operator changed the limits (see [operations.md](operations.md)). A script that goes over is stopped and its step fails with a message naming the limit.
+- Each script may run for **10 minutes** and use **1024 MB** of memory, unless the operator changed the limits (see [operations.md](operations.md)). A script that goes over is stopped and its step fails with a message naming the limit. Tests on a sample have the same limits.
 - Available libraries: **pandas 3.0, pyarrow 25, numpy 2.5, polars 1.44, duckdb 1.5, geopandas 1.2, openpyxl 3.1** and the Python 3.12 standard library. Scripts cannot install other packages; importing one that is not there fails with `ModuleNotFoundError`.
 - Do not rely on network access: a future release removes it from the analytics service.
 - A script larger than 200 KB is rejected.

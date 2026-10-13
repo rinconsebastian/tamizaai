@@ -255,3 +255,93 @@ def test_geometry_columns_are_published_as_wkt(step):
 
     assert run_step(step_dir, "output")["status"] == "succeeded"
     assert output(step_dir, "points")["geometry"].tolist() == ["POINT (-76.5 3.4)"]
+
+
+@pytest.fixture
+def with_reference(step):
+    def make(code, reference):
+        step_dir = step(code)
+        (step_dir / "reference").mkdir(exist_ok=True)
+        for name, frame in reference.items():
+            interchange.write_parquet(frame, step_dir / "reference" / f"{name}.parquet")
+        return step_dir
+
+    return make
+
+
+def test_a_script_reads_a_reference_table(with_reference):
+    population = pd.DataFrame({"municipality": ["cali", "buga"], "population_2026": pd.array([2_300_000, 130_000])})
+    step_dir = with_reference(
+        """
+        import pandas as pd
+
+        def compute_indicators(cleaned, ctx):
+            population = ctx.reference["population"]
+            counts = cleaned["main"].groupby("municipality").size().rename("n").reset_index()
+            merged = counts.merge(population, on="municipality")
+            return pd.DataFrame({
+                "indicator": "per_100k",
+                "disaggregation": merged["municipality"],
+                "value": merged["n"] / merged["population_2026"] * 100_000,
+                "numerator": merged["n"],
+                "denominator": merged["population_2026"],
+            })
+        """,
+        {"population": population},
+    )
+
+    result = run_step(step_dir, "indicators")
+
+    assert result["status"] == "succeeded", result
+    indicators = output(step_dir, "indicators").sort_values("disaggregation")
+    assert indicators["denominator"].tolist() == [130_000, 2_300_000]
+
+
+def test_an_unknown_reference_table_names_the_available_ones(with_reference):
+    step_dir = with_reference(
+        """
+        def clean(raw, ctx):
+            ctx.reference["populaton"]
+            return raw
+        """,
+        {"population": pd.DataFrame({"a": [1]})},
+    )
+
+    result = run_step(step_dir, "clean")
+
+    assert result["status"] == "failed"
+    assert "'populaton'" in result["error"] and "Available: population" in result["error"]
+    assert "line 3, in clean" in result["traceback"]
+
+
+def test_reference_tables_can_be_listed_and_checked_without_loading(with_reference, monkeypatch, capsys):
+    step_dir = with_reference(
+        """
+        def clean(raw, ctx):
+            print(sorted(ctx.reference), "codes" in ctx.reference, "other" in ctx.reference, ctx.reference.get("other"))
+            return raw
+        """,
+        {"population": pd.DataFrame({"a": [1]}), "codes": pd.DataFrame({"b": ["x"]})},
+    )
+    loaded = []
+    original = interchange.read_parquet
+    monkeypatch.setattr(interchange, "read_parquet", lambda path: loaded.append(path.parent.name) or original(path))
+
+    result = run_step(step_dir, "clean")
+
+    assert result["status"] == "succeeded", result
+    assert "reference" not in loaded  # only the input tables were read
+    assert "['codes', 'population'] True False None" in capsys.readouterr().out
+
+
+def test_a_project_without_reference_tables_lists_none(step, capsys):
+    step_dir = step("""
+        def clean(raw, ctx):
+            print("names:", list(ctx.reference))
+            return raw
+    """)
+
+    result = run_step(step_dir, "clean")
+
+    assert result["status"] == "succeeded", result
+    assert "names: []" in capsys.readouterr().out

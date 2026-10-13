@@ -61,10 +61,67 @@ export interface StepDetails extends StepSummary {
   error: string | null;
 }
 
+/** A reference table as a run read it when it started. */
+export interface RunReferenceTable {
+  name: string;
+  rows: number;
+  updatedAt: string;
+}
+
 export interface RunDetails {
   run: RunSummary;
   steps: StepDetails[];
+  referenceTables: RunReferenceTable[];
 }
+
+/** Column types of previews and reference tables. */
+export type ColumnType = 'integer' | 'decimal' | 'boolean' | 'date' | 'timestamp' | 'text';
+
+/**
+ * A table a test step produced. Only the first 20 tables of a step have `columns` and a `preview` of their first rows;
+ * `cutCells` lists the [row, column] of text values cut at 500 characters.
+ */
+export interface TestTable {
+  name: string;
+  rows: number;
+  columns: { name: string; type: ColumnType }[] | null;
+  previewRows: number;
+  preview: unknown[][] | null;
+  cutCells: number[][] | null;
+}
+
+export interface TestStep {
+  step: RunStepName;
+  status: 'succeeded' | 'failed';
+  startedAt: string | null;
+  finishedAt: string | null;
+  inputRows: number | null;
+  outputRows: number | null;
+  tables: TestTable[];
+  log: string;
+  error: string | null;
+}
+
+/** A test of a draft script on a sample of submissions; `waitingFor` says what a queued test waits for. */
+export interface ScriptTest {
+  id: string;
+  kind: ScriptKind;
+  status: RunStatus;
+  sampleSize: number;
+  code: string;
+  waitingFor: 'run' | 'test' | null;
+  cleanVersion: number | null;
+  queuedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  errorCode: string | null;
+  error: string | null;
+  steps: TestStep[];
+}
+
+export const minSampleSize = 1;
+export const maxSampleSize = 5000;
+export const defaultSampleSize = 500;
 
 export interface RunPage {
   items: RunSummary[];
@@ -79,6 +136,9 @@ export interface PipelineSettings {
 
 /** How often the Scripts section refreshes while a run is queued or running. */
 export const PIPELINE_POLL_MS = new InjectionToken<number>('PIPELINE_POLL_MS', { factory: () => 5000 });
+
+/** How often a script test is refreshed while it is queued or running. */
+export const SCRIPT_TEST_POLL_MS = new InjectionToken<number>('SCRIPT_TEST_POLL_MS', { factory: () => 2000 });
 
 const base = '/api/v1/projects';
 
@@ -121,6 +181,14 @@ export class PipelineService {
 
   run(projectId: string, runId: string): Observable<RunDetails> {
     return this.http.get<RunDetails>(`${base}/${projectId}/runs/${runId}`);
+  }
+
+  startTest(projectId: string, kind: ScriptKind, code: string, sampleSize: number): Observable<ScriptTest> {
+    return this.http.post<ScriptTest>(`${base}/${projectId}/script-tests`, { kind, code, sampleSize });
+  }
+
+  test(projectId: string, testId: string): Observable<ScriptTest> {
+    return this.http.get<ScriptTest>(`${base}/${projectId}/script-tests/${testId}`);
   }
 
   settings(projectId: string): Observable<PipelineSettings> {

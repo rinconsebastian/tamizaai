@@ -20,6 +20,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Naming cases shared with the analytics tests. -->
+    <None Include="..\..\..\tamiza-analytics\tests\fixtures\column_names.json" Link="Pipeline\column_names.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Tamiza.Api\Tamiza.Api.csproj" />
   </ItemGroup>
 

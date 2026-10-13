@@ -6,22 +6,41 @@ import {
   PipelineService,
   ProjectScript,
   ScriptKind,
+  ScriptTest,
   ScriptVersionDetails,
   ScriptVersionSummary,
+  defaultSampleSize,
+  maxSampleSize,
+  minSampleSize,
   scriptKinds,
   scriptTemplates,
 } from '../../core/projects/pipeline.service';
-import { Alert, Badge, Button, Card, ConfirmDialog, Skeleton, ToastService } from '../../shared/ui';
+import { Alert, Badge, Button, Card, ConfirmDialog, FormField, Input, Skeleton, ToastService } from '../../shared/ui';
 import { CodeEditor } from '../../shared/ui/code-editor';
 import { PipelineRuns } from './pipeline-runs';
 import { PipelineSettingsCard } from './pipeline-settings';
 import { ProjectContext } from './project-context';
+import { ScriptTestPanel } from './script-test-panel';
 
 const maxCodeBytes = 200 * 1024;
 
 @Component({
   selector: 'app-project-scripts',
-  imports: [DatePipe, TranslocoDirective, Alert, Badge, Button, Card, Skeleton, CodeEditor, PipelineRuns, PipelineSettingsCard],
+  imports: [
+    DatePipe,
+    TranslocoDirective,
+    Alert,
+    Badge,
+    Button,
+    Card,
+    FormField,
+    Input,
+    Skeleton,
+    CodeEditor,
+    PipelineRuns,
+    PipelineSettingsCard,
+    ScriptTestPanel,
+  ],
   template: `
     <div class="flex flex-col gap-6" *transloco="let t">
       <div class="grid gap-6 lg:grid-cols-4">
@@ -91,6 +110,28 @@ const maxCodeBytes = 200 * 1024;
                 }
               }
             </div>
+
+            @if (canEdit() && !viewing()) {
+              <form class="mt-4 flex flex-col gap-3 border-t border-default pt-4 sm:flex-row sm:items-end" novalidate (submit)="$event.preventDefault(); startTest()">
+                <tmz-form-field class="sm:w-48" [label]="t('scriptTests.sampleSize')" fieldId="sample-size" [error]="testError()">
+                  <input
+                    tmzInput
+                    id="sample-size"
+                    type="number"
+                    inputmode="numeric"
+                    [min]="minSampleSize"
+                    [max]="maxSampleSize"
+                    [value]="sampleSize()"
+                    (input)="sampleSize.set($any($event.target).value)"
+                    data-testid="sample-size"
+                  />
+                </tmz-form-field>
+                <button tmzButton variant="secondary" type="submit" [disabled]="testing() || !draft().trim()" data-testid="test-on-sample">
+                  {{ t('scriptTests.start') }}
+                </button>
+              </form>
+              <p class="mt-2 text-sm text-body">{{ t('scriptTests.hint') }}</p>
+            }
           }
         </tmz-card>
 
@@ -121,6 +162,10 @@ const maxCodeBytes = 200 * 1024;
         </tmz-card>
       </div>
 
+      @if (test(); as test) {
+        <app-script-test-panel [started]="test" [projectId]="projectId()" [draft]="draft()" />
+      }
+
       <app-pipeline-settings />
       <app-pipeline-runs />
     </div>
@@ -143,6 +188,13 @@ export class ProjectScripts {
   protected readonly draft = signal('');
   protected readonly busy = signal(false);
   protected readonly saveError = signal<string | null>(null);
+  protected readonly minSampleSize = minSampleSize;
+  protected readonly maxSampleSize = maxSampleSize;
+  protected readonly sampleSize = signal<number | string>(defaultSampleSize);
+  protected readonly testing = signal(false);
+  protected readonly testError = signal<string | null>(null);
+  /** The latest test started from this page; the panel follows it until it ends. */
+  protected readonly test = signal<ScriptTest | null>(null);
 
   protected readonly canEdit = computed(() => this.context.can('analyst'));
   protected readonly current = computed(() => this.scripts()?.find((s) => s.kind === this.selected())?.current ?? null);
@@ -257,6 +309,33 @@ export class ProjectScripts {
     });
   }
 
+  /** Tests the editor's text, saved or not, on a sample of the project's submissions. */
+  protected startTest(): void {
+    const size = Number(this.sampleSize());
+    this.testError.set(null);
+    if (!Number.isInteger(size) || size < minSampleSize || size > maxSampleSize) {
+      this.testError.set(this.transloco.translate('scriptTests.sampleSizeRange', { min: minSampleSize, max: maxSampleSize.toLocaleString('en') }));
+      return;
+    }
+    const code = this.draft();
+    if (new TextEncoder().encode(code).length > maxCodeBytes) {
+      this.testError.set(this.transloco.translate('scripts.tooLarge'));
+      return;
+    }
+    this.testing.set(true);
+    this.service.startTest(this.projectId(), this.selected(), code, size).subscribe({
+      next: (test) => {
+        this.testing.set(false);
+        this.test.set(test);
+      },
+      error: (error) => {
+        this.testing.set(false);
+        const parsed = this.errors.parse(error);
+        this.testError.set(parsed.fieldErrors['sampleSize'] ?? parsed.fieldErrors['code'] ?? parsed.message);
+      },
+    });
+  }
+
   protected insertTemplate(): void {
     this.editor()?.replace(scriptTemplates[this.selected()]);
   }
@@ -321,7 +400,7 @@ export class ProjectScripts {
     });
   }
 
-  private projectId(): string {
+  protected projectId(): string {
     return this.context.project()!.id;
   }
 }

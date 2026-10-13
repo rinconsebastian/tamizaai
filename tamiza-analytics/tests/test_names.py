@@ -1,9 +1,24 @@
+import json
 import uuid
+from pathlib import Path
 
 import psycopg.sql
 import pytest
 
 from tamiza import names
+
+# Cases shared with the API's port of the rule (Tamiza.Api ColumnNames), so the two cannot drift apart.
+SHARED = json.loads((Path(__file__).parent / "fixtures" / "column_names.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("case", SHARED["reduce"], ids=lambda case: case["name"][:20] or "<empty>")
+def test_reduce_shared_cases(case):
+    assert names.reduce(case["name"]) == case["reduced"]
+
+
+@pytest.mark.parametrize("case", SHARED["deduplicate"])
+def test_deduplicate_shared_cases(case):
+    assert names.deduplicate(case["names"]) == case["deduplicated"]
 
 
 @pytest.mark.parametrize(

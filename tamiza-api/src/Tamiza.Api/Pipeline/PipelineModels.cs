@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Tamiza.Api.Data;
+using Tamiza.Api.Projects;
 
 namespace Tamiza.Api.Pipeline;
 
@@ -44,7 +46,8 @@ public sealed record RunSummary(
     string? ErrorCode,
     string? Error);
 
-public sealed record RunDetails(RunSummary Run, IReadOnlyList<StepDetails> Steps);
+/// <summary>A run with every step and the reference tables it read when it started.</summary>
+public sealed record RunDetails(RunSummary Run, IReadOnlyList<StepDetails> Steps, IReadOnlyList<RunReferenceTable> ReferenceTables);
 
 public sealed record RunPage(IReadOnlyList<RunSummary> Items, int Total);
 
@@ -52,3 +55,41 @@ public sealed record RunPage(IReadOnlyList<RunSummary> Items, int Total);
 public sealed record PipelineSettings(bool RunAfterSync, int? RunIntervalHours, DateTimeOffset? NextRunAt);
 
 public sealed record PipelineSettingsRequest(bool? RunAfterSync, int? RunIntervalHours);
+
+/// <summary>A reference table without its rows.</summary>
+public sealed record ReferenceTableSummary(
+    string Name, string FileName, int RowCount, IReadOnlyList<ReferenceColumn> Columns, Person UpdatedBy, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+
+/// <summary>An uploaded or replaced table, with the headers whose column names differ from them.</summary>
+public sealed record ReferenceTableUpload(ReferenceTableSummary Table, IReadOnlyList<RenamedColumn> Renamed);
+
+/// <summary>A reference table with its first rows, values in column order.</summary>
+public sealed record ReferenceTablePreview(ReferenceTableSummary Table, IReadOnlyList<List<JsonElement>> Rows);
+
+public sealed record ScriptTestRequest(string? Kind, string? Code, int? SampleSize);
+
+/// <summary>What a queued test waits for: a running run, or another test that runs or is queued before it.</summary>
+public enum ScriptTestWait
+{
+    Run,
+    Test,
+}
+
+/// <summary>
+/// A test and, as its steps end, their logs and table previews. <see cref="CleanVersion"/> is the saved script 1 it ran
+/// before an output or indicators draft.
+/// </summary>
+public sealed record ScriptTestDetails(
+    Guid Id,
+    ScriptKind Kind,
+    RunStatus Status,
+    int SampleSize,
+    string Code,
+    ScriptTestWait? WaitingFor,
+    int? CleanVersion,
+    DateTimeOffset QueuedAt,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? FinishedAt,
+    string? ErrorCode,
+    string? Error,
+    IReadOnlyList<TestStep> Steps);

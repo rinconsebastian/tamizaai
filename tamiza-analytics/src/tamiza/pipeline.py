@@ -1,4 +1,4 @@
-"""Claims queued runs and executes the chain: flatten → clean → output and indicators.
+"""Claims queued tests and runs, and executes the chain: flatten → clean → output and indicators.
 
 Each step records itself in ``tamiza.run_steps`` as it ends. A step whose script is absent falls back to the default
 behavior (clean = flattened data; output and indicators are removed). Scripts 2 and 3 depend only on script 1.
@@ -17,9 +17,10 @@ from uuid import UUID
 import psycopg
 from psycopg.types.json import Jsonb
 
-from tamiza import publish
+from tamiza import publish, reference
 from tamiza.flatten import flatten
 from tamiza.launcher import MAX_LOG_BYTES, Limits, OutputTable, run_script
+from tamiza.reference import ReferenceTable
 from tamiza.settings import Settings
 
 logger = logging.getLogger("tamiza.pipeline")
@@ -97,18 +98,31 @@ def claim(connection: psycopg.Connection) -> ClaimedRun | None:
 
 
 class Processor:
-    """Called once per worker cycle with the worker's connection; returns True when it executed a run."""
+    """
+    Called once per worker cycle with the worker's connection; returns True when it executed a test or a run. Queued
+    script tests go before queued runs: they are short and an analyst is waiting for them.
+    """
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self._started = False
 
     def __call__(self, connection: psycopg.Connection) -> bool:
+        from tamiza import sample_runs  # imports this module
+
         if not self._started:
             interrupted = fail_interrupted(connection)
             if interrupted:
                 logger.warning("Marked %d runs interrupted by the last shutdown as failed.", interrupted)
+            interrupted = sample_runs.fail_interrupted(connection)
+            if interrupted:
+                logger.warning("Marked %d tests interrupted by the last shutdown as failed.", interrupted)
             self._started = True
+        sample_runs.delete_expired(connection)
+        test = sample_runs.claim(connection)
+        if test is not None:
+            sample_runs.execute(connection, test, self.settings)
+            return True
         claimed = claim(connection)
         if claimed is None:
             return False
@@ -141,12 +155,17 @@ def execute(connection: psycopg.Connection, run: ClaimedRun, settings: Settings)
     logger.info("Run %s of project %s %s.", run.id, run.project_id, "failed" if failed else "succeeded")
 
 
-def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Path, records: dict[str, StepRecord]):
-    project = connection.execute(
-        "SELECT name, form_fields, form_choices FROM tamiza.projects WHERE id = %s", (run.project_id,)
+@dataclass(frozen=True)
+class ProjectContext:
+    form_fields: list[dict]
+    context: dict  # what context.json gives the runner: project name and form dictionary
+
+
+def project_context(connection: psycopg.Connection, project_id: UUID) -> ProjectContext:
+    """The form snapshot and the ``ctx`` data every script of the project receives, in runs and tests alike."""
+    project_name, form_fields, form_choices = connection.execute(
+        "SELECT name, form_fields, form_choices FROM tamiza.projects WHERE id = %s", (project_id,)
     ).fetchone()
-    project_name, form_fields, form_choices = project
-    codes = _codes(connection, run)
     context = {
         "project_name": project_name,
         "questions": [
@@ -163,18 +182,41 @@ def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Pa
             {"list_name": c.get("listName"), "name": c.get("name"), "label": c.get("label")} for c in form_choices
         ],
     }
-    limits = Limits(settings.run_timeout_seconds, settings.run_memory_mb)
+    return ProjectContext(form_fields, context)
 
-    # Flatten.
+
+def load_reference(settings: Settings, project_id: UUID, work_dir: Path) -> tuple[list[ReferenceTable], str]:
+    """Reads the project's reference tables once for a run or test; returns them and a line for the step log."""
+    tables = reference.load(settings.database_url, project_id, work_dir / "reference")
+    if not tables:
+        return tables, "No reference tables."
+    listed = ", ".join(f"{t.name} ({t.rows:,} rows)" for t in tables)
+    return tables, f"Reference tables: {listed}."
+
+
+def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Path, records: dict[str, StepRecord]):
+    project = project_context(connection, run.project_id)
+    form_fields, context = project.form_fields, project.context
+    codes = _codes(connection, run)
+    limits = Limits(settings.run_timeout_seconds, settings.run_memory_mb)
+    references: dict[str, Path] = {}
+
+    # Reference tables, read once for the whole run, then flatten.
     raw: list[OutputTable] | None = None
 
     def do_flatten(record: StepRecord) -> None:
         nonlocal raw
+        tables, reference_log = load_reference(settings, run.project_id, work_dir)
+        references.update({t.name: t.path for t in tables})
+        connection.execute(
+            "UPDATE tamiza.runs SET reference_tables = %s WHERE id = %s",
+            (Jsonb([t.summary() for t in tables]), run.id),
+        )
         result = flatten(form_fields, lambda: _submissions(settings.database_url, run.project_id), work_dir / "raw")
         raw = [OutputTable(t.name, t.rows, t.path) for t in result.tables]
         publish.publish(connection, run.project_id, "raw", [publish.Table(t.name, t.path) for t in raw])
         record.input_rows = result.input_rows
-        record.log = "\n".join(result.log)
+        record.log = "\n".join([reference_log, *result.log])
         _set_outputs(record, raw)
 
     _run_step(connection, run, records["flatten"], do_flatten)
@@ -191,7 +233,7 @@ def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Pa
             cleaned = raw
             record.log = "No clean script: the flattened tables are published as the clean data."
         else:
-            cleaned = _script(record, work_dir, "clean", codes["clean"], raw, context, limits)
+            cleaned = _script(record, work_dir, "clean", codes["clean"], raw, context, limits, references)
             if cleaned is None:
                 return
         publish.publish(connection, run.project_id, "clean", [publish.Table(t.name, t.path) for t in cleaned])
@@ -212,7 +254,7 @@ def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Pa
                 record.status = "skipped"
                 record.log = f"No {kind} script: nothing is published for this step."
                 return
-            outputs = _script(record, work_dir, kind, codes[kind], cleaned, context, limits)
+            outputs = _script(record, work_dir, kind, codes[kind], cleaned, context, limits, references)
             if outputs is None:
                 return
             publish.publish(connection, run.project_id, kind, [publish.Table(t.name, t.path) for t in outputs])
@@ -239,7 +281,7 @@ def _run_step(connection, run: ClaimedRun, record: StepRecord, action: Callable[
     _save(connection, run, record)
 
 
-def _script(record, work_dir, kind, code, inputs, context, limits) -> list[OutputTable] | None:
+def _script(record, work_dir, kind, code, inputs, context, limits, references) -> list[OutputTable] | None:
     outcome = run_script(
         work_dir / "steps",
         kind,
@@ -248,6 +290,7 @@ def _script(record, work_dir, kind, code, inputs, context, limits) -> list[Outpu
         context,
         work_dir / kind,
         limits,
+        references,
     )
     record.log = outcome.log
     if not outcome.succeeded:
@@ -268,12 +311,17 @@ def _record_skipped(connection, run, records, steps, reason) -> None:
         _save(connection, run, records[step])
 
 
+def capped_log(log: str) -> str:
+    """The last 1 MB of a step's log, noting the cut."""
+    if len(log.encode("utf-8")) <= MAX_LOG_BYTES:
+        return log
+    return "[Log truncated: only the last 1 MB is kept.]\n" + log.encode("utf-8")[-MAX_LOG_BYTES:].decode(
+        "utf-8", "ignore"
+    )
+
+
 def _save(connection, run: ClaimedRun, record: StepRecord) -> None:
-    log = record.log
-    if len(log.encode("utf-8")) > MAX_LOG_BYTES:
-        log = "[Log truncated: only the last 1 MB is kept.]\n" + log.encode("utf-8")[-MAX_LOG_BYTES:].decode(
-            "utf-8", "ignore"
-        )
+    log = capped_log(record.log)
     connection.execute(
         """
         INSERT INTO tamiza.run_steps

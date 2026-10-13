@@ -256,7 +256,8 @@ The user SHALL be able to export the indicator table to XLSX.
 - `script_versions`: id, project_id, kind (1/2/3), code, author_id, created_at.
 - `runs`: id, project_id, status (queued/running/succeeded/failed), trigger, script_versions_used, started_at, finished_at, logs, error.
 - `sampling_frames`: project_id, dimensions, targets.
-- `reference_tables`: id, project_id, name, table_name.
+- `script_tests`: id, project_id, requested_by, kind, code (the tested draft), sample_size, status, clean_version_id, queued_at, started_at, finished_at, error, steps (per-step logs and table previews). Deleted 24 hours after they end.
+- `reference_tables`: id, project_id, name, file_name, columns (name, header, type), row_count, updated_by, updated_at. The rows are in `reference_table_contents` (one JSONB array per table), not in a per-project schema.
 
 ---
 

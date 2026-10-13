@@ -1,0 +1,178 @@
+{
+  "reduce": [
+    {
+      "name": "age",
+      "reduced": "age"
+    },
+    {
+      "name": "Household size",
+      "reduced": "household_size"
+    },
+    {
+      "name": "edad_años",
+      "reduced": "edad_anos"
+    },
+    {
+      "name": "Ingreso (COP)",
+      "reduced": "ingreso_cop"
+    },
+    {
+      "name": "a--b",
+      "reduced": "a_b"
+    },
+    {
+      "name": "respondent/age",
+      "reduced": "respondent_age"
+    },
+    {
+      "name": "2026_visits",
+      "reduced": "c_2026_visits"
+    },
+    {
+      "name": "_id",
+      "reduced": "_id"
+    },
+    {
+      "name": "¿?",
+      "reduced": "column"
+    },
+    {
+      "name": "select",
+      "reduced": "select"
+    },
+    {
+      "name": "",
+      "reduced": "column"
+    },
+    {
+      "name": "   ",
+      "reduced": "column"
+    },
+    {
+      "name": " age ",
+      "reduced": "_age"
+    },
+    {
+      "name": "Población 2026",
+      "reduced": "poblacion_2026"
+    },
+    {
+      "name": "MUNICIPIO",
+      "reduced": "municipio"
+    },
+    {
+      "name": "ﬁle_count",
+      "reduced": "file_count"
+    },
+    {
+      "name": "m²",
+      "reduced": "m2"
+    },
+    {
+      "name": "Ñandú",
+      "reduced": "nandu"
+    },
+    {
+      "name": "x__y",
+      "reduced": "x_y"
+    },
+    {
+      "name": "año-2025/mes",
+      "reduced": "ano_2025_mes"
+    },
+    {
+      "name": "household_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_first",
+      "reduced": "household_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_a1c180"
+    },
+    {
+      "name": "household_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_second",
+      "reduced": "household_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_8dc412"
+    },
+    {
+      "name": "ññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññ",
+      "reduced": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn_7006e3"
+    },
+    {
+      "name": "9999999999999999999999999999999999999999999999999999999999999999999999",
+      "reduced": "c_999999999999999999999999999999999999999999999999999999_de6aac"
+    },
+    {
+      "name": "Código DANE",
+      "reduced": "codigo_dane"
+    },
+    {
+      "name": "Population, 2026 (projected)",
+      "reduced": "population_2026_projected"
+    },
+    {
+      "name": "über",
+      "reduced": "uber"
+    },
+    {
+      "name": "café_au_lait",
+      "reduced": "cafe_au_lait"
+    },
+    {
+      "name": "日本語",
+      "reduced": "column"
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reduced": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reduced": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0098ba"
+    }
+  ],
+  "deduplicate": [
+    {
+      "names": [
+        "age",
+        "age",
+        "name",
+        "age"
+      ],
+      "deduplicated": [
+        "age",
+        "age_2",
+        "name",
+        "age_3"
+      ]
+    },
+    {
+      "names": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "deduplicated": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_2"
+      ]
+    },
+    {
+      "names": [
+        "column",
+        "column",
+        "column"
+      ],
+      "deduplicated": [
+        "column",
+        "column_2",
+        "column_3"
+      ]
+    },
+    {
+      "names": [
+        "age",
+        "age_2",
+        "age"
+      ],
+      "deduplicated": [
+        "age",
+        "age_2",
+        "age_3"
+      ]
+    }
+  ]
+}

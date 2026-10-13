@@ -71,6 +71,13 @@
       },
       "script": {
         "not_set": "There is no script to remove."
+      },
+      "test": {
+        "interrupted": "The test was interrupted because the analytics worker stopped. Test again."
+      },
+      "reference": {
+        "exists": "The project already has a reference table with this name. Replace it from the list, or choose another name.",
+        "limit": "The project already has 50 reference tables. Delete one before adding another."
       }
     }
   },
@@ -119,6 +126,7 @@
       "overview": "Overview",
       "data": "Data",
       "scripts": "Scripts",
+      "reference": "Reference data",
       "members": "Members",
       "samplingFrame": "Sampling frame",
       "webhook": "Webhook"
@@ -287,7 +295,10 @@
       "succeeded": "Succeeded",
       "failed": "Failed",
       "skipped": "Skipped"
-    }
+    },
+    "referenceTitle": "Reference data used",
+    "referenceTable": "({{ rows }} rows, updated {{ updated }})",
+    "noReference": "This run used no reference tables."
   },
   "pipeline": {
     "settingsTitle": "When scripts run",
@@ -390,5 +401,73 @@
     "importApplied": "The imported rows are in the editor. Review them and save.",
     "chooseFile": "Choose a file",
     "noFile": "No file chosen"
+  },
+  "scriptTests": {
+    "sampleSize": "Sample size",
+    "start": "Test on sample",
+    "hint": "Runs the code in the editor, saved or not, on a sample of submissions. Nothing is saved or published.",
+    "sampleSizeRange": "Enter a whole number of submissions from {{ min }} to {{ max }}.",
+    "title": "Test of {{ kind }} on {{ size }} submissions",
+    "stale": "The editor has changed since this test. Test again to see the result of the current code.",
+    "starting": "Starting…",
+    "running": "Running…",
+    "waitingForRun": "Waiting for a run to finish. The test starts right after it.",
+    "waitingForTest": "Waiting for another test to finish.",
+    "succeeded": "The test succeeded. Save the script to use it in the next run.",
+    "savedClean": "Clean (saved version {{ number }})",
+    "draft": "{{ kind }} (draft)",
+    "table": "Table",
+    "tableOption": "{{ name }} ({{ rows }} rows)",
+    "previewRows": "First {{ shown }} of {{ rows }} rows.",
+    "previewTrimmed": "First {{ shown }} of {{ rows }} rows: fewer are shown to keep the preview under 1 MB.",
+    "noPreview": "{{ rows }} rows. Only the first 20 tables of a step are previewed."
+  },
+  "preview": {
+    "cut": "(cut at 500 characters)",
+    "types": {
+      "integer": "integer",
+      "decimal": "decimal",
+      "boolean": "boolean",
+      "date": "date",
+      "timestamp": "timestamp",
+      "text": "text"
+    }
+  },
+  "reference": {
+    "title": "Reference data",
+    "intro": "Tables your scripts read by name, for example population projections or municipality codes: ctx.reference[\"population\"].",
+    "add": "Upload table",
+    "emptyEditor": "No reference tables yet. Upload a CSV or XLSX file; scripts read it with ctx.reference[\"name\"] from the next run.",
+    "emptyViewer": "This project has no reference tables.",
+    "size": "{{ rows }} rows, {{ columns }} columns",
+    "updated": "Updated by {{ name }}, {{ date }}",
+    "preview": "Preview",
+    "replace": "Replace",
+    "delete": "Delete",
+    "columns": {
+      "name": "Name",
+      "file": "File",
+      "size": "Size",
+      "updated": "Updated",
+      "actions": "Actions"
+    },
+    "uploadTitle": "Upload a reference table",
+    "uploadIntro": "CSV (UTF-8, comma or semicolon) or XLSX (first sheet), up to 10 MB. The first non-empty row is the header; column types are detected from the values.",
+    "chooseFile": "Choose file",
+    "name": "Table name",
+    "nameHint": "Lowercase letters, digits and underscores, starting with a letter. Scripts use it in ctx.reference.",
+    "upload": "Upload",
+    "fileRequired": "Choose a CSV or XLSX file.",
+    "fileTooLarge": "The file is larger than 10 MB.",
+    "uploaded": "Reference table {{ name }} uploaded. Scripts can read it from the next run.",
+    "replaced": "Reference table {{ name }} replaced. Scripts read the new rows from the next run.",
+    "deleted": "Reference table {{ name }} deleted.",
+    "renamed": "Columns of {{ name }} renamed for scripts:",
+    "emptyHeader": "(empty header)",
+    "replaceTitle": "Replace {{ name }}?",
+    "replaceMessage": "The rows and columns of {{ name }} will be those of {{ file }}. Runs that already started keep the current rows.",
+    "deleteTitle": "Delete {{ name }}?",
+    "deleteMessage": "Scripts that read ctx.reference[\"{{ name }}\"] fail from the next run.",
+    "previewNote": "First {{ shown }} of {{ rows }} rows, from {{ file }}."
   }
 }

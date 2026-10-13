@@ -1,6 +1,5 @@
 using System.Globalization;
 using MiniExcelLibs;
-using MiniExcelLibs.Csv;
 
 namespace Tamiza.Api.Projects;
 
@@ -16,17 +15,6 @@ public static class SamplingFrameImport
 {
     public const long MaxFileBytes = 5 * 1024 * 1024;
     private const string TargetColumn = "target";
-
-    public static bool IsSupported(string fileName, out ExcelType type)
-    {
-        type = Path.GetExtension(fileName).ToLowerInvariant() switch
-        {
-            ".csv" => ExcelType.CSV,
-            ".xlsx" => ExcelType.XLSX,
-            _ => ExcelType.UNKNOWN,
-        };
-        return type != ExcelType.UNKNOWN;
-    }
 
     /// <summary>Returns the preview, or a file-level error message (unreadable file, too many rows).</summary>
     public static (ImportPreview? Preview, string? FileError) Read(Stream content, ExcelType type)
@@ -90,38 +78,15 @@ public static class SamplingFrameImport
 
     private static List<List<object?>> ReadTable(Stream content, ExcelType type)
     {
-        MiniExcelLibs.IConfiguration? configuration = null;
-        if (type == ExcelType.CSV)
-        {
-            configuration = new CsvConfiguration { Seperator = DetectSeparator(content) };
-        }
-
-        return MiniExcel.Query(content, useHeaderRow: false, excelType: type, configuration: configuration)
-            .Take(SamplingFrameValidator.MaxRows + 2)
-            .Select(row => ((IDictionary<string, object?>)row).Values.ToList())
-            .ToList();
+        var separator = type == ExcelType.CSV ? SpreadsheetReader.DetectSeparator(content) : ',';
+        return SpreadsheetReader.Rows(content, type, separator).Take(SamplingFrameValidator.MaxRows + 2).ToList();
     }
 
-    /// <summary>Spreadsheets in many locales (including Spanish) export CSV with ';' instead of ','.</summary>
-    private static char DetectSeparator(Stream content)
-    {
-        using var reader = new StreamReader(content, leaveOpen: true);
-        var firstLine = reader.ReadLine() ?? "";
-        content.Position = 0;
-        return firstLine.Count(c => c == ';') > firstLine.Count(c => c == ',') ? ';' : ',';
-    }
+    private static object? Cell(List<object?> cells, int index) => SpreadsheetReader.Cell(cells, index);
 
-    private static object? Cell(List<object?> cells, int index) => index < cells.Count ? cells[index] : null;
+    private static bool HasValue(object? cell) => SpreadsheetReader.HasValue(cell);
 
-    private static bool HasValue(object? cell) => Text(cell).Length > 0;
-
-    private static string Text(object? cell) => cell switch
-    {
-        null => "",
-        double number => number.ToString(CultureInfo.InvariantCulture),
-        DateTime date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-        _ => Convert.ToString(cell, CultureInfo.InvariantCulture)?.Trim() ?? "",
-    };
+    private static string Text(object? cell) => SpreadsheetReader.Text(cell);
 
     private static decimal? Number(object? cell) => cell switch
     {

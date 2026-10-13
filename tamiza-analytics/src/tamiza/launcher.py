@@ -45,19 +45,30 @@ class ScriptOutcome:
 
 
 def run_script(
-    work_dir: Path, kind: str, code: str, inputs: dict[str, Path], context: dict, out_dir: Path, limits: Limits
+    work_dir: Path,
+    kind: str,
+    code: str,
+    inputs: dict[str, Path],
+    context: dict,
+    out_dir: Path,
+    limits: Limits,
+    reference: dict[str, Path] | None = None,
 ) -> ScriptOutcome:
     """
     Prepares ``work_dir/<kind>``, runs the script there, moves its Parquet outputs into ``out_dir`` and removes the
-    step directory, whatever happened.
+    step directory, whatever happened. ``reference`` maps the project's reference tables to their Parquet files.
     """
     step_dir = work_dir / kind
     shutil.rmtree(step_dir, ignore_errors=True)
     (step_dir / "input").mkdir(parents=True)
+    (step_dir / "reference").mkdir()
     (step_dir / "tmp").mkdir()
     try:
+        # Copies, not links: a script writing to its files must not change what later steps receive.
         for name, path in inputs.items():
             shutil.copyfile(path, step_dir / "input" / f"{name}.parquet")
+        for name, path in (reference or {}).items():
+            shutil.copyfile(path, step_dir / "reference" / f"{name}.parquet")
         (step_dir / "script.py").write_text(code, encoding="utf-8")
         (step_dir / "context.json").write_text(json.dumps(context), encoding="utf-8")
         return _collect(step_dir, out_dir, *launch(step_dir, kind, limits))

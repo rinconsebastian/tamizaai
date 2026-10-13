@@ -69,7 +69,7 @@ public static class SamplingFrameEndpoints
             return Problems.Validation("file", "The file is larger than 5 MB.");
         }
 
-        if (!SamplingFrameImport.IsSupported(file.FileName, out var type))
+        if (!SpreadsheetReader.IsSupported(file.FileName, out var type))
         {
             return Problems.Validation("file", "Use a .csv or .xlsx file.");
         }

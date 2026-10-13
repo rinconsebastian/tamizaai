@@ -163,6 +163,33 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
             """));
     }
 
+    [Fact]
+    public async Task Pipeline_authoring_script_upgrades_a_database_at_the_pipeline_schema()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql");
+        await ExecuteAsync(connectionString, """
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('00000000-0000-0000-0000-000000000001', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('00000000-0000-0000-0000-0000000000aa', 'Existing', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(),
+                    '00000000-0000-0000-0000-000000000001', now(), now());
+            INSERT INTO tamiza.runs (id, project_id, trigger, status, queued_at)
+            VALUES (gen_random_uuid(), '00000000-0000-0000-0000-0000000000aa', 'manual', 'succeeded', now());
+            """);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        foreach (var table in new[] { "script_tests", "reference_tables", "reference_table_contents" })
+        {
+            Assert.True(await TableExistsAsync(connectionString, table), table);
+        }
+
+        // Existing runs used no reference tables.
+        Assert.Equal("[]", await ScalarAsync<string>(connectionString, "SELECT reference_tables::text FROM tamiza.runs"));
+    }
+
     /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>
     private static void ApplyScripts(string connectionString, params string[] names)
     {

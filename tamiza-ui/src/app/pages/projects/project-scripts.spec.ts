@@ -7,8 +7,11 @@ import {
   ProjectScript,
   RunPage,
   RunSummary,
+  SCRIPT_TEST_POLL_MS,
+  ScriptTest,
   ScriptVersionDetails,
   ScriptVersionSummary,
+  TestStep,
 } from '../../core/projects/pipeline.service';
 import { ProjectRole } from '../../core/projects/projects.service';
 import { ToastService } from '../../shared/ui';
@@ -62,11 +65,15 @@ interface Seed {
   settings?: PipelineSettings;
   runs?: RunPage;
   pollMs?: number;
+  testPollMs?: number;
 }
 
 async function open(role: ProjectRole, seed: Seed = {}) {
   const current = version(2);
-  const providers = seed.pollMs ? [{ provide: PIPELINE_POLL_MS, useValue: seed.pollMs }] : [];
+  const providers = [
+    ...(seed.pollMs ? [{ provide: PIPELINE_POLL_MS, useValue: seed.pollMs }] : []),
+    ...(seed.testPollMs ? [{ provide: SCRIPT_TEST_POLL_MS, useValue: seed.testPollMs }] : []),
+  ];
   const opened = await openProjectSection('scripts', role, {}, providers);
   const { http, harness } = opened;
   http.expectOne((r) => r.url === settingsUrl).flush(seed.settings ?? { runAfterSync: true, runIntervalHours: null, nextRunAt: null });
@@ -81,6 +88,75 @@ async function open(role: ProjectRole, seed: Seed = {}) {
   return { ...opened, editor };
 }
 
+const testsUrl = `/api/v1/projects/${projectId}/script-tests`;
+const draftCode = 'def clean(raw, ctx):\n    return raw  # draft\n';
+
+function scriptTest(overrides: Partial<ScriptTest> = {}): ScriptTest {
+  return {
+    id: 't1',
+    kind: 'clean',
+    status: 'queued',
+    sampleSize: 500,
+    code: draftCode,
+    waitingFor: null,
+    cleanVersion: null,
+    queuedAt: '2026-10-03T10:00:00Z',
+    startedAt: null,
+    finishedAt: null,
+    errorCode: null,
+    error: null,
+    steps: [],
+    ...overrides,
+  };
+}
+
+const flattenStep: TestStep = {
+  step: 'flatten',
+  status: 'succeeded',
+  startedAt: '2026-10-03T10:00:01Z',
+  finishedAt: '2026-10-03T10:00:02Z',
+  inputRows: 120,
+  outputRows: 360,
+  tables: [
+    {
+      name: 'main',
+      rows: 120,
+      columns: [
+        { name: '_id', type: 'integer' },
+        { name: 'note', type: 'text' },
+      ],
+      previewRows: 2,
+      preview: [
+        [1, 'short'],
+        [2, null],
+      ],
+      cutCells: [],
+    },
+    {
+      name: 'members',
+      rows: 240,
+      columns: [{ name: 'member_name', type: 'text' }],
+      previewRows: 100,
+      preview: [['m1']],
+      cutCells: [[0, 0]],
+    },
+  ],
+  log: 'Sample: 120 submissions.',
+  error: null,
+};
+
+async function startTest(opened: Awaited<ReturnType<typeof open>>, size = '500') {
+  const { root, harness, editor } = opened;
+  editor().replace(draftCode);
+  await settle(harness);
+  const input = byTestId<HTMLInputElement>(root, 'sample-size')!;
+  input.value = size;
+  input.dispatchEvent(new Event('input'));
+  await settle(harness);
+  byTestId<HTMLButtonElement>(root, 'test-on-sample')!.click();
+  await settle(harness);
+}
+
 function confirmDialog(): HTMLButtonElement | null {
   return document.querySelector('[data-testid="confirm"]');
 }
@@ -93,7 +169,7 @@ describe('ProjectScripts', () => {
 
     expect(editor().text()).toContain('# v2');
     expect(root.querySelector('.cm-content')?.getAttribute('contenteditable')).toBe('false');
-    for (const id of ['save', 'remove', 'upload', 'template', 'run-now', 'pipeline-settings-form']) {
+    for (const id of ['save', 'remove', 'upload', 'template', 'run-now', 'pipeline-settings-form', 'test-on-sample', 'sample-size']) {
       expect(byTestId(root, id)).toBeNull();
     }
     expect(byTestId(root, 'pipeline-settings-read-only')?.textContent).toContain('No schedule');
@@ -277,6 +353,7 @@ describe('ProjectScripts', () => {
         { step: 'clean', status: 'failed', startedAt: null, finishedAt: null, inputRows: null, outputRows: null, tables: [], log: 'INFO starting', error: "KeyError: 'age'\n\nTraceback..." },
         { step: 'output', status: 'skipped', startedAt: null, finishedAt: null, inputRows: null, outputRows: null, tables: [], log: 'Not run: the clean step failed.', error: null },
       ],
+      referenceTables: [{ name: 'population', rows: 1123, updatedAt: '2026-10-01T12:00:00Z' }],
     });
     await settle(harness);
 
@@ -286,6 +363,18 @@ describe('ProjectScripts', () => {
     expect(byTestId(byTestId(dialog, 'step-flatten')!, 'step-tables')?.textContent).toContain('members (6)');
     expect(byTestId(byTestId(dialog, 'step-clean')!, 'step-error')?.textContent).toContain("KeyError: 'age'");
     expect(byTestId(dialog, 'step-output')?.textContent).toContain('Skipped');
+    expect(byTestId(dialog, 'run-reference')?.textContent).toContain('population (1123 rows, updated Oct 1, 2026');
+  });
+
+  it('says when a run used no reference tables', async () => {
+    const { root, http, harness } = await open('viewer');
+
+    byTestId<HTMLButtonElement>(root, 'run-details-r1')!.click();
+    await settle(harness);
+    http.expectOne(`${runsUrl}/r1`).flush({ run: run(), steps: [], referenceTables: [] });
+    await settle(harness);
+
+    expect(byTestId(document.querySelector('.cdk-overlay-container')!, 'run-reference')?.textContent).toContain('This run used no reference tables.');
   });
 
   it('polls while a run is active and stops when the page is destroyed', async () => {
@@ -328,5 +417,123 @@ describe('ProjectScripts', () => {
     cleared.flush({ runAfterSync: false, runIntervalHours: null, nextRunAt: null });
     await settle(harness);
     expect(byTestId(root, 'field-error')).toBeNull();
+  });
+
+  // 6.1 — tests on a sample
+
+  it('tests the draft on a sample and follows the test until it ends', async () => {
+    const opened = await open('analyst', { testPollMs: 20 });
+    const { root, http, harness } = opened;
+
+    await startTest(opened);
+    const request = http.expectOne((r) => r.url === testsUrl && r.method === 'POST');
+    expect(request.request.body).toEqual({ kind: 'clean', code: draftCode, sampleSize: 500 });
+    request.flush(scriptTest({ waitingFor: 'run' }));
+    await settle(harness);
+    expect(byTestId(root, 'test-progress')?.textContent).toContain('Waiting for a run to finish');
+    expect(byTestId(root, 'unsaved')).not.toBeNull(); // nothing was saved
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    http.expectOne(`${testsUrl}/t1`).flush(scriptTest({ status: 'running', startedAt: '2026-10-03T10:00:01Z', steps: [flattenStep] }));
+    await settle(harness);
+    expect(byTestId(root, 'test-progress')?.textContent).toContain('Running');
+    expect(byTestId(root, 'test-step-flatten')?.textContent).toContain('120 rows in, 360 out');
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const clean: TestStep = {
+      ...flattenStep,
+      step: 'clean',
+      inputRows: 360,
+      outputRows: 300,
+      tables: [{ ...flattenStep.tables[0], rows: 100 }],
+      log: 'INFO Dropped 20 test submissions',
+    };
+    http.expectOne(`${testsUrl}/t1`).flush(scriptTest({ status: 'succeeded', finishedAt: '2026-10-03T10:00:04Z', steps: [flattenStep, clean] }));
+    await settle(harness);
+
+    expect(byTestId(root, 'test-status')?.textContent).toContain('Succeeded');
+    expect(byTestId(root, 'test-progress')).toBeNull();
+    const step = byTestId(root, 'test-step-clean')!;
+    expect(step.textContent).toContain('1. Clean (draft)');
+    expect(byTestId(step, 'test-preview-note')?.textContent).toContain('First 2 of 100 rows');
+    expect([...step.querySelectorAll('[data-testid="column-type"]')].map((e) => e.textContent?.trim())).toEqual(['integer', 'text']);
+    expect(step.querySelector('tbody')?.textContent).toContain('short');
+    expect(byTestId(step, 'test-step-log')?.textContent).toContain('Dropped 20 test submissions');
+    expect(byTestId(root, 'test-stale')).toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    http.expectNone(`${testsUrl}/t1`);
+  });
+
+  it('shows a failed step with its traceback and lets the earlier tables be browsed', async () => {
+    const opened = await open('analyst');
+    const { root, http, harness } = opened;
+    await startTest(opened);
+
+    const failed: TestStep = {
+      ...flattenStep,
+      step: 'clean',
+      status: 'failed',
+      tables: [],
+      log: '',
+      error: "KeyError: 'age'\n\nTraceback (most recent call last):\n  File \"script.py\", line 2, in clean",
+    };
+    http
+      .expectOne((r) => r.url === testsUrl && r.method === 'POST')
+      .flush(scriptTest({ status: 'failed', errorCode: 'step.clean', error: "KeyError: 'age'", steps: [flattenStep, failed] }));
+    await settle(harness);
+
+    expect(byTestId(root, 'test-error')?.textContent).toContain("Script 1 (clean) failed: KeyError: 'age'");
+    expect(byTestId(byTestId(root, 'test-step-clean')!, 'test-step-error')?.textContent).toContain('line 2, in clean');
+    const flatten = byTestId(root, 'test-step-flatten')!;
+    const select = byTestId<HTMLSelectElement>(flatten, 'test-table-select-flatten')!;
+    expect([...select.options].map((o) => o.textContent?.trim())).toEqual(['main (120 rows)', 'members (240 rows)']);
+    select.value = 'members';
+    select.dispatchEvent(new Event('change'));
+    await settle(harness);
+    expect(flatten.querySelector('tbody')?.textContent).toContain('m1');
+    expect(flatten.querySelector('tbody')?.textContent).toContain('cut at 500 characters');
+  });
+
+  it('names the saved script 1 a test of script 2 ran first, and says when the editor changed', async () => {
+    const opened = await open('analyst');
+    const { root, http, harness, editor } = opened;
+    await startTest(opened);
+
+    const savedClean: TestStep = { ...flattenStep, step: 'clean' };
+    const output: TestStep = { ...flattenStep, step: 'output', tables: [{ ...flattenStep.tables[0], name: 'households', columns: null, preview: null, previewRows: 0, cutCells: null }] };
+    http
+      .expectOne((r) => r.url === testsUrl && r.method === 'POST')
+      .flush(scriptTest({ kind: 'output', status: 'succeeded', cleanVersion: 3, steps: [flattenStep, savedClean, output] }));
+    await settle(harness);
+
+    expect(byTestId(root, 'test-step-clean')?.textContent).toContain('Clean (saved version 3)');
+    expect(byTestId(root, 'test-step-output')?.textContent).toContain('2. Output (draft)');
+    expect(byTestId(root, 'test-no-preview')?.textContent).toContain('Only the first 20 tables');
+
+    editor().replace(draftCode + '# more\n');
+    await settle(harness);
+    expect(byTestId(root, 'test-stale')?.textContent).toContain('The editor has changed since this test');
+  });
+
+  it('says when a queued test waits for another test', async () => {
+    const opened = await open('analyst');
+    const { root, http, harness } = opened;
+    await startTest(opened);
+
+    http.expectOne((r) => r.url === testsUrl && r.method === 'POST').flush(scriptTest({ waitingFor: 'test' }));
+    await settle(harness);
+
+    expect(byTestId(root, 'test-progress')?.textContent).toContain('Waiting for another test');
+  });
+
+  it('checks the sample size before asking the API', async () => {
+    const opened = await open('analyst');
+    const { root, http } = opened;
+
+    await startTest(opened, '10000');
+
+    http.expectNone((r) => r.url === testsUrl);
+    expect(byTestId(root, 'field-error')?.textContent).toContain('from 1 to 5,000');
   });
 });

@@ -57,6 +57,7 @@ export class ProjectPage {
       { label: t('project.tabs.overview'), link: `/projects/${id}/overview` },
       { label: t('project.tabs.data'), link: `/projects/${id}/data` },
       { label: t('project.tabs.scripts'), link: `/projects/${id}/scripts` },
+      { label: t('project.tabs.reference'), link: `/projects/${id}/reference` },
       { label: t('project.tabs.members'), link: `/projects/${id}/members` },
       { label: t('project.tabs.samplingFrame'), link: `/projects/${id}/sampling-frame` },
     ];

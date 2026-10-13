@@ -4,7 +4,7 @@
 
 Tamiza is compatible with KoboToolbox but is not affiliated with it.
 
-> **Status:** early development. Available: the self-hosted stack, sign-in through Keycloak, projects linked to a Kobo form with members, roles and a sampling frame, ingestion of submissions through Kobo's webhook plus scheduled synchronization ([docs/kobo.md](docs/kobo.md)), and the Python script chain that flattens, cleans and computes indicators into per-project tables ([docs/scripts.md](docs/scripts.md)). The sample test run, reference data and the dashboards come next (see `docs/tamiza-brief.md`, section 8).
+> **Status:** early development. Available: the self-hosted stack, sign-in through Keycloak, projects linked to a Kobo form with members, roles and a sampling frame, ingestion of submissions through Kobo's webhook plus scheduled synchronization ([docs/kobo.md](docs/kobo.md)), and the Python script chain that flattens, cleans and computes indicators into per-project tables, with tests of a draft script on a sample and project reference data ([docs/scripts.md](docs/scripts.md)). The dashboards come next (see `docs/tamiza-brief.md`, section 8).
 
 ## Architecture
 

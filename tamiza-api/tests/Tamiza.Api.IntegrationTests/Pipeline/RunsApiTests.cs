@@ -74,8 +74,9 @@ public sealed class RunsApiTests(PostgresFixture postgres) : IDisposable
             """, ("p", h.ProjectId));
         var runId = Guid.CreateVersion7();
         await TestData.ExecuteAsync(h.Db, """
-            INSERT INTO tamiza.runs (id, project_id, trigger, status, queued_at, started_at, finished_at, error_code, error)
-            VALUES (@id, @p, 'manual', 'failed', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z', '2026-10-05T00:01:00Z', 'step.clean', 'KeyError: ''age''');
+            INSERT INTO tamiza.runs (id, project_id, trigger, status, queued_at, started_at, finished_at, error_code, error, reference_tables)
+            VALUES (@id, @p, 'manual', 'failed', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z', '2026-10-05T00:01:00Z', 'step.clean', 'KeyError: ''age''',
+                    '[{"name": "population", "rows": 1123, "updatedAt": "2026-10-04T12:00:00+00:00"}]');
             INSERT INTO tamiza.run_steps (run_id, step, status, input_rows, output_rows, tables, log, error) VALUES
                 (@id, 'flatten', 'succeeded', 3, 9, '[{"name":"main","rows":3},{"name":"members","rows":6}]', 'Flattened 3 submissions', NULL),
                 (@id, 'clean', 'failed', NULL, NULL, '[]', 'INFO starting', 'KeyError: ''age'''),
@@ -99,6 +100,12 @@ public sealed class RunsApiTests(PostgresFixture postgres) : IDisposable
         Assert.Equal("KeyError: 'age'", steps[1].GetProperty("error").GetString());
         Assert.Equal("INFO starting", steps[1].GetProperty("log").GetString());
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        var reference = Assert.Single(details.GetProperty("referenceTables").EnumerateArray());
+        Assert.Equal("population", reference.GetProperty("name").GetString());
+        Assert.Equal(1123, reference.GetProperty("rows").GetInt64());
+        Assert.Equal(DateTimeOffset.Parse("2026-10-04T12:00:00Z"), reference.GetProperty("updatedAt").GetDateTimeOffset());
+        var older = page.GetProperty("items")[1].GetProperty("id").GetString();
+        Assert.Empty((await viewer.GetFromJsonAsync<JsonElement>($"{Runs(h)}/{older}")).GetProperty("referenceTables").EnumerateArray());
     }
 
     // 6.3 — settings and triggers
@@ -196,6 +203,8 @@ public sealed class RunsApiTests(PostgresFixture postgres) : IDisposable
         {
             "ListScripts", "SaveScript", "RemoveScript", "ListScriptVersions", "GetScriptVersion", "RestoreScriptVersion",
             "StartRun", "ListRuns", "GetRun", "GetPipelineSettings", "UpdatePipelineSettings",
+            "StartScriptTest", "GetScriptTest",
+            "ListReferenceTables", "GetReferenceTable", "UploadReferenceTable", "ReplaceReferenceTable", "DeleteReferenceTable",
         }, operations);
     }
 
