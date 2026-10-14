@@ -35,7 +35,7 @@ import {
   tableRow,
 } from '../../shared/ui';
 import { DataFilterDialog, DataFilterDialogData, DataFilterDialogResult } from './data-filter-dialog';
-import { emptyQuery, normalizeFilter, parseView, sanitize, viewParams } from './data-view';
+import { describeFilter, emptyQuery, normalizeFilter, parseView, sanitize, viewParams } from './data-view';
 import { ProjectContext } from './project-context';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
@@ -644,26 +644,7 @@ export class ProjectCleanData {
   }
 
   protected chipText(filter: DataFilter, t: Translate): string {
-    const name = filter.column;
-    switch (filter.op) {
-      case 'contains':
-        return t('cleanData.chip.contains', { name, value: filter.value });
-      case 'equals':
-        return t('cleanData.chip.equals', { name, value: filter.value });
-      case 'in': {
-        const values = filter.values ?? [];
-        return values.length === 1 ? t('cleanData.chip.equals', { name, value: values[0] }) : t('cleanData.chip.in', { name, count: values.length });
-      }
-      case 'range':
-        if (filter.min !== undefined && filter.max !== undefined) {
-          return t('cleanData.chip.rangeBoth', { name, min: filter.min, max: filter.max });
-        }
-        return filter.min !== undefined ? t('cleanData.chip.rangeMin', { name, min: filter.min }) : t('cleanData.chip.rangeMax', { name, max: filter.max });
-      case 'empty':
-        return t('cleanData.chip.empty', { name });
-      default:
-        return t('cleanData.chip.notEmpty', { name });
-    }
+    return describeFilter(filter, t);
   }
 
   protected droppedText(item: string, t: Translate): string {

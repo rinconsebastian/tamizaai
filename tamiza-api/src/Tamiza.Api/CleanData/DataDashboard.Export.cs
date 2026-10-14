@@ -55,8 +55,17 @@ public sealed partial class DataDashboard
             return null;
         }
 
+        return await ExportFromSchemaAsync(projectId, userId, DataSources.SchemaName(projectId, source), table, request, ct);
+    }
+
+    /// <summary>
+    /// <see cref="ExportAsync"/> for a schema the caller built from the project id (the indicators dashboard exports
+    /// <c>p_&lt;id&gt;_indicators.indicators</c>, which is not one of the clean data sources).
+    /// </summary>
+    internal async Task<DataExportOutcome?> ExportFromSchemaAsync(
+        Guid projectId, Guid userId, string schema, string table, DataExportRequest request, CancellationToken ct)
+    {
         var csv = request.Format == Csv;
-        var schema = DataSources.SchemaName(projectId, source);
 
         if (!await _exportSlots.WaitAsync(_options.QueueTimeout, ct))
         {

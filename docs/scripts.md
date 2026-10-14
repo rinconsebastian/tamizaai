@@ -161,7 +161,7 @@ def prepare_output(cleaned, ctx):
 
 ### 3. `compute_indicators(cleaned, ctx)`
 
-Receives the cleaned tables; returns **one** DataFrame with the columns `indicator`, `disaggregation`, `value`, `numerator` and `denominator`. Other columns are allowed.
+Receives the cleaned tables; returns **one** DataFrame with the columns `indicator`, `disaggregation`, `value`, `numerator` and `denominator`. Other columns are allowed, and the [indicators dashboard](indicators-dashboard.md) can group and filter its widgets by any of them (a `year` or `round` column for a trend). For a map, add a geometry column: a geopandas column, or text in WKT (`POINT`, `POLYGON` or `MULTIPOLYGON`), projected to degrees (longitude and latitude) before you return it; see [Maps](indicators-dashboard.md#maps). Rows that share an indicator and a disaggregation are summed by the dashboard's widgets.
 
 ```python
 import pandas as pd

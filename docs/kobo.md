@@ -135,8 +135,8 @@ The tables' columns also carry the text of their questions, as labels (see [scri
 | Role | Can |
 |---|---|
 | Admin | Everything below, plus project settings, the synchronization and script schedules, the Kobo token, the webhook and members. |
-| Analyst | Edit the sampling frame, re-check the form, run **Sync now** and **Full resync**, and write and run the [scripts](scripts.md). |
-| Viewer | Read the project, including the performance dashboard, its Data section and synchronization log. |
+| Analyst | Edit the sampling frame, re-check the form, run **Sync now** and **Full resync**, write and run the [scripts](scripts.md), and build the [indicators dashboard](indicators-dashboard.md). |
+| Viewer | Read the project, including the dashboards, its Data section and synchronization log. |
 
 Admins add people in the **Members** section by email and role:
 

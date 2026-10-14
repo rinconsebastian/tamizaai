@@ -1,0 +1,151 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Tamiza.Api.IntegrationTests.Infrastructure;
+
+namespace Tamiza.Api.IntegrationTests.Indicators;
+
+/// <summary>
+/// A project with an admin, an analyst and a viewer, plus a user who is not a member, whose indicator table is written with SQL
+/// as the analytics worker would publish it, next to the run record it leaves.
+/// </summary>
+public sealed class IndicatorsHarness : IAsyncDisposable
+{
+    /// <summary>The five columns script 3 must return.</summary>
+    public const string RequiredColumns = "indicator text, disaggregation text, value numeric, numerator numeric, denominator numeric";
+
+    private IndicatorsHarness(
+        TamizaApiFactory factory, string db, Guid projectId, string exportDirectory,
+        HttpClient viewer, HttpClient analyst, HttpClient admin, HttpClient outsider)
+    {
+        Factory = factory;
+        Db = db;
+        ProjectId = projectId;
+        ExportDirectory = exportDirectory;
+        Viewer = viewer;
+        Analyst = analyst;
+        Admin = admin;
+        Outsider = outsider;
+    }
+
+    public TamizaApiFactory Factory { get; }
+
+    public string Db { get; }
+
+    public Guid ProjectId { get; }
+
+    public string ExportDirectory { get; }
+
+    public string[] ExportFiles => Directory.Exists(ExportDirectory) ? Directory.GetFiles(ExportDirectory) : [];
+
+    public HttpClient Viewer { get; }
+
+    public HttpClient Analyst { get; }
+
+    public HttpClient Admin { get; }
+
+    /// <summary>Signed in, but not a member of the project.</summary>
+    public HttpClient Outsider { get; }
+
+    public string Url => UrlOf(ProjectId);
+
+    public static string UrlOf(Guid projectId) => $"/api/v1/projects/{projectId}/indicators";
+
+    public static async Task<IndicatorsHarness> CreateAsync(PostgresFixture postgres, Dictionary<string, string?>? settings = null)
+    {
+        var exportDirectory = Path.Combine(Path.GetTempPath(), "tamiza-indicator-export-tests-" + Guid.NewGuid().ToString("N"));
+        settings = new Dictionary<string, string?> { ["DataDashboard:ExportDirectory"] = exportDirectory }
+            .Concat(settings ?? []).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.Last().Value);
+        // Idle connections of a finished test are pruned after a few seconds: the whole suite shares one server with a connection limit.
+        var db = await postgres.CreateDatabaseAsync() + ";Connection Idle Lifetime=3;Connection Pruning Interval=1";
+        var factory = new TamizaApiFactory(db, settings);
+        var adminId = await TestData.SignInAsync(factory, "ada", "ada@example.org");
+        var projectId = await TestData.InsertProjectAsync(db, adminId, "Coverage 2026");
+        await TestData.AddMemberAsync(db, projectId, adminId, "admin");
+        var analystId = await TestData.SignInAsync(factory, "grace", "grace@example.org");
+        await TestData.AddMemberAsync(db, projectId, analystId, "analyst");
+        var viewerId = await TestData.SignInAsync(factory, "vic", "vic@example.org");
+        await TestData.AddMemberAsync(db, projectId, viewerId, "viewer");
+        await TestData.SignInAsync(factory, "mallory", "mallory@example.org");
+        return new IndicatorsHarness(factory, db, projectId, exportDirectory,
+            TestData.ClientFor(factory, "vic", "vic@example.org"),
+            TestData.ClientFor(factory, "grace", "grace@example.org"),
+            TestData.ClientFor(factory, "ada", "ada@example.org"),
+            TestData.ClientFor(factory, "mallory", "mallory@example.org"));
+    }
+
+    /// <summary>Replaces the project's indicator schema with the table <c>indicators</c> and records the step as succeeded.</summary>
+    public Task<Guid> PublishAsync(string columns, string rows) =>
+        PublishedTables.PublishAsync(Db, ProjectId, "indicators", ("indicators", columns, rows));
+
+    public Task ExecuteAsync(string sql, params (string Name, object Value)[] parameters) => TestData.ExecuteAsync(Db, sql, parameters);
+
+    /// <summary>A second project of the same admin, for widgets that must stay in their own project.</summary>
+    public async Task<Guid> AddOtherProjectAsync()
+    {
+        var adminId = await TestData.ScalarAsync<Guid>(Db, "SELECT id FROM tamiza.users WHERE keycloak_sub = 'ada'");
+        var otherId = await TestData.InsertProjectAsync(Db, adminId, "Other");
+        await TestData.AddMemberAsync(Db, otherId, adminId, "admin");
+        return otherId;
+    }
+
+    public async Task<JsonElement> GetAsync(string path = "", HttpClient? client = null)
+    {
+        var response = await (client ?? Viewer).GetAsync(Url + path);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    public async Task<JsonElement> QueryAsync(object body, HttpClient? client = null)
+    {
+        var response = await (client ?? Viewer).PostAsJsonAsync(Url + "/query", body);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    public Task<HttpResponseMessage> PostQueryAsync(object body, HttpClient? client = null) =>
+        (client ?? Viewer).PostAsJsonAsync(Url + "/query", body);
+
+    public Task<HttpResponseMessage> PostWidgetAsync(object body, HttpClient? client = null) =>
+        (client ?? Analyst).PostAsJsonAsync(Url + "/widgets", body);
+
+    /// <summary>Adds a widget as the analyst and returns its JSON; fails the test when it is not created.</summary>
+    public async Task<JsonElement> AddWidgetAsync(object body, HttpClient? client = null)
+    {
+        var response = await PostWidgetAsync(body, client);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    public static string[] Errors(JsonElement problem, string field) =>
+        problem.GetProperty("errors").GetProperty(field).EnumerateArray().Select(e => e.GetString()!).ToArray();
+
+    /// <summary>The rows of a query response as <c>indicator|group|value</c>.</summary>
+    public static string[] Rows(JsonElement result) =>
+        result.GetProperty("rows").EnumerateArray()
+            .Select(r => $"{r.GetProperty("indicator").GetString()}|{r.GetProperty("group").GetString()}|{r.GetProperty("value").GetDouble():0.##}")
+            .ToArray();
+
+    public static string[] Strings(JsonElement array) => array.EnumerateArray().Select(e => e.GetString()!).ToArray();
+
+    public async ValueTask DisposeAsync()
+    {
+        Viewer.Dispose();
+        Analyst.Dispose();
+        Admin.Dispose();
+        Outsider.Dispose();
+        await Factory.DisposeAsync();
+        Performance.PerformanceHarness.ReleasePool(Db);
+        if (Directory.Exists(ExportDirectory))
+        {
+            Directory.Delete(ExportDirectory, recursive: true);
+        }
+    }
+}
+
+internal static class HttpClientPatchExtensions
+{
+    public static Task<HttpResponseMessage> PatchJsonAsync(this HttpClient client, string url, object body) =>
+        client.PatchAsync(url, JsonContent.Create(body));
+}

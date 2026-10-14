@@ -243,11 +243,18 @@ Every member SHALL be able to export the full table, with the applied filters an
 
 ### 5.7 Dashboard 3: indicators (`dashboard-indicators`)
 
-#### Requirement: Generic indicator view
+> **Superseded by `add-indicators-dashboard`** (section 8, item 7). The two requirements below are the original scope, kept for reference: one fixed bar chart by disaggregation and an XLSX export. The change replaces them with the widget canvas described next; see `docs/indicators-dashboard.md`.
+
+#### Requirement: Generic indicator view *(original, superseded)*
 The dashboard SHALL read the standard indicator table and show each indicator with its value, numerator and denominator, with a filter by disaggregation and a bar chart by disaggregation.
 
-#### Requirement: Indicator export
+#### Requirement: Indicator export *(original, superseded)*
 The user SHALL be able to export the indicator table to XLSX.
+
+#### Requirement: Widget canvas
+Every project member SHALL be able to open a canvas of widgets over the indicator table that script 3 published, and `analyst` and `admin` members SHALL be able to add, edit, arrange and remove them; a `viewer` only sees them. A widget is a stat tile, a bar, column, line, histogram or pie chart, or a map, each with a title and a query over the published table: one or more indicators (exactly one for a stat tile, a pie chart and a map), a column to group by (`disaggregation` by default, or any other column of the table), the field to plot (`value`, `numerator` or `denominator`) and up to 50 filters built as the clean data dashboard's. Rows that share an indicator and a group value are summed before they are plotted. A project holds a limited number of widgets and a widget plots a limited number of rows, and the dashboard says when a limit is reached.
+
+Widgets sit on a 12-column grid that analysts and admins move and resize by dragging or with the keyboard; the reading order is top to bottom, left to right. Charts and maps are drawn as inline SVG with no chart or map library, each with a "Show as table" alternative. A map draws the `POINT`, `POLYGON` and `MULTIPOLYGON` geometry (WKT) that a script publishes in a column of the indicator table, as regions or markers colored by the plotted field, with no basemap; rows whose geometry cannot be read are left out and counted. A widget whose indicator or column the table no longer has shows a message naming what is missing instead of failing the page. Every member can export the whole published indicator table to CSV and XLSX through the single-use link of the clean data dashboard.
 
 ---
 
@@ -263,6 +270,7 @@ The user SHALL be able to export the indicator table to XLSX.
 - `sampling_frames`: project_id, dimensions, targets.
 - `script_tests`: id, project_id, requested_by, kind, code (the tested draft), sample_size, status, clean_version_id, queued_at, started_at, finished_at, error, steps (per-step logs and table previews). Deleted 24 hours after they end.
 - `reference_tables`: id, project_id, name, file_name, columns (name, header, type), row_count, updated_by, updated_at. The rows are in `reference_table_contents` (one JSONB array per table), not in a per-project schema.
+- `dashboard_widgets`: id, project_id, chart_type (stat/bar/column/line/histogram/pie/map), title, config (the widget's query: indicators, group column, plotted field, filters, geometry column, histogram ranges), layout (x, y, w, h on the 12-column grid), created_by, created_at, updated_by, updated_at. One row per widget of the indicators dashboard.
 - `form_versions`: project_id, uid (a Kobo form version, `__version__`), status (pending/available/failed/not_found), fields and choices (the version's questions and choice lists, with labels in the default language), deployed_at, recorded_at, fetched_at, attempts, next_attempt_at, error. One row per version a project's submissions use; recorded when a submission with the version is stored, fetched from Kobo once.
 
 ---
@@ -291,7 +299,7 @@ Implement in this order, one change per line:
 4d. `add-question-labels`: the flattened columns carry their question's label, from the latest deployed form version only, as column comments, in `ctx.form.columns` and in the sample-test preview. Not breaking.
 5. `add-performance-dashboard`: the first dashboard (submissions per day, completion time, enumerators, sampling frame coverage) computed in SQL on the stored submissions, with a per-project time zone and a date range; the field check reports coverage unavailable without a usable frame.
 6. `add-clean-data-dashboard`: the second dashboard: the tables the last runs published (output, else clean) in a paged table with typed server-side filters, sorting and a view kept in the page address, and CSV and XLSX exports downloaded through single-use links; publishing waits in short attempts for readers of the tables, so a long export never blocks the dashboard.
-7. `add-indicators-dashboard`
+7. `add-indicators-dashboard`: the third dashboard, replacing the fixed bar chart of section 5.7 with a canvas of widgets (stat tile, bar, column, line, histogram, pie and map) over the indicator table script 3 published, each a saved query that can group by any column, with a drag-and-resize grid editable by analysts and admins, maps drawn from a WKT geometry column without a basemap, and CSV and XLSX export of the whole table; widgets are one row each in `dashboard_widgets`.
 
 ### Deferred from `setup-foundation`
 

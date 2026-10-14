@@ -138,6 +138,7 @@
     "tabs": {
       "performance": "Performance",
       "cleanData": "Clean data",
+      "indicators": "Indicators",
       "overview": "Overview",
       "data": "Data",
       "scripts": "Scripts",
@@ -715,6 +716,155 @@
       "preparing": "Preparing the export…",
       "ready": "Export ready: {{ rows }} rows. The download starts now.",
       "readyCut": "{{ cut }} cells were longer than Excel allows and were cut."
+    }
+  },
+  "indicators": {
+    "empty": {
+      "title": "No indicators published yet",
+      "body": "The indicators appear here after a run publishes the table that script 3 (indicators) returns.",
+      "editor": "Write script 3 and run the scripts to publish it. Widgets you add now are kept and draw once it is published.",
+      "editorLink": "Open the scripts",
+      "viewer": "An analyst or admin has to run the project’s scripts first.",
+      "widgets": "{{ count }} widgets are already configured; they draw once the indicators are published."
+    },
+    "published": "Published {{ time }}",
+    "publishedRun": "by run {{ run }}",
+    "runsLink": "See the runs",
+    "count": "{{ count }} of {{ max }} widgets",
+    "showTables": "Show all as tables",
+    "showCharts": "Show all as charts",
+    "add": "Add widget",
+    "limit": "The dashboard has the most widgets it can hold ({{ count }}). Remove one to add another.",
+    "added": "Widget {{ title }} added.",
+    "saved": "Widget {{ title }} saved.",
+    "noWidgets": {
+      "title": "No widgets yet",
+      "editor": "Add a widget to chart the published indicators: a figure, a chart or a map.",
+      "viewer": "An analyst or admin can add widgets to this dashboard."
+    },
+    "export": {
+      "button": "Export",
+      "help": "Exports the whole published indicator table.",
+      "csv": "CSV file",
+      "xlsx": "Excel file (XLSX)",
+      "preparing": "Preparing the export…",
+      "ready": "Export ready: {{ rows }} rows. The download starts now."
+    },
+    "remove": {
+      "title": "Remove {{ title }}?",
+      "message": "The widget is removed for every member of the project.",
+      "confirm": "Remove widget",
+      "done": "Widget {{ title }} removed."
+    },
+    "chartTypes": {
+      "stat": "Stat tile",
+      "bar": "Bar chart",
+      "column": "Column chart",
+      "line": "Line chart",
+      "histogram": "Histogram",
+      "pie": "Pie chart",
+      "map": "Map"
+    },
+    "valueFields": {
+      "value": "value",
+      "numerator": "numerator",
+      "denominator": "denominator"
+    },
+    "grid": {
+      "move": "Move {{ title }}",
+      "resize": "Resize {{ title }}",
+      "edit": "Edit {{ title }}",
+      "remove": "Remove {{ title }}",
+      "help": "Arrow keys move the widget by one cell. Hold shift, or use the resize handle, to change its size.",
+      "status": "{{ title }}: column {{ column }}, row {{ row }}, {{ width }} wide, {{ height }} high."
+    },
+    "widget": {
+      "unpublished": "Nothing is published yet. This widget draws once the indicators are published.",
+      "rowLimit": "Only the first {{ count }} rows are shown: the query matches more. Add a filter to narrow it down.",
+      "empty": "No rows match this widget’s query.",
+      "showTable": "Show as table",
+      "showChart": "Show as chart"
+    },
+    "missing": {
+      "title": "This widget cannot be drawn",
+      "indicators": "The published table no longer has the indicators: {{ names }}.",
+      "columns": "The published table no longer has the columns: {{ names }}.",
+      "help": "A script change removed them. Edit the widget to choose others, or restore them in the script."
+    },
+    "chart": {
+      "noGroup": "(none)",
+      "caption": "{{ field }} by {{ group }}",
+      "captionHistogram": "Rows per range of {{ field }}, in {{ buckets }} ranges",
+      "range": "Range",
+      "rowsOf": "Rows of {{ indicator }}",
+      "summaryEmpty": "Chart of {{ indicators }}: no data.",
+      "summary": {
+        "bar": "Bar chart of {{ indicators }} by {{ group }}: {{ count }} groups, from {{ min }} to {{ max }}. Highest: {{ top }}.",
+        "column": "Column chart of {{ indicators }} by {{ group }}: {{ count }} groups, from {{ min }} to {{ max }}. Highest: {{ top }}.",
+        "line": "Line chart of {{ indicators }} by {{ group }}: {{ count }} points, from {{ min }} to {{ max }}. Highest: {{ top }}.",
+        "histogram": "Histogram of {{ indicators }}: {{ count }} ranges, the fullest holds {{ max }} rows ({{ top }}).",
+        "pie": "Pie chart of {{ indicators }} by {{ group }}: {{ count }} slices. Largest: {{ top }}, {{ share }}."
+      }
+    },
+    "stat": {
+      "rows": "Sum over {{ count }} rows"
+    },
+    "pie": {
+      "other": "Other",
+      "share": "Share",
+      "skipped": "{{ count }} groups with a zero or negative value are not drawn; the table lists them."
+    },
+    "map": {
+      "caption": "{{ indicator }}: {{ field }} by {{ group }}",
+      "leftOut": "{{ count }} rows left out: their geometry is missing or cannot be read.",
+      "nothing": "No row has a geometry that can be drawn.",
+      "summary": "Map of {{ indicator }}: {{ count }} places drawn, from {{ min }} to {{ max }}; {{ left }} left out.",
+      "geometry": "Geometry",
+      "kind": {
+        "polygon": "Region",
+        "point": "Point",
+        "none": "Left out"
+      }
+    },
+    "dialog": {
+      "addTitle": "Add a widget",
+      "editTitle": "Edit widget",
+      "chartType": "Chart type",
+      "title": "Title",
+      "indicators": "Indicators",
+      "indicatorsOne": "This chart type plots exactly one indicator.",
+      "indicatorsMany": "Choose one or more indicators, up to {{ count }}; each is its own series.",
+      "indicatorsText": "Indicators, separated by commas",
+      "search": "Search indicators",
+      "noIndicators": "No indicators to list.",
+      "notPublished": "not published",
+      "selected": "{{ count }} selected",
+      "unpublishedHelp": "Nothing is published yet, so the indicators cannot be listed. Type their names as the script will return them.",
+      "groupBy": "Group by",
+      "valueField": "Field to plot",
+      "geometry": "Geometry column",
+      "geometryChoose": "Choose a column",
+      "geometryHelp": "A text column holding WKT: POINT, POLYGON or MULTIPOLYGON.",
+      "buckets": "Ranges",
+      "bucketsHelp": "How many equal-width ranges to count rows in, up to {{ max }}. 10 when empty.",
+      "filters": "Filters",
+      "filterColumn": "Column",
+      "addFilter": "Add filter",
+      "filtersFull": "A widget takes at most {{ count }} filters.",
+      "filtersUnpublished": "Filters can be added once the indicators are published.",
+      "preview": "Preview",
+      "previewIncomplete": "Complete the form to see a preview.",
+      "saving": "Saving…",
+      "errors": {
+        "title": "Enter a title.",
+        "titleLong": "The title takes at most {{ max }} characters.",
+        "indicatorsOne": "Choose exactly one indicator for this chart type.",
+        "indicatorsMany": "Choose at least one indicator.",
+        "indicatorsMax": "Choose at most {{ count }} indicators.",
+        "groupBy": "Choose the column to group by.",
+        "geometry": "Choose the geometry column of the map.",
+        "buckets": "Enter a whole number from 1 to {{ max }}, or leave it empty."
+      }
     }
   }
 }

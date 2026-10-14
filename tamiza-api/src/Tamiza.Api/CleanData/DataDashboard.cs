@@ -214,7 +214,7 @@ public sealed partial class DataDashboard : IDisposable
     /// is a published table; once it is locked it cannot be replaced until this transaction ends, so a second lookup gives the
     /// columns every statement that follows will see.
     /// </summary>
-    private static async Task<IReadOnlyList<TableColumn>?> LockAndDescribeAsync(
+    internal static async Task<IReadOnlyList<TableColumn>?> LockAndDescribeAsync(
         NpgsqlConnection connection, NpgsqlTransaction transaction, string schema, string table, CancellationToken ct)
     {
         if (await TableCatalog.FindAsync(connection, transaction, schema, table, ct) is null)
@@ -237,7 +237,7 @@ public sealed partial class DataDashboard : IDisposable
         return await TableCatalog.FindAsync(connection, transaction, schema, table, ct);
     }
 
-    private async Task SleepForTestsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken ct)
+    internal async Task SleepForTestsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken ct)
     {
         if (_options.TestStatementSleep <= TimeSpan.Zero)
         {
@@ -343,7 +343,7 @@ public sealed partial class DataDashboard : IDisposable
     }
 
     /// <summary>Runs one read in one of the query slots; waiting longer than the queue timeout fails as too long.</summary>
-    private async Task<T> WithSlotAsync<T>(Func<Task<T>> work, CancellationToken ct)
+    internal async Task<T> WithSlotAsync<T>(Func<Task<T>> work, CancellationToken ct)
     {
         if (!await _slots.WaitAsync(_options.QueueTimeout, ct))
         {
@@ -360,7 +360,7 @@ public sealed partial class DataDashboard : IDisposable
         }
     }
 
-    private sealed record StepInfo(Guid RunId, DateTimeOffset? FinishedAt, IReadOnlyDictionary<string, long> Rows);
+    internal sealed record StepInfo(Guid RunId, DateTimeOffset? FinishedAt, IReadOnlyDictionary<string, long> Rows);
 
     private static async Task<HashSet<string>> ExistingSchemasAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, string[] names, CancellationToken ct)
     {
@@ -400,7 +400,7 @@ public sealed partial class DataDashboard : IDisposable
     /// The latest succeeded run step of this source. A source's schema is replaced only by a succeeded step, so while the schema
     /// exists this step is the one that published it, whatever failed since.
     /// </summary>
-    private static async Task<StepInfo?> LatestStepAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid projectId, string step, CancellationToken ct)
+    internal static async Task<StepInfo?> LatestStepAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid projectId, string step, CancellationToken ct)
     {
         await using var command = new NpgsqlCommand(
             """
@@ -435,7 +435,7 @@ public sealed partial class DataDashboard : IDisposable
     /// Runs <paramref name="work"/> in a read-only transaction on a connection of its own. The statement and lock time limits and the
     /// project's time zone apply to every statement in it; a limit that is hit becomes a <see cref="DataTimeoutException"/>.
     /// </summary>
-    private async Task<T> InTransactionAsync<T>(
+    internal async Task<T> InTransactionAsync<T>(
         Guid projectId, TimeSpan statementTimeout, Func<NpgsqlConnection, NpgsqlTransaction, DataProject, Task<T>> work, CancellationToken ct,
         bool heapOrder = false)
     {

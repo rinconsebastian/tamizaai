@@ -39,6 +39,8 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
 
     public DbSet<FormVersion> FormVersions => Set<FormVersion>();
 
+    public DbSet<DashboardWidget> DashboardWidgets => Set<DashboardWidget>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(Schema);
@@ -276,6 +278,24 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             // The background pass looks for versions that are due.
             version.HasIndex(v => v.NextAttemptAt).HasFilter("status IN ('pending', 'failed')");
             version.HasOne<Project>().WithMany().HasForeignKey(v => v.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<DashboardWidget>(widget =>
+        {
+            widget.ToTable("dashboard_widgets", table => table.HasCheckConstraint(
+                "ck_dashboard_widgets_chart_type", "chart_type IN ('stat', 'bar', 'column', 'line', 'histogram', 'pie', 'map')"));
+            widget.HasKey(w => w.Id);
+            widget.Property(w => w.Id).HasDefaultValueSql("gen_random_uuid()");
+            widget.Property(w => w.ChartType).HasColumnType("text");
+            widget.Property(w => w.Title).HasColumnType("text");
+            widget.Property(w => w.Config).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            widget.Property(w => w.Layout).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            widget.Property(w => w.CreatedAt).HasDefaultValueSql("now()");
+            widget.Property(w => w.UpdatedAt).HasDefaultValueSql("now()");
+            widget.HasIndex(w => w.ProjectId);
+            widget.HasOne<Project>().WithMany().HasForeignKey(w => w.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            widget.HasOne<User>().WithMany().HasForeignKey(w => w.CreatedBy).OnDelete(DeleteBehavior.Restrict);
+            widget.HasOne<User>().WithMany().HasForeignKey(w => w.UpdatedBy).OnDelete(DeleteBehavior.Restrict);
         });
     }
 

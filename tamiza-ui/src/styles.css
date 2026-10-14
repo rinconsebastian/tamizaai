@@ -33,3 +33,45 @@
     @apply min-h-screen font-sans;
   }
 }
+
+/*
+ * Chart colors for the indicator widgets: eight categorical hues in a fixed order (a series keeps its color) and one sequential
+ * ramp of seven steps for magnitude, the map's fill. The dark values are stepped for the dark surface, not an inversion; the
+ * sequential ramp runs light to dark on the light theme and dark to light on the dark one, so the low end recedes in both.
+ */
+:root {
+  --tmz-series-1: #2a78d6;
+  --tmz-series-2: #eb6834;
+  --tmz-series-3: #1baf7a;
+  --tmz-series-4: #eda100;
+  --tmz-series-5: #e87ba4;
+  --tmz-series-6: #008300;
+  --tmz-series-7: #6250d6;
+  --tmz-series-8: #e34948;
+  --tmz-series-other: #898781;
+  --tmz-seq-1: #cde2fb;
+  --tmz-seq-2: #9ec5f4;
+  --tmz-seq-3: #6da7ec;
+  --tmz-seq-4: #3987e5;
+  --tmz-seq-5: #256abf;
+  --tmz-seq-6: #184f95;
+  --tmz-seq-7: #0d366b;
+}
+
+.dark {
+  --tmz-series-1: #3987e5;
+  --tmz-series-2: #d95926;
+  --tmz-series-3: #199e70;
+  --tmz-series-4: #c98500;
+  --tmz-series-5: #d55181;
+  --tmz-series-6: #008300;
+  --tmz-series-7: #9085e9;
+  --tmz-series-8: #e66767;
+  --tmz-seq-1: #184f95;
+  --tmz-seq-2: #256abf;
+  --tmz-seq-3: #3987e5;
+  --tmz-seq-4: #5598e7;
+  --tmz-seq-5: #6da7ec;
+  --tmz-seq-6: #9ec5f4;
+  --tmz-seq-7: #cde2fb;
+}

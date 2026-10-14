@@ -56,6 +56,7 @@ export class ProjectPage {
     const tabs: TabItem[] = [
       { label: t('project.tabs.performance'), link: `/projects/${id}/performance` },
       { label: t('project.tabs.cleanData'), link: `/projects/${id}/clean-data` },
+      { label: t('project.tabs.indicators'), link: `/projects/${id}/indicators` },
       { label: t('project.tabs.overview'), link: `/projects/${id}/overview` },
       { label: t('project.tabs.data'), link: `/projects/${id}/data` },
       { label: t('project.tabs.scripts'), link: `/projects/${id}/scripts` },

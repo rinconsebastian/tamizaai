@@ -24,4 +24,25 @@ public sealed class ScriptConventionTests
 
         Assert.Empty(duplicates);
     }
+
+    [Fact]
+    public void The_indicators_dashboard_script_names_every_constraint_and_index_explicitly()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0007_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0007_add_indicators_dashboard.sql", resource);
+        Assert.Contains("CONSTRAINT pk_dashboard_widgets PRIMARY KEY", sql);
+        Assert.Contains("CONSTRAINT ck_dashboard_widgets_chart_type CHECK", sql);
+        Assert.Contains("CONSTRAINT fk_dashboard_widgets_projects_project_id FOREIGN KEY", sql);
+        Assert.Contains("CONSTRAINT fk_dashboard_widgets_users_created_by FOREIGN KEY", sql);
+        Assert.Contains("CONSTRAINT fk_dashboard_widgets_users_updated_by FOREIGN KEY", sql);
+        // Every key, check and foreign key is introduced by a CONSTRAINT name; every index has an ix_ name.
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"PRIMARY KEY"));
+        Assert.Equal(System.Text.RegularExpressions.Regex.Matches(sql, @"(?:PRIMARY KEY|FOREIGN KEY|CHECK)").Count,
+            System.Text.RegularExpressions.Regex.Matches(sql, @"CONSTRAINT (?:pk|fk|ck)_\w+ (?:PRIMARY KEY|FOREIGN KEY|CHECK)").Count);
+        Assert.All(System.Text.RegularExpressions.Regex.Matches(sql, @"CREATE (?:UNIQUE )?INDEX (\w+)").Select(m => m.Groups[1].Value),
+            name => Assert.StartsWith("ix_dashboard_widgets_", name));
+    }
 }

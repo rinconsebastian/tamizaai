@@ -131,6 +131,13 @@ Projects' synchronization intervals are set per project by their admins, in the 
 
 Exports are written to `ExportDirectory` before the browser downloads them, so they use the `api` container's disk (its writable layer), not memory. A file is deleted as soon as it is downloaded or its link expires, and the directory is emptied whenever `api` starts. In the worst case the disk holds `MaxExportFileSize` for each export prepared in the last `ExportLinkLifetime` that nobody has downloaded yet; lower `MaxExportFileSize` on a small disk. Download links live in the memory of the `api` process, so a restart invalidates links that were not used yet, which is another reason to run a single `api` replica.
 
+**Indicators dashboard.** The dashboard of widgets (see [indicators-dashboard.md](indicators-dashboard.md)) reads the indicator table with the `DataDashboard__` time limits and query slots above, and exports it with the same export settings. Two more variables on the `api` service limit what a project can ask of it:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `IndicatorDashboard__MaxWidgetsPerProject` | `50` | Most widgets one project's dashboard can hold, from 1 to 500. Widgets already saved are kept if you lower it; the project just cannot add more until it is under the limit. |
+| `IndicatorDashboard__MaxWidgetQueryRows` | `5000` | Most rows one widget plots, from 1 to 100,000. A widget with more says that only the first rows are shown. |
+
 **Per-project tables.** The pipeline publishes each project's results in PostgreSQL schemas named `p_<project id without dashes>_raw`, `_clean`, `_output` and `_indicators` (see [scripts.md](scripts.md)). They are rebuilt by every run. To remove a project's tables by hand, drop its four schemas, for example `DROP SCHEMA p_01a0ffdc120470188195fe685d20c5c9_raw CASCADE;`; the next run creates them again.
 
 **One `api` replica.** Run a single `api` container. On startup it marks any synchronization left running as interrupted, which assumes no other `api` is running one.

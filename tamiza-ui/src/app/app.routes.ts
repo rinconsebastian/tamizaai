@@ -20,6 +20,7 @@ export const routes: Routes = [
           { path: '', pathMatch: 'full', redirectTo: 'performance' },
           { path: 'performance', loadComponent: () => import('./pages/projects/project-performance').then((m) => m.ProjectPerformance) },
           { path: 'clean-data', loadComponent: () => import('./pages/projects/project-clean-data').then((m) => m.ProjectCleanData) },
+          { path: 'indicators', loadComponent: () => import('./pages/projects/project-indicators').then((m) => m.ProjectIndicators) },
           { path: 'overview', loadComponent: () => import('./pages/projects/project-overview').then((m) => m.ProjectOverview) },
           { path: 'data', loadComponent: () => import('./pages/projects/project-data').then((m) => m.ProjectData) },
           {

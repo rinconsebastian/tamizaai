@@ -246,6 +246,46 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
             await ScalarAsync<string>(connectionString, "SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_raw_submissions_project_id_submitted_at'"));
     }
 
+    [Fact]
+    public async Task Indicators_dashboard_script_adds_the_widgets_table_and_keeps_existing_data()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(
+            connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql", "0004_add_pipeline_authoring.sql",
+            "0005_add_choice_labels.sql", "0006_add_performance_dashboard.sql");
+        await ExecuteAsync(connectionString, """
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('00000000-0000-0000-0000-000000000001', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('00000000-0000-0000-0000-0000000000aa', 'Existing', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(),
+                    '00000000-0000-0000-0000-000000000001', now(), now());
+            """);
+        Assert.False(await TableExistsAsync(connectionString, "dashboard_widgets"));
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        Assert.Contains("0007_add_indicators_dashboard.sql", Scripts);
+        Assert.True(await TableExistsAsync(connectionString, "dashboard_widgets"));
+        Assert.Equal("Existing", await ScalarAsync<string>(connectionString, "SELECT name FROM tamiza.projects"));
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+
+        // The defaults fill in what a widget does not say, and the constraints refuse what it must not be.
+        await ExecuteAsync(connectionString, """
+            INSERT INTO tamiza.dashboard_widgets (project_id, chart_type, title, created_by, updated_by)
+            VALUES ('00000000-0000-0000-0000-0000000000aa', 'map', 'First', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001')
+            """);
+        Assert.Equal("{} {}", await ScalarAsync<string>(connectionString, "SELECT config::text || ' ' || layout::text FROM tamiza.dashboard_widgets"));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, """
+            INSERT INTO tamiza.dashboard_widgets (project_id, chart_type, title, created_by, updated_by)
+            VALUES ('00000000-0000-0000-0000-0000000000aa', 'radar', 'Bad', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001')
+            """));
+
+        // Deleting the project deletes its widgets.
+        await ExecuteAsync(connectionString, "DELETE FROM tamiza.projects WHERE id = '00000000-0000-0000-0000-0000000000aa'");
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+    }
+
     /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>
     private static void ApplyScripts(string connectionString, params string[] names)
     {

@@ -789,7 +789,7 @@ describe('ProjectCleanData', () => {
       const { root } = await open('viewer');
 
       const tabs = Array.from(root.querySelectorAll('nav a')).map((a) => a.textContent?.trim());
-      expect(tabs.slice(0, 3)).toEqual(['Performance', 'Clean data', 'Overview']);
+      expect(tabs.slice(0, 3)).toEqual(['Performance', 'Clean data', 'Indicators']);
       expect(root.querySelectorAll('nav a')[1].getAttribute('href')).toBe(`/projects/${projectId}/clean-data`);
       expect(root.querySelector('nav a[aria-current="page"]')?.textContent?.trim()).toBe('Clean data');
     });

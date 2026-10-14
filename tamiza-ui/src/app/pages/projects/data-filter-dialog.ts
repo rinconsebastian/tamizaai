@@ -4,7 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { Observable, Subject, catchError, debounceTime, distinctUntilChanged, merge, of, switchMap, tap } from 'rxjs';
 import { ApiErrors } from '../../core/api-error';
-import { DataColumn, DataFilter, DataValueCount, FilterOp } from '../../core/projects/data.service';
+import { DataColumn, DataFilter, FilterOp } from '../../core/projects/data.service';
 import { Alert, Button, FormField, Input } from '../../shared/ui';
 import { operationsFor } from './data-view';
 
@@ -14,9 +14,11 @@ export interface DataFilterDialogData {
   filter: DataFilter | null;
   timeZone: string;
   /** The most frequent values of a text column, only those that contain `search` when it is not empty. */
-  loadValues: (search: string) => Observable<DataValueCount[]>;
+  loadValues: (search: string) => Observable<{ value: string; count: number | null }[]>;
   /** Asks the server whether the filter is accepted; it fails with the API's error when it is not. */
   check: (filter: DataFilter) => Observable<unknown>;
+  /** For tables that cannot list a column's values: the text typed in the search box is offered as a value to choose. */
+  allowTypedValues?: boolean;
 }
 
 /** What the dialog closes with: the filter to apply, or the order to remove the column's filter. */
@@ -148,7 +150,7 @@ export class DataFilterDialog {
   protected readonly search = signal('');
 
   protected readonly loading = signal(false);
-  protected readonly listed = signal<DataValueCount[]>([]);
+  protected readonly listed = signal<{ value: string; count: number | null }[]>([]);
   protected readonly busy = signal(false);
   protected readonly fieldError = signal<string | null>(null);
   protected readonly error = signal<string | null>(null);
@@ -165,7 +167,9 @@ export class DataFilterDialog {
     const listed = this.listed();
     const known = new Set(listed.map((v) => v.value));
     const missing = this.search() ? [] : this.selected().filter((v) => !known.has(v)).map((value) => ({ value, count: null }));
-    return [...missing, ...listed];
+    const typed = (this.search() || '').trim();
+    const offered = this.data.allowTypedValues && typed && !known.has(typed) ? [{ value: typed, count: null }] : [];
+    return [...offered, ...missing, ...listed];
   });
 
   constructor() {
@@ -174,7 +178,7 @@ export class DataFilterDialog {
       merge(this.first, this.searches.pipe(debounceTime(valueSearchDelayMs), distinctUntilChanged()))
         .pipe(
           tap(() => this.loading.set(true)),
-          switchMap((search) => this.data.loadValues(search).pipe(catchError(() => of<DataValueCount[]>([])))),
+          switchMap((search) => this.data.loadValues(search).pipe(catchError(() => of<{ value: string; count: number | null }[]>([])))),
           takeUntilDestroyed(inject(DestroyRef)),
         )
         .subscribe((values) => {
