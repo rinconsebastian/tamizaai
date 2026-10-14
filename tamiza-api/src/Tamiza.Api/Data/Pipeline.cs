@@ -9,10 +9,23 @@ public sealed class ScriptVersion
 
     public ScriptKind Kind { get; set; }
 
-    /// <summary>1, 2, 3... per project and kind.</summary>
+    /// <summary>The indicator's name, which is also its table's name; null for the clean and output scripts.</summary>
+    public string? Name { get; set; }
+
+    /// <summary>1, 2, 3... per project and kind, and per name for indicators.</summary>
     public int Number { get; set; }
 
     public string? Code { get; set; }
+
+    /// <summary>The indicator's metadata at this version; null for the clean and output scripts and for a removed indicator.</summary>
+    public string? Label { get; set; }
+
+    public string? Description { get; set; }
+
+    public string? Unit { get; set; }
+
+    /// <summary><c>count</c>, <c>decimal</c>, <c>percent</c> or <c>currency</c>.</summary>
+    public string? Format { get; set; }
 
     public Guid AuthorId { get; set; }
 
@@ -21,12 +34,12 @@ public sealed class ScriptVersion
     public User? Author { get; set; }
 }
 
-/// <summary>The three scripts of the chain: 1 <c>clean</c>, 2 <c>prepare_output</c>, 3 <c>compute_indicators</c>.</summary>
+/// <summary>The scripts of the chain: 1 <c>clean</c>, 2 <c>prepare_output</c>, and any number of <c>compute</c> indicators.</summary>
 public enum ScriptKind
 {
     Clean,
     Output,
-    Indicators,
+    Indicator,
 }
 
 /// <summary>One execution of the chain. Queued rows are the analytics worker's queue.</summary>
@@ -47,7 +60,8 @@ public sealed class Run
 
     public Guid? OutputVersionId { get; set; }
 
-    public Guid? IndicatorsVersionId { get; set; }
+    /// <summary>The version of each indicator script the worker resolved when it claimed the run, in name order.</summary>
+    public List<RunIndicatorVersion> IndicatorVersions { get; set; } = [];
 
     public DateTimeOffset QueuedAt { get; set; }
 
@@ -90,6 +104,9 @@ public sealed class RunStep
 
     public RunStepName Step { get; set; }
 
+    /// <summary>The indicator's name for an <see cref="RunStepName.Indicator"/> step; empty for the three fixed steps.</summary>
+    public string Name { get; set; } = "";
+
     public RunStepStatus Status { get; set; }
 
     public DateTimeOffset? StartedAt { get; set; }
@@ -110,12 +127,15 @@ public sealed class RunStep
 
 public sealed record StepTable(string Name, long Rows);
 
+/// <summary>An indicator script version a run used, as the worker recorded it.</summary>
+public sealed record RunIndicatorVersion(string Name, Guid VersionId, int Number);
+
 public enum RunStepName
 {
     Flatten,
     Clean,
     Output,
-    Indicators,
+    Indicator,
 }
 
 public enum RunStepStatus

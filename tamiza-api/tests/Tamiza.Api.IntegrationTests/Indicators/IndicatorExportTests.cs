@@ -7,28 +7,28 @@ using Tamiza.Api.IntegrationTests.Infrastructure;
 
 namespace Tamiza.Api.IntegrationTests.Indicators;
 
-/// <summary><c>POST /projects/{id}/indicators/exports</c>: the whole published table, downloaded through the shared single-use link.</summary>
+/// <summary><c>POST /projects/{id}/indicators/{name}/exports</c>: the whole published table of one indicator, downloaded through the shared single-use link.</summary>
 [Collection(PostgresCollection.Name)]
 public sealed class IndicatorExportTests(PostgresFixture postgres)
 {
-    private const string Columns = IndicatorsHarness.RequiredColumns + ", year bigint, geometry text";
+    private const string Columns = IndicatorsHarness.StandardColumns + ", year bigint, geometry text";
 
     private const string Rows = """
-        ('coverage', 'Cali',    40.5, 4, 10, 2025, 'POINT(1 1)'),
-        ('coverage', 'Palmira', 60,   6, 10, 2025, NULL),
-        ('target',   'Cali, "centre"', 90, 9, 10, 2026, NULL)
+        ('Cali',    40.5, 4, 10, 2025, 'POINT(1 1)'),
+        ('Palmira', 60,   6, 10, 2025, NULL),
+        ('Cali, "centre"', 90, 9, 10, 2026, NULL)
         """;
 
     private static async Task<IndicatorsHarness> PublishedAsync(PostgresFixture postgres)
     {
         var h = await IndicatorsHarness.CreateAsync(postgres);
-        await h.PublishAsync(Columns, Rows);
+        await h.PublishAsync("coverage", Columns, Rows);
         return h;
     }
 
-    private static async Task<JsonElement> PrepareAsync(IndicatorsHarness h, string format, HttpClient? client = null)
+    private static async Task<JsonElement> PrepareAsync(IndicatorsHarness h, string format, HttpClient? client = null, string indicator = "coverage")
     {
-        var response = await (client ?? h.Viewer).PostAsJsonAsync(h.Url + "/exports", new { format });
+        var response = await (client ?? h.Viewer).PostAsJsonAsync($"{h.Url}/{indicator}/exports", new { format });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
@@ -55,13 +55,13 @@ public sealed class IndicatorExportTests(PostgresFixture postgres)
         Assert.Equal(3, export.GetProperty("rowCount").GetInt64());
         Assert.Equal(0, export.GetProperty("cutCells").GetInt64());
         Assert.StartsWith("/api/v1/data-exports/", export.GetProperty("downloadUrl").GetString());
-        Assert.Matches(@"^coverage-2026_indicators_\d{4}-\d{2}-\d{2}\.csv$", export.GetProperty("fileName").GetString());
+        Assert.Matches(@"^coverage-2026_coverage_\d{4}-\d{2}-\d{2}\.csv$", export.GetProperty("fileName").GetString());
         Assert.Equal(
             [
-                "﻿indicator,disaggregation,value,numerator,denominator,year,geometry",
-                "coverage,Cali,40.5,4,10,2025,POINT(1 1)",
-                "coverage,Palmira,60,6,10,2025,",
-                "target,\"Cali, \"\"centre\"\"\",90,9,10,2026,",
+                "﻿municipality,value,numerator,denominator,year,geometry",
+                "Cali,40.5,4,10,2025,POINT(1 1)",
+                "Palmira,60,6,10,2025,",
+                "\"Cali, \"\"centre\"\"\",90,9,10,2026,",
             ],
             lines);
     }
@@ -76,14 +76,14 @@ public sealed class IndicatorExportTests(PostgresFixture postgres)
         var rows = new MemoryStream(await response.Content.ReadAsByteArrayAsync()).Query(useHeaderRow: true).Cast<IDictionary<string, object?>>().ToList();
 
         Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", response.Content.Headers.ContentType!.MediaType);
-        Assert.EndsWith("_indicators_" + DateTime.UtcNow.ToString("yyyy-MM-dd") + ".xlsx", export.GetProperty("fileName").GetString());
+        Assert.EndsWith("_coverage_" + DateTime.UtcNow.ToString("yyyy-MM-dd") + ".xlsx", export.GetProperty("fileName").GetString());
         Assert.Equal(3, rows.Count);
-        Assert.Equal(["indicator", "disaggregation", "value", "numerator", "denominator", "year", "geometry"], rows[0].Keys);
-        Assert.Equal("coverage", rows[0]["indicator"]);
+        Assert.Equal(["municipality", "value", "numerator", "denominator", "year", "geometry"], rows[0].Keys);
+        Assert.Equal("Cali", rows[0]["municipality"]);
         Assert.Equal(40.5, Convert.ToDouble(rows[0]["value"]));
         Assert.Equal(2025, Convert.ToInt64(rows[0]["year"]));
         Assert.Null(rows[1]["geometry"]);
-        Assert.Equal("Cali, \"centre\"", rows[2]["disaggregation"]);
+        Assert.Equal("Cali, \"centre\"", rows[2]["municipality"]);
     }
 
     [Fact]
@@ -133,16 +133,55 @@ public sealed class IndicatorExportTests(PostgresFixture postgres)
         Assert.DoesNotContain("Ana", text);
     }
 
+    [Fact]
+    public async Task Each_indicator_exports_its_own_table_only()
+    {
+        await using var h = await PublishedAsync(postgres);
+        await h.PublishAsync("attendance", "round text, students bigint", "('first', 20), ('second', 7)");
+
+        var export = await PrepareAsync(h, "csv", client: null, indicator: "attendance");
+        var text = new UTF8Encoding(false).GetString(await (await DownloadAsync(h, export)).Content.ReadAsByteArrayAsync());
+
+        Assert.Equal(2, export.GetProperty("rowCount").GetInt64());
+        Assert.Matches(@"^coverage-2026_attendance_\d{4}-\d{2}-\d{2}\.csv$", export.GetProperty("fileName").GetString());
+        Assert.Equal(["﻿round,students", "first,20", "second,7"], text.TrimEnd('\r', '\n').Split("\r\n"));
+    }
+
+    [Fact]
+    public async Task An_indicator_whose_table_another_indicator_does_not_have_is_not_published_even_if_others_are()
+    {
+        await using var h = await PublishedAsync(postgres);
+        await h.AddIndicatorAsync("attendance");
+
+        var response = await h.Viewer.PostAsJsonAsync(h.Url + "/attendance/exports", new { format = "csv" });
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("indicators.notPublished", problem.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task A_name_that_is_not_a_published_table_is_never_interpolated()
+    {
+        await using var h = await PublishedAsync(postgres);
+
+        var response = await h.Viewer.PostAsJsonAsync(h.Url + "/" + Uri.EscapeDataString("coverage\"; DROP SCHEMA public CASCADE; --") + "/exports", new { format = "csv" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.True(await TestData.ScalarAsync<bool>(h.Db, "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'public')"));
+        Assert.Empty(h.ExportFiles);
+    }
+
     // Not published / validation / access
 
     [Theory]
     [InlineData("csv")]
     [InlineData("xlsx")]
-    public async Task While_script_3_has_not_published_there_is_nothing_to_export(string format)
+    public async Task While_the_indicator_has_not_published_there_is_nothing_to_export(string format)
     {
         await using var h = await IndicatorsHarness.CreateAsync(postgres);
 
-        var response = await h.Viewer.PostAsJsonAsync(h.Url + "/exports", new { format });
+        var response = await h.Viewer.PostAsJsonAsync(h.Url + "/coverage/exports", new { format });
         var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -158,7 +197,7 @@ public sealed class IndicatorExportTests(PostgresFixture postgres)
     {
         await using var h = await PublishedAsync(postgres);
 
-        var response = await h.Viewer.PostAsJsonAsync(h.Url + "/exports", new { format });
+        var response = await h.Viewer.PostAsJsonAsync(h.Url + "/coverage/exports", new { format });
         var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -170,7 +209,7 @@ public sealed class IndicatorExportTests(PostgresFixture postgres)
     {
         await using var h = await PublishedAsync(postgres);
 
-        var response = await h.Outsider.PostAsJsonAsync(h.Url + "/exports", new { format = "csv" });
+        var response = await h.Outsider.PostAsJsonAsync(h.Url + "/coverage/exports", new { format = "csv" });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Empty(h.ExportFiles);

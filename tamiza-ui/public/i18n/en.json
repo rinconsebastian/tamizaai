@@ -69,7 +69,7 @@
         "flatten": "Flattening the submissions failed.",
         "clean": "Script 1 (clean) failed:",
         "output": "Script 2 (output) failed:",
-        "indicators": "Script 3 (indicators) failed:"
+        "indicator": "An indicator script failed:"
       },
       "script": {
         "not_set": "There is no script to remove."
@@ -91,6 +91,9 @@
         "exportBusy": "Other exports are being prepared. Try again in a moment.",
         "xlsxTooManyRows": "More rows match than fit an XLSX sheet (1,048,575). Export to CSV, or add a filter.",
         "exportTooLarge": "The export is larger than this installation allows. Add a filter to export fewer rows."
+      },
+      "indicators": {
+        "notPublished": "This indicator has not published a table yet. Run the scripts first."
       }
     }
   },
@@ -368,12 +371,12 @@
     "kinds": {
       "clean": "1. Clean",
       "output": "2. Output",
-      "indicators": "3. Indicators"
+      "indicator": "Indicator"
     },
     "contracts": {
       "clean": "clean(raw, ctx) receives the flattened tables and returns the cleaned ones. Without it, the flattened tables are the clean data.",
       "output": "prepare_output(cleaned, ctx) returns the tables for the clean-data dashboard. Optional.",
-      "indicators": "compute_indicators(cleaned, ctx) returns one table with indicator, disaggregation, value, numerator and denominator. Optional."
+      "indicator": "compute(cleaned, ctx) returns one table for this indicator: the columns it is broken down by and at least one numeric column, such as value. The table is published under the indicator’s name."
     },
     "notSet": "not set",
     "removedBadge": "removed",
@@ -398,11 +401,49 @@
     "removeMessage": {
       "clean": "From the next run, the flattened tables are published as the clean data. Earlier versions stay in the history.",
       "output": "From the next run, no output tables are published. Earlier versions stay in the history.",
-      "indicators": "From the next run, no indicator table is published. Earlier versions stay in the history."
+      "indicator": "From the next run, this indicator’s table is no longer published. Earlier versions stay in the history."
     },
     "discardTitle": "Discard unsaved changes?",
     "discardMessage": "The edits to this script have not been saved.",
-    "discard": "Discard"
+    "discard": "Discard",
+    "indicators": "Indicators",
+    "addIndicator": "Add indicator",
+    "indicatorLimit": "The project has the most indicators it can hold ({{ max }}). Remove one to add another.",
+    "noIndicators": "This project has no indicators yet.",
+    "noIndicatorsEditor": "This project has no indicators yet. Add one to publish a table for the indicators dashboard.",
+    "newBadge": "new",
+    "editorLabelIndicator": "Python code of indicator {{ name }}",
+    "addTitle": "Add an indicator",
+    "addIntro": "An indicator is one script that returns one table for the dashboard. Its name cannot be changed later.",
+    "addConfirm": "Add indicator",
+    "labelRequired": "Enter a label.",
+    "removedIndicator": "Indicator removed (version {{ number }}). Its table is no longer published from the next run.",
+    "fields": {
+      "name": "Name",
+      "nameHint": "Lowercase letters, digits and underscores, starting with a letter, up to 63 characters. For example piped_water_rate.",
+      "label": "Label",
+      "description": "Description (optional)",
+      "unit": "Unit (optional)",
+      "unitHint": "Shown after the value, such as households. For the currency format, the currency code, such as COP.",
+      "format": "Format"
+    },
+    "nameErrors": {
+      "required": "Enter a name.",
+      "invalid": "Use lowercase letters, digits and underscores only, starting with a letter, up to 63 characters.",
+      "taken": "This project already has an indicator with this name."
+    },
+    "formats": {
+      "count": "Count",
+      "decimal": "Decimal",
+      "percent": "Percentage",
+      "currency": "Currency"
+    },
+    "formatHints": {
+      "count": "A whole number with thousands separators.",
+      "decimal": "A number with two decimals.",
+      "percent": "A fraction shown as a percentage: 0.42 is shown as 42%.",
+      "currency": "A number with two decimals, in the currency given as the unit."
+    }
   },
   "runs": {
     "title": "Runs",
@@ -436,7 +477,7 @@
       "flatten": "Flatten",
       "clean": "Clean",
       "output": "Output",
-      "indicators": "Indicators"
+      "indicator": "Indicator"
     },
     "stepStatus": {
       "succeeded": "Succeeded",
@@ -445,7 +486,10 @@
     },
     "referenceTitle": "Reference data used",
     "referenceTable": "({{ rows }} rows, updated {{ updated }})",
-    "noReference": "This run used no reference tables."
+    "noReference": "This run used no reference tables.",
+    "indicatorsSummary": "Indicators {{ done }}/{{ total }}",
+    "indicatorCount": "{{ count }} indicators",
+    "indicatorCountOne": "1 indicator"
   },
   "pipeline": {
     "settingsTitle": "When scripts run",
@@ -567,7 +611,8 @@
     "tableOption": "{{ name }} ({{ rows }} rows)",
     "previewRows": "First {{ shown }} of {{ rows }} rows.",
     "previewTrimmed": "First {{ shown }} of {{ rows }} rows: fewer are shown to keep the preview under 1 MB.",
-    "noPreview": "{{ rows }} rows. Only the first 20 tables of a step are previewed."
+    "noPreview": "{{ rows }} rows. Only the first 20 tables of a step are previewed.",
+    "indicator": "indicator {{ name }}"
   },
   "preview": {
     "cut": "(cut at 500 characters)",
@@ -721,15 +766,23 @@
   "indicators": {
     "empty": {
       "title": "No indicators published yet",
-      "body": "The indicators appear here after a run publishes the table that script 3 (indicators) returns.",
-      "editor": "Write script 3 and run the scripts to publish it. Widgets you add now are kept and draw once it is published.",
+      "body": "Each indicator publishes its own table after a run of the scripts.",
+      "editor": "Add an indicator on the scripts page and run the scripts to publish its table. Widgets you add are kept and draw once their indicator publishes.",
       "editorLink": "Open the scripts",
-      "viewer": "An analyst or admin has to run the project’s scripts first.",
-      "widgets": "{{ count }} widgets are already configured; they draw once the indicators are published."
+      "viewer": "An analyst or admin has to add the indicators and run the project’s scripts first.",
+      "widgets": "{{ count }} widgets are already configured; they draw once their indicators are published."
+    },
+    "list": {
+      "title": "Indicators ({{ count }})",
+      "indicator": "Indicator",
+      "format": "Format",
+      "status": "Status",
+      "rows": "Rows",
+      "published": "Published",
+      "notPublished": "Not published yet"
     },
     "published": "Published {{ time }}",
     "publishedRun": "by run {{ run }}",
-    "runsLink": "See the runs",
     "count": "{{ count }} of {{ max }} widgets",
     "showTables": "Show all as tables",
     "showCharts": "Show all as charts",
@@ -739,12 +792,12 @@
     "saved": "Widget {{ title }} saved.",
     "noWidgets": {
       "title": "No widgets yet",
-      "editor": "Add a widget to chart the published indicators: a figure, a chart or a map.",
+      "editor": "Add a widget to chart a published indicator: a figure, a chart or a map.",
       "viewer": "An analyst or admin can add widgets to this dashboard."
     },
     "export": {
       "button": "Export",
-      "help": "Exports the whole published indicator table.",
+      "help": "Exports the whole published table of this indicator.",
       "csv": "CSV file",
       "xlsx": "Excel file (XLSX)",
       "preparing": "Preparing the export…",
@@ -765,11 +818,6 @@
       "pie": "Pie chart",
       "map": "Map"
     },
-    "valueFields": {
-      "value": "value",
-      "numerator": "numerator",
-      "denominator": "denominator"
-    },
     "grid": {
       "move": "Move {{ title }}",
       "resize": "Resize {{ title }}",
@@ -779,7 +827,8 @@
       "status": "{{ title }}: column {{ column }}, row {{ row }}, {{ width }} wide, {{ height }} high."
     },
     "widget": {
-      "unpublished": "Nothing is published yet. This widget draws once the indicators are published.",
+      "notPublished": "{{ label }} has not published yet.",
+      "scriptsLink": "Open the scripts",
       "rowLimit": "Only the first {{ count }} rows are shown: the query matches more. Add a filter to narrow it down.",
       "empty": "No rows match this widget’s query.",
       "showTable": "Show as table",
@@ -787,27 +836,25 @@
     },
     "missing": {
       "title": "This widget cannot be drawn",
-      "indicators": "The published table no longer has the indicators: {{ names }}.",
       "columns": "The published table no longer has the columns: {{ names }}.",
       "help": "A script change removed them. Edit the widget to choose others, or restore them in the script."
     },
     "chart": {
       "noGroup": "(none)",
-      "caption": "{{ field }} by {{ group }}",
-      "captionHistogram": "Rows per range of {{ field }}, in {{ buckets }} ranges",
+      "caption": "{{ what }} by {{ group }}",
+      "captionHistogram": "Rows per range of {{ what }}, in {{ buckets }} ranges",
       "range": "Range",
-      "rowsOf": "Rows of {{ indicator }}",
-      "summaryEmpty": "Chart of {{ indicators }}: no data.",
+      "rowsOf": "Rows of {{ what }}",
+      "rowCount": "{{ count }} rows",
+      "rowCountOne": "{{ count }} row",
+      "summaryEmpty": "Chart of {{ what }}: no data.",
       "summary": {
-        "bar": "Bar chart of {{ indicators }} by {{ group }}: {{ count }} groups, from {{ min }} to {{ max }}. Highest: {{ top }}.",
-        "column": "Column chart of {{ indicators }} by {{ group }}: {{ count }} groups, from {{ min }} to {{ max }}. Highest: {{ top }}.",
-        "line": "Line chart of {{ indicators }} by {{ group }}: {{ count }} points, from {{ min }} to {{ max }}. Highest: {{ top }}.",
-        "histogram": "Histogram of {{ indicators }}: {{ count }} ranges, the fullest holds {{ max }} rows ({{ top }}).",
-        "pie": "Pie chart of {{ indicators }} by {{ group }}: {{ count }} slices. Largest: {{ top }}, {{ share }}."
+        "bar": "Bar chart of {{ what }} by {{ group }}: {{ count }} groups, from {{ min }} to {{ max }}. Highest: {{ top }}.",
+        "column": "Column chart of {{ what }} by {{ group }}: {{ count }} groups, from {{ min }} to {{ max }}. Highest: {{ top }}.",
+        "line": "Line chart of {{ what }} by {{ group }}: {{ count }} points, from {{ min }} to {{ max }}. Highest: {{ top }}.",
+        "histogram": "Histogram of {{ what }}: {{ count }} ranges, the fullest holds {{ max }} rows ({{ top }}).",
+        "pie": "Pie chart of {{ what }} by {{ group }}: {{ count }} slices. Largest: {{ top }}, {{ share }}."
       }
-    },
-    "stat": {
-      "rows": "Sum over {{ count }} rows"
     },
     "pie": {
       "other": "Other",
@@ -815,10 +862,10 @@
       "skipped": "{{ count }} groups with a zero or negative value are not drawn; the table lists them."
     },
     "map": {
-      "caption": "{{ indicator }}: {{ field }} by {{ group }}",
+      "caption": "{{ what }} by {{ group }}",
       "leftOut": "{{ count }} rows left out: their geometry is missing or cannot be read.",
       "nothing": "No row has a geometry that can be drawn.",
-      "summary": "Map of {{ indicator }}: {{ count }} places drawn, from {{ min }} to {{ max }}; {{ left }} left out.",
+      "summary": "Map of {{ what }}: {{ count }} places drawn, from {{ min }} to {{ max }}; {{ left }} left out.",
       "geometry": "Geometry",
       "kind": {
         "polygon": "Region",
@@ -831,19 +878,26 @@
       "editTitle": "Edit widget",
       "chartType": "Chart type",
       "title": "Title",
-      "indicators": "Indicators",
-      "indicatorsOne": "This chart type plots exactly one indicator.",
-      "indicatorsMany": "Choose one or more indicators, up to {{ count }}; each is its own series.",
-      "indicatorsText": "Indicators, separated by commas",
-      "search": "Search indicators",
-      "noIndicators": "No indicators to list.",
-      "notPublished": "not published",
-      "selected": "{{ count }} selected",
-      "unpublishedHelp": "Nothing is published yet, so the indicators cannot be listed. Type their names as the script will return them.",
+      "indicator": "Indicator",
+      "indicatorChoose": "Choose an indicator",
+      "notPublished": "not published yet",
+      "formatNote": "Values are shown as: {{ format }}.",
+      "formatNoteUnit": "Values are shown as: {{ format }}, with the unit {{ unit }}.",
+      "unpublished": "{{ label }} has not published yet, so its columns cannot be listed. Run the scripts first.",
+      "plot": "Plot",
+      "modeMeasure": "A measure",
+      "modeRatio": "A ratio of two columns",
+      "measure": "Measure",
+      "measureDefault": "Default ({{ column }})",
+      "measureDefaultUnknown": "Default measure",
+      "numerator": "Numerator",
+      "denominator": "Denominator",
+      "ratioHelp": "Plots the sum of the numerator divided by the sum of the denominator, as a rate is.",
+      "columnChoose": "Choose a column",
       "groupBy": "Group by",
-      "valueField": "Field to plot",
+      "groupByNone": "(none)",
+      "groupByOptional": "Optional. Without it, a histogram counts each row.",
       "geometry": "Geometry column",
-      "geometryChoose": "Choose a column",
       "geometryHelp": "A text column holding WKT: POINT, POLYGON or MULTIPOLYGON.",
       "buckets": "Ranges",
       "bucketsHelp": "How many equal-width ranges to count rows in, up to {{ max }}. 10 when empty.",
@@ -851,16 +905,15 @@
       "filterColumn": "Column",
       "addFilter": "Add filter",
       "filtersFull": "A widget takes at most {{ count }} filters.",
-      "filtersUnpublished": "Filters can be added once the indicators are published.",
+      "filtersUnpublished": "Filters can be added once the indicator is published.",
       "preview": "Preview",
       "previewIncomplete": "Complete the form to see a preview.",
       "saving": "Saving…",
       "errors": {
         "title": "Enter a title.",
         "titleLong": "The title takes at most {{ max }} characters.",
-        "indicatorsOne": "Choose exactly one indicator for this chart type.",
-        "indicatorsMany": "Choose at least one indicator.",
-        "indicatorsMax": "Choose at most {{ count }} indicators.",
+        "indicator": "Choose an indicator.",
+        "ratio": "Choose the numerator and the denominator.",
         "groupBy": "Choose the column to group by.",
         "geometry": "Choose the geometry column of the map.",
         "buckets": "Enter a whole number from 1 to {{ max }}, or leave it empty."

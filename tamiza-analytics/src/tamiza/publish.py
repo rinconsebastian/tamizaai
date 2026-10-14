@@ -8,6 +8,10 @@ The swap needs an exclusive lock on the published tables, so it waits for reader
 dashboard page, an export). A waiting exclusive lock also queues every new reader behind it, so each attempt gives up
 after ``lock_timeout_seconds`` and is retried after a growing pause: readers are held for one attempt at most, and the
 swap succeeds in a gap. After ``max_wait_seconds`` the step fails and the previous tables stay published.
+
+An indicator publishes one table at a time (``publish_table``): the table is loaded into the ``<schema>__next`` schema
+and one transaction drops the published table and moves the new one into place, so the exclusive lock is on that table
+only and readers of the other indicator tables are never held.
 """
 
 import time
@@ -74,6 +78,23 @@ def _swap(
     lock_timeout_seconds: float,
     sleep: Callable[[float], None],
 ) -> float:
+    def replace_schema() -> None:
+        connection.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(published)))
+        connection.execute(
+            sql.SQL("ALTER SCHEMA {} RENAME TO {}").format(sql.Identifier(staging), sql.Identifier(published))
+        )
+
+    return _locked(connection, replace_schema, max_wait_seconds, lock_timeout_seconds, sleep)
+
+
+def _locked(
+    connection: psycopg.Connection,
+    statements: Callable[[], None],
+    max_wait_seconds: float,
+    lock_timeout_seconds: float,
+    sleep: Callable[[float], None],
+) -> float:
+    """Runs ``statements`` in one transaction that waits for readers, retrying as the module docstring describes."""
     started = time.monotonic()
     pause = _FIRST_PAUSE_SECONDS
     while True:
@@ -83,10 +104,7 @@ def _swap(
                 connection.execute(
                     "SELECT set_config('lock_timeout', %s, true)", (f"{int(lock_timeout_seconds * 1000)}ms",)
                 )
-                connection.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(published)))
-                connection.execute(
-                    sql.SQL("ALTER SCHEMA {} RENAME TO {}").format(sql.Identifier(staging), sql.Identifier(published))
-                )
+                statements()
             return time.monotonic() - started
         except errors.LockNotAvailable:
             if time.monotonic() - started + pause > max_wait_seconds:
@@ -104,6 +122,79 @@ def _duration(seconds: float) -> str:
         return f"{minutes} minute{'s' if minutes != 1 else ''}"
     whole = f"{seconds:g}"
     return f"{whole} second{'s' if seconds != 1 else ''}"
+
+
+def publish_table(
+    connection: psycopg.Connection,
+    project_id: UUID | str,
+    step: str,
+    table: Table,
+    *,
+    max_wait_seconds: float = DEFAULT_MAX_WAIT_SECONDS,
+    lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
+) -> float:
+    """
+    Replaces one table of the step's schema, creating the schema if it does not exist, and leaves the others as they
+    are. The connection must be in autocommit mode. Returns the seconds the swap took.
+    """
+    published = names.schema_name(project_id, step)
+    staging = f"{published}__next"
+    connection.execute("SET TIME ZONE 'UTC'")  # naive timestamps from Parquet are UTC
+    connection.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(published)))
+    connection.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(staging)))
+    connection.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(staging)))
+    try:
+        _load(connection, staging, table)
+
+        def replace_table() -> None:
+            connection.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(sql.Identifier(published, table.name)))
+            connection.execute(
+                sql.SQL("ALTER TABLE {} SET SCHEMA {}").format(
+                    sql.Identifier(staging, table.name), sql.Identifier(published)
+                )
+            )
+
+        return _locked(connection, replace_table, max_wait_seconds, lock_timeout_seconds, sleep)
+    finally:
+        connection.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(staging)))
+
+
+def drop_tables_except(
+    connection: psycopg.Connection,
+    project_id: UUID | str,
+    step: str,
+    keep: Sequence[str],
+    *,
+    max_wait_seconds: float = DEFAULT_MAX_WAIT_SECONDS,
+    lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[str]:
+    """
+    Removes from the step's schema every table not named in ``keep`` (an indicator that no longer exists), creating the
+    schema if it does not exist. Waits for readers like a swap does. Returns the names it removed.
+    """
+    published = names.schema_name(project_id, step)
+    connection.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(published)))
+    present = [
+        row[0]
+        for row in connection.execute(
+            """
+            SELECT c.relname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = %s AND c.relkind = 'r' ORDER BY c.relname
+            """,
+            (published,),
+        )
+    ]
+    stale = [name for name in present if name not in set(keep)]
+    if stale:
+
+        def drop_stale() -> None:
+            for name in stale:
+                connection.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(sql.Identifier(published, name)))
+
+        _locked(connection, drop_stale, max_wait_seconds, lock_timeout_seconds, sleep)
+    return stale
 
 
 def drop(connection: psycopg.Connection, project_id: UUID | str, step: str) -> None:

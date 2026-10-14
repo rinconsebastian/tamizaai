@@ -28,7 +28,7 @@ const apiErrorCodes = [
   'step.flatten',
   'step.clean',
   'step.output',
-  'step.indicators',
+  'step.indicator',
   'script.not_set',
   'test.interrupted',
   'reference.exists',
@@ -40,6 +40,7 @@ const apiErrorCodes = [
   'data.exportBusy',
   'data.xlsxTooManyRows',
   'data.exportTooLarge',
+  'indicators.notPublished',
 ];
 
 function lookup(root: unknown, path: string): unknown {
@@ -54,7 +55,7 @@ describe('English translations', () => {
   it('name every run trigger, status, step and step status', () => {
     for (const key of ['manual', 'sync', 'schedule']) expect(typeof lookup(en.runs.triggers, key)).toBe('string');
     for (const key of ['queued', 'running', 'succeeded', 'failed']) expect(typeof lookup(en.runs.status, key)).toBe('string');
-    for (const key of ['flatten', 'clean', 'output', 'indicators']) expect(typeof lookup(en.runs.steps, key)).toBe('string');
+    for (const key of ['flatten', 'clean', 'output', 'indicator']) expect(typeof lookup(en.runs.steps, key)).toBe('string');
     for (const key of ['succeeded', 'failed', 'skipped']) expect(typeof lookup(en.runs.stepStatus, key)).toBe('string');
   });
 

@@ -1,4 +1,4 @@
-"""Script tests against PostgreSQL: sample, saved script 1 for drafts of 2 and 3, previews, nothing published."""
+"""Script tests against PostgreSQL: sample, saved script 1 for drafts of 2 and indicators, previews, no publishing."""
 
 import textwrap
 import uuid
@@ -19,11 +19,20 @@ def prepare_output(cleaned, ctx):
     main = cleaned["main"]
     return {"households": main.groupby("municipality").size().rename("households").reset_index()}
 """
-NO_DENOMINATOR = """
+COVERAGE = """
 import pandas as pd
 
-def compute_indicators(cleaned, ctx):
-    return pd.DataFrame([{"indicator": "n", "disaggregation": "total", "value": 1, "numerator": 1}])
+def compute(cleaned, ctx):
+    main = cleaned["main"]
+    rows = main.groupby("municipality").size().rename("value").reset_index()
+    rows["denominator"] = len(main)
+    return rows
+"""
+NO_NUMBER = """
+import pandas as pd
+
+def compute(cleaned, ctx):
+    return pd.DataFrame({"municipality": ["Cali", "Buga"]})
 """
 
 
@@ -44,17 +53,18 @@ def code(text):
     return textwrap.dedent(text)
 
 
-def queue_test(database, project, kind, draft, sample_size=500) -> uuid.UUID:
+def queue_test(database, project, kind, draft, sample_size=500, name=None) -> uuid.UUID:
     test_id = uuid.uuid4()
     database.execute(
         """
-        INSERT INTO tamiza.script_tests (id, project_id, requested_by, kind, code, sample_size, status, queued_at)
-        VALUES (%s, %s, %s, %s, %s, %s, 'queued', now())
+        INSERT INTO tamiza.script_tests (id, project_id, requested_by, kind, name, code, sample_size, status, queued_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, 'queued', now())
         """,
         test_id,
         project.id,
         project.user_id,
         kind,
+        name,
         code(draft),
         sample_size,
     )
@@ -144,9 +154,32 @@ def test_without_a_saved_script_1_the_draft_receives_the_flattened_tables(databa
     assert sum(column(table(outcome["steps"]["output"], "households"), "households")) == 3
 
 
-def test_a_failing_saved_script_1_stops_a_test_of_script_3(database, seeded, settings):
+def test_a_draft_of_an_indicator_runs_as_that_indicator_on_the_saved_script_1(database, seeded, settings):
+    add_script(database, seeded, "clean", code(CLEAN))
+    test_id = queue_test(database, seeded, "indicator", COVERAGE, name="coverage")
+
+    run_next(database, settings)
+
+    outcome = result(database, test_id)
+    assert outcome["status"] == "succeeded", outcome
+    assert list(outcome["steps"]) == ["flatten", "clean", "indicator"]
+    coverage = table(outcome["steps"]["indicator"], "coverage")
+    assert coverage["rows"] == 2
+    assert dict(zip(column(coverage, "municipality"), column(coverage, "value"), strict=True)) == {"Buga": 1, "Cali": 1}
+    assert [c["name"] for c in coverage["columns"]] == ["municipality", "value", "denominator"]
+    # Nothing was published or saved.
+    assert database.scalar("SELECT count(*) FROM tamiza.script_versions WHERE kind = 'indicator'") == 0
+    assert (
+        database.scalar(
+            "SELECT count(*) FROM information_schema.schemata WHERE schema_name LIKE %s", f"p_{seeded.id.hex}%"
+        )
+        == 0
+    )
+
+
+def test_a_failing_saved_script_1_stops_a_test_of_an_indicator(database, seeded, settings):
     add_script(database, seeded, "clean", "def clean(raw, ctx):\n    return raw['missing']\n")
-    test_id = queue_test(database, seeded, "indicators", NO_DENOMINATOR)
+    test_id = queue_test(database, seeded, "indicator", COVERAGE, name="coverage")
 
     run_next(database, settings)
 
@@ -158,14 +191,15 @@ def test_a_failing_saved_script_1_stops_a_test_of_script_3(database, seeded, set
     assert "line 2, in clean" in outcome["steps"]["clean"]["error"]
 
 
-def test_a_missing_indicator_column_fails_with_the_runs_message(database, seeded, settings):
-    test_id = queue_test(database, seeded, "indicators", NO_DENOMINATOR)
+def test_an_indicator_without_a_numeric_column_fails_with_the_runs_message(database, seeded, settings):
+    test_id = queue_test(database, seeded, "indicator", NO_NUMBER, name="coverage")
 
     run_next(database, settings)
 
     outcome = result(database, test_id)
-    assert outcome["status"] == "failed" and outcome["error_code"] == "step.indicators"
-    assert outcome["error"] == "The indicator table is missing the column denominator."
+    assert outcome["status"] == "failed" and outcome["error_code"] == "step.indicator"
+    assert outcome["error"] == "The indicator table has no numeric column; add at least one, such as `value`."
+    assert outcome["steps"]["indicator"]["tables"] == []
 
 
 def test_a_draft_exception_shows_its_traceback_and_the_earlier_tables(database, seeded, settings):

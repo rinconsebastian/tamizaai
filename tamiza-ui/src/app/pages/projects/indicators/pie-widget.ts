@@ -1,9 +1,10 @@
-import { DecimalPipe, PercentPipe } from '@angular/common';
+import { PercentPipe } from '@angular/common';
 import { LOCALE_ID, Component, ElementRef, computed, inject, input, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
 import { observeSize, pivot } from './chart-data';
-import { plainNumber, seriesColor, seriesCount, slicePath } from './chart-scales';
+import { seriesColor, seriesCount, slicePath } from './chart-scales';
+import { ValueFormatter, plotted } from './format';
 import { TableModel, WidgetTable } from './widget-table';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
@@ -18,16 +19,16 @@ interface Slice {
 }
 
 /**
- * A pie chart (design D5): one slice per group value of the one indicator, sized by its share of the total. Slices run from the
+ * A pie chart (design D5): one slice per group value of the indicator, sized by its share of the total. Slices run from the
  * largest; past the eighth color the smallest fold into one "Other" slice. Values at or below zero have no share and are only
  * counted, and listed in the table.
  */
 @Component({
   selector: 'app-pie-widget',
-  imports: [DecimalPipe, PercentPipe, TranslocoDirective, WidgetTable],
+  imports: [PercentPipe, TranslocoDirective, WidgetTable],
   template: `
     <ng-container *transloco="let t">
-      <p class="shrink-0 text-xs text-body" data-testid="chart-caption">{{ t('indicators.chart.caption', { field: t('indicators.valueFields.' + config().valueField), group: config().groupBy }) }}</p>
+      <p class="shrink-0 text-xs text-body" data-testid="chart-caption">{{ t('indicators.chart.caption', { what: what(), group: config().groupBy }) }}</p>
       @if (asTable()) {
         <app-widget-table class="flex-1 overflow-auto" [model]="table(t)" />
       } @else {
@@ -51,7 +52,7 @@ interface Slice {
             <li class="flex items-center gap-1.5 py-0.5" data-testid="legend-item">
               <span aria-hidden="true" class="inline-block size-2.5 shrink-0 rounded-sm" [style.background]="slice.color"></span>
               <span class="min-w-0 flex-1 break-all">{{ slice.name }}</span>
-              <span class="tabular-nums">{{ slice.value | number: '1.0-2' }} · {{ slice.share | percent: '1.0-1' }}</span>
+              <span class="tabular-nums">{{ format()(slice.value) }} · {{ slice.share | percent: '1.0-1' }}</span>
             </li>
           }
         </ul>
@@ -69,16 +70,19 @@ export class PieWidget {
 
   readonly rows = input.required<QueryRow[]>();
   readonly config = input.required<WidgetConfig>();
+  /** The indicator's label and the formatter of its values. */
+  readonly label = input.required<string>();
+  readonly format = input.required<ValueFormatter>();
   readonly asTable = input(false);
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private readonly size = observeSize(() => this.box());
-  private readonly plain = plainNumber(this.locale);
+
+  protected readonly what = computed(() => plotted(this.config(), this.label()));
 
   private readonly all = computed(() => {
-    const data = pivot(this.rows(), this.config().indicators, this.transloco.translate('indicators.chart.noGroup'), 'listed');
-    const values = data.series[0]?.values ?? [];
-    return data.categories.map((name, i) => ({ name, value: values[i] ?? 0 }));
+    const data = pivot(this.rows(), this.transloco.translate('indicators.chart.noGroup'), 'listed');
+    return data.categories.map((name, i) => ({ name, value: data.values[i] }));
   });
 
   protected readonly notDrawn = computed(() => this.all().filter((entry) => entry.value <= 0).length);
@@ -114,16 +118,16 @@ export class PieWidget {
   });
 
   protected sliceTitle(slice: Slice): string {
-    return `${slice.name}: ${this.plain(slice.value)} (${new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }).format(slice.share)})`;
+    return `${slice.name}: ${this.format()(slice.value)} (${new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }).format(slice.share)})`;
   }
 
   protected summary(t: Translate): string {
     const slices = this.slices();
     if (!slices.length) {
-      return t('indicators.chart.summaryEmpty', { indicators: this.config().indicators.join(', ') });
+      return t('indicators.chart.summaryEmpty', { what: this.what() });
     }
     return t('indicators.chart.summary.pie', {
-      indicators: this.config().indicators.join(', '),
+      what: this.what(),
       group: this.config().groupBy,
       count: slices.length,
       top: slices[0].name,
@@ -134,8 +138,12 @@ export class PieWidget {
   protected table(t: Translate): TableModel {
     const total = this.all().reduce((sum, entry) => sum + Math.max(0, entry.value), 0);
     return {
-      headers: [this.config().groupBy, this.config().indicators[0] ?? '', t('indicators.pie.share')],
-      rows: this.all().map((entry) => [entry.name, entry.value, entry.value > 0 && total ? `${this.plain((entry.value / total) * 100)}%` : '—']),
+      headers: [this.config().groupBy ?? '', this.what(), t('indicators.pie.share')],
+      rows: this.all().map((entry) => [
+        entry.name,
+        this.format()(entry.value),
+        entry.value > 0 && total ? new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }).format(entry.value / total) : null,
+      ]),
     };
   }
 }

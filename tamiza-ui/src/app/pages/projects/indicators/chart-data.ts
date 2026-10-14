@@ -2,72 +2,38 @@ import { ElementRef, Signal, effect, signal } from '@angular/core';
 import { QueryRow } from '../../../core/projects/indicators.service';
 import { naturalCompare } from './chart-scales';
 
-export interface Series {
-  name: string;
-  /** One value per category; null where the indicator has no row for that group. */
-  values: (number | null)[];
-}
-
 export interface Pivot {
   categories: string[];
-  series: Series[];
+  values: number[];
 }
 
 /**
- * Rows to a category-by-series table. Categories are the group values, in the order the rows list them or in natural order
- * (2 before 10); there is one series per indicator, in the order the widget names them. A missing group shows as `emptyLabel`.
+ * Rows to categories and values. Categories are the group values, in the order the rows list them or in natural order (2 before
+ * 10); a missing group shows as `emptyLabel`. The server sends one row per group value.
  */
-export function pivot(rows: readonly QueryRow[], indicators: readonly string[], emptyLabel: string, order: 'listed' | 'natural'): Pivot {
-  const none = Symbol('none');
-  const keys: (string | typeof none)[] = [];
-  const seen = new Set<string | typeof none>();
-  for (const row of rows) {
-    const key = row.group ?? none;
-    if (!seen.has(key)) {
-      seen.add(key);
-      keys.push(key);
-    }
-  }
+export function pivot(rows: readonly QueryRow[], emptyLabel: string, order: 'listed' | 'natural'): Pivot {
+  const listed = rows.map((row) => ({ category: row.group ?? emptyLabel, missing: row.group === null, value: row.value }));
   if (order === 'natural') {
-    keys.sort((a, b) => (a === none ? 1 : b === none ? -1 : naturalCompare(a, b)));
+    listed.sort((a, b) => (a.missing ? 1 : b.missing ? -1 : naturalCompare(a.category, b.category)));
   }
-  const index = new Map(keys.map((key, i) => [key, i]));
-  const names = [...indicators];
-  for (const row of rows) {
-    if (!names.includes(row.indicator)) {
-      names.push(row.indicator);
-    }
-  }
-  const series: Series[] = names.map((name) => ({ name, values: keys.map(() => null) }));
-  for (const row of rows) {
-    const target = series[names.indexOf(row.indicator)];
-    const at = index.get(row.group ?? none)!;
-    target.values[at] = (target.values[at] ?? 0) + row.value;
-  }
-  return { categories: keys.map((key) => (key === none ? emptyLabel : key)), series };
+  return { categories: listed.map((entry) => entry.category), values: listed.map((entry) => entry.value) };
 }
 
 export interface Bucket {
   from: number;
   to: number;
-  /** Rows per series that fall in `[from, to)`; the last bucket also takes `to`. */
-  counts: number[];
+  /** Rows that fall in `[from, to)`; the last bucket also takes `to`. */
+  count: number;
 }
 
 /**
  * Buckets the plotted value of the returned rows into `count` equal-width ranges between the smallest and the largest value and
- * counts the rows in each, one count per indicator. The ranges are shared by every indicator so they can be compared.
+ * counts the rows in each.
  */
-export function histogram(rows: readonly QueryRow[], indicators: readonly string[], count: number): { buckets: Bucket[]; names: string[] } {
-  const names = [...indicators];
-  for (const row of rows) {
-    if (!names.includes(row.indicator)) {
-      names.push(row.indicator);
-    }
-  }
+export function histogram(rows: readonly QueryRow[], count: number): Bucket[] {
   const values = rows.map((row) => row.value).filter((value) => Number.isFinite(value));
   if (!values.length) {
-    return { buckets: [], names };
+    return [];
   }
   const size = Math.max(1, Math.floor(count));
   const min = Math.min(...values);
@@ -76,15 +42,11 @@ export function histogram(rows: readonly QueryRow[], indicators: readonly string
     max = min + 1; // every row falls in the first bucket
   }
   const width = (max - min) / size;
-  const buckets: Bucket[] = Array.from({ length: size }, (_, i) => ({ from: min + i * width, to: i === size - 1 ? max : min + (i + 1) * width, counts: names.map(() => 0) }));
-  for (const row of rows) {
-    if (!Number.isFinite(row.value)) {
-      continue;
-    }
-    const at = Math.min(size - 1, Math.floor((row.value - min) / width));
-    buckets[at].counts[names.indexOf(row.indicator)]++;
+  const buckets: Bucket[] = Array.from({ length: size }, (_, i) => ({ from: min + i * width, to: i === size - 1 ? max : min + (i + 1) * width, count: 0 }));
+  for (const value of values) {
+    buckets[Math.min(size - 1, Math.floor((value - min) / width))].count++;
   }
-  return { buckets, names };
+  return buckets;
 }
 
 export interface Size {

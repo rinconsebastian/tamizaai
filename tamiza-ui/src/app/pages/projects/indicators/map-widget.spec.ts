@@ -1,16 +1,16 @@
 import { byTestId, settle } from '../../../../testing/project-harness';
-import { QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
-import { Context, all, clearOverlay, config, isQuery, open, result, row, text, widget } from './indicators-testing';
+import { IndicatorEntry, QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
+import { Context, all, clearOverlay, config, indicator, isQuery, open, result, row, text, widget } from './indicators-testing';
 
 const square = (x: number, y: number, size = 1) => `POLYGON ((${x} ${y}, ${x + size} ${y}, ${x + size} ${y + size}, ${x} ${y + size}, ${x} ${y}))`;
 
-async function show(rows: QueryRow[], settings: Partial<WidgetConfig> = {}) {
-  const context = await open('viewer', [widget('w1', { chartType: 'map', config: config({ geometryColumn: 'geometry', ...settings }) })], null);
+async function show(rows: QueryRow[], settings: Partial<WidgetConfig> = {}, indicators?: IndicatorEntry[]) {
+  const context = await open('viewer', [widget('w1', { chartType: 'map', config: config({ geometryColumn: 'geometry', ...settings }) })], null, indicators ? { indicators } : {});
   const requests = context.http.match(isQuery);
   expect(requests).toHaveLength(1);
   requests[0].flush(result(rows));
   await settle(context.harness);
-  return { ...context, query: requests[0].request.body as WidgetConfig };
+  return { ...context, query: requests[0].request.body as { config: WidgetConfig; chartType: string } };
 }
 
 const regions = (context: Context) => all(context.root, 'map-region');
@@ -23,10 +23,10 @@ describe('map widget', () => {
 
   describe('choropleth by region', () => {
     const municipalities = [
-      row('coverage', 'Cali', 90, square(0, 0)),
-      row('coverage', 'Bogotá', 50, square(1, 0)),
-      row('coverage', 'Pasto', 10, square(0, 1)),
-      row('coverage', 'Quibdó', 70, `MULTIPOLYGON (((1 1, 2 1, 2 2, 1 2, 1 1)), ((2.2 1, 2.8 1, 2.8 1.6, 2.2 1, 2.2 1)))`),
+      row('Cali', 90, square(0, 0)),
+      row('Bogotá', 50, square(1, 0)),
+      row('Pasto', 10, square(0, 1)),
+      row('Quibdó', 70, `MULTIPOLYGON (((1 1, 2 1, 2 2, 1 2, 1 1)), ((2.2 1, 2.8 1, 2.8 1.6, 2.2 1, 2.2 1)))`),
     ];
 
     it('shows each municipality as a filled region, colored by its value', async () => {
@@ -44,7 +44,7 @@ describe('map widget', () => {
     it('asks for the geometry column along with the indicator', async () => {
       const { query } = await show(municipalities);
 
-      expect(query).toEqual({ ...config({ geometryColumn: 'geometry' }), buckets: null });
+      expect(query).toEqual({ config: config({ geometryColumn: 'geometry' }), chartType: 'map' });
     });
 
     it('draws the shapes in their relative positions, north up', async () => {
@@ -78,7 +78,7 @@ describe('map widget', () => {
 
     it('draws holes with the even-odd rule', async () => {
       const donut = 'POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (3 3, 7 3, 7 7, 3 7, 3 3))';
-      const context = await show([row('coverage', 'Ring', 40, donut)]);
+      const context = await show([row('Ring', 40, donut)]);
 
       const path = regions(context)[0];
       expect(path.getAttribute('fill-rule')).toBe('evenodd');
@@ -98,7 +98,7 @@ describe('map widget', () => {
       const context = await show(municipalities);
 
       expect(byTestId(context.root, 'chart-svg')!.getAttribute('role')).toBe('img');
-      expect(byTestId(context.root, 'chart-svg')!.getAttribute('aria-label')).toBe('Map of coverage: 4 places drawn, from 10 to 90; 0 left out.');
+      expect(byTestId(context.root, 'chart-svg')!.getAttribute('aria-label')).toBe('Map of Coverage: 4 places drawn, from 10 to 90; 0 left out.');
       byTestId(context.root, 'chart-toggle')!.click();
       await settle(context.harness);
 
@@ -107,15 +107,29 @@ describe('map widget', () => {
       expect(rows).toEqual([['Cali', '90', 'Region'], ['Bogotá', '50', 'Region'], ['Pasto', '10', 'Region'], ['Quibdó', '70', 'Region']]);
     });
 
+    it('writes the tooltips, the legend and the table with the indicator\'s format', async () => {
+      const context = await show([row('Cali', 0.9, square(0, 0)), row('Pasto', 0.1, square(1, 0))], { indicator: 'piped_water_rate' }, [indicator('piped_water_rate')]);
+
+      expect(regions(context).map(titleOf)).toEqual(['Cali: 90%', 'Pasto: 10%']);
+      expect(text(byTestId(context.root, 'map-legend-min'))).toBe('10%');
+      expect(text(byTestId(context.root, 'map-legend-max'))).toBe('90%');
+      byTestId(context.root, 'chart-toggle')!.click();
+      await settle(context.harness);
+      expect(all(context.root, 'widget-table-row').map((r) => Array.from(r.children).map(text))).toEqual([
+        ['Cali', '90%', 'Region'],
+        ['Pasto', '10%', 'Region'],
+      ]);
+    });
+
     it('colors by the middle step when every value is the same', async () => {
-      const context = await show([row('coverage', 'A', 5, square(0, 0)), row('coverage', 'B', 5, square(1, 0))]);
+      const context = await show([row('A', 5, square(0, 0)), row('B', 5, square(1, 0))]);
 
       expect(regions(context).map(fill).every((f) => f.includes('var(--tmz-seq-4)'))).toBe(true);
     });
   });
 
   describe('points', () => {
-    const places = [row('coverage', 'Cali', 80, 'POINT (-76.53 3.43)'), row('coverage', 'Pasto', 20, 'POINT (-77.28 1.21)'), row('coverage', 'Quibdó', 50, 'POINT (-76.65 5.69)')];
+    const places = [row('Cali', 80, 'POINT (-76.53 3.43)'), row('Pasto', 20, 'POINT (-77.28 1.21)'), row('Quibdó', 50, 'POINT (-76.65 5.69)')];
 
     it('shows each point as a marker instead of a filled region', async () => {
       const context = await show(places);
@@ -142,7 +156,7 @@ describe('map widget', () => {
     });
 
     it('centers a lone point', async () => {
-      const context = await show([row('coverage', 'Cali', 80, 'POINT (-76.53 3.43)')]);
+      const context = await show([row('Cali', 80, 'POINT (-76.53 3.43)')]);
 
       const svg = byTestId(context.root, 'chart-svg')!;
       const point = points(context)[0];
@@ -151,7 +165,7 @@ describe('map widget', () => {
     });
 
     it('draws points and regions together when the column mixes them', async () => {
-      const context = await show([row('coverage', 'Cali', 80, 'POINT (0.5 0.5)'), row('coverage', 'Pasto', 20, square(1, 0))]);
+      const context = await show([row('Cali', 80, 'POINT (0.5 0.5)'), row('Pasto', 20, square(1, 0))]);
 
       expect(points(context)).toHaveLength(1);
       expect(regions(context)).toHaveLength(1);
@@ -160,11 +174,11 @@ describe('map widget', () => {
 
   describe('unparseable geometry', () => {
     const rows = [
-      row('coverage', 'Cali', 90, square(0, 0)),
-      row('coverage', 'Bogotá', 50, square(1, 0)),
-      row('coverage', 'Pasto', 10, 'LINESTRING (0 0, 1 1)'),
-      row('coverage', 'Quibdó', 70, 'POLYGON ((0 0, 1 1'),
-      row('coverage', 'Leticia', 30, null),
+      row('Cali', 90, square(0, 0)),
+      row('Bogotá', 50, square(1, 0)),
+      row('Pasto', 10, 'LINESTRING (0 0, 1 1)'),
+      row('Quibdó', 70, 'POLYGON ((0 0, 1 1'),
+      row('Leticia', 30, null),
     ];
 
     it('shows the other rows and counts the 3 left out', async () => {
@@ -191,7 +205,7 @@ describe('map widget', () => {
     });
 
     it('says so when no row can be drawn', async () => {
-      const context = await show([row('coverage', 'Cali', 90, 'garbage'), row('coverage', 'Pasto', 10, null)]);
+      const context = await show([row('Cali', 90, 'garbage'), row('Pasto', 10, null)]);
 
       expect(regions(context)).toHaveLength(0);
       expect(text(byTestId(context.root, 'map-nothing'))).toBe('No row has a geometry that can be drawn.');

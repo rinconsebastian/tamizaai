@@ -376,7 +376,7 @@ public sealed partial class DataDashboard : IDisposable
         return found;
     }
 
-    private static async Task<List<string>> TableNamesAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, string schema, CancellationToken ct)
+    internal static async Task<List<string>> TableNamesAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, string schema, CancellationToken ct)
     {
         await using var command = new NpgsqlCommand(
             """

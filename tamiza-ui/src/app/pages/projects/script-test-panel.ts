@@ -18,7 +18,7 @@ const statusTones: Record<RunStatus, Tone> = { queued: 'neutral', running: 'bran
       @if (test(); as test) {
         <div class="mb-3 flex flex-wrap items-center gap-2">
           <h2 class="text-lg font-semibold text-heading">
-            {{ t('scriptTests.title', { kind: t('scripts.kinds.' + test.kind), size: test.sampleSize }) }}
+            {{ t('scriptTests.title', { kind: kindLabel(test), size: test.sampleSize }) }}
           </h2>
           <tmz-badge [tone]="tone(test.status)" data-testid="test-status">{{ t('runs.status.' + test.status) }}</tmz-badge>
           <span class="text-sm text-body">{{ test.queuedAt | date: 'mediumTime' }}</span>
@@ -152,7 +152,14 @@ export class ScriptTestPanel {
     if (step.step === 'clean' && test.kind !== 'clean') {
       return t('scriptTests.savedClean', { number: test.cleanVersion ?? '—' });
     }
-    return step.step === test.kind ? t('scriptTests.draft', { kind: t('scripts.kinds.' + test.kind) }) : t('runs.steps.' + step.step);
+    return step.step === test.kind ? t('scriptTests.draft', { kind: this.kindLabel(test) }) : t('runs.steps.' + step.step);
+  }
+
+  /** "1. Clean", "2. Output" or "indicator coverage". */
+  protected kindLabel(test: ScriptTest): string {
+    return test.kind === 'indicator'
+      ? this.transloco.translate('scriptTests.indicator', { name: test.name })
+      : this.transloco.translate('scripts.kinds.' + test.kind);
   }
 
   protected selectedTable(step: TestStep): TestTable {

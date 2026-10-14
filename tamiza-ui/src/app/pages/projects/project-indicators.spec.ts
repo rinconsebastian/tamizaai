@@ -10,7 +10,9 @@ import {
   catalog,
   clearOverlay,
   config,
+  defaultIndicators,
   downloader,
+  indicator,
   indicatorsUrl,
   isColumns,
   isOverview,
@@ -23,8 +25,13 @@ import {
   widget,
 } from './indicators/indicators-testing';
 
-const answer = result([row('coverage', 'Cali', 75), row('coverage', 'Bogotá', 60)]);
-const two = [widget('w1', { title: 'Coverage by municipality' }), widget('w2', { title: 'Response rate', chartType: 'stat', layout: { x: 6, y: 0, w: 3, h: 2 } })];
+const answer = result([row('Cali', 75), row('Bogotá', 60)]);
+const two = [
+  widget('w1', { title: 'Coverage by municipality' }),
+  widget('w2', { title: 'Response rate', chartType: 'stat', config: config({ indicator: 'response_rate', groupBy: null }), layout: { x: 6, y: 0, w: 3, h: 2 } }),
+];
+/** Every indicator of the project is listed and none has a table. */
+const unpublished = { indicators: defaultIndicators.map((i) => indicator(i.name, { published: false, publishedAt: null, runId: null, rows: null })) };
 
 describe('ProjectIndicators', () => {
   beforeEach(() => downloader.start.mockClear());
@@ -48,19 +55,38 @@ describe('ProjectIndicators', () => {
 
       expect(all(root, 'widget-title').map(text)).toEqual(['Coverage by municipality', 'Response rate']);
       expect(byTestId(root, 'indicators-empty')).toBeNull();
-      expect(text(byTestId(root, 'indicators-published'))).toMatch(/^Published .*2026.* by run abcdef12/);
       expect(text(byTestId(root, 'indicators-count'))).toBe('2 of 50 widgets');
     });
 
-    it('asks for the rows of each widget with its own query', async () => {
+    it('lists the indicators with their label, name, format, unit and whether they have published', async () => {
+      const indicators = [
+        indicator('coverage'),
+        indicator('households_visited', { description: 'Visits made', rows: 12450 }),
+        indicator('target', { published: false, publishedAt: null, runId: null, rows: null }),
+      ];
+      const { root } = await open('viewer', [], null, { indicators });
+
+      expect(text(byTestId(root, 'indicator-table-card')!.querySelector('h2'))).toContain('Indicators (3)');
+      const rows = indicators.map((i) => byTestId(root, `indicator-row-${i.name}`)!);
+      expect(rows.map((r) => text(byTestId(r, 'indicator-label')))).toEqual(['Coverage', 'Households visited', 'Target']);
+      expect(rows.map((r) => text(byTestId(r, 'indicator-name')))).toEqual(['coverage', 'households_visited', 'target']);
+      expect(rows.map((r) => text(byTestId(r, 'indicator-format')))).toEqual(['Count', 'Count · households', 'Count']);
+      expect(text(byTestId(rows[0], 'indicator-published'))).toMatch(/^Published .*2026.* by run abcdef12/);
+      expect(text(rows[1])).toContain('Visits made');
+      expect(text(rows[1])).toContain('12,450');
+      expect(text(byTestId(rows[2], 'indicator-unpublished'))).toBe('Not published yet');
+      expect(byTestId(rows[2], 'indicator-published')).toBeNull();
+    });
+
+    it('asks for the rows of each widget with its own query and chart type', async () => {
       const wide = widget('w3', { chartType: 'map', config: config({ geometryColumn: 'geometry', buckets: 20 }) });
-      const context = await open('viewer', [widget('w1', { chartType: 'histogram', config: config({ buckets: 12, valueField: 'numerator' }) }), wide], null);
+      const context = await open('viewer', [widget('w1', { chartType: 'histogram', config: config({ buckets: 12, measure: 'numerator', groupBy: null }) }), wide], null);
 
       const requests = context.http.match(isQuery);
       expect(requests).toHaveLength(2);
       // Settings of another chart type are not sent.
-      expect(requests[0].request.body).toEqual({ ...config({ valueField: 'numerator' }), buckets: 12, geometryColumn: null });
-      expect(requests[1].request.body).toEqual({ ...config(), geometryColumn: 'geometry', buckets: null });
+      expect(requests[0].request.body).toEqual({ config: config({ measure: 'numerator', buckets: 12, groupBy: null }), chartType: 'histogram' });
+      expect(requests[1].request.body).toEqual({ config: config({ geometryColumn: 'geometry' }), chartType: 'map' });
       requests.forEach((r) => r.flush(result([])));
     });
 
@@ -104,15 +130,19 @@ describe('ProjectIndicators', () => {
       const context = await open('viewer', two, null);
       const [first, second] = context.http.match(isQuery);
       first.flush({ title: 'x', errors: { 'filters[0]': ['The filter does not fit the column.'] } }, { status: 400, statusText: 'Bad Request' });
-      second.flush(result([row('response_rate', 'A', 5)]));
+      second.flush(result([row(null, 3.5)]));
       await settle(context.harness);
 
       expect(text(byTestId(context.root, 'view-error'))).toBe('The filter does not fit the column.');
-      expect(text(byTestId(context.root, 'stat-value'))).toBe('5');
+      expect(text(byTestId(context.root, 'stat-value'))).toBe('3.50');
     });
 
     it('shows every widget as a table at once, in reading order, and back', async () => {
-      const wide = [widget('w1', { title: 'Lower', layout: { x: 0, y: 4, w: 6, h: 4 } }), widget('w2', { title: 'Upper right', layout: { x: 6, y: 0, w: 6, h: 4 } }), widget('w3', { title: 'Upper left', layout: { x: 0, y: 0, w: 6, h: 4 } })];
+      const wide = [
+        widget('w1', { title: 'Lower', layout: { x: 0, y: 4, w: 6, h: 4 } }),
+        widget('w2', { title: 'Upper right', layout: { x: 6, y: 0, w: 6, h: 4 } }),
+        widget('w3', { title: 'Upper left', layout: { x: 0, y: 0, w: 6, h: 4 } }),
+      ];
       const { root, harness } = await open('viewer', wide, answer);
 
       byTestId(root, 'tables-toggle')!.click();
@@ -128,18 +158,33 @@ describe('ProjectIndicators', () => {
     });
   });
 
-  describe('nothing published yet', () => {
-    const unpublished = { published: false, publishedAt: null, runId: null };
-
+  describe('no indicator has published', () => {
     it('says so with instructions, still lists the configured widgets and does not ask for rows', async () => {
       const context = await open('viewer', two, null, unpublished);
 
       expect(byTestId(context.root, 'indicators-empty')).not.toBeNull();
-      expect(text(byTestId(context.root, 'indicators-empty-widgets'))).toBe('2 widgets are already configured; they draw once the indicators are published.');
+      expect(text(byTestId(context.root, 'indicators-empty-widgets'))).toBe('2 widgets are already configured; they draw once their indicators are published.');
       expect(all(context.root, 'widget-title').map(text)).toEqual(['Coverage by municipality', 'Response rate']);
-      expect(all(context.root, 'view-idle').map(text)[0]).toContain('Nothing is published yet');
+      expect(all(context.root, 'view-not-published').map(text)).toEqual(['Coverage has not published yet.', 'Response rate has not published yet.']);
       expect(context.http.match(isQuery)).toHaveLength(0);
-      expect(byTestId(context.root, 'indicators-published')).toBeNull();
+      expect(all(context.root, 'indicator-unpublished')).toHaveLength(defaultIndicators.length);
+    });
+
+    it('says so too when the project has no indicators at all', async () => {
+      const { root } = await open('analyst', [], null, { indicators: [] });
+
+      expect(byTestId(root, 'indicators-empty')).not.toBeNull();
+      expect(byTestId(root, 'indicator-table')).toBeNull();
+      expect(byTestId(root, 'no-widgets')).toBeNull();
+      expect(byTestId<HTMLButtonElement>(root, 'widget-add')!.disabled).toBe(true); // a widget needs an indicator
+    });
+
+    it('does not say so once one indicator has published', async () => {
+      const indicators = [indicator('coverage'), indicator('target', { published: false, publishedAt: null, runId: null, rows: null })];
+      const { root } = await open('viewer', [], null, { indicators });
+
+      expect(byTestId(root, 'indicators-empty')).toBeNull();
+      expect(text(byTestId(root, 'no-widgets'))).toContain('An analyst or admin can add widgets');
     });
 
     it.each<[ProjectRole, boolean]>([
@@ -154,10 +199,12 @@ describe('ProjectIndicators', () => {
       expect(byTestId(root, 'no-widgets')).toBeNull();
     });
 
-    it('turns the export off', async () => {
+    it('turns the export of every indicator off', async () => {
       const { root } = await open('viewer', [], null, unpublished);
 
-      expect(byTestId<HTMLButtonElement>(root, 'indicators-export')!.disabled).toBe(true);
+      const buttons = all(root, 'indicator-table').flatMap((table) => Array.from(table.querySelectorAll<HTMLButtonElement>('tbody button')));
+      expect(buttons).toHaveLength(defaultIndicators.length);
+      expect(buttons.every((b) => b.disabled)).toBe(true);
     });
   });
 
@@ -171,24 +218,83 @@ describe('ProjectIndicators', () => {
     });
   });
 
-  describe('stale configuration', () => {
-    it('names the removed group column instead of the chart (column removed by a script change)', async () => {
-      const { root } = await open('viewer', [widget('w1', { config: config({ groupBy: 'year' }) })], result([], { missing: { indicators: [], columns: ['year'] } }));
+  describe('an indicator that has not published', () => {
+    const attendance = widget('w1', { title: 'Attendance by round', config: config({ indicator: 'attendance', groupBy: 'round' }) });
+    const neverPublished = { indicators: [indicator('coverage'), indicator('attendance', { published: false, publishedAt: null, runId: null, rows: null })] };
 
-      expect(text(byTestId(root, 'widget-missing'))).toContain('no longer has the columns: year');
-      expect(byTestId(root, 'missing-indicators')).toBeNull();
+    it('says the indicator has not published yet instead of its chart, without asking for rows', async () => {
+      const context = await open('viewer', [attendance, widget('w2', { title: 'Coverage' })], null, neverPublished);
+
+      const requests = context.http.match(isQuery);
+      expect(requests).toHaveLength(1); // only the coverage widget asks
+      expect(requests[0].request.body.config.indicator).toBe('coverage');
+      requests[0].flush(answer);
+      await settle(context.harness);
+
+      const notices = all(context.root, 'view-not-published');
+      expect(notices.map(text)).toEqual(['Attendance has not published yet.']);
+      expect(all(context.root, 'chart-svg')).toHaveLength(1);
+      expect(byTestId(context.root, 'indicators-empty')).toBeNull(); // another indicator has published
+    });
+
+    it.each<[ProjectRole, boolean]>([
+      ['analyst', true],
+      ['admin', true],
+      ['viewer', false],
+    ])('links to the scripts for an editor, not for a viewer, for a %s', async (role, link) => {
+      const { root } = await open(role, [attendance], null, neverPublished);
+
+      const anchor = byTestId(root, 'view-scripts-link');
+      expect(anchor !== null).toBe(link);
+      if (anchor) {
+        expect(anchor.getAttribute('href')).toBe(`/projects/${projectId}/scripts`);
+      }
+    });
+
+    it('says so when the query answers that the indicator has no table, as a run may have removed it since', async () => {
+      const { root } = await open('analyst', [widget('w1')], result([], { published: false, missing: { indicator: true, columns: [] } }));
+
+      expect(text(byTestId(root, 'view-not-published')!.querySelector('p'))).toBe('Coverage has not published yet.');
+      expect(byTestId(root, 'view-scripts-link')).not.toBeNull();
       expect(all(root, 'chart-svg')).toHaveLength(0);
     });
 
-    it('names a removed indicator', async () => {
-      const { root } = await open('viewer', [widget('w1')], result([], { missing: { indicators: ['coverage', 'target'], columns: [] } }));
+    it('names the indicator when the project no longer lists it', async () => {
+      const { root } = await open('viewer', [widget('w1', { config: config({ indicator: 'removed_one' }) })], result([], { published: false, missing: { indicator: true, columns: [] } }));
 
-      expect(text(byTestId(root, 'missing-indicators'))).toBe('The published table no longer has the indicators: coverage, target.');
+      expect(text(byTestId(root, 'view-not-published'))).toBe('removed_one has not published yet.');
+    });
+
+    it('keeps the other widgets drawing', async () => {
+      const context = await open('viewer', two, null);
+      const [first, second] = context.http.match(isQuery);
+      first.flush(result([], { missing: { indicator: true, columns: [] } }));
+      second.flush(result([row(null, 3.5)]));
+      await settle(context.harness);
+
+      expect(all(context.root, 'view-not-published')).toHaveLength(1);
+      expect(text(byTestId(context.root, 'stat-value'))).toBe('3.50');
+    });
+  });
+
+  describe('stale configuration', () => {
+    it('names the removed group column instead of the chart (column removed by a script change)', async () => {
+      const { root } = await open('viewer', [widget('w1', { config: config({ groupBy: 'year' }) })], result([], { missing: { indicator: false, columns: ['year'] } }));
+
+      expect(text(byTestId(root, 'widget-missing'))).toContain('no longer has the columns: year');
+      expect(byTestId(root, 'view-not-published')).toBeNull();
       expect(all(root, 'chart-svg')).toHaveLength(0);
+    });
+
+    it('names a removed measure, or the columns of a removed ratio', async () => {
+      const ratio = { numerator: 'cases', denominator: 'population' };
+      const { root } = await open('viewer', [widget('w1', { config: config({ ratio }) })], result([], { missing: { indicator: false, columns: ['cases', 'population'] } }));
+
+      expect(text(byTestId(root, 'missing-columns'))).toBe('The published table no longer has the columns: cases, population.');
     });
 
     it('names a removed geometry column', async () => {
-      const { root } = await open('viewer', [widget('w1', { chartType: 'map', config: config({ geometryColumn: 'boundary' }) })], result([], { missing: { indicators: [], columns: ['boundary'] } }));
+      const { root } = await open('viewer', [widget('w1', { chartType: 'map', config: config({ geometryColumn: 'boundary' }) })], result([], { missing: { indicator: false, columns: ['boundary'] } }));
 
       expect(text(byTestId(root, 'missing-columns'))).toBe('The published table no longer has the columns: boundary.');
       expect(all(root, 'map-region')).toHaveLength(0);
@@ -197,60 +303,80 @@ describe('ProjectIndicators', () => {
     it('keeps the other widgets drawing', async () => {
       const context = await open('viewer', two, null);
       const [first, second] = context.http.match(isQuery);
-      first.flush(result([], { missing: { indicators: ['coverage'], columns: [] } }));
-      second.flush(result([row('response_rate', 'A', 5)]));
+      first.flush(result([], { missing: { indicator: false, columns: ['municipality'] } }));
+      second.flush(result([row(null, 3.5)]));
       await settle(context.harness);
 
       expect(all(context.root, 'widget-missing')).toHaveLength(1);
-      expect(text(byTestId(context.root, 'stat-value'))).toBe('5');
+      expect(text(byTestId(context.root, 'stat-value'))).toBe('3.50');
     });
   });
 
   describe('exporting', () => {
-    const exported = { downloadUrl: '/api/v1/data-exports/token', fileName: 'indicators.xlsx', rowCount: 120, cutCells: 0, expiresAt: '2026-10-02T12:05:00Z' };
+    const exported = { downloadUrl: '/api/v1/data-exports/token', fileName: 'coverage.xlsx', rowCount: 120, cutCells: 0, expiresAt: '2026-10-02T12:05:00Z' };
+
+    async function exportAs(context: Context, name: string, format: 'csv' | 'xlsx') {
+      byTestId(context.root, `indicator-export-${name}`)!.click();
+      await settle(context.harness);
+      (overlay().querySelector(`[data-testid="indicators-export-${format}"]`) as HTMLElement).click();
+      await settle(context.harness);
+    }
 
     it.each<[ProjectRole, 'csv' | 'xlsx']>([
       ['viewer', 'xlsx'],
       ['analyst', 'csv'],
       ['admin', 'xlsx'],
-    ])('lets a %s export the whole table as %s through a single-use link', async (role, format) => {
-      const { http, harness, root } = await open(role, [], null);
+    ])('lets a %s export the whole table of an indicator as %s through a single-use link', async (role, format) => {
+      const context = await open(role, [], null);
 
-      byTestId(root, 'indicators-export')!.click();
-      await settle(harness);
-      (overlay().querySelector(`[data-testid="indicators-export-${format}"]`) as HTMLElement).click();
-      await settle(harness);
+      await exportAs(context, 'households_visited', format);
 
-      const request = http.expectOne(`${indicatorsUrl}/exports`);
+      const request = context.http.expectOne(`${indicatorsUrl}/households_visited/exports`);
       expect(request.request.method).toBe('POST');
       expect(request.request.body).toEqual({ format });
       request.flush(exported);
-      await settle(harness);
+      await settle(context.harness);
       expect(downloader.start).toHaveBeenCalledWith('/api/v1/data-exports/token');
     });
 
+    it('turns the export off for an indicator that has not published, and only for it', async () => {
+      const indicators = [indicator('coverage'), indicator('target', { published: false, publishedAt: null, runId: null, rows: null })];
+      const { root } = await open('viewer', [], null, { indicators });
+
+      expect(byTestId<HTMLButtonElement>(root, 'indicator-export-coverage')!.disabled).toBe(false);
+      expect(byTestId<HTMLButtonElement>(root, 'indicator-export-target')!.disabled).toBe(true);
+    });
+
     it('reports a refused export', async () => {
-      const { http, harness, root } = await open('viewer', [], null);
+      const context = await open('viewer', [], null);
       const toasts = TestBed.inject(ToastService);
 
-      byTestId(root, 'indicators-export')!.click();
-      await settle(harness);
-      (overlay().querySelector('[data-testid="indicators-export-csv"]') as HTMLElement).click();
-      await settle(harness);
-      http.expectOne(`${indicatorsUrl}/exports`).flush({ code: 'data.exportBusy', title: 'x' }, { status: 429, statusText: 'Too Many Requests' });
-      await settle(harness);
+      await exportAs(context, 'coverage', 'csv');
+      context.http.expectOne(`${indicatorsUrl}/coverage/exports`).flush({ code: 'data.exportBusy', title: 'x' }, { status: 429, statusText: 'Too Many Requests' });
+      await settle(context.harness);
 
       expect(downloader.start).not.toHaveBeenCalled();
       expect(toasts.toasts().some((t) => t.message.includes('Other exports are being prepared'))).toBe(true);
+    });
+
+    it('says the indicator has not published when its table went away since the page loaded', async () => {
+      const context = await open('viewer', [], null);
+      const toasts = TestBed.inject(ToastService);
+
+      await exportAs(context, 'coverage', 'xlsx');
+      context.http.expectOne(`${indicatorsUrl}/coverage/exports`).flush({ code: 'indicators.notPublished', title: 'x' }, { status: 404, statusText: 'Not Found' });
+      await settle(context.harness);
+
+      expect(toasts.toasts().some((t) => t.message.includes('has not published a table yet'))).toBe(true);
     });
   });
 
   describe('widgets: add, edit, remove', () => {
     async function openEditor(widgets = two) {
-      const context = await open('analyst', widgets, answer);
-      return context;
+      return open('analyst', widgets, answer);
     }
 
+    /** Opens the widget dialog, which reads the columns of the indicator it starts on. */
     async function openDialog(context: Context, button: string, index = 0) {
       all(context.root, button)[index].click();
       await settle(context.harness);
@@ -264,18 +390,18 @@ describe('ProjectIndicators', () => {
       const context = await openEditor();
       await openDialog(context, 'widget-add');
 
-      expect(byTestId(overlay(), 'widget-dialog')).not.toBeNull();
       const dialog = overlay();
+      expect(byTestId(dialog, 'widget-dialog')).not.toBeNull();
       const title = byTestId<HTMLInputElement>(dialog, 'dialog-title')!;
       title.value = 'Coverage by municipality';
       title.dispatchEvent(new Event('input'));
-      (all(dialog, 'indicator-option')[1] as HTMLInputElement).click();
       await settle(context.harness);
       byTestId(dialog, 'dialog-save')!.click();
       await settle(context.harness);
 
+      // A new widget starts on the first indicator that has published, grouped by the table's default group column.
       const request = context.http.expectOne((r) => r.method === 'POST' && r.url === `${indicatorsUrl}/widgets`);
-      expect(request.request.body).toEqual({ title: 'Coverage by municipality', chartType: 'column', config: { ...config(), buckets: null, geometryColumn: null } });
+      expect(request.request.body).toEqual({ title: 'Coverage by municipality', chartType: 'column', config: config({ indicator: 'attendance' }) });
       request.flush(widget('w3', { title: 'Coverage by municipality', layout: { x: 0, y: 4, w: 6, h: 4 } }));
       await settle(context.harness);
       await answerQueries(context, answer);
@@ -294,11 +420,12 @@ describe('ProjectIndicators', () => {
       const title = byTestId<HTMLInputElement>(dialog, 'dialog-title')!;
       title.value = 'Coverage';
       title.dispatchEvent(new Event('input'));
+      await settle(context.harness);
       byTestId(dialog, 'dialog-save')!.click();
       await settle(context.harness);
 
       const request = context.http.expectOne((r) => r.method === 'PATCH' && r.url === `${indicatorsUrl}/widgets/w1`);
-      expect(request.request.body).toEqual({ title: 'Coverage', chartType: 'column', config: { ...config(), buckets: null, geometryColumn: null } });
+      expect(request.request.body).toEqual({ title: 'Coverage', chartType: 'column', config: config() });
       request.flush(widget('w1', { title: 'Coverage' }));
       await settle(context.harness);
       await answerQueries(context, answer);

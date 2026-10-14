@@ -3,7 +3,7 @@ import { DatePipe } from '@angular/common';
 import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
-import { PIPELINE_POLL_MS, PipelineService, RunPage, RunStatus, RunSummary, RunStepStatus } from '../../core/projects/pipeline.service';
+import { PIPELINE_POLL_MS, PipelineService, RunPage, RunStatus, RunStepStatus, RunSummary, StepSummary } from '../../core/projects/pipeline.service';
 import {
   Badge,
   Button,
@@ -51,8 +51,11 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
                 </div>
                 <p class="text-body">{{ (run.startedAt ?? run.queuedAt) | date: 'medium' }}</p>
                 <p class="mt-1 flex flex-wrap gap-1">
-                  @for (step of run.steps; track step.step) {
+                  @for (step of fixedSteps(run); track step.step) {
                     <tmz-badge [tone]="stepTone(step.status)">{{ t('runs.steps.' + step.step) }}</tmz-badge>
+                  }
+                  @if (indicatorSteps(run).length) {
+                    <tmz-badge [tone]="stepTone(indicatorStatus(run))">{{ indicatorsSummary(run) }}</tmz-badge>
                   }
                 </p>
                 @if (run.error) {
@@ -89,8 +92,11 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
                     </td>
                     <td [class]="tableCell">
                       <span class="flex flex-wrap gap-1">
-                        @for (step of run.steps; track step.step) {
+                        @for (step of fixedSteps(run); track step.step) {
                           <tmz-badge [tone]="stepTone(step.status)">{{ t('runs.steps.' + step.step) }}</tmz-badge>
+                        }
+                        @if (indicatorSteps(run).length) {
+                          <tmz-badge [tone]="stepTone(indicatorStatus(run))" data-testid="run-indicators">{{ indicatorsSummary(run) }}</tmz-badge>
                         }
                       </span>
                     </td>
@@ -211,9 +217,31 @@ export class PipelineRuns {
     return stepTones[status];
   }
 
+  protected fixedSteps(run: RunSummary): StepSummary[] {
+    return run.steps.filter((step) => step.step !== 'indicator');
+  }
+
+  protected indicatorSteps(run: RunSummary): StepSummary[] {
+    return run.steps.filter((step) => step.step === 'indicator');
+  }
+
+  /** The indicators as one badge: failed when any failed, succeeded when any did, skipped when none ran. */
+  protected indicatorStatus(run: RunSummary): RunStepStatus {
+    const steps = this.indicatorSteps(run);
+    return steps.some((s) => s.status === 'failed') ? 'failed' : steps.some((s) => s.status === 'succeeded') ? 'succeeded' : 'skipped';
+  }
+
+  protected indicatorsSummary(run: RunSummary): string {
+    const steps = this.indicatorSteps(run);
+    return this.transloco.translate('runs.indicatorsSummary', { done: steps.filter((s) => s.status === 'succeeded').length, total: steps.length });
+  }
+
+  /** The versions of script 1 and script 2 the run used, then how many indicators it ran. */
   protected versions(run: RunSummary): string {
     const v = run.versions;
-    return [v.clean, v.output, v.indicators].map((n) => (n === null ? '—' : `v${n}`)).join(' / ');
+    const fixed = [v.clean, v.output].map((n) => (n === null ? '—' : `v${n}`));
+    const count = v.indicators.length;
+    return [...fixed, this.transloco.translate(count === 1 ? 'runs.indicatorCountOne' : 'runs.indicatorCount', { count })].join(' / ');
   }
 
   /** The translated message for the run's error code, or the API's text. */

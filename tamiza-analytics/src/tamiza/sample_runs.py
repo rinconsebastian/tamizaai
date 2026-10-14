@@ -1,8 +1,9 @@
 """Script tests: a draft script run on a sample of the project's submissions, with previews and nothing published.
 
-A test flattens the sample, runs the saved script 1 first when the draft is script 2 or 3, then runs the draft with
-the same contract, ``ctx``, validation and limits as a run. Each step is recorded in ``tamiza.script_tests.steps`` as it
-ends, with previews of the tables it produced. The worker claims queued tests before queued runs.
+A test flattens the sample, runs the saved script 1 first when the draft is script 2 or an indicator, then runs the
+draft with the same contract, ``ctx``, validation and limits as a run. Each step is recorded in
+``tamiza.script_tests.steps`` as it ends, with previews of the tables it produced. The worker claims queued tests
+before queued runs.
 """
 
 import logging
@@ -35,9 +36,10 @@ class ClaimedTest:
     id: UUID
     project_id: UUID
     kind: str
+    name: str | None  # the indicator a draft is tested as; None for script 1 and script 2
     code: str
     sample_size: int
-    clean_version_id: UUID | None  # the saved script 1 run before an output or indicators draft
+    clean_version_id: UUID | None  # the saved script 1 run before an output or indicator draft
 
 
 @dataclass
@@ -87,7 +89,7 @@ def delete_expired(connection: psycopg.Connection) -> int:
 
 
 def claim(connection: psycopg.Connection) -> ClaimedTest | None:
-    """Starts the oldest queued test; a test of script 2 or 3 records the current version of script 1."""
+    """Starts the oldest queued test; a test of script 2 or an indicator records the current version of script 1."""
     with connection.transaction():
         row = connection.execute(
             """
@@ -101,7 +103,7 @@ def claim(connection: psycopg.Connection) -> ClaimedTest | None:
                     SELECT v.id FROM tamiza.script_versions v
                     WHERE v.project_id = t.project_id AND v.kind = 'clean' ORDER BY v.number DESC LIMIT 1) END
             FROM next WHERE t.id = next.id
-            RETURNING t.id, t.project_id, t.kind, t.code, t.sample_size, t.clean_version_id
+            RETURNING t.id, t.project_id, t.kind, t.name, t.code, t.sample_size, t.clean_version_id
             """
         ).fetchone()
     return None if row is None else ClaimedTest(*row)
@@ -176,7 +178,7 @@ def _execute_steps(connection, test: ClaimedTest, settings: Settings, work_dir: 
         inputs = cleaned
 
     def do_draft(step: TestStep) -> None:
-        _script(step, work_dir, test.kind, test.code, inputs, project.context, limits, references)
+        _script(step, work_dir, test.kind, test.code, inputs, project.context, limits, references, test.name)
 
     _run_step(connection, test, steps, test.kind, do_draft)
 
@@ -199,9 +201,17 @@ def _run_step(connection, test: ClaimedTest, steps: list[TestStep], name: str, a
     )
 
 
-def _script(step, work_dir, kind, code, inputs, context, limits, references) -> list[OutputTable] | None:
+def _script(step, work_dir, kind, code, inputs, context, limits, references, name=None) -> list[OutputTable] | None:
     outcome = run_script(
-        work_dir / "steps", kind, code, {t.name: t.path for t in inputs}, context, work_dir / kind, limits, references
+        work_dir / "steps",
+        kind,
+        code,
+        {t.name: t.path for t in inputs},
+        context,
+        work_dir / kind,
+        limits,
+        references,
+        name,
     )
     step.input_rows = sum(t.rows for t in inputs)
     step.log = outcome.log

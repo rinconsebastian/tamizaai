@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using NpgsqlTypes;
@@ -6,67 +7,93 @@ using Tamiza.Api.Http;
 
 namespace Tamiza.Api.Indicators;
 
-/// <summary>Where and when the project's indicator table was published; <see cref="Published"/> is false while script 3 has never published.</summary>
-public sealed record IndicatorPublication(bool Published, DateTimeOffset? PublishedAt, Guid? RunId);
+/// <summary>Where and when an indicator's table was published; <see cref="Published"/> is false while the table does not exist.</summary>
+public sealed record IndicatorPublication(bool Published, DateTimeOffset? PublishedAt, Guid? RunId, long? Rows)
+{
+    public static readonly IndicatorPublication None = new(false, null, null, null);
+}
 
 /// <summary>
-/// Reads the table script 3 published, <c>p_&lt;id&gt;_indicators.indicators</c> (design D2 to D4). It reads through the clean data
+/// Reads the tables the indicator scripts published, one per indicator in <c>p_&lt;id&gt;_indicators</c>. It reads through the clean data
 /// dashboard's machinery: a read-only transaction on a connection of its own, the table locked against the swap that replaces
 /// it, the same time limits and query slots. The schema name is built from the route's project id and a constant, and every
-/// column name that reaches SQL was returned by the catalog.
+/// table and column name that reaches SQL was returned by the catalog.
 /// </summary>
 public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboardOptions> dataOptions, IOptions<IndicatorDashboardOptions> options)
 {
-    public const string Step = "indicators";
-    public const string Table = "indicators";
+    public const string Schema = "indicators";
 
-    /// <summary>The most indicators the column catalog lists.</summary>
-    public const int MaxListedIndicators = 500;
+    /// <summary>The name of an indicator's step in <c>run_steps</c>.</summary>
+    public const string Step = "indicator";
 
     private readonly IndicatorDashboardOptions _options = options.Value;
 
     /// <summary><c>p_&lt;32 hex&gt;_indicators</c>, the name the analytics worker publishes under.</summary>
-    public static string SchemaName(Guid projectId) => $"p_{projectId:N}_{Step}";
+    public static string SchemaName(Guid projectId) => $"p_{projectId:N}_{Schema}";
 
-    private static string From(Guid projectId) => $"{DataSources.Quote(SchemaName(projectId))}.{DataSources.Quote(Table)}";
+    private static string From(Guid projectId, string table) => $"{DataSources.Quote(SchemaName(projectId))}.{DataSources.Quote(table)}";
 
-    /// <summary>Whether the table is published and, if so, by which run and when (resolved as the clean data dashboard does).</summary>
-    public Task<IndicatorPublication> GetPublicationAsync(Guid projectId, CancellationToken ct) =>
-        data.InTransactionAsync(projectId, dataOptions.Value.StatementTimeout, async (connection, transaction, _) =>
+    /// <summary>
+    /// The indicator tables that exist, with the latest succeeded step that published each. A table is replaced only by a succeeded
+    /// step, so while it exists that step is the one that published it, whatever failed since.
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, IndicatorPublication>> GetPublicationsAsync(Guid projectId, CancellationToken ct) =>
+        data.InTransactionAsync<IReadOnlyDictionary<string, IndicatorPublication>>(projectId, dataOptions.Value.StatementTimeout, async (connection, transaction, _) =>
         {
-            if (await TableCatalog.FindAsync(connection, transaction, SchemaName(projectId), Table, ct) is null)
+            var tables = await DataDashboard.TableNamesAsync(connection, transaction, SchemaName(projectId), ct);
+            var publications = tables.ToDictionary(t => t, _ => new IndicatorPublication(true, null, null, null), StringComparer.Ordinal);
+            if (tables.Count == 0)
             {
-                return new IndicatorPublication(false, null, null);
+                return publications;
             }
 
-            var step = await DataDashboard.LatestStepAsync(connection, transaction, projectId, Step, ct);
-            return new IndicatorPublication(true, step?.FinishedAt, step?.RunId);
+            await using var command = new NpgsqlCommand(
+                """
+                SELECT DISTINCT ON (s.name) s.name, s.run_id, s.finished_at, s.tables
+                FROM tamiza.run_steps s JOIN tamiza.runs r ON r.id = s.run_id
+                WHERE r.project_id = @project AND s.step = @step AND s.status = 'succeeded'
+                ORDER BY s.name, s.finished_at DESC NULLS LAST
+                """, connection, transaction);
+            command.Parameters.Add(new NpgsqlParameter("project", NpgsqlDbType.Uuid) { Value = projectId });
+            command.Parameters.Add(new NpgsqlParameter("step", NpgsqlDbType.Text) { Value = Step });
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var name = reader.GetString(0);
+                if (!publications.ContainsKey(name))
+                {
+                    continue;
+                }
+
+                publications[name] = new IndicatorPublication(
+                    true, reader.IsDBNull(2) ? null : reader.GetFieldValue<DateTimeOffset>(2), reader.GetGuid(1), RowsOf(reader.GetString(3), name));
+            }
+
+            return publications;
         }, ct);
 
-    /// <summary>The table's columns and the indicators it holds. Not published: no columns and no indicators.</summary>
-    public Task<IndicatorColumns> GetColumnsAsync(Guid projectId, CancellationToken ct) =>
+    /// <summary>The table's columns, those a widget can plot, and the measure and group a new widget starts with. Not published: none.</summary>
+    public Task<IndicatorColumns> GetColumnsAsync(Guid projectId, string indicator, CancellationToken ct) =>
         data.InTransactionAsync(projectId, dataOptions.Value.StatementTimeout, async (connection, transaction, _) =>
         {
-            var columns = await DataDashboard.LockAndDescribeAsync(connection, transaction, SchemaName(projectId), Table, ct);
-            if (columns is null)
-            {
-                return new IndicatorColumns(false, [], []);
-            }
-
-            var indicators = columns.Any(c => c.Name == IndicatorQueryBuilder.IndicatorColumn)
-                ? await ListIndicatorsAsync(connection, transaction, projectId, ct)
-                : [];
-            return new IndicatorColumns(true, columns, indicators);
+            var columns = await DataDashboard.LockAndDescribeAsync(connection, transaction, SchemaName(projectId), indicator, ct);
+            return columns is null
+                ? new IndicatorColumns(false, [], [], new ColumnDefaults(null, null))
+                : new IndicatorColumns(
+                    true,
+                    columns,
+                    columns.Where(IndicatorValidation.IsNumeric).Select(c => c.Name).ToList(),
+                    new ColumnDefaults(IndicatorQueryBuilder.DefaultMeasure(columns), IndicatorQueryBuilder.DefaultGroupBy(columns)));
         }, ct);
 
     /// <summary>
-    /// Checks a widget's query against the published table's columns, adding to <paramref name="errors"/>. Returns false, and
-    /// checks nothing, while the table is not published: a widget may be configured before script 3 has published.
+    /// Checks a widget's query against its indicator's table, adding to <paramref name="errors"/>. Returns false, and checks
+    /// nothing, while the table is not published: a widget may be configured before its indicator has published.
     /// </summary>
     public Task<bool> CheckConfigAgainstTableAsync(Guid projectId, WidgetConfig config, string prefix, FieldErrors errors, CancellationToken ct) =>
         data.InTransactionAsync(projectId, dataOptions.Value.StatementTimeout, async (connection, transaction, project) =>
         {
-            var columns = await TableCatalog.FindAsync(connection, transaction, SchemaName(projectId), Table, ct);
+            var columns = await TableCatalog.FindAsync(connection, transaction, SchemaName(projectId), config.Indicator, ct);
             if (columns is null)
             {
                 return false;
@@ -77,15 +104,15 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
         }, ct);
 
     /// <summary>
-    /// Runs a widget's query (design D2, D8, D9). The response lists what the query names that the table does not have instead of
-    /// failing; a request that is malformed is returned as validation errors. Throws <see cref="DataTimeoutException"/> when the
-    /// read takes too long.
+    /// Runs a widget's query. The response says that the indicator is not published, or lists what the query names that the table
+    /// does not have, instead of failing; a request that is malformed is returned as validation errors. Throws
+    /// <see cref="DataTimeoutException"/> when the read takes too long.
     /// </summary>
-    public async Task<IndicatorQueryOutcome> QueryAsync(Guid projectId, WidgetConfigInput input, CancellationToken ct)
+    public async Task<IndicatorQueryOutcome> QueryAsync(Guid projectId, WidgetConfigInput input, string? chartType, CancellationToken ct)
     {
         var config = input.Normalize();
         var errors = new FieldErrors();
-        IndicatorValidation.CheckConfig(config, chartType: null, prefix: "", errors);
+        IndicatorValidation.CheckConfig(config, ChartTypes.IsKnown(chartType) ? chartType : null, prefix: "", errors);
         if (errors.Any)
         {
             return new IndicatorQueryOutcome(null, errors.ToDictionary());
@@ -94,79 +121,55 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
         var maxRows = _options.MaxWidgetQueryRows;
         return await data.WithSlotAsync(() => data.InTransactionAsync(projectId, dataOptions.Value.StatementTimeout, async (connection, transaction, project) =>
         {
-            var columns = await DataDashboard.LockAndDescribeAsync(connection, transaction, SchemaName(projectId), Table, ct);
+            var columns = await DataDashboard.LockAndDescribeAsync(connection, transaction, SchemaName(projectId), config.Indicator, ct);
             if (columns is null)
             {
-                return new IndicatorQueryOutcome(new IndicatorQueryResponse(false, [], false, MissingReferences.None), null);
+                return new IndicatorQueryOutcome(new IndicatorQueryResponse(false, [], false, new MissingReferences(true, [])), null);
             }
 
-            var plan = IndicatorQueryBuilder.Plan(config, columns, project.TimeZone, From(projectId), maxRows);
+            var plan = IndicatorQueryBuilder.Plan(
+                config, columns, project.TimeZone, From(projectId, config.Indicator), maxRows, perRow: chartType == ChartTypes.Histogram);
             if (plan.Errors is not null)
             {
                 return new IndicatorQueryOutcome(null, plan.Errors);
             }
 
-            var group = columns.FirstOrDefault(c => c.Name == config.GroupBy);
-            var missingIndicators = columns.Any(c => c.Name == IndicatorQueryBuilder.IndicatorColumn)
-                ? await MissingIndicatorsAsync(connection, transaction, projectId, config.Indicators, ct)
-                : [];
-            if (plan.Sql is null || missingIndicators.Count > 0)
+            if (plan.Sql is null)
             {
-                return new IndicatorQueryOutcome(
-                    new IndicatorQueryResponse(true, [], false, new MissingReferences(missingIndicators, plan.MissingColumns)), null);
+                return new IndicatorQueryOutcome(new IndicatorQueryResponse(true, [], false, new MissingReferences(false, plan.MissingColumns)), null);
             }
 
             await data.SleepForTestsAsync(connection, transaction, ct);
-            var (rows, limitReached) = await ReadRowsAsync(connection, transaction, plan.Sql, group!.Type, maxRows, ct);
+            var group = columns.FirstOrDefault(c => c.Name == config.GroupBy);
+            var (rows, limitReached) = await ReadRowsAsync(connection, transaction, plan.Sql, group?.Type, maxRows, ct);
             return new IndicatorQueryOutcome(new IndicatorQueryResponse(true, rows, limitReached, MissingReferences.None), null);
         }, ct), ct);
     }
 
     /// <summary>
-    /// Writes the whole published table to a file and registers its single-use link (design D4). Returns null when the table is not
-    /// published. Throws what <see cref="DataDashboard.ExportAsync"/> throws.
+    /// Writes the whole published table of one indicator to a file and registers its single-use link. Returns null when the table is
+    /// not published. Throws what <see cref="DataDashboard.ExportAsync"/> throws.
     /// </summary>
-    public Task<DataExportOutcome?> ExportAsync(Guid projectId, Guid userId, string format, CancellationToken ct) =>
-        data.ExportFromSchemaAsync(projectId, userId, SchemaName(projectId), Table, new DataExportRequest(format), ct);
+    public Task<DataExportOutcome?> ExportAsync(Guid projectId, Guid userId, string indicator, string format, CancellationToken ct) =>
+        data.ExportFromSchemaAsync(projectId, userId, SchemaName(projectId), indicator, new DataExportRequest(format), ct);
 
-    private static async Task<List<string>> ListIndicatorsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid projectId, CancellationToken ct)
+    private static long? RowsOf(string tablesJson, string name)
     {
-        var indicator = DataSources.Quote(IndicatorQueryBuilder.IndicatorColumn);
-        await using var command = new NpgsqlCommand(
-            $"""
-            SELECT DISTINCT {indicator}::text COLLATE "C" FROM {From(projectId)}
-            WHERE {indicator} IS NOT NULL ORDER BY 1 LIMIT {MaxListedIndicators}
-            """, connection, transaction);
-        var values = new List<string>();
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        using var tables = JsonDocument.Parse(tablesJson);
+        foreach (var table in tables.RootElement.EnumerateArray())
         {
-            values.Add(reader.GetString(0));
+            if (table.TryGetProperty("name", out var tableName) && tableName.GetString() == name
+                && table.TryGetProperty("rows", out var count) && count.TryGetInt64(out var rows))
+            {
+                return rows;
+            }
         }
 
-        return values;
-    }
-
-    /// <summary>The requested indicators that are not among the distinct values of the <c>indicator</c> column.</summary>
-    private static async Task<List<string>> MissingIndicatorsAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, Guid projectId, IReadOnlyList<string> requested, CancellationToken ct)
-    {
-        var indicator = DataSources.Quote(IndicatorQueryBuilder.IndicatorColumn);
-        await using var command = new NpgsqlCommand(
-            $"SELECT DISTINCT {indicator}::text FROM {From(projectId)} WHERE {indicator}::text = ANY(@requested)", connection, transaction);
-        command.Parameters.Add(new NpgsqlParameter("requested", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = requested.ToArray() });
-        var found = new HashSet<string>(StringComparer.Ordinal);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            found.Add(reader.GetString(0));
-        }
-
-        return requested.Distinct(StringComparer.Ordinal).Where(i => !found.Contains(i)).ToList();
+        return null;
     }
 
     private static async Task<(List<IndicatorRow> Rows, bool LimitReached)> ReadRowsAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, DataColumnType groupType, int maxRows, CancellationToken ct)
+        NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, DataColumnType? groupType, int maxRows, CancellationToken ct)
     {
         await using var command = new NpgsqlCommand(sql.Sql, connection, transaction);
         foreach (var parameter in sql.Parameters)
@@ -185,18 +188,17 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
                 break;
             }
 
-            var sum = reader.GetDouble(2);
-            if (!double.IsFinite(sum))
+            var value = reader.GetDouble(1);
+            if (!double.IsFinite(value))
             {
                 continue; // NaN and infinity have no number in JSON
             }
 
-            var group = reader.IsDBNull(1) ? null : reader.GetString(1);
+            var group = reader.IsDBNull(0) ? null : reader.GetString(0);
             rows.Add(new IndicatorRow(
-                reader.GetString(0),
                 group is not null && groupType == DataColumnType.Timestamp ? DataValues.IsoTimestamp(group) : group,
-                sum,
-                reader.IsDBNull(3) ? null : reader.GetString(3)));
+                value,
+                reader.IsDBNull(2) ? null : reader.GetString(2)));
         }
 
         return (rows, limitReached);

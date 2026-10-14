@@ -60,7 +60,7 @@ public sealed partial class DataDashboard
 
     /// <summary>
     /// <see cref="ExportAsync"/> for a schema the caller built from the project id (the indicators dashboard exports
-    /// <c>p_&lt;id&gt;_indicators.indicators</c>, which is not one of the clean data sources).
+    /// <c>p_&lt;id&gt;_indicators.&lt;name&gt;</c>, which is not one of the clean data sources).
     /// </summary>
     internal async Task<DataExportOutcome?> ExportFromSchemaAsync(
         Guid projectId, Guid userId, string schema, string table, DataExportRequest request, CancellationToken ct)

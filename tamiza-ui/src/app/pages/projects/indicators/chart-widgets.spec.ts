@@ -1,14 +1,20 @@
 import { byTestId, settle } from '../../../../testing/project-harness';
-import { ChartType, QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
-import { Context, all, clearOverlay, config, isQuery, open, result, row, text, widget } from './indicators-testing';
+import { ChartType, IndicatorEntry, QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
+import { Context, all, clearOverlay, config, indicator, isQuery, open, result, row, text, widget } from './indicators-testing';
 
-async function show(chartType: ChartType, settings: Partial<WidgetConfig>, rows: QueryRow[]) {
-  const context = await open('viewer', [widget('w1', { chartType, config: config(settings) })], null);
+interface Query {
+  config: WidgetConfig;
+  chartType: ChartType;
+}
+
+/** Opens a dashboard with one widget of `chartType` over `settings`, and answers its one query with `rows`. */
+async function show(chartType: ChartType, settings: Partial<WidgetConfig>, rows: QueryRow[], indicators?: IndicatorEntry[]) {
+  const context = await open('viewer', [widget('w1', { chartType, config: config(settings) })], null, indicators ? { indicators } : {});
   const requests = context.http.match(isQuery);
   expect(requests).toHaveLength(1);
   requests[0].flush(result(rows));
   await settle(context.harness);
-  return { ...context, query: requests[0].request.body as WidgetConfig };
+  return { ...context, query: requests[0].request.body as Query };
 }
 
 async function toggle(context: Context) {
@@ -21,47 +27,91 @@ const titles = (elements: HTMLElement[]) => elements.map((e) => text(e.querySele
 const label = (context: Context) => byTestId(context.root, 'chart-svg')!.getAttribute('aria-label');
 const tableRows = (context: Context) => all(context.root, 'widget-table-row').map((r) => Array.from(r.children).map(text));
 const tableHeaders = (context: Context) => Array.from(context.root.querySelectorAll('[data-testid="widget-table"] th[scope="col"]')).map(text);
+const svgTexts = (context: Context) => Array.from(context.root.querySelectorAll('[data-testid="chart-svg"] text')).map(text);
 const x = (element: Element) => Number(element.getAttribute('x'));
+
+const households = indicator('households_visited');
+const rate = indicator('piped_water_rate');
 
 describe('chart widgets', () => {
   afterEach(clearOverlay);
 
   describe('stat tile', () => {
-    it('shows one number, the sum of the indicator\'s plotted field over every row (single figure)', async () => {
-      const { root, query } = await show('stat', { indicators: ['response_rate'] }, [row('response_rate', 'Cali', 40.25), row('response_rate', 'Bogotá', 35), row('response_rate', 'Pasto', 12)]);
+    it('shows one number for the indicator, written with its format and unit (single figure)', async () => {
+      const { root, query } = await show('stat', { indicator: 'households_visited', measure: 'value' }, [row(null, 12450)]);
 
-      expect(text(byTestId(root, 'stat-value'))).toBe('87.25');
-      expect(text(byTestId(root, 'stat-label'))).toBe('response_rate · value');
-      expect(text(byTestId(root, 'stat-rows'))).toBe('Sum over 3 rows');
-      expect(query.indicators).toEqual(['response_rate']);
+      expect(text(byTestId(root, 'stat-value'))).toBe('12,450 households');
+      expect(text(byTestId(root, 'stat-label'))).toBe('Households visited: value');
+      expect(byTestId(root, 'chart-toggle')).toBeNull(); // a single figure has no plot
+      // The server sums the measure over every row; a stat tile never groups.
+      expect(query).toEqual({ config: { ...config({ indicator: 'households_visited', measure: 'value' }), groupBy: null }, chartType: 'stat' });
     });
 
-    it('names the plotted field and has no table toggle, for a single figure has no plot', async () => {
-      const { root } = await show('stat', { indicators: ['coverage'], valueField: 'denominator' }, [row('coverage', null, 1500)]);
+    it('shows a rate stored as a fraction as a percentage', async () => {
+      const { root } = await show('stat', { indicator: 'piped_water_rate' }, [row(null, 0.42)]);
 
-      expect(text(byTestId(root, 'stat-value'))).toBe('1,500');
-      expect(text(byTestId(root, 'stat-label'))).toBe('coverage · denominator');
-      expect(byTestId(root, 'chart-toggle')).toBeNull();
+      expect(text(byTestId(root, 'stat-value'))).toBe('42%');
+      expect(text(byTestId(root, 'stat-label'))).toBe('Piped water rate');
+    });
+
+    it('shows the ratio of the sums of a numerator and a denominator, as the server computes it', async () => {
+      const ratio = { numerator: 'numerator', denominator: 'denominator' };
+      const { root, query } = await show('stat', { indicator: 'piped_water_rate', measure: null, ratio }, [row(null, 0.5)]);
+
+      expect(text(byTestId(root, 'stat-value'))).toBe('50%');
+      expect(text(byTestId(root, 'stat-label'))).toBe('Piped water rate: numerator / denominator');
+      expect(query.config.ratio).toEqual(ratio);
+      expect(query.config.measure).toBeNull();
+    });
+
+    it('writes decimals with two digits, and any other unit after the value', async () => {
+      const { root } = await show('stat', { indicator: 'response_rate' }, [row(null, 3.5)], [indicator('response_rate', { unit: 'visits' })]);
+
+      expect(text(byTestId(root, 'stat-value'))).toBe('3.50 visits');
+    });
+
+    it('says when nothing matches, for a ratio whose denominator sums to zero has no value', async () => {
+      const { root } = await show('stat', { indicator: 'piped_water_rate', ratio: { numerator: 'numerator', denominator: 'denominator' } }, []);
+
+      expect(text(byTestId(root, 'widget-empty'))).toBe('No rows match this widget’s query.');
+      expect(byTestId(root, 'stat')).toBeNull();
     });
   });
 
   describe('column chart', () => {
-    const groups = [row('coverage', 'Cali', 75), row('coverage', 'Bogotá', 60), row('coverage', 'Pasto', 35), row('coverage', 'Quibdó', 90), row('coverage', 'Leticia', 10)];
+    const groups = [row('Cali', 75), row('Bogotá', 60), row('Pasto', 35), row('Quibdó', 90), row('Leticia', 10)];
 
     it('shows one column per group value (one indicator, several groups)', async () => {
       const context = await show('column', {}, groups);
 
       expect(marks(context)).toHaveLength(5);
-      expect(titles(marks(context))).toEqual(['Cali · coverage: 75', 'Bogotá · coverage: 60', 'Pasto · coverage: 35', 'Quibdó · coverage: 90', 'Leticia · coverage: 10']);
-      expect(all(context.root, 'legend-item')).toHaveLength(0); // one series: the title names it
+      expect(titles(marks(context))).toEqual(['Cali: 75', 'Bogotá: 60', 'Pasto: 35', 'Quibdó: 90', 'Leticia: 10']);
+      expect(all(context.root, 'legend-item')).toHaveLength(0); // one series: the caption names it
+      expect(context.query).toEqual({ config: config(), chartType: 'column' });
+    });
+
+    it('labels each column with its value, format and unit (count with a unit)', async () => {
+      const context = await show('column', { indicator: 'households_visited' }, [row('Cali', 12450), row('Pasto', 800)], [households]);
+
+      expect(titles(marks(context))).toEqual(['Cali: 12,450 households', 'Pasto: 800 households']);
+    });
+
+    it('writes the axis, the tooltips and the table with the indicator\'s format', async () => {
+      const context = await show('column', { indicator: 'piped_water_rate' }, [row('Cali', 0.5), row('Pasto', 0.25)], [rate]);
+
+      expect(titles(marks(context))).toEqual(['Cali: 50%', 'Pasto: 25%']);
+      expect(svgTexts(context)).toEqual(expect.arrayContaining(['0%', '10%', '50%']));
+      expect(label(context)).toBe('Column chart of Piped water rate by municipality: 2 groups, from 25% to 50%. Highest: Cali.');
+      await toggle(context);
+      expect(tableRows(context)).toEqual([['Cali', '50%'], ['Pasto', '25%']]);
     });
 
     it('labels only as many groups as fit, however many groups there are', async () => {
-      const many = Array.from({ length: 1500 }, (_, i) => row('coverage', `Group ${String(i).padStart(4, '0')}`, i));
+      const many = Array.from({ length: 1500 }, (_, i) => row(`Group ${String(i).padStart(4, '0')}`, i));
       const context = await show('column', {}, many);
 
       const width = Number(byTestId(context.root, 'chart-svg')!.getAttribute('width'));
-      const groupLabels = Array.from(context.root.querySelectorAll('[data-testid="chart-svg"] text')).map(text).filter((t) => t.startsWith('Gr'));
+      const groupLabels = svgTexts(context).filter((t) => t.startsWith('Gr'));
       expect(groupLabels.length).toBeGreaterThan(0);
       expect(groupLabels.length).toBeLessThanOrEqual(Math.ceil(width / 40));
     });
@@ -88,12 +138,12 @@ describe('chart widgets', () => {
 
       const svg = byTestId(context.root, 'chart-svg')!;
       expect(svg.getAttribute('role')).toBe('img');
-      expect(label(context)).toBe('Column chart of coverage by disaggregation: 5 groups, from 10 to 90. Highest: Quibdó.');
-      expect(text(byTestId(context.root, 'chart-caption'))).toBe('value by disaggregation');
+      expect(label(context)).toBe('Column chart of Coverage by municipality: 5 groups, from 10 to 90. Highest: Quibdó.');
+      expect(text(byTestId(context.root, 'chart-caption'))).toBe('Coverage by municipality');
 
       await toggle(context);
       expect(byTestId(context.root, 'chart-svg')).toBeNull();
-      expect(tableHeaders(context)).toEqual(['disaggregation', 'coverage']);
+      expect(tableHeaders(context)).toEqual(['municipality', 'Coverage']);
       expect(tableRows(context)).toEqual([['Cali', '75'], ['Bogotá', '60'], ['Pasto', '35'], ['Quibdó', '90'], ['Leticia', '10']]);
       expect(text(byTestId(context.root, 'chart-toggle'))).toBe('Show as chart');
 
@@ -101,15 +151,28 @@ describe('chart widgets', () => {
       expect(marks(context)).toHaveLength(5);
     });
 
+    it('names a chosen measure or the two columns of a ratio in the caption', async () => {
+      const measure = await show('column', { measure: 'count' }, groups);
+      expect(text(byTestId(measure.root, 'chart-caption'))).toBe('Coverage: count by municipality');
+    });
+
+    it('names the two columns of a ratio in the caption and sends the ratio', async () => {
+      const ratio = { numerator: 'numerator', denominator: 'denominator' };
+      const context = await show('column', { ratio }, groups);
+
+      expect(text(byTestId(context.root, 'chart-caption'))).toBe('Coverage: numerator / denominator by municipality');
+      expect(context.query.config).toMatchObject({ measure: null, ratio });
+    });
+
     it('labels a group that has no value', async () => {
-      const context = await show('column', {}, [row('coverage', null, 3)]);
+      const context = await show('column', {}, [row(null, 3)]);
 
       await toggle(context);
       expect(tableRows(context)).toEqual([['(none)', '3']]);
     });
 
     it('draws a negative value below the zero line', async () => {
-      const context = await show('column', {}, [row('coverage', 'A', 50), row('coverage', 'B', -20)]);
+      const context = await show('column', {}, [row('A', 50), row('B', -20)]);
 
       const [a, b] = marks(context);
       expect(Number(b.getAttribute('y'))).toBeGreaterThanOrEqual(Number(a.getAttribute('y')) + Number(a.getAttribute('height')) - 0.01);
@@ -117,191 +180,184 @@ describe('chart widgets', () => {
   });
 
   describe('bar chart', () => {
-    const rows = [
-      row('coverage', 'Cali', 75), row('target', 'Cali', 80),
-      row('coverage', 'Bogotá', 60), row('target', 'Bogotá', 70),
-      row('coverage', 'Pasto', 35), row('target', 'Pasto', 50),
-    ];
+    const rows = [row('Cali', 75), row('Bogotá', 60), row('Pasto', 35)];
 
-    it('shows one series per indicator, sharing the group values on the axis (several indicators compared)', async () => {
-      const context = await show('bar', { indicators: ['coverage', 'target'] }, rows);
+    it('shows one bar per group, the groups down the chart', async () => {
+      const context = await show('bar', {}, rows);
 
-      expect(marks(context)).toHaveLength(6);
-      // Two bars per group, in series order, the groups down the chart.
-      expect(titles(marks(context))).toEqual(['Cali · coverage: 75', 'Cali · target: 80', 'Bogotá · coverage: 60', 'Bogotá · target: 70', 'Pasto · coverage: 35', 'Pasto · target: 50']);
-      const labels = Array.from(context.root.querySelectorAll('[data-testid="chart-svg"] text')).map(text);
-      expect(labels).toEqual(expect.arrayContaining(['Cali', 'Bogotá', 'Pasto']));
+      expect(titles(marks(context))).toEqual(['Cali: 75', 'Bogotá: 60', 'Pasto: 35']);
+      expect(svgTexts(context)).toEqual(expect.arrayContaining(['Cali', 'Bogotá', 'Pasto']));
+      expect(all(context.root, 'legend-item')).toHaveLength(0);
     });
 
     it('labels only as many groups as fit, however many groups there are', async () => {
-      const many = Array.from({ length: 400 }, (_, i) => row('coverage', `Group ${String(i).padStart(4, '0')}`, i));
-      const context = await show('bar', { indicators: ['coverage'] }, many);
+      const many = Array.from({ length: 400 }, (_, i) => row(`Group ${String(i).padStart(4, '0')}`, i));
+      const context = await show('bar', {}, many);
 
       const height = Number(byTestId(context.root, 'chart-svg')!.getAttribute('height'));
-      const groupLabels = Array.from(context.root.querySelectorAll('[data-testid="chart-svg"] text')).map(text).filter((t) => t.startsWith('Gr'));
+      const groupLabels = svgTexts(context).filter((t) => t.startsWith('Gr'));
       expect(groupLabels.length).toBeGreaterThan(0);
       expect(groupLabels.length).toBeLessThanOrEqual(Math.floor(height / 14));
     });
 
-    it('draws bars horizontally from the same baseline', async () => {
-      const context = await show('bar', { indicators: ['coverage', 'target'] }, rows);
+    it('draws bars horizontally from the same baseline, longer for larger values', async () => {
+      const context = await show('bar', {}, rows);
 
       const bars = marks(context);
       expect(new Set(bars.map((b) => b.getAttribute('x'))).size).toBe(1);
-      expect(Number(bars[1].getAttribute('width'))).toBeGreaterThan(Number(bars[0].getAttribute('width')));
+      expect(Number(bars[0].getAttribute('width'))).toBeGreaterThan(Number(bars[1].getAttribute('width')));
       expect(Number(bars[1].getAttribute('y'))).toBeGreaterThan(Number(bars[0].getAttribute('y')));
     });
 
-    it('gives each series its own color and a legend, so no series is told apart by color alone', async () => {
-      const context = await show('bar', { indicators: ['coverage', 'target'] }, rows);
-
-      expect(all(context.root, 'legend-item').map(text)).toEqual(['coverage', 'target']);
-      const colors = marks(context).map((m) => m.getAttribute('style'));
-      expect(colors[0]).toContain('var(--tmz-series-1)');
-      expect(colors[1]).toContain('var(--tmz-series-2)');
-      expect(colors[2]).toBe(colors[0]);
-    });
-
-    it('lists the series as columns of the table', async () => {
-      const context = await show('bar', { indicators: ['coverage', 'target'] }, rows);
+    it('lists the group and the value in the table', async () => {
+      const context = await show('bar', {}, rows);
 
       await toggle(context);
-      expect(tableHeaders(context)).toEqual(['disaggregation', 'coverage', 'target']);
-      expect(tableRows(context)[0]).toEqual(['Cali', '75', '80']);
-    });
-
-    it('leaves a gap where an indicator has no row for a group', async () => {
-      const context = await show('bar', { indicators: ['coverage', 'target'] }, [row('coverage', 'Cali', 75), row('target', 'Bogotá', 70)]);
-
-      expect(marks(context)).toHaveLength(2);
-      await toggle(context);
-      expect(tableRows(context)).toEqual([['Cali', '75', '—'], ['Bogotá', '—', '70']]);
+      expect(tableHeaders(context)).toEqual(['municipality', 'Coverage']);
+      expect(tableRows(context)[0]).toEqual(['Cali', '75']);
     });
   });
 
   describe('line chart', () => {
-    const rounds = [row('attendance', '3', 80), row('attendance', '1', 60), row('attendance', '10', 95), row('attendance', '2', 70)];
+    const rounds = [row('3', 80), row('1', 60), row('10', 95), row('2', 70)];
+    const settings = { indicator: 'attendance', groupBy: 'round' };
 
     it('draws one line through the points in the natural order of the group values (trend over a grouped column)', async () => {
-      const context = await show('line', { indicators: ['attendance'], groupBy: 'round' }, rounds);
+      const context = await show('line', settings, rounds);
 
       const lines = all(context.root, 'chart-line');
       expect(lines).toHaveLength(1);
-      expect(titles(all(context.root, 'chart-dot'))).toEqual(['1 · attendance: 60', '2 · attendance: 70', '3 · attendance: 80', '10 · attendance: 95']);
+      expect(titles(all(context.root, 'chart-dot'))).toEqual(['1: 60', '2: 70', '3: 80', '10: 95']);
       const path = lines[0].getAttribute('d')!;
       expect(path.match(/[ML]/g)).toEqual(['M', 'L', 'L', 'L']);
       const xs = Array.from(path.matchAll(/[ML]([\d.]+) /g)).map((m) => Number(m[1]));
       expect(xs).toEqual([...xs].sort((a, b) => a - b));
     });
 
-    it('draws a line per indicator with a legend', async () => {
-      const context = await show('line', { indicators: ['attendance', 'target'], groupBy: 'round' }, [
-        ...rounds, row('target', '1', 80), row('target', '2', 80), row('target', '3', 80), row('target', '10', 80),
-      ]);
+    it('draws the three points of three rounds in order', async () => {
+      const context = await show('line', settings, [row('1', 60), row('2', 70), row('3', 80)]);
 
-      expect(all(context.root, 'chart-line')).toHaveLength(2);
-      expect(all(context.root, 'legend-item').map(text)).toEqual(['attendance', 'target']);
+      expect(all(context.root, 'chart-line')).toHaveLength(1);
+      expect(titles(all(context.root, 'chart-dot'))).toEqual(['1: 60', '2: 70', '3: 80']);
     });
 
-    it('breaks the line where a group has no value', async () => {
-      const context = await show('line', { indicators: ['attendance', 'target'], groupBy: 'round' }, [
-        row('attendance', '1', 60), row('attendance', '2', 70), row('attendance', '3', 80), row('target', '1', 80), row('target', '3', 80),
-      ]);
+    it('draws a lone point as a marker, with no line to draw', async () => {
+      const context = await show('line', settings, [row('1', 60)]);
 
-      const target = all(context.root, 'chart-line')[1];
-      expect(target.getAttribute('d')).toBe(''); // two lone points: markers only, no line between them
-      expect(all(context.root, 'chart-dot')).toHaveLength(5);
+      expect(all(context.root, 'chart-line')[0].getAttribute('d')).toBe('');
+      expect(all(context.root, 'chart-dot')).toHaveLength(1);
     });
 
     it('summarizes the trend and lists it in the table', async () => {
-      const context = await show('line', { indicators: ['attendance'], groupBy: 'round' }, rounds);
+      const context = await show('line', settings, rounds);
 
-      expect(label(context)).toBe('Line chart of attendance by round: 4 points, from 60 to 95. Highest: 10.');
+      expect(label(context)).toBe('Line chart of Attendance by round: 4 points, from 60 to 95. Highest: 10.');
       await toggle(context);
       expect(tableRows(context).map((r) => r[0])).toEqual(['1', '2', '3', '10']);
     });
   });
 
   describe('histogram', () => {
-    const coverage = Array.from({ length: 80 }, (_, i) => row('coverage', `Municipality ${i + 1}`, 10 + (130 * i) / 79));
+    const values = Array.from({ length: 80 }, (_, i) => 10 + (130 * i) / 79);
+    const rowsOf = (list: number[]) => list.map((value) => row(null, value));
+    const coverage = rowsOf(values);
 
-    it('shows one bar per bucket, each counting the groups whose value falls in its range (distribution across many groups)', async () => {
-      const context = await show('histogram', { indicators: ['coverage'], buckets: 10 }, coverage);
+    it('shows one bar per bucket, each counting the rows whose value falls in its range (distribution across many groups)', async () => {
+      const context = await show('histogram', { buckets: 10, groupBy: null }, coverage);
 
       expect(marks(context)).toHaveLength(10);
-      const counts = titles(marks(context)).map((t) => Number(t.split(': ')[1]));
+      const counts = titles(marks(context)).map((t) => Number(t.split(': ')[1].split(' ')[0]));
       expect(counts.reduce((a, b) => a + b, 0)).toBe(80);
       // 80 evenly spaced values over 10 ranges: 7 or 8 in each.
-      expect(counts).toEqual(Array.from({ length: 10 }, (_, k) => coverage.filter((_r, i) => Math.min(9, Math.floor((i * 10) / 79)) === k).length));
+      expect(counts).toEqual(Array.from({ length: 10 }, (_, k) => values.filter((_v, i) => Math.min(9, Math.floor((i * 10) / 79)) === k).length));
       expect(Math.min(...counts)).toBeGreaterThanOrEqual(7);
-      expect(titles(marks(context))[0]).toBe('10–23 · coverage: 8');
+      expect(titles(marks(context))[0]).toBe('10–23: 8 rows');
     });
 
-    it('asks the server for the rows, not for the buckets, and counts them in the browser', async () => {
-      const { query } = await show('histogram', { indicators: ['coverage'], buckets: 10 }, coverage);
+    it('asks the server for one row per table row when there is no group column, and counts them in the browser', async () => {
+      const { query } = await show('histogram', { buckets: 10, groupBy: null }, coverage);
 
-      expect(query).toEqual({ ...config({ buckets: 10 }), geometryColumn: null });
+      expect(query).toEqual({ config: config({ buckets: 10, groupBy: null }), chartType: 'histogram' });
+    });
+
+    it('can group first, and then counts the groups', async () => {
+      const { query, root } = await show('histogram', { buckets: 4 }, [row('a', 0), row('b', 10), row('c', 5), row('d', 3)]);
+
+      expect(query.config.groupBy).toBe('municipality');
+      expect(titles(all(root, 'chart-mark'))).toEqual(['0–2.5: 1 row', '2.5–5: 1 row', '5–7.5: 1 row', '7.5–10: 1 row']);
     });
 
     it('uses ten buckets when none is set', async () => {
-      const context = await show('histogram', { indicators: ['coverage'] }, coverage);
+      const context = await show('histogram', { groupBy: null }, coverage);
 
       expect(marks(context)).toHaveLength(10);
     });
 
     it('buckets to the number asked for, putting the largest value in the last bucket', async () => {
-      const context = await show('histogram', { indicators: ['coverage'], buckets: 4 }, [row('coverage', 'a', 0), row('coverage', 'b', 10), row('coverage', 'c', 5), row('coverage', 'd', 3)]);
+      const context = await show('histogram', { buckets: 4, groupBy: null }, rowsOf([0, 10, 5, 3]));
 
-      expect(titles(marks(context))).toEqual(['0–2.5 · coverage: 1', '2.5–5 · coverage: 1', '5–7.5 · coverage: 1', '7.5–10 · coverage: 1']);
+      expect(titles(marks(context)).map((t) => t.split(': ')[1])).toEqual(['1 row', '1 row', '1 row', '1 row']);
+      expect(titles(marks(context))[0]).toBe('0–2.5: 1 row');
+      expect(titles(marks(context))[3]).toBe('7.5–10: 1 row');
     });
 
     it('puts every row in one bucket when all values are equal', async () => {
-      const context = await show('histogram', { indicators: ['coverage'], buckets: 3 }, [row('coverage', 'a', 7), row('coverage', 'b', 7)]);
+      const context = await show('histogram', { buckets: 3, groupBy: null }, rowsOf([7, 7]));
 
-      const counts = titles(marks(context)).map((t) => Number(t.split(': ')[1]));
+      const counts = titles(marks(context)).map((t) => Number(t.split(': ')[1].split(' ')[0]));
       expect(counts[0]).toBe(2);
     });
 
-    it('counts each indicator\'s rows apart in shared ranges', async () => {
-      const context = await show('histogram', { indicators: ['coverage', 'target'], buckets: 2 }, [row('coverage', 'a', 0), row('coverage', 'b', 1), row('target', 'a', 10), row('target', 'b', 9)]);
+    it('writes the ranges with the indicator\'s format, and the counts as plain numbers', async () => {
+      const context = await show('histogram', { indicator: 'piped_water_rate', buckets: 2, groupBy: null }, rowsOf([0.1, 0.2, 0.9]), [rate]);
 
-      expect(titles(marks(context))).toEqual(['0–5 · coverage: 2', '0–5 · target: 0', '5–10 · coverage: 0', '5–10 · target: 2']);
-      expect(all(context.root, 'legend-item').map(text)).toEqual(['coverage', 'target']);
+      expect(titles(marks(context))).toEqual(['10%–50%: 2 rows', '50%–90%: 1 row']);
     });
 
     it('lists the ranges and counts in the table', async () => {
-      const context = await show('histogram', { indicators: ['coverage'], buckets: 10 }, coverage);
+      const context = await show('histogram', { buckets: 10, groupBy: null }, coverage);
 
-      expect(label(context)).toContain('Histogram of coverage: 10 ranges');
+      expect(label(context)).toContain('Histogram of Coverage: 10 ranges');
       await toggle(context);
-      expect(tableHeaders(context)).toEqual(['Range', 'Rows of coverage']);
+      expect(tableHeaders(context)).toEqual(['Range', 'Rows of Coverage']);
       expect(tableRows(context)).toHaveLength(10);
       expect(tableRows(context)[0]).toEqual(['10–23', '8']);
     });
   });
 
   describe('pie chart', () => {
-    const submissions = [row('submissions', 'Cali', 50), row('submissions', 'Bogotá', 30), row('submissions', 'Pasto', 15), row('submissions', 'Leticia', 5)];
+    const visits = [row('Cali', 50), row('Bogotá', 30), row('Pasto', 15), row('Leticia', 5)];
+    const settings = { indicator: 'households_visited' };
 
     it('shows each group as a slice sized by its share of the summed total (shares of a total)', async () => {
-      const context = await show('pie', { indicators: ['submissions'] }, submissions);
+      const context = await show('pie', settings, visits, [households]);
 
       const slices = all(context.root, 'pie-slice');
       expect(slices).toHaveLength(4);
-      expect(titles(slices)).toEqual(['Cali: 50 (50%)', 'Bogotá: 30 (30%)', 'Pasto: 15 (15%)', 'Leticia: 5 (5%)']);
+      expect(titles(slices)).toEqual([
+        'Cali: 50 households (50%)',
+        'Bogotá: 30 households (30%)',
+        'Pasto: 15 households (15%)',
+        'Leticia: 5 households (5%)',
+      ]);
       const legend = all(context.root, 'legend-item').map((item) => Array.from(item.querySelectorAll('span:not([aria-hidden])')).map(text));
-      expect(legend).toEqual([['Cali', '50 · 50%'], ['Bogotá', '30 · 30%'], ['Pasto', '15 · 15%'], ['Leticia', '5 · 5%']]);
+      expect(legend).toEqual([
+        ['Cali', '50 households · 50%'],
+        ['Bogotá', '30 households · 30%'],
+        ['Pasto', '15 households · 15%'],
+        ['Leticia', '5 households · 5%'],
+      ]);
     });
 
     it('draws the slices from the largest, each in its own color', async () => {
-      const context = await show('pie', { indicators: ['submissions'] }, [row('submissions', 'Small', 10), row('submissions', 'Large', 90)]);
+      const context = await show('pie', {}, [row('Small', 10), row('Large', 90)]);
 
       expect(titles(all(context.root, 'pie-slice'))).toEqual(['Large: 90 (90%)', 'Small: 10 (10%)']);
       expect(all(context.root, 'pie-slice').map((s) => s.getAttribute('style'))).toEqual([expect.stringContaining('var(--tmz-series-1)'), expect.stringContaining('var(--tmz-series-2)')]);
     });
 
     it('draws a whole circle for a single group', async () => {
-      const context = await show('pie', { indicators: ['submissions'] }, [row('submissions', 'Cali', 50)]);
+      const context = await show('pie', {}, [row('Cali', 50)]);
 
       const slice = all(context.root, 'pie-slice')[0];
       expect(slice.tagName.toLowerCase()).toBe('circle');
@@ -309,8 +365,8 @@ describe('chart widgets', () => {
     });
 
     it('folds the smallest groups past the eighth color into one "Other" slice', async () => {
-      const many = Array.from({ length: 10 }, (_, i) => row('submissions', `G${i + 1}`, 100 - i * 5));
-      const context = await show('pie', { indicators: ['submissions'] }, many);
+      const many = Array.from({ length: 10 }, (_, i) => row(`G${i + 1}`, 100 - i * 5));
+      const context = await show('pie', {}, many);
 
       const slices = all(context.root, 'pie-slice');
       expect(slices).toHaveLength(8);
@@ -319,19 +375,19 @@ describe('chart widgets', () => {
     });
 
     it('counts values at or below zero instead of drawing them, and keeps them in the table', async () => {
-      const context = await show('pie', { indicators: ['submissions'] }, [row('submissions', 'A', 10), row('submissions', 'B', 0), row('submissions', 'C', -4)]);
+      const context = await show('pie', {}, [row('A', 10), row('B', 0), row('C', -4)]);
 
       expect(all(context.root, 'pie-slice')).toHaveLength(1);
       expect(text(byTestId(context.root, 'pie-skipped'))).toBe('2 groups with a zero or negative value are not drawn; the table lists them.');
       await toggle(context);
-      expect(tableHeaders(context)).toEqual(['disaggregation', 'submissions', 'Share']);
+      expect(tableHeaders(context)).toEqual(['municipality', 'Coverage', 'Share']);
       expect(tableRows(context)).toEqual([['A', '10', '100%'], ['B', '0', '—'], ['C', '-4', '—']]);
     });
 
     it('summarizes the largest slice for assistive technology', async () => {
-      const context = await show('pie', { indicators: ['submissions'] }, submissions);
+      const context = await show('pie', settings, visits, [households]);
 
-      expect(label(context)).toBe('Pie chart of submissions by disaggregation: 4 slices. Largest: Cali, 50%.');
+      expect(label(context)).toBe('Pie chart of Households visited by municipality: 4 slices. Largest: Cali, 50%.');
     });
   });
 });

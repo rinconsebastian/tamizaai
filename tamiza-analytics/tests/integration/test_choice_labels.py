@@ -103,7 +103,7 @@ def test_a_failure_while_loading_labels_fails_the_flatten_step_and_publishes_not
         "step.flatten",
     )
     statuses = dict(database.rows("SELECT step, status FROM tamiza.run_steps WHERE run_id = %s", run_id))
-    assert statuses == {"flatten": "failed", "clean": "skipped", "output": "skipped", "indicators": "skipped"}
+    assert statuses == {"flatten": "failed", "clean": "skipped", "output": "skipped"}
     assert database.scalar("SELECT error FROM tamiza.run_steps WHERE run_id = %s AND step = 'flatten'", run_id)
     assert (
         database.scalar(
@@ -147,17 +147,18 @@ def test_ctx_form_name_resolves_the_labels_of_every_version_a_run_translated_wit
     ]
 
 
-def queue_test(database, project, kind, draft, sample_size=500) -> uuid.UUID:
+def queue_test(database, project, kind, draft, sample_size=500, name=None) -> uuid.UUID:
     test_id = uuid.uuid4()
     database.execute(
         """
-        INSERT INTO tamiza.script_tests (id, project_id, requested_by, kind, code, sample_size, status, queued_at)
-        VALUES (%s, %s, %s, %s, %s, %s, 'queued', now())
+        INSERT INTO tamiza.script_tests (id, project_id, requested_by, kind, name, code, sample_size, status, queued_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, 'queued', now())
         """,
         test_id,
         project.id,
         project.user_id,
         kind,
+        name,
         textwrap.dedent(draft),
         sample_size,
     )
@@ -191,21 +192,21 @@ def test_a_sample_test_receives_and_previews_labels(database, versioned, setting
         assert sorted(row[index] for row in main["preview"]) == ["Buga", "Cali", "Cali (old)"]
 
 
-def test_a_sample_test_of_script_3_gets_the_labels_through_the_saved_script_1(database, versioned, settings):
+def test_a_sample_test_of_an_indicator_gets_the_labels_through_the_saved_script_1(database, versioned, settings):
     add_script(database, versioned, "clean", "def clean(raw, ctx):\n    return raw\n")
     test_id = queue_test(
         database,
         versioned,
-        "indicators",
+        "indicator",
         """
         import pandas as pd
 
-        def compute_indicators(cleaned, ctx):
+        def compute(cleaned, ctx):
             labels = sorted(cleaned["main"]["municipality"])
             assert labels == ["Buga", "Cali", "Cali (old)"], labels
-            row = {"indicator": "n", "disaggregation": "total", "value": 1, "numerator": 1, "denominator": 1}
-            return pd.DataFrame([row])
+            return pd.DataFrame([{"scope": "total", "value": 1}])
         """,
+        name="n",
     )
 
     with database.connect() as connection:

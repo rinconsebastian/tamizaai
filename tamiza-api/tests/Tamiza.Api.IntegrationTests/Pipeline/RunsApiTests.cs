@@ -77,11 +77,11 @@ public sealed class RunsApiTests(PostgresFixture postgres) : IDisposable
             INSERT INTO tamiza.runs (id, project_id, trigger, status, queued_at, started_at, finished_at, error_code, error, reference_tables)
             VALUES (@id, @p, 'manual', 'failed', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z', '2026-10-05T00:01:00Z', 'step.clean', 'KeyError: ''age''',
                     '[{"name": "population", "rows": 1123, "updatedAt": "2026-10-04T12:00:00+00:00"}]');
-            INSERT INTO tamiza.run_steps (run_id, step, status, input_rows, output_rows, tables, log, error) VALUES
-                (@id, 'flatten', 'succeeded', 3, 9, '[{"name":"main","rows":3},{"name":"members","rows":6}]', 'Flattened 3 submissions', NULL),
-                (@id, 'clean', 'failed', NULL, NULL, '[]', 'INFO starting', 'KeyError: ''age'''),
-                (@id, 'output', 'skipped', NULL, NULL, '[]', 'Not run: the clean step failed.', NULL),
-                (@id, 'indicators', 'skipped', NULL, NULL, '[]', 'Not run: the clean step failed.', NULL);
+            INSERT INTO tamiza.run_steps (run_id, step, name, status, input_rows, output_rows, tables, log, error) VALUES
+                (@id, 'flatten', '', 'succeeded', 3, 9, '[{"name":"main","rows":3},{"name":"members","rows":6}]', 'Flattened 3 submissions', NULL),
+                (@id, 'clean', '', 'failed', NULL, NULL, '[]', 'INFO starting', 'KeyError: ''age'''),
+                (@id, 'output', '', 'skipped', NULL, NULL, '[]', 'Not run: the clean step failed.', NULL),
+                (@id, 'indicator', 'coverage', 'skipped', NULL, NULL, '[]', 'Not run: the clean step failed.', NULL);
             """, ("id", runId), ("p", h.ProjectId));
 
         var page = await viewer.GetFromJsonAsync<JsonElement>($"{Runs(h)}?page=1&pageSize=10");
@@ -95,7 +95,9 @@ public sealed class RunsApiTests(PostgresFixture postgres) : IDisposable
         Assert.Equal("step.clean", newest.GetProperty("errorCode").GetString());
         Assert.Equal(["succeeded", "failed", "skipped", "skipped"], newest.GetProperty("steps").EnumerateArray().Select(s => s.GetProperty("status").GetString()));
         var steps = details.GetProperty("steps");
-        Assert.Equal(["flatten", "clean", "output", "indicators"], steps.EnumerateArray().Select(s => s.GetProperty("step").GetString()));
+        Assert.Equal(["flatten", "clean", "output", "indicator"], steps.EnumerateArray().Select(s => s.GetProperty("step").GetString()));
+        Assert.Equal(["", "", "", "coverage"], steps.EnumerateArray().Select(s => s.GetProperty("name").GetString()));
+        Assert.Equal(0, newest.GetProperty("versions").GetProperty("indicators").GetArrayLength());
         Assert.Equal(6, steps[0].GetProperty("tables")[1].GetProperty("rows").GetInt64());
         Assert.Equal("KeyError: 'age'", steps[1].GetProperty("error").GetString());
         Assert.Equal("INFO starting", steps[1].GetProperty("log").GetString());
@@ -107,6 +109,103 @@ public sealed class RunsApiTests(PostgresFixture postgres) : IDisposable
         var older = page.GetProperty("items")[1].GetProperty("id").GetString();
         Assert.Empty((await viewer.GetFromJsonAsync<JsonElement>($"{Runs(h)}/{older}")).GetProperty("referenceTables").EnumerateArray());
     }
+
+    // Indicator steps and the versions a run used
+
+    private static async Task<Guid> InsertVersionAsync(IngestionHarness h, string kind, string? name, int number, string? label, string format = "decimal")
+    {
+        var id = Guid.CreateVersion7();
+        await TestData.ExecuteAsync(h.Db, """
+            INSERT INTO tamiza.script_versions (id, project_id, kind, name, number, code, label, format, author_id, created_at)
+            VALUES (@id, @p, @kind, @name, @number, 'x', @label, @format, (SELECT created_by FROM tamiza.projects WHERE id = @p), now())
+            """,
+            ("id", id), ("p", h.ProjectId), ("kind", kind), ("name", (object?)name ?? DBNull.Value), ("number", number),
+            ("label", (object?)label ?? DBNull.Value), ("format", kind == "indicator" ? format : (object)DBNull.Value));
+        return id;
+    }
+
+    [Fact]
+    public async Task A_run_lists_its_indicator_steps_by_name_and_the_versions_it_used_not_the_current_ones()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        using var viewer = await MemberAsync(h, "vera", "viewer");
+        var clean4 = await InsertVersionAsync(h, "clean", null, 4, null);
+        var coverage2 = await InsertVersionAsync(h, "indicator", "coverage", 2, "Coverage (as the run saw it)");
+        var attendance1 = await InsertVersionAsync(h, "indicator", "attendance", 1, "Attendance");
+        await InsertVersionAsync(h, "indicator", "coverage", 3, "Coverage (saved during the run)");
+        await InsertVersionAsync(h, "clean", null, 5, null);
+        var runId = Guid.CreateVersion7();
+        await TestData.ExecuteAsync(h.Db, """
+            INSERT INTO tamiza.runs (id, project_id, trigger, status, queued_at, started_at, finished_at, error_code, error, clean_version_id, indicator_versions)
+            VALUES (@id, @p, 'manual', 'failed', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z', '2026-10-05T00:01:00Z',
+                    'step.indicator', 'Indicator coverage failed: KeyError: ''age''', @clean, @versions::jsonb);
+            INSERT INTO tamiza.run_steps (run_id, step, name, status, input_rows, output_rows, tables, log, error) VALUES
+                (@id, 'flatten', '', 'succeeded', 3, 3, '[{"name":"main","rows":3}]', '', NULL),
+                (@id, 'clean', '', 'succeeded', 3, 3, '[{"name":"main","rows":3}]', '', NULL),
+                (@id, 'output', '', 'skipped', NULL, NULL, '[]', 'No script 2.', NULL),
+                (@id, 'indicator', 'coverage', 'failed', 3, NULL, '[]', 'Traceback ...', 'KeyError: ''age'''),
+                (@id, 'indicator', 'attendance', 'succeeded', 3, 2, '[{"name":"attendance","rows":2}]', 'ok', NULL);
+            """,
+            ("id", runId), ("p", h.ProjectId), ("clean", clean4),
+            // Stored in no particular order: the API lists them by name.
+            ("versions", $$"""[{"name":"coverage","versionId":"{{coverage2}}","number":2},{"name":"attendance","versionId":"{{attendance1}}","number":1}]"""));
+
+        var list = await viewer.GetFromJsonAsync<JsonElement>(Runs(h));
+        var details = await viewer.GetFromJsonAsync<JsonElement>($"{Runs(h)}/{runId}");
+
+        var versions = list.GetProperty("items")[0].GetProperty("versions");
+        Assert.Equal(4, versions.GetProperty("clean").GetInt32());
+        Assert.Equal(JsonValueKind.Null, versions.GetProperty("output").ValueKind);
+        Assert.Equal([("attendance", 1), ("coverage", 2)], versions.GetProperty("indicators").EnumerateArray()
+            .Select(i => (i.GetProperty("name").GetString(), i.GetProperty("number").GetInt32())));
+        Assert.Equal("step.indicator", details.GetProperty("run").GetProperty("errorCode").GetString());
+        Assert.Contains("coverage", details.GetProperty("run").GetProperty("error").GetString());
+        var steps = details.GetProperty("steps").EnumerateArray().ToList();
+        Assert.Equal([("flatten", ""), ("clean", ""), ("output", ""), ("indicator", "attendance"), ("indicator", "coverage")],
+            steps.Select(s => (s.GetProperty("step").GetString()!, s.GetProperty("name").GetString()!)));
+        // The label is the one of the version the run used.
+        Assert.Equal([JsonValueKind.Null, JsonValueKind.Null, JsonValueKind.Null, JsonValueKind.String, JsonValueKind.String], steps.Select(s => s.GetProperty("label").ValueKind));
+        Assert.Equal("Attendance", steps[3].GetProperty("label").GetString());
+        Assert.Equal("Coverage (as the run saw it)", steps[4].GetProperty("label").GetString());
+        Assert.Equal("KeyError: 'age'", steps[4].GetProperty("error").GetString());
+        Assert.Equal("failed", steps[4].GetProperty("status").GetString());
+        Assert.Equal(2, steps[3].GetProperty("outputRows").GetInt64());
+        var summarySteps = details.GetProperty("run").GetProperty("steps").EnumerateArray().ToList();
+        Assert.Equal(["", "", "", "attendance", "coverage"], summarySteps.Select(s => s.GetProperty("name").GetString()));
+    }
+
+    [Fact]
+    public async Task A_run_without_indicators_has_an_empty_list_of_versions_and_no_indicator_steps()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        var runId = Guid.CreateVersion7();
+        await TestData.ExecuteAsync(h.Db, """
+            INSERT INTO tamiza.runs (id, project_id, trigger, status, queued_at, started_at, finished_at)
+            VALUES (@id, @p, 'manual', 'succeeded', now(), now(), now());
+            INSERT INTO tamiza.run_steps (run_id, step, name, status) VALUES
+                (@id, 'flatten', '', 'succeeded'), (@id, 'clean', '', 'succeeded'), (@id, 'output', '', 'skipped');
+            """, ("id", runId), ("p", h.ProjectId));
+
+        var details = await h.Admin.GetFromJsonAsync<JsonElement>($"{Runs(h)}/{runId}");
+
+        Assert.Equal(0, details.GetProperty("run").GetProperty("versions").GetProperty("indicators").GetArrayLength());
+        Assert.Equal(["flatten", "clean", "output"], details.GetProperty("steps").EnumerateArray().Select(s => s.GetProperty("step").GetString()));
+    }
+
+    [Fact]
+    public async Task A_run_is_queued_with_no_versions_and_the_worker_fills_them_when_it_claims_it()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        using var analyst = await MemberAsync(h, "ana", "analyst");
+        await InsertVersionAsync(h, "indicator", "coverage", 1, "Coverage");
+
+        var queued = await (await analyst.PostAsync(Runs(h), null)).Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(0, queued.GetProperty("versions").GetProperty("indicators").GetArrayLength());
+        Assert.Equal(JsonValueKind.Null, queued.GetProperty("versions").GetProperty("clean").ValueKind);
+        Assert.Equal("[]", await TestData.ScalarAsync<string>(h.Db, "SELECT indicator_versions::text FROM tamiza.runs"));
+    }
+
 
     // 6.3 — settings and triggers
 
@@ -203,6 +302,7 @@ public sealed class RunsApiTests(PostgresFixture postgres) : IDisposable
         {
             "ListScripts", "SaveScript", "RemoveScript", "ListScriptVersions", "GetScriptVersion", "RestoreScriptVersion",
             "StartRun", "ListRuns", "GetRun", "GetPipelineSettings", "UpdatePipelineSettings",
+            "SaveIndicatorScript", "RemoveIndicatorScript", "ListIndicatorScriptVersions", "GetIndicatorScriptVersion", "RestoreIndicatorScriptVersion",
             "StartScriptTest", "GetScriptTest",
             "ListReferenceTables", "GetReferenceTable", "UploadReferenceTable", "ReplaceReferenceTable", "DeleteReferenceTable",
         }, operations);

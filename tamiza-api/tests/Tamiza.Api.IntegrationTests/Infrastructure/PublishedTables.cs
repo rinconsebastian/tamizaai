@@ -34,9 +34,36 @@ public static class PublishedTables
         return await RecordStepAsync(connectionString, projectId, step, tables.Select(t => (t.Name, CountRows(t.Rows))).ToArray());
     }
 
-    /// <summary>Records a run with one step, as the worker does when a step succeeds, and returns the run's id.</summary>
+    /// <summary>
+    /// Adds or replaces one table of the project's <paramref name="step"/> schema, as the worker's per-table publish of an indicator does:
+    /// the other tables stay. Records a succeeded step for it (for <c>indicators</c>, an <c>indicator</c> step named after the table).
+    /// </summary>
+    public static async Task<Guid> PublishTableAsync(string connectionString, Guid projectId, string step, string name, string columns, string rows)
+    {
+        var schema = Schema(projectId, step);
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await Run(connection, transaction, $"CREATE SCHEMA IF NOT EXISTS \"{schema}\"");
+        await Run(connection, transaction, $"DROP TABLE IF EXISTS \"{schema}\".\"{name}\"");
+        await Run(connection, transaction, $"CREATE TABLE \"{schema}\".\"{name}\" ({columns})");
+        if (rows.Length > 0)
+        {
+            await Run(connection, transaction, $"INSERT INTO \"{schema}\".\"{name}\" VALUES {rows}");
+        }
+
+        await transaction.CommitAsync();
+        return await RecordStepAsync(connectionString, projectId, step, [(name, CountRows(rows))]);
+    }
+
+    /// <summary>
+    /// Records a run with one step, as the worker does when a step succeeds, and returns the run's id. The step <c>indicators</c> (the
+    /// schema's name) is recorded as the worker records it: one <c>indicator</c> step per table, named after it; with no tables,
+    /// <paramref name="indicator"/> names the one step (a failed indicator).
+    /// </summary>
     public static async Task<Guid> RecordStepAsync(
-        string connectionString, Guid projectId, string step, (string Name, long Rows)[] tables, string status = "succeeded", DateTimeOffset? finishedAt = null)
+        string connectionString, Guid projectId, string step, (string Name, long Rows)[] tables, string status = "succeeded",
+        DateTimeOffset? finishedAt = null, string? indicator = null)
     {
         var runId = Guid.CreateVersion7();
         var finished = finishedAt ?? DateTimeOffset.UtcNow;
@@ -46,13 +73,21 @@ public static class PublishedTables
             VALUES (@id, @project, 'manual', @runStatus, @finished, @finished, @finished)
             """,
             ("id", runId), ("project", projectId), ("runStatus", status == "succeeded" ? "succeeded" : "failed"), ("finished", finished));
-        var json = "[" + string.Join(",", tables.Select(t => $"{{\"name\":\"{t.Name}\",\"rows\":{t.Rows}}}")) + "]";
-        await TestData.ExecuteAsync(connectionString,
-            """
-            INSERT INTO tamiza.run_steps (run_id, step, status, started_at, finished_at, tables)
-            VALUES (@id, @step, @status, @finished, @finished, @tables::jsonb)
-            """,
-            ("id", runId), ("step", step), ("status", status), ("finished", finished), ("tables", json));
+        var steps = step == "indicators"
+            ? (tables.Length > 0 ? tables.Select(t => (Name: t.Name, Tables: new[] { t })) : [(Name: indicator ?? throw new ArgumentException("Name the indicator.", nameof(indicator)), Tables: tables)])
+                .Select(s => ("indicator", s.Name, s.Tables)).ToArray()
+            : [(step, "", tables)];
+        foreach (var (stepName, name, stepTables) in steps)
+        {
+            var json = "[" + string.Join(",", stepTables.Select(t => $"{{\"name\":\"{t.Name}\",\"rows\":{t.Rows}}}")) + "]";
+            await TestData.ExecuteAsync(connectionString,
+                """
+                INSERT INTO tamiza.run_steps (run_id, step, name, status, started_at, finished_at, tables)
+                VALUES (@id, @step, @name, @status, @finished, @finished, @tables::jsonb)
+                """,
+                ("id", runId), ("step", stepName), ("name", name), ("status", status), ("finished", finished), ("tables", json));
+        }
+
         return runId;
     }
 

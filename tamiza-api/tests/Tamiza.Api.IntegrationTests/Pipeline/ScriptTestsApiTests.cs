@@ -66,6 +66,7 @@ public sealed class ScriptTestsApiTests(PostgresFixture postgres) : IDisposable
     [InlineData("clean", "x = 1", 0, "sampleSize")]
     [InlineData("cleanup", "x = 1", 500, "kind")]
     [InlineData("1", "x = 1", 500, "kind")]
+    [InlineData("indicators", "x = 1", 500, "kind")]
     [InlineData("clean", "   ", 500, "code")]
     public async Task Invalid_requests_queue_nothing(string kind, string code, int sampleSize, string field)
     {
@@ -196,6 +197,122 @@ public sealed class ScriptTestsApiTests(PostgresFixture postgres) : IDisposable
         Assert.Equal([1, 1], table.GetProperty("cutCells")[0].EnumerateArray().Select(v => v.GetInt32()));
         Assert.Equal("KeyError: 'age'", read.GetProperty("steps")[1].GetProperty("error").GetString());
     }
+
+    // Tests of an indicator
+
+    private const string Compute = "def compute(cleaned, ctx):\n    return cleaned['main']\n";
+
+    [Fact]
+    public async Task A_test_of_an_indicator_is_queued_with_the_indicators_name()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        using var analyst = await MemberAsync(h, "ana", "analyst");
+
+        var test = await StartAsync(analyst, h, new { kind = "indicator", name = "coverage", code = Compute, sampleSize = 100 });
+
+        Assert.Equal("indicator", test.GetProperty("kind").GetString());
+        Assert.Equal("coverage", test.GetProperty("name").GetString());
+        Assert.Equal("queued", test.GetProperty("status").GetString());
+        Assert.Equal(Compute, test.GetProperty("code").GetString());
+        Assert.Equal("coverage", await TestData.ScalarAsync<string>(h.Db, "SELECT name FROM tamiza.script_tests"));
+        var read = await analyst.GetFromJsonAsync<JsonElement>($"{Tests(h)}/{Id(test)}");
+        Assert.Equal("coverage", read.GetProperty("name").GetString());
+        // Testing is not saving: no indicator exists afterwards.
+        Assert.Equal(0L, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("Piped water")]
+    [InlineData("1st_round")]
+    [InlineData("an_indicator_name_that_is_longer_than_sixty_three_characters_for_sure_yes")]
+    public async Task A_test_of_an_indicator_without_a_valid_name_is_rejected_and_queues_nothing(string? name)
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await h.Admin.PostAsJsonAsync(Tests(h), new { kind = "indicator", name, code = Compute });
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("lowercase letters, digits and underscores", problem.GetProperty("errors").GetProperty("name")[0].GetString());
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_tests"));
+    }
+
+    [Theory]
+    [InlineData("clean")]
+    [InlineData("output")]
+    public async Task The_clean_and_output_tests_take_no_name_so_one_that_is_sent_is_not_stored(string kind)
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var test = await StartAsync(h.Admin, h, new { kind, name = "coverage", code = Clean });
+
+        Assert.Equal(JsonValueKind.Null, test.GetProperty("name").ValueKind);
+        Assert.True(await TestData.ScalarAsync<bool>(h.Db, "SELECT name IS NULL FROM tamiza.script_tests"));
+    }
+
+    [Fact]
+    public async Task A_viewer_cannot_start_a_test_of_an_indicator()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        using var viewer = await MemberAsync(h, "vic", "viewer");
+
+        var response = await viewer.PostAsJsonAsync(Tests(h), new { kind = "indicator", name = "coverage", code = Compute });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_tests"));
+    }
+
+    [Fact]
+    public async Task A_new_test_of_another_indicator_replaces_the_users_queued_test()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        var first = await StartAsync(h.Admin, h, new { kind = "indicator", name = "coverage", code = Compute });
+
+        var second = await StartAsync(h.Admin, h, new { kind = "indicator", name = "attendance", code = Compute });
+
+        Assert.Equal(HttpStatusCode.NotFound, (await h.Admin.GetAsync($"{Tests(h)}/{Id(first)}")).StatusCode);
+        Assert.Equal("attendance", (await h.Admin.GetFromJsonAsync<JsonElement>($"{Tests(h)}/{Id(second)}")).GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public async Task The_steps_of_a_test_of_an_indicator_name_the_table_it_produced()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        var test = await StartAsync(h.Admin, h, new { kind = "indicator", name = "coverage", code = Compute });
+        const string steps = """
+            [{"step": "flatten", "status": "succeeded", "startedAt": null, "finishedAt": null, "inputRows": 2, "outputRows": 2, "log": "", "error": null, "tables": []},
+             {"step": "indicator", "status": "succeeded", "startedAt": null, "finishedAt": null, "inputRows": 2, "outputRows": 2, "log": "", "error": null,
+              "tables": [{"name": "coverage", "rows": 2,
+                          "columns": [{"name": "municipality", "type": "text", "label": null}, {"name": "value", "type": "decimal", "label": null}],
+                          "previewRows": 2, "preview": [["Cali", 0.5], ["Palmira", 0.25]], "cutCells": []}]}]
+            """;
+        await TestData.ExecuteAsync(h.Db,
+            "UPDATE tamiza.script_tests SET status = 'succeeded', finished_at = now(), steps = @steps::jsonb", ("steps", steps));
+
+        var read = await h.Admin.GetFromJsonAsync<JsonElement>($"{Tests(h)}/{Id(test)}");
+
+        var step = read.GetProperty("steps")[1];
+        Assert.Equal("indicator", step.GetProperty("step").GetString());
+        Assert.Equal("coverage", step.GetProperty("tables")[0].GetProperty("name").GetString());
+        Assert.Equal(["municipality", "value"], step.GetProperty("tables")[0].GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
+    }
+
+    [Fact]
+    public async Task The_openapi_document_describes_the_name_of_a_test()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        using var client = h.Factory.CreateClient();
+
+        var document = await client.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        Assert.True(schemas.GetProperty("ScriptTestRequest").GetProperty("properties").TryGetProperty("name", out _));
+        Assert.True(schemas.GetProperty("ScriptTestDetails").GetProperty("properties").TryGetProperty("name", out _));
+    }
+
 
     public void Dispose() => _kobo.Dispose();
 }

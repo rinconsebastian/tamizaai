@@ -46,7 +46,7 @@ Each project has its own PostgreSQL schemas:
 - `p_<id>_raw`: flattened tables (main table + one table per repeat group, with a key to the parent).
 - `p_<id>_clean`: output of script 1.
 - `p_<id>_output`: output of script 2.
-- `p_<id>_indicators`: output of script 3.
+- `p_<id>_indicators`: one table per indicator script, named after the indicator.
 
 Schema and table names are never built from user text without validation (allow list + quoted identifiers).
 
@@ -161,8 +161,8 @@ Each raw submission SHALL record its origin (`webhook` or `sync`), the form vers
 #### Requirement: Automatic flattening
 Before the user scripts, the system SHALL flatten the non-deleted raw submissions into the `p_<id>_raw` schema: one main table and one table per repeat group with a key to the parent record. Answers to select questions are written as choice labels in the form's default language, taken from the definition of the form version each submission was made with. Each column that holds the answers to a question carries that question's label, in the default language, from the form's latest deployed version only, as a PostgreSQL column comment published with the table.
 
-#### Requirement: Three scripts with a fixed contract
-Each project SHALL have up to three optional scripts, each with a fixed-signature function:
+#### Requirement: Scripts with a fixed contract
+Each project SHALL have up to two optional scripts, script 1 and script 2, and any number of indicator scripts (up to 100), each with a fixed-signature function:
 
 ```python
 # 1. General cleaning
@@ -171,29 +171,31 @@ def clean(raw: dict[str, pd.DataFrame], ctx) -> dict[str, pd.DataFrame]: ...
 # 2. Output processing (dashboard 2)
 def prepare_output(cleaned: dict[str, pd.DataFrame], ctx) -> dict[str, pd.DataFrame]: ...
 
-# 3. Indicator calculation (dashboard 3)
-def compute_indicators(cleaned: dict[str, pd.DataFrame], ctx) -> pd.DataFrame: ...
+# 3. One indicator (dashboard 3); a project has one such script per indicator, named like a table
+def compute(cleaned: dict[str, pd.DataFrame], ctx) -> pd.DataFrame: ...
 ```
+
+An indicator has a name (the name of its published table, immutable), a label, an optional description, an optional unit and a format (`count`, `decimal`, `percent` or `currency`), saved with every version of its script.
 
 `ctx` exposes: the project's reference data, the form dictionary (questions, choices and labels) and a logger whose messages are shown in the UI.
 
 #### Requirement: Optional scripts with default behavior
 - Without script 1, `cleaned` = `raw`.
 - Without script 2, dashboard 2 uses `cleaned`.
-- Without script 3, dashboard 3 shows an empty state with instructions.
+- Without indicator scripts, no indicator step runs, the indicator schema is removed and dashboard 3 shows an empty state with instructions.
 
 #### Requirement: Execution order
-Script 1 SHALL run first. Scripts 2 and 3 depend only on script 1 and can run in parallel. If script 1 fails, scripts 2 and 3 do not run.
+Script 1 SHALL run first. Script 2 and the indicator scripts depend only on script 1; they run after it one at a time, the indicators in the order of their names. If script 1 fails, script 2 and the indicator scripts do not run.
 
 #### Requirement: Atomic publishing
-Each script SHALL write its results to a temporary schema and replace the published schema only if it finishes without errors and passes validation.
+Script 1 and script 2 SHALL write their results to a temporary schema and replace the published schema only if they finish without errors and pass validation. Each indicator SHALL replace only its own table in the indicator schema the same way, so an indicator that fails keeps its previous table and does not stop the others; the run still ends as failed and names the indicator.
 
 ##### Scenario: Script failure
 - WHEN a script raises an exception
 - THEN the dashboards keep showing the last published version and the run ends in state `failed` with the traceback visible
 
 #### Requirement: Indicator output validation
-The output of script 3 SHALL contain the columns `indicator`, `disaggregation`, `value`, `numerator`, `denominator`. If any are missing, the run fails and nothing is published.
+The output of an indicator script SHALL be one DataFrame with at least one numeric column; any other columns are its dimensions. By convention `value` is the default measure and `numerator` and `denominator` let a widget plot a ratio of sums. If there is no numeric column, the indicator's step fails and nothing is published for it.
 
 #### Requirement: Run triggers
 The chain SHALL run manually, when a synchronization finishes (configurable) or on a configurable schedule. Never on every webhook.
@@ -252,9 +254,9 @@ The dashboard SHALL read the standard indicator table and show each indicator wi
 The user SHALL be able to export the indicator table to XLSX.
 
 #### Requirement: Widget canvas
-Every project member SHALL be able to open a canvas of widgets over the indicator table that script 3 published, and `analyst` and `admin` members SHALL be able to add, edit, arrange and remove them; a `viewer` only sees them. A widget is a stat tile, a bar, column, line, histogram or pie chart, or a map, each with a title and a query over the published table: one or more indicators (exactly one for a stat tile, a pie chart and a map), a column to group by (`disaggregation` by default, or any other column of the table), the field to plot (`value`, `numerator` or `denominator`) and up to 50 filters built as the clean data dashboard's. Rows that share an indicator and a group value are summed before they are plotted. A project holds a limited number of widgets and a widget plots a limited number of rows, and the dashboard says when a limit is reached.
+Every project member SHALL be able to open a canvas of widgets over the tables the indicator scripts published, and `analyst` and `admin` members SHALL be able to add, edit, arrange and remove them; a `viewer` only sees them. A widget is a stat tile, a bar, column, line, histogram or pie chart, or a map, each with a title and a query over exactly one indicator's table: a measure (a numeric column, `value` by default) or a ratio of two numeric columns, a column to group by (required for bar, column, line, pie and map widgets) and up to 50 filters built as the clean data dashboard's. Rows that share a group value are summed, or combined as a ratio of sums, before they are plotted, and values are formatted with the indicator's format and unit. A project holds a limited number of widgets and a widget plots a limited number of rows, and the dashboard says when a limit is reached.
 
-Widgets sit on a 12-column grid that analysts and admins move and resize by dragging or with the keyboard; the reading order is top to bottom, left to right. Charts and maps are drawn as inline SVG with no chart or map library, each with a "Show as table" alternative. A map draws the `POINT`, `POLYGON` and `MULTIPOLYGON` geometry (WKT) that a script publishes in a column of the indicator table, as regions or markers colored by the plotted field, with no basemap; rows whose geometry cannot be read are left out and counted. A widget whose indicator or column the table no longer has shows a message naming what is missing instead of failing the page. Every member can export the whole published indicator table to CSV and XLSX through the single-use link of the clean data dashboard.
+Widgets sit on a 12-column grid that analysts and admins move and resize by dragging or with the keyboard; the reading order is top to bottom, left to right. Charts and maps are drawn as inline SVG with no chart or map library, each with a "Show as table" alternative. A map draws the `POINT`, `POLYGON` and `MULTIPOLYGON` geometry (WKT) that an indicator script publishes in a column of its table, as regions or markers colored by the plotted value, with no basemap; rows whose geometry cannot be read are left out and counted. A widget whose indicator has not published, or whose column the table no longer has, shows a message naming what is missing instead of failing the page. Every member can export the whole published table of one indicator to CSV and XLSX through the single-use link of the clean data dashboard.
 
 ---
 
@@ -265,12 +267,12 @@ Widgets sit on a 12-column grid that analysts and admins move and resize by drag
 - `project_members`: project_id, user_id, role.
 - `raw_submissions`: id, project_id, kobo_uuid (unique per project), kobo_id, form_version, data (JSONB), origin, received_at, deleted.
 - `syncs`: id, project_id, type, started_at, finished_at, created_count, updated_count, deleted_count, error.
-- `script_versions`: id, project_id, kind (1/2/3), code, author_id, created_at.
-- `runs`: id, project_id, status (queued/running/succeeded/failed), trigger, script_versions_used, started_at, finished_at, logs, error.
+- `script_versions`: id, project_id, kind (clean/output/indicator), name (the indicator's name; empty for the two fixed scripts), code, label, description, unit, format (the indicator's metadata at that version), number (per project and kind, and per name), author_id, created_at.
+- `runs`: id, project_id, status (queued/running/succeeded/failed), trigger, the versions of script 1 and script 2 used and `indicator_versions` (name, version, number of each indicator script used), reference_tables, started_at, finished_at, error. Its steps are in `run_steps`: one for flatten, clean and output and one per indicator (`step` = `indicator` and its `name`), each with status, duration, rows and log.
 - `sampling_frames`: project_id, dimensions, targets.
 - `script_tests`: id, project_id, requested_by, kind, code (the tested draft), sample_size, status, clean_version_id, queued_at, started_at, finished_at, error, steps (per-step logs and table previews). Deleted 24 hours after they end.
 - `reference_tables`: id, project_id, name, file_name, columns (name, header, type), row_count, updated_by, updated_at. The rows are in `reference_table_contents` (one JSONB array per table), not in a per-project schema.
-- `dashboard_widgets`: id, project_id, chart_type (stat/bar/column/line/histogram/pie/map), title, config (the widget's query: indicators, group column, plotted field, filters, geometry column, histogram ranges), layout (x, y, w, h on the 12-column grid), created_by, created_at, updated_by, updated_at. One row per widget of the indicators dashboard.
+- `dashboard_widgets`: id, project_id, chart_type (stat/bar/column/line/histogram/pie/map), title, config (the widget's query: indicator, measure or ratio, group column, filters, geometry column, histogram ranges), layout (x, y, w, h on the 12-column grid), created_by, created_at, updated_by, updated_at. One row per widget of the indicators dashboard.
 - `form_versions`: project_id, uid (a Kobo form version, `__version__`), status (pending/available/failed/not_found), fields and choices (the version's questions and choice lists, with labels in the default language), deployed_at, recorded_at, fetched_at, attempts, next_attempt_at, error. One row per version a project's submissions use; recorded when a submission with the version is stored, fetched from Kobo once.
 
 ---
@@ -300,6 +302,14 @@ Implement in this order, one change per line:
 5. `add-performance-dashboard`: the first dashboard (submissions per day, completion time, enumerators, sampling frame coverage) computed in SQL on the stored submissions, with a per-project time zone and a date range; the field check reports coverage unavailable without a usable frame.
 6. `add-clean-data-dashboard`: the second dashboard: the tables the last runs published (output, else clean) in a paged table with typed server-side filters, sorting and a view kept in the page address, and CSV and XLSX exports downloaded through single-use links; publishing waits in short attempts for readers of the tables, so a long export never blocks the dashboard.
 7. `add-indicators-dashboard`: the third dashboard, replacing the fixed bar chart of section 5.7 with a canvas of widgets (stat tile, bar, column, line, histogram, pie and map) over the indicator table script 3 published, each a saved query that can group by any column, with a drag-and-resize grid editable by analysts and admins, maps drawn from a WKT geometry column without a basemap, and CSV and XLSX export of the whole table; widgets are one row each in `dashboard_widgets`.
+
+### Next, in this order (agreed 2026-10-14, before loading real data)
+
+7a. `split-indicator-scripts`: instead of one script 3 returning one `indicators` table, a project has any number of named indicator scripts, each returning one table published under its name in `p_<id>_indicators`, with the rows and columns its indicator needs (any numeric column as a measure, `value` by default; `numerator`/`denominator` optional for ratios of sums), metadata per indicator (label, description, unit, format), per-table publishing so one failing indicator leaves its previous table and the others publish, and widgets that plot one indicator table each. Clean cut: the single-table contract is dropped without migration, since no real data exists yet. Implemented.
+7b. `add-script-workbench`: script-editing ergonomics: a panel of the available tables and columns with their types, autocompletion of `ctx`, tables and columns in the editor, Tab indentation and basic linting, inline `ctx` reference and better templates, and stateless exploration cells on the sample test (`# %%` cells and `ctx.show(df, name)` previews re-run from scratch on a cached sample; no persistent kernel) with an "as the dashboard will see it" preview for indicator tables.
+7c. `add-local-dev-kit`: download of a sample test's inputs (`context.json`, the input and reference Parquet files) through a single-use link, and a small `tamiza-sdk` package built from the database-free runner (`load_context`, `load_tables`, `check`) to write scripts in Jupyter locally and upload them.
+
+Deferred with a reason: a Jupyter-like persistent kernel in the browser (it contradicts the per-step process isolation, the one-job worker and the 4 GB VPS target); a shared helper module across indicator scripts; widgets that compare several indicator tables.
 
 ### Deferred from `setup-foundation`
 

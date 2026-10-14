@@ -1,6 +1,6 @@
 # Writing scripts
 
-Each project can have up to three Python scripts that turn the raw Kobo submissions into the tables the dashboards read. Tamiza runs them in order every time the project's data changes, publishes each result only if it succeeds, and records what happened in the run log.
+Each project can have up to two Python scripts that clean the raw Kobo submissions and prepare tables for reading, and any number of **indicator scripts** that each compute one indicator, up to 100. Tamiza runs them in order every time the project's data changes, publishes each result only if it succeeds, and records what happened in the run log.
 
 Analysts and admins write scripts in the project's **Scripts** section; viewers can read them. Every save creates a version you can view and restore.
 
@@ -8,14 +8,14 @@ Analysts and admins write scripts in the project's **Scripts** section; viewers 
 
 ```
 raw submissions ──► flatten ──► 1. clean ──┬─► 2. prepare_output ──► clean-data dashboard
-                                           └─► 3. compute_indicators ──► indicators dashboard
+                                           └─► indicator scripts, one `compute` each ──► indicators dashboard
 ```
 
 1. **Flatten** (automatic) turns the submissions into tables.
 2. **Script 1, `clean`**, receives those tables and returns cleaned tables. Without it, the flattened tables are the clean data.
-3. **Script 2, `prepare_output`**, and **script 3, `compute_indicators`**, each receive the cleaned tables. They do not depend on each other: if one fails, the other still runs and publishes. Both are optional; without them nothing is published for that step.
+3. **Script 2, `prepare_output`**, and each **indicator script, `compute`**, receive the cleaned tables. They do not depend on each other: if one fails, the others still run and publish. All of them are optional; without script 2 nothing is published for it, and without indicator scripts there are no indicator tables.
 
-If flattening or script 1 fails, scripts 2 and 3 do not run.
+If flattening or script 1 fails, script 2 and the indicator scripts do not run. The indicator scripts run after script 2, one at a time, in the order of their names.
 
 ## The flattened tables
 
@@ -159,30 +159,63 @@ def prepare_output(cleaned, ctx):
     return {"households": households[["_id", "municipality", "municipality_code", "household_size"]]}
 ```
 
-### 3. `compute_indicators(cleaned, ctx)`
+### 3. Indicator scripts: `compute(cleaned, ctx)`
 
-Receives the cleaned tables; returns **one** DataFrame with the columns `indicator`, `disaggregation`, `value`, `numerator` and `denominator`. Other columns are allowed, and the [indicators dashboard](indicators-dashboard.md) can group and filter its widgets by any of them (a `year` or `round` column for a trend). For a map, add a geometry column: a geopandas column, or text in WKT (`POINT`, `POLYGON` or `MULTIPOLYGON`), projected to degrees (longitude and latitude) before you return it; see [Maps](indicators-dashboard.md#maps). Rows that share an indicator and a disaggregation are summed by the dashboard's widgets.
+An indicator is one function that receives the cleaned tables and returns **one DataFrame** shaped for that indicator: a rate by municipality, a series by month, a top ten. Each indicator is its own script, published as its own table in the indicators schema, named after the indicator.
+
+**The contract is one sentence: return a DataFrame with the dimensions you need and at least one numeric column.** Nothing else is required, and the step fails with a message when the DataFrame has no numeric column. By convention, and not by rule:
+
+- `value` is the number a widget plots by default. When the table has no `value`, the dashboard offers its first numeric column.
+- `numerator` and `denominator` let a widget plot a **rate** as `sum(numerator) / sum(denominator)` over any group of rows. Return them next to `value` whenever the indicator is a ratio: a widget that groups several rows into one then gets the right rate, while summing `value` would add up percentages.
+- Every other column is a **dimension** the dashboard can group and filter by: `municipality`, a `round` or `year` column for a trend, `sex`.
+- For a map, add a geometry column: a geopandas column, or text in WKT (`POINT`, `POLYGON` or `MULTIPOLYGON`), projected to degrees (longitude and latitude) before you return it; see [Maps](indicators-dashboard.md#maps).
+
+#### The indicator's name and metadata
+
+Create an indicator with **Add indicator** in the Scripts section. It has:
+
+| Field | Rules |
+|---|---|
+| **Name** | The name of its table: lowercase letters, digits and underscores, starting with a letter, at most 63 characters (`piped_water_rate`). It cannot be changed; remove the indicator and create another to rename it. |
+| **Label** | The text the dashboard shows, 1 to 120 characters (`Households with piped water`). |
+| **Description** | Optional, up to 1,000 characters. |
+| **Unit** | Optional, up to 32 characters (`households`, `COP`, `%`). |
+| **Format** | How the dashboard shows the numbers: `count` (a whole number with thousands separators), `decimal` (two decimals), `percent` (a **fraction** shown as a percentage: 0.42 reads `42%`) or `currency` (two decimals; the unit is the currency code, such as `COP`). |
+
+The metadata is saved with every version of the script, so restoring a version brings back its label, unit and format too. If you store 42 for 42 %, choose `decimal` with the unit `%` instead of `percent`.
+
+A project can have up to **100 indicators**. Each has its own versions, its own sample test and its own step in the run, so an indicator that fails never stops the others.
+
+#### A rate by municipality
 
 ```python
 import pandas as pd
 
 
-def compute_indicators(cleaned, ctx):
+def compute(cleaned, ctx):
     main = cleaned["main"]
-    rows = []
-    for label, group in [("total", main), *[(f"municipality={m}", g) for m, g in main.groupby("municipality")]]:
-        with_water = int((group["water_source"] == "Piped").sum())  # select answers are labels
-        rows.append({
-            "indicator": "households_with_piped_water",
-            "disaggregation": label,
-            "value": with_water / len(group) if len(group) else None,
-            "numerator": with_water,
-            "denominator": len(group),
-        })
-    return pd.DataFrame(rows)
+    rows = main.groupby("municipality").agg(
+        numerator=("water_source", lambda answers: int((answers == "Piped").sum())),  # select answers are labels
+        denominator=("water_source", "size"),
+    ).reset_index()
+    rows["value"] = rows["numerator"] / rows["denominator"]
+    return rows[["municipality", "value", "numerator", "denominator"]]
 ```
 
-**Insert template** in the editor writes a starting point for the selected script, and **Upload .py** loads a file you wrote elsewhere (for example in Jupyter).
+Saved as `piped_water_rate` with the format `percent`, a widget can plot `value` by municipality, or the ratio of `numerator` to `denominator` for any selection of rows.
+
+#### A series by month
+
+```python
+def compute(cleaned, ctx):
+    main = cleaned["main"]
+    month = main["_submission_time"].dt.strftime("%Y-%m")
+    return main.groupby(month).size().rename("value").rename_axis("month").reset_index()
+```
+
+Saved as `households_surveyed` with the format `count`, a line chart groups by `month`. A named index (here `month`) is published as a column.
+
+**Insert template** in the editor writes a starting point for the selected script, and **Upload .py** loads a file you wrote elsewhere (for example in Jupyter). Common preparation that several indicators need belongs in script 1 or script 2, whose tables every indicator receives; indicator scripts cannot import from each other.
 
 ## `ctx`
 
@@ -206,7 +239,7 @@ Asking for a reference table the project does not have, such as `ctx.reference["
 
 **Test on sample**, under the editor, runs the code in the editor on a sample of the project's submissions, whether you saved it or not. It is how to try a change before saving it: nothing is saved, no version is created, nothing is published and the test does not appear in **Runs**. Analysts and admins can test; viewers cannot.
 
-- **What runs.** The test flattens the sample, then runs the script you are editing. When that is script 2 or 3, the current saved version of script 1 runs first, as in a run (or the flattened tables are used when there is no script 1). To test a change to script 1 together with script 2, save script 1 first.
+- **What runs.** The test flattens the sample, then runs the script you are editing. When that is script 2 or an indicator, the current saved version of script 1 runs first, as in a run (or the flattened tables are used when there is no script 1). To test a change to script 1 together with script 2 or an indicator, save script 1 first. A test runs **one** indicator, the one selected, and its preview shows the table named after that indicator.
 - **The sample.** 500 submissions by default; choose from 1 to 5,000. They are spread across the whole project, not only the newest, and consecutive tests use the same submissions as long as the data does not change, so you can compare one attempt with the next. Submissions deleted in Kobo are left out. A project with fewer submissions than the sample size uses all of them.
 - **The same rules as a run.** The test uses the same contract, `ctx` (reference tables included), validation and time and memory limits, and the tables the draft receives hold choice labels, as in a run. A test that passes predicts a run that passes, apart from problems that only appear with more data.
 - **Waiting.** Tests run in the same worker as runs, one job at a time. A test goes ahead of runs that are waiting, but waits for a run that has already started, which can take a few minutes on a large project; the panel says what it is waiting for. Starting another test replaces your test that has not started yet.
@@ -235,7 +268,7 @@ In pandas, `integer` columns arrive as the nullable `Int64` type, `decimal` as `
 import pandas as pd
 
 
-def compute_indicators(cleaned, ctx):
+def compute(cleaned, ctx):
     population = ctx.reference["population"]  # columns municipality_code, population_2026
     # The table is keyed by codes and the tables hold labels, so the join goes through ctx.form.name.
     main = cleaned["main"].copy()
@@ -243,8 +276,7 @@ def compute_indicators(cleaned, ctx):
     counts = main.groupby("municipality_code").size().rename("households").reset_index()
     merged = counts.merge(population, on="municipality_code")
     return pd.DataFrame({
-        "indicator": "households_per_1000_people",
-        "disaggregation": "municipality=" + merged["municipality_code"],
+        "municipality_code": merged["municipality_code"],
         "value": merged["households"] / merged["population_2026"] * 1000,
         "numerator": merged["households"],
         "denominator": merged["population_2026"],
@@ -256,14 +288,15 @@ def compute_indicators(cleaned, ctx):
 ## Rules for what scripts return
 
 - Scripts 1 and 2 return at least one table. **Table names** must already use lowercase letters, digits and underscores, start with a letter and have at most 63 characters (`households`, `persons_2026`), because the dashboards select tables by name.
+- An indicator script returns **one DataFrame** with at least one numeric column (integer or decimal, nullable ones included; true/false columns do not count). It is published as the table named after the indicator.
 - **Column names** are adjusted for you the same way question names are (`Household size` → `household_size`); the run log lists every renamed column. If two columns of a table end up with the same name (`Age` and `age`), the step fails.
 - A **named index** (for example after `groupby`) is published as columns; an unnamed index is dropped.
 - **Geometry columns** (geopandas) are published as text in WKT format.
 - **Row order** is kept: the clean data dashboard lists a table's rows in the order your script returned them until a member sorts by a column, so sort the DataFrame (`sort_values`) if the order matters to your readers.
-- Script 3's table is published as `indicators`.
+- Each indicator's table is published under the indicator's name, one table per indicator.
 - **Column labels.** Only the flattened columns carry a [question label](#question-labels). The dashboard shows it under the column name when there is one, so a table you build in script 2 shows names only; use descriptive column names (`household_size`) for those.
 
-A step that fails publishes nothing: the dashboards keep showing the last successful results.
+A step that fails publishes nothing: the dashboards keep showing the last successful results. For an indicator that means its own previous table stays and the other indicators still publish.
 
 ## When scripts run
 
@@ -273,14 +306,14 @@ A step that fails publishes nothing: the dashboards keep showing the last succes
 
 Admins change the first two under **When scripts run** in the Scripts section. A webhook delivery never starts a run by itself. A project has at most one run waiting: if one is already queued, another trigger does not add a second; if one is running, one more is queued to follow it.
 
-Saving a script does not start a run; the next run uses the latest version. A run records which version of each script it used.
+Saving a script does not start a run; the next run uses the latest version of each script. A run records which version of script 1, script 2 and each indicator it used. An indicator you create while a run is running is computed from the next run.
 
 ## The run log
 
-**Runs** lists every run with its status, trigger, the script versions it used and how long it took. **Details** shows each step:
+**Runs** lists every run with its status, trigger, the script versions it used and how long it took. **Details** shows each step, with one step per indicator listed by its label and name after the three fixed ones:
 
 - **Succeeded**, with rows in and out and the tables it published.
-- **Failed**, with the error. For an exception, the traceback shows the lines of your script that raised it.
+- **Failed**, with the error. For an exception, the traceback shows the lines of your script that raised it. A run with a failed indicator ends as failed and its error names the indicator; the run list shows it, and the other indicators are published all the same.
 - **Skipped**, when the script does not exist or an earlier step failed.
 
 The log of each step holds your `ctx.log` messages and printed output, and for flattening the reference tables the run read, the count of values that could not be read, every choice-label fallback (see [Choice labels](#choice-labels)), and where the column labels came from, the columns that have none because their question is not in the deployed version, or why no labels were applied (see [Question labels](#question-labels)). Below the steps, **Reference data used** lists those tables with their row counts and when each was last updated.
@@ -307,9 +340,9 @@ For people who query the database directly: each project's tables are in Postgre
 | `p_<id>_raw` | The flattened tables. |
 | `p_<id>_clean` | Script 1's tables, or the flattened ones. |
 | `p_<id>_output` | Script 2's tables (absent without script 2). |
-| `p_<id>_indicators` | The `indicators` table (absent without script 3). |
+| `p_<id>_indicators` | One table per indicator, named after it (absent when the project has no indicators). |
 
-Each schema is replaced as a whole when its step succeeds.
+The raw, clean and output schemas are replaced as a whole when their step succeeds. In the indicators schema each indicator replaces only its own table, and the tables of indicators that were removed are dropped at the start of the next run's indicator steps.
 
 **Column comments.** The columns of the flattened tables hold their [question labels](#question-labels) as PostgreSQL column comments, in `p_<id>_raw` and, when there is no script 1, in `p_<id>_clean`. They are published in the same swap as the tables, so a reader never sees tables with the comments of another run. To list them:
 

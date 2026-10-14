@@ -2,8 +2,9 @@ import { LOCALE_ID, Component, ElementRef, computed, inject, input, viewChild } 
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { QueryRow, WidgetConfig, defaultBuckets } from '../../../core/projects/indicators.service';
 
-import { Pivot, histogram, observeSize, pivot } from './chart-data';
-import { bandScale, charWidth, compactNumber, linePath, linearScale, niceAxis, plainNumber, seriesColor, truncate, Point } from './chart-scales';
+import { histogram, observeSize, pivot } from './chart-data';
+import { bandScale, charWidth, compactNumber, linePath, linearScale, niceAxis, seriesColor, truncate, Point } from './chart-scales';
+import { ValueFormatter, plotted } from './format';
 import { TableModel, WidgetTable } from './widget-table';
 
 export type AxisKind = 'bar' | 'column' | 'line' | 'histogram';
@@ -48,9 +49,10 @@ const maxThickness = 40;
 const minSlot = 14;
 
 /**
- * Bar (horizontal), column (vertical), line and histogram charts as inline SVG (design D5), one series per indicator. The SVG is
- * drawn at the pixel size of its box, so text keeps one size however the widget is resized; `role="img"` with a computed summary
- * and a table of the same numbers stand in for it to assistive technology.
+ * Bar (horizontal), column (vertical), line and histogram charts as inline SVG (design D5), one series: the widget's indicator.
+ * Values are written with the indicator's format and unit (design D6). The SVG is drawn at the pixel size of its box, so text
+ * keeps one size however the widget is resized; `role="img"` with a computed summary and a table of the same numbers stand in
+ * for it to assistive technology.
  */
 @Component({
   selector: 'app-axis-chart',
@@ -94,16 +96,6 @@ const minSlot = 14;
             }
           </svg>
         </div>
-        @if (data().series.length > 1) {
-          <ul class="flex shrink-0 flex-wrap gap-x-4 gap-y-1 text-xs text-body" data-testid="chart-legend">
-            @for (series of data().series; track series.name; let i = $index) {
-              <li class="inline-flex items-center gap-1.5" data-testid="legend-item">
-                <span aria-hidden="true" class="inline-block size-2.5 rounded-sm" [style.background]="color(i)"></span>
-                <span class="break-all">{{ series.name }}</span>
-              </li>
-            }
-          </ul>
-        }
       }
     </ng-container>
   `,
@@ -116,39 +108,45 @@ export class AxisChart {
   readonly kind = input.required<AxisKind>();
   readonly rows = input.required<QueryRow[]>();
   readonly config = input.required<WidgetConfig>();
+  /** The indicator's label and the formatter of its values. */
+  readonly label = input.required<string>();
+  readonly format = input.required<ValueFormatter>();
   readonly asTable = input(false);
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   protected readonly size = observeSize(() => this.box());
 
+  /** Counts of rows (a histogram's axis) are not values of the indicator, so they are written plainly. */
   private readonly compact = compactNumber(this.locale);
-  private readonly plain = plainNumber(this.locale);
+  private readonly whole = new Intl.NumberFormat(this.locale, { maximumFractionDigits: 0 });
 
-  /** Categories and series as the chart plots them: group values for bar, column and line; value ranges for a histogram. */
-  protected readonly data = computed<Pivot & { ranges: boolean }>(() => {
+  /** Categories and values as the chart plots them: group values for bar, column and line; value ranges for a histogram. */
+  protected readonly data = computed(() => {
     const kind = this.kind();
-    const config = this.config();
     if (kind === 'histogram') {
-      const { buckets, names } = histogram(this.rows(), config.indicators, config.buckets ?? defaultBuckets);
+      const buckets = histogram(this.rows(), this.config().buckets ?? defaultBuckets);
+      const format = this.format();
       return {
         ranges: true,
-        categories: buckets.map((b) => `${this.plain(b.from)}–${this.plain(b.to)}`),
-        series: names.map((name, i) => ({ name, values: buckets.map((b) => b.counts[i]) })),
+        categories: buckets.map((b) => `${format.plain(b.from)}–${format.plain(b.to)}`),
+        values: buckets.map((b) => b.count),
       };
     }
     const empty = this.transloco.translate('indicators.chart.noGroup');
-    return { ranges: false, ...pivot(this.rows(), config.indicators, empty, kind === 'line' ? 'natural' : 'listed') };
+    return { ranges: false, ...pivot(this.rows(), empty, kind === 'line' ? 'natural' : 'listed') };
   });
 
   protected readonly layout = computed(() => {
     const kind = this.kind();
-    const { categories, series } = this.data();
+    const { categories, values, ranges } = this.data();
+    const format = this.format();
+    const tickText = (value: number) => (ranges ? this.compact(value) : format.tick(value));
+    const valueText = (value: number) => (ranges ? this.transloco.translate(value === 1 ? 'indicators.chart.rowCountOne' : 'indicators.chart.rowCount', { count: this.whole.format(value) }) : format(value));
     const w = Math.max(160, this.size().width);
     const h = Math.max(120, this.size().height);
     const count = categories.length;
-    const numbers = series.flatMap((s) => s.values).filter((v): v is number => v !== null);
-    const low = Math.min(0, ...numbers);
-    const high = Math.max(0, ...numbers);
+    const low = Math.min(0, ...values);
+    const high = Math.max(0, ...values);
     const axis = low === 0 && high === 0 ? niceAxis(0, 1) : niceAxis(low, high);
     const grid: Line[] = [];
     const ticks: Label[] = [];
@@ -156,8 +154,8 @@ export class AxisChart {
     const rects: Rect[] = [];
     const lines: Path[] = [];
     const dots: Dot[] = [];
-    const slots = Math.max(1, series.length);
-    const titleOf = (category: string, name: string, value: number) => `${category} · ${name}: ${this.plain(value)}`;
+    const color = seriesColor(0);
+    const titleOf = (category: string, value: number) => `${category}: ${valueText(value)}`;
     const top = 8;
     const right = 14;
 
@@ -171,33 +169,28 @@ export class AxisChart {
       const stride = Math.max(1, Math.ceil(minSlot / (bands.step || 1)));
       for (const tick of axis.ticks) {
         grid.push({ x1: x(tick), y1: top, x2: x(tick), y2: h - bottom, zero: tick === 0 });
-        ticks.push({ x: x(tick), y: h - 8, text: this.compact(tick), anchor: 'middle' });
+        ticks.push({ x: x(tick), y: h - 8, text: tickText(tick), anchor: 'middle' });
       }
-      const sub = bands.bandwidth / slots;
-      const thickness = Math.min(maxThickness, Math.max(1, sub - (slots > 1 ? 2 : 0)));
+      const thickness = Math.min(maxThickness, Math.max(1, bands.bandwidth));
       categories.forEach((category, i) => {
         if (i % stride === 0) {
           labels.push({ x: left - 6, y: bands.start(i) + bands.bandwidth / 2 + 4, text: truncate(category, labelChars), anchor: 'end', title: truncate(category, labelChars) === category ? undefined : category });
         }
-        series.forEach((s, j) => {
-          const value = s.values[i];
-          if (value === null) return;
-          const zero = x(0);
-          const end = x(value);
-          rects.push({
-            x: Math.min(zero, end),
-            y: bands.start(i) + j * sub + (sub - thickness) / 2,
-            width: Math.max(1, Math.abs(end - zero)),
-            height: thickness,
-            color: seriesColor(j),
-            title: titleOf(category, s.name, value),
-          });
+        const zero = x(0);
+        const end = x(values[i]);
+        rects.push({
+          x: Math.min(zero, end),
+          y: bands.start(i) + (bands.bandwidth - thickness) / 2,
+          width: Math.max(1, Math.abs(end - zero)),
+          height: thickness,
+          color,
+          title: titleOf(category, values[i]),
         });
       });
       return { width: w, height: h, grid, ticks, labels, rects, lines, dots };
     }
 
-    const tickTexts = axis.ticks.map((tick) => this.compact(tick));
+    const tickTexts = axis.ticks.map((tick) => tickText(tick));
     const left = Math.max(...tickTexts.map((t) => t.length)) * charWidth + 14;
     const bottom = 26;
     const y = linearScale([axis.min, axis.max], [h - bottom, top]);
@@ -216,83 +209,66 @@ export class AxisChart {
     });
 
     if (kind === 'line') {
-      series.forEach((s, j) => {
-        const color = seriesColor(j);
-        const segments: Point[][] = [[]];
-        s.values.forEach((value, i) => {
-          if (value === null) {
-            if (segments[segments.length - 1].length) segments.push([]);
-            return;
-          }
-          const point = { x: bands.start(i) + bands.bandwidth / 2, y: y(value) };
-          segments[segments.length - 1].push(point);
-          if (count <= 40 || (s.values[i - 1] ?? null) === null) {
-            dots.push({ cx: point.x, cy: point.y, color, title: titleOf(categories[i], s.name, value) });
-          }
-        });
-        lines.push({ d: segments.filter((p) => p.length > 1).map(linePath).join(' '), color, name: s.name });
+      const points: Point[] = values.map((value, i) => ({ x: bands.start(i) + bands.bandwidth / 2, y: y(value) }));
+      points.forEach((point, i) => {
+        if (count <= 40) {
+          dots.push({ cx: point.x, cy: point.y, color, title: titleOf(categories[i], values[i]) });
+        }
       });
+      lines.push({ d: points.length > 1 ? linePath(points) : '', color, name: this.label() });
       return { width: w, height: h, grid, ticks, labels, rects, lines, dots };
     }
 
-    const sub = bands.bandwidth / slots;
-    const thickness = Math.min(maxThickness, Math.max(1, sub - (slots > 1 ? 2 : 0)));
+    const thickness = Math.min(maxThickness, Math.max(1, bands.bandwidth));
     categories.forEach((category, i) => {
-      series.forEach((s, j) => {
-        const value = s.values[i];
-        if (value === null) return;
-        const zero = y(0);
-        const end = y(value);
-        rects.push({
-          x: bands.start(i) + j * sub + (sub - thickness) / 2,
-          y: Math.min(zero, end),
-          width: thickness,
-          height: Math.max(1, Math.abs(end - zero)),
-          color: seriesColor(j),
-          title: titleOf(category, s.name, value),
-        });
+      const zero = y(0);
+      const end = y(values[i]);
+      rects.push({
+        x: bands.start(i) + (bands.bandwidth - thickness) / 2,
+        y: Math.min(zero, end),
+        width: thickness,
+        height: Math.max(1, Math.abs(end - zero)),
+        color,
+        title: titleOf(category, values[i]),
       });
     });
     return { width: w, height: h, grid, ticks, labels, rects, lines, dots };
   });
 
-  protected color(index: number): string {
-    return seriesColor(index);
-  }
-
   protected caption(t: Translate): string {
     const config = this.config();
+    const what = plotted(config, this.label());
     return this.kind() === 'histogram'
-      ? t('indicators.chart.captionHistogram', { field: t(`indicators.valueFields.${config.valueField}`), buckets: config.buckets ?? defaultBuckets })
-      : t('indicators.chart.caption', { field: t(`indicators.valueFields.${config.valueField}`), group: config.groupBy });
+      ? t('indicators.chart.captionHistogram', { what, buckets: config.buckets ?? defaultBuckets })
+      : t('indicators.chart.caption', { what, group: config.groupBy });
   }
 
   protected summary(t: Translate): string {
-    const { categories, series } = this.data();
+    const { categories, values } = this.data();
     const config = this.config();
-    const names = series.map((s) => s.name).join(', ');
-    const entries = series.flatMap((s, j) => s.values.map((value, i) => ({ value, category: categories[i], series: j }))).filter((e): e is { value: number; category: string; series: number } => e.value !== null);
-    if (!entries.length) {
-      return t('indicators.chart.summaryEmpty', { indicators: names });
+    const what = plotted(config, this.label());
+    if (!values.length) {
+      return t('indicators.chart.summaryEmpty', { what });
     }
-    const top = entries.reduce((a, b) => (b.value > a.value ? b : a));
-    const low = entries.reduce((a, b) => (b.value < a.value ? b : a));
+    const format = this.format();
+    const top = values.indexOf(Math.max(...values));
     return t(`indicators.chart.summary.${this.kind()}`, {
-      indicators: names,
+      what,
       group: config.groupBy,
       count: categories.length,
-      min: this.plain(low.value),
-      max: this.plain(top.value),
-      top: top.category,
+      min: this.data().ranges ? this.whole.format(Math.min(...values)) : format(Math.min(...values)),
+      max: this.data().ranges ? this.whole.format(Math.max(...values)) : format(Math.max(...values)),
+      top: categories[top],
     });
   }
 
   protected table(t: Translate): TableModel {
-    const { categories, series, ranges } = this.data();
-    const first = ranges ? t('indicators.chart.range') : this.config().groupBy;
+    const { categories, values, ranges } = this.data();
+    const what = plotted(this.config(), this.label());
+    const format = this.format();
     return {
-      headers: [first, ...series.map((s) => (ranges ? t('indicators.chart.rowsOf', { indicator: s.name }) : s.name))],
-      rows: categories.map((category, i) => [category, ...series.map((s) => s.values[i])]),
+      headers: [ranges ? t('indicators.chart.range') : (this.config().groupBy ?? ''), ranges ? t('indicators.chart.rowsOf', { what }) : what],
+      rows: categories.map((category, i) => [category, ranges ? this.whole.format(values[i]) : format(values[i])]),
     };
   }
 }

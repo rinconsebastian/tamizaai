@@ -9,7 +9,7 @@ public sealed class IndicatorValidationTests
     private static readonly TableColumn[] Columns =
     [
         new("indicator", DataColumnType.Text, null),
-        new("disaggregation", DataColumnType.Text, null),
+        new("municipality", DataColumnType.Text, null),
         new("value", DataColumnType.Decimal, null),
         new("numerator", DataColumnType.Decimal, null),
         new("denominator", DataColumnType.Decimal, null),
@@ -17,7 +17,8 @@ public sealed class IndicatorValidationTests
         new("geometry", DataColumnType.Text, null),
     ];
 
-    private static WidgetConfig Config(params string[] indicators) => new WidgetConfigInput(indicators).Normalize();
+    private static WidgetConfig Config(string indicator = "coverage", string? groupBy = "municipality") =>
+        new WidgetConfigInput(indicator, GroupBy: groupBy).Normalize();
 
     private static IDictionary<string, string[]> Check(WidgetConfig config, string? chartType)
     {
@@ -33,9 +34,10 @@ public sealed class IndicatorValidationTests
     {
         var config = new WidgetConfigInput().Normalize();
 
-        Assert.Empty(config.Indicators);
-        Assert.Equal("disaggregation", config.GroupBy);
-        Assert.Equal("value", config.ValueField);
+        Assert.Equal("", config.Indicator);
+        Assert.Null(config.Measure);
+        Assert.Null(config.Ratio);
+        Assert.Null(config.GroupBy);
         Assert.Empty(config.Filters);
         Assert.Null(config.GeometryColumn);
         Assert.Null(config.Buckets);
@@ -44,10 +46,10 @@ public sealed class IndicatorValidationTests
     [Fact]
     public void Empty_text_counts_as_left_out()
     {
-        var config = new WidgetConfigInput(["a"], GroupBy: "", ValueField: "", GeometryColumn: "").Normalize();
+        var config = new WidgetConfigInput("a", Measure: "", GroupBy: "", GeometryColumn: "").Normalize();
 
-        Assert.Equal("disaggregation", config.GroupBy);
-        Assert.Equal("value", config.ValueField);
+        Assert.Null(config.Measure);
+        Assert.Null(config.GroupBy);
         Assert.Null(config.GeometryColumn);
     }
 
@@ -62,76 +64,102 @@ public sealed class IndicatorValidationTests
     public void Each_chart_type_has_a_default_size(string chartType, int w, int h) =>
         Assert.Equal((w, h), IndicatorValidation.DefaultSize(chartType));
 
-    // Per-type indicator constraints (design D9)
+    // The indicator
+
+    [Fact]
+    public void No_indicator_is_always_an_error()
+    {
+        foreach (var chartType in new string?[] { "stat", "bar", null })
+        {
+            Assert.Equal(["Choose an indicator."], Check(Config(indicator: ""), chartType)["config.indicator"]);
+        }
+    }
 
     [Theory]
-    [InlineData("stat")]
-    [InlineData("pie")]
-    [InlineData("map")]
-    public void Stat_pie_and_map_need_exactly_one_indicator(string chartType)
+    [InlineData("Piped water")]
+    [InlineData("1rate")]
+    [InlineData("a-b")]
+    public void An_indicator_that_is_not_a_valid_name_is_an_error(string name) =>
+        Assert.Contains("config.indicator", Check(Config(indicator: name), "bar").Keys);
+
+    [Fact]
+    public void An_overlong_indicator_name_is_an_error()
     {
-        Assert.Empty(Check(WithGeometry(Config("a")), chartType));
-
-        var two = Check(WithGeometry(Config("a", "b")), chartType);
-
-        Assert.Equal([$"A {chartType} widget uses exactly one indicator."], two["config.indicators"]);
+        Assert.Empty(Check(Config(indicator: new string('x', 63)), "bar"));
+        Assert.Contains("config.indicator", Check(Config(indicator: new string('x', 64)), "bar").Keys);
     }
+
+    // The group column per chart type (design D6)
 
     [Theory]
     [InlineData("bar")]
     [InlineData("column")]
     [InlineData("line")]
-    [InlineData("histogram")]
-    public void The_other_charts_accept_one_or_more(string chartType)
+    [InlineData("pie")]
+    public void Charts_that_group_need_a_group_column(string chartType)
     {
-        Assert.Empty(Check(Config("a"), chartType));
-        Assert.Empty(Check(Config("a", "b", "c"), chartType));
+        Assert.Equal([$"A {chartType} widget needs a column to group by."], Check(Config(groupBy: null), chartType)["config.groupBy"]);
+        Assert.Empty(Check(Config(), chartType));
+    }
+
+    [Fact]
+    public void A_map_needs_a_group_column_and_a_geometry_column()
+    {
+        var errors = Check(Config(groupBy: null), "map");
+
+        Assert.Contains("config.groupBy", errors.Keys);
+        Assert.Contains("config.geometryColumn", errors.Keys);
+        Assert.Empty(Check(WithGeometry(Config()), "map"));
     }
 
     [Theory]
     [InlineData("stat")]
-    [InlineData("bar")]
-    [InlineData(null)]
-    public void No_indicator_is_always_an_error(string? chartType) =>
-        Assert.Equal(["Choose at least one indicator."], Check(Config(), chartType)["config.indicators"]);
+    [InlineData("histogram")]
+    public void A_stat_tile_and_a_histogram_may_have_no_group_column(string chartType) =>
+        Assert.Empty(Check(Config(groupBy: null), chartType));
 
     [Fact]
-    public void Without_a_chart_type_as_in_the_query_endpoint_only_the_general_rules_apply() =>
-        Assert.Empty(Check(Config("a", "b"), chartType: null));
+    public void Without_a_chart_type_as_in_the_query_endpoint_the_group_is_not_required() =>
+        Assert.Empty(Check(Config(groupBy: null), chartType: null));
 
     [Fact]
-    public void A_map_needs_a_geometry_column_and_other_types_do_not()
+    public void Only_a_map_needs_a_geometry_column() =>
+        Assert.Empty(Check(Config(), "bar"));
+
+    // Measure and ratio
+
+    [Fact]
+    public void A_measure_or_a_ratio_is_valid_but_not_both()
     {
-        Assert.Contains("config.geometryColumn", Check(Config("a"), "map").Keys);
-        Assert.Empty(Check(Config("a"), "bar"));
+        var measure = new WidgetConfigInput("a", Measure: "numerator", GroupBy: "g").Normalize();
+        var ratio = new WidgetConfigInput("a", Ratio: new WidgetRatio("numerator", "denominator"), GroupBy: "g").Normalize();
+        var both = new WidgetConfigInput("a", Measure: "value", Ratio: new WidgetRatio("numerator", "denominator"), GroupBy: "g").Normalize();
+
+        Assert.Empty(Check(measure, "bar"));
+        Assert.Empty(Check(ratio, "bar"));
+        Assert.Equal(["Plot a measure or a ratio, not both."], Check(both, "bar")["config.measure"]);
     }
 
     [Fact]
-    public void An_empty_or_overlong_indicator_is_an_error()
+    public void A_ratio_needs_both_columns()
     {
-        Assert.Contains("config.indicators", Check(Config("a", ""), "bar").Keys);
-        Assert.Contains("config.indicators", Check(Config(new string('x', 501)), "bar").Keys);
-        Assert.Empty(Check(Config(new string('x', 500)), "bar"));
+        var config = new WidgetConfigInput("a", Ratio: new WidgetRatio("", ""), GroupBy: "g").Normalize();
+
+        var errors = Check(config, "bar");
+
+        Assert.Contains("config.ratio.numerator", errors.Keys);
+        Assert.Contains("config.ratio.denominator", errors.Keys);
     }
 
     [Fact]
-    public void At_most_100_indicators_are_allowed()
+    public void Column_names_are_at_most_the_query_text_length()
     {
-        Assert.Empty(Check(Config(Enumerable.Range(0, 100).Select(i => "i" + i).ToArray()), "bar"));
-        Assert.Contains("config.indicators", Check(Config(Enumerable.Range(0, 101).Select(i => "i" + i).ToArray()), "bar").Keys);
-    }
+        var tooLong = new string('c', DataQueryBuilder.MaxTextLength + 1);
 
-    [Theory]
-    [InlineData("value", true)]
-    [InlineData("numerator", true)]
-    [InlineData("denominator", true)]
-    [InlineData("Value", false)]
-    [InlineData("total", false)]
-    public void The_field_to_plot_is_one_of_three(string field, bool valid)
-    {
-        var config = new WidgetConfigInput(["a"], ValueField: field).Normalize();
-
-        Assert.Equal(valid, Check(config, "bar").Count == 0);
+        Assert.Contains("config.measure", Check(new WidgetConfigInput("a", Measure: tooLong, GroupBy: "g").Normalize(), "bar").Keys);
+        Assert.Contains("config.groupBy", Check(new WidgetConfigInput("a", GroupBy: tooLong).Normalize(), "bar").Keys);
+        Assert.Contains("config.ratio.numerator",
+            Check(new WidgetConfigInput("a", Ratio: new WidgetRatio(tooLong, "d"), GroupBy: "g").Normalize(), "bar").Keys);
     }
 
     [Theory]
@@ -142,7 +170,7 @@ public sealed class IndicatorValidationTests
     [InlineData(101, false)]
     public void Buckets_are_between_1_and_100(int buckets, bool valid)
     {
-        var config = new WidgetConfigInput(["a"], Buckets: buckets).Normalize();
+        var config = new WidgetConfigInput("a", Buckets: buckets).Normalize();
 
         Assert.Equal(valid, Check(config, "histogram").Count == 0);
     }
@@ -152,9 +180,9 @@ public sealed class IndicatorValidationTests
     [Fact]
     public void A_filter_needs_a_column_and_a_known_operator()
     {
-        var config = new WidgetConfigInput(["a"], Filters: [new DataFilter("", "equals", "x"), new DataFilter("year", "like", "x"), null!]).Normalize();
+        var config = new WidgetConfigInput("a", Filters: [new DataFilter("", "equals", "x"), new DataFilter("year", "like", "x"), null!]).Normalize();
 
-        var errors = Check(config, "bar");
+        var errors = Check(config, "stat");
 
         Assert.Equal(["config.filters[0]", "config.filters[1]", "config.filters[2]"], errors.Keys.Order());
     }
@@ -165,8 +193,8 @@ public sealed class IndicatorValidationTests
         var many = Enumerable.Range(0, 51).Select(i => new DataFilter("c" + i, "empty")).ToArray();
         var values = new DataFilter("c", "in", Values: Enumerable.Range(0, 101).Select(i => "v" + i).ToArray());
 
-        Assert.Contains("config.filters", Check(new WidgetConfigInput(["a"], Filters: many).Normalize(), "bar").Keys);
-        Assert.Contains("config.filters[0]", Check(new WidgetConfigInput(["a"], Filters: [values]).Normalize(), "bar").Keys);
+        Assert.Contains("config.filters", Check(new WidgetConfigInput("a", Filters: many).Normalize(), "stat").Keys);
+        Assert.Contains("config.filters[0]", Check(new WidgetConfigInput("a", Filters: [values]).Normalize(), "stat").Keys);
     }
 
     // Against the table
@@ -181,7 +209,7 @@ public sealed class IndicatorValidationTests
     [Fact]
     public void Group_geometry_and_filter_columns_must_be_in_the_table_and_are_named()
     {
-        var config = new WidgetConfigInput(["a"], GroupBy: "round", GeometryColumn: "shape", Filters: [new DataFilter("region", "empty")]).Normalize();
+        var config = new WidgetConfigInput("a", GroupBy: "round", GeometryColumn: "shape", Filters: [new DataFilter("region", "empty")]).Normalize();
 
         var errors = CheckTable(config);
 
@@ -191,10 +219,24 @@ public sealed class IndicatorValidationTests
     }
 
     [Fact]
+    public void Measure_and_ratio_columns_must_be_numeric_columns_of_the_table()
+    {
+        var config = new WidgetConfigInput("a", Ratio: new WidgetRatio("municipality", "missing")).Normalize();
+        var measure = new WidgetConfigInput("a", Measure: "geometry").Normalize();
+
+        var errors = CheckTable(config);
+
+        Assert.Contains("is not a number", errors["config.ratio.numerator"][0]);
+        Assert.Contains("'missing'", errors["config.ratio.denominator"][0]);
+        Assert.Contains("is not a number", CheckTable(measure)["config.measure"][0]);
+        Assert.Empty(CheckTable(new WidgetConfigInput("a", Ratio: new WidgetRatio("numerator", "denominator")).Normalize()));
+    }
+
+    [Fact]
     public void A_config_that_matches_the_table_has_no_errors()
     {
-        var config = new WidgetConfigInput(["a"], GroupBy: "year", GeometryColumn: "geometry",
-            Filters: [new DataFilter("year", "range", Min: "2020", Max: "2026"), new DataFilter("disaggregation", "in", Values: ["Cali"])]).Normalize();
+        var config = new WidgetConfigInput("a", GroupBy: "year", GeometryColumn: "geometry",
+            Filters: [new DataFilter("year", "range", Min: "2020", Max: "2026"), new DataFilter("municipality", "in", Values: ["Cali"])]).Normalize();
 
         Assert.Empty(CheckTable(config));
     }
@@ -202,7 +244,7 @@ public sealed class IndicatorValidationTests
     [Fact]
     public void A_filter_that_does_not_fit_its_columns_type_is_an_error()
     {
-        var config = new WidgetConfigInput(["a"], Filters: [new DataFilter("disaggregation", "range", Min: "1")]).Normalize();
+        var config = new WidgetConfigInput("a", Filters: [new DataFilter("municipality", "range", Min: "1")]).Normalize();
 
         Assert.Contains("does not support the filter 'range'", CheckTable(config)["config.filters[0]"][0]);
     }

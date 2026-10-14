@@ -1,10 +1,11 @@
 using Tamiza.Api.CleanData;
 using Tamiza.Api.Http;
+using Tamiza.Api.Pipeline;
 
 namespace Tamiza.Api.Indicators;
 
 /// <summary>
-/// What a widget's fields must satisfy (design D3 and D9). The checks that need no table run on every request; the checks against
+/// What a widget's fields must satisfy. The checks that need no table run on every request; the checks against
 /// the published table's columns run when the table is published (<see cref="CheckAgainstColumns"/>).
 /// </summary>
 public static class IndicatorValidation
@@ -78,37 +79,51 @@ public static class IndicatorValidation
     }
 
     /// <summary>
-    /// The checks of a widget's query that need no table. <paramref name="chartType"/> is null for the query endpoint, which has
-    /// no chart type; then the per-type constraints are not checked. <paramref name="prefix"/> is <c>config.</c> inside a widget.
+    /// The checks of a widget's query that need no table. <paramref name="chartType"/> is null when the caller has none, as the query
+    /// endpoint may; then the per-type constraints are not checked. <paramref name="prefix"/> is <c>config.</c> inside a widget.
     /// </summary>
     public static void CheckConfig(WidgetConfig config, string? chartType, string prefix, FieldErrors errors)
     {
-        var indicators = config.Indicators;
-        if (indicators.Count == 0)
+        if (string.IsNullOrEmpty(config.Indicator))
         {
-            errors.Add(prefix + "indicators", "Choose at least one indicator.");
+            errors.Add(prefix + "indicator", "Choose an indicator.");
         }
-        else if (indicators.Count > WidgetConfig.MaxIndicators)
+        else if (!ColumnNames.IsValidTableName(config.Indicator))
         {
-            errors.Add(prefix + "indicators", $"At most {WidgetConfig.MaxIndicators} indicators are allowed.");
-        }
-        else if (indicators.Any(i => string.IsNullOrEmpty(i) || i.Length > DataQueryBuilder.MaxTextLength))
-        {
-            errors.Add(prefix + "indicators", $"An indicator is empty or longer than {DataQueryBuilder.MaxTextLength} characters.");
-        }
-        else if (chartType is not null && ChartTypes.NeedsExactlyOneIndicator(chartType) && indicators.Count != 1)
-        {
-            errors.Add(prefix + "indicators", $"A {chartType} widget uses exactly one indicator.");
+            errors.Add(prefix + "indicator", "The indicator is not a valid indicator name.");
         }
 
-        if (config.GroupBy.Length > DataQueryBuilder.MaxTextLength)
+        if (config.Measure is not null && config.Ratio is not null)
         {
-            errors.Add(prefix + "groupBy", $"The group column is longer than {DataQueryBuilder.MaxTextLength} characters.");
+            errors.Add(prefix + "measure", "Plot a measure or a ratio, not both.");
         }
 
-        if (!ValueFields.All.Contains(config.ValueField))
+        CheckColumnName(config.Measure, prefix + "measure", "measure", errors);
+        if (config.Ratio is { } ratio)
         {
-            errors.Add(prefix + "valueField", $"The field to plot must be one of {string.Join(", ", ValueFields.All)}.");
+            if (string.IsNullOrEmpty(ratio.Numerator))
+            {
+                errors.Add(prefix + "ratio.numerator", "Choose the numerator column.");
+            }
+            else
+            {
+                CheckColumnName(ratio.Numerator, prefix + "ratio.numerator", "numerator", errors);
+            }
+
+            if (string.IsNullOrEmpty(ratio.Denominator))
+            {
+                errors.Add(prefix + "ratio.denominator", "Choose the denominator column.");
+            }
+            else
+            {
+                CheckColumnName(ratio.Denominator, prefix + "ratio.denominator", "denominator", errors);
+            }
+        }
+
+        CheckColumnName(config.GroupBy, prefix + "groupBy", "group column", errors);
+        if (chartType is not null && ChartTypes.NeedsGroup(chartType) && config.GroupBy is null)
+        {
+            errors.Add(prefix + "groupBy", $"A {chartType} widget needs a column to group by.");
         }
 
         if (config.Buckets is { } buckets && (buckets < 1 || buckets > WidgetConfig.MaxBuckets))
@@ -120,12 +135,20 @@ public static class IndicatorValidation
         {
             errors.Add(prefix + "geometryColumn", "A map widget needs a geometry column.");
         }
-        else if (config.GeometryColumn is { Length: > DataQueryBuilder.MaxTextLength })
+        else
         {
-            errors.Add(prefix + "geometryColumn", $"The geometry column is longer than {DataQueryBuilder.MaxTextLength} characters.");
+            CheckColumnName(config.GeometryColumn, prefix + "geometryColumn", "geometry column", errors);
         }
 
         CheckFilterShape(config.Filters, prefix, errors);
+    }
+
+    private static void CheckColumnName(string? name, string field, string what, FieldErrors errors)
+    {
+        if (name is { Length: > DataQueryBuilder.MaxTextLength })
+        {
+            errors.Add(field, $"The {what} is longer than {DataQueryBuilder.MaxTextLength} characters.");
+        }
     }
 
     /// <summary>What a filter must have whatever the table is. The meaning of the operator for the column's type is checked against the table.</summary>
@@ -157,18 +180,38 @@ public static class IndicatorValidation
     }
 
     /// <summary>
-    /// Checks a query against the published table: the group column, the geometry column and the filters' columns must exist, and
-    /// the filters must make sense for their columns' types, exactly as the clean data dashboard checks them.
+    /// Checks a query against the published table: the measure or ratio columns must exist and be numbers, the group and geometry
+    /// columns must exist, and the filters must make sense for their columns' types, exactly as the clean data dashboard checks them.
     /// </summary>
     public static void CheckAgainstColumns(WidgetConfig config, IReadOnlyList<TableColumn> columns, string timeZone, string prefix, FieldErrors errors)
     {
-        var names = columns.Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
-        if (!names.Contains(config.GroupBy))
+        var byName = columns.ToDictionary(c => c.Name, StringComparer.Ordinal);
+        void Numeric(string? name, string field)
+        {
+            if (name is null)
+            {
+                return;
+            }
+
+            if (!byName.TryGetValue(name, out var column))
+            {
+                errors.Add(field, $"The table has no column '{name}'.");
+            }
+            else if (!IsNumeric(column))
+            {
+                errors.Add(field, $"Column '{name}' is not a number, so it cannot be plotted.");
+            }
+        }
+
+        Numeric(config.Measure, prefix + "measure");
+        Numeric(config.Ratio?.Numerator, prefix + "ratio.numerator");
+        Numeric(config.Ratio?.Denominator, prefix + "ratio.denominator");
+        if (config.GroupBy is not null && !byName.ContainsKey(config.GroupBy))
         {
             errors.Add(prefix + "groupBy", $"The table has no column '{config.GroupBy}'.");
         }
 
-        if (config.GeometryColumn is not null && !names.Contains(config.GeometryColumn))
+        if (config.GeometryColumn is not null && !byName.ContainsKey(config.GeometryColumn))
         {
             errors.Add(prefix + "geometryColumn", $"The table has no column '{config.GeometryColumn}'.");
         }
@@ -183,4 +226,6 @@ public static class IndicatorValidation
             }
         }
     }
+
+    public static bool IsNumeric(TableColumn column) => column.Type is DataColumnType.Integer or DataColumnType.Decimal;
 }

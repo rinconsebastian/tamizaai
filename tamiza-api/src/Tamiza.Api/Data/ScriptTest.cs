@@ -16,6 +16,9 @@ public sealed class ScriptTest
 
     public ScriptKind Kind { get; set; }
 
+    /// <summary>The indicator the draft is tested as; null for the clean and output scripts.</summary>
+    public string? Name { get; set; }
+
     /// <summary>The tested code, as it was in the editor; it need not be saved.</summary>
     public required string Code { get; set; }
 

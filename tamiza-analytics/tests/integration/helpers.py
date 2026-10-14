@@ -182,22 +182,39 @@ def column_comments(database: Database, schema: str, table: str) -> dict[str, st
     )
 
 
-def add_script(database: Database, project: Project, kind: str, code: str | None) -> uuid.UUID:
-    """Saves a new version of a script (None marks it removed) and returns its id."""
+def add_script(
+    database: Database,
+    project: Project,
+    kind: str,
+    code: str | None,
+    name: str | None = None,
+    label: str | None = None,
+    format: str = "decimal",
+) -> uuid.UUID:
+    """
+    Saves a new version of a script (None marks it removed) and returns its id. An `indicator` script needs its
+    `name`; it is numbered per name and carries a label and a format unless it is a removal.
+    """
     version_id = uuid.uuid4()
     database.execute(
         """
-        INSERT INTO tamiza.script_versions (id, project_id, kind, number, code, author_id, created_at)
-        VALUES (%s, %s, %s,
-                (SELECT coalesce(max(number), 0) + 1 FROM tamiza.script_versions WHERE project_id = %s AND kind = %s),
-                %s, %s, now())
+        INSERT INTO tamiza.script_versions
+            (id, project_id, kind, name, number, code, label, format, author_id, created_at)
+        VALUES (%s, %s, %s, %s,
+                (SELECT coalesce(max(number), 0) + 1 FROM tamiza.script_versions
+                 WHERE project_id = %s AND kind = %s AND name IS NOT DISTINCT FROM %s),
+                %s, %s, %s, %s, now())
         """,
         version_id,
         project.id,
         kind,
+        name,
         project.id,
         kind,
+        name,
         code,
+        None if code is None or name is None else label or name,
+        None if code is None or name is None else format,
         project.user_id,
     )
     return version_id

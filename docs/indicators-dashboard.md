@@ -1,70 +1,85 @@
 # Indicators dashboard
 
-The indicators dashboard is a canvas of **widgets**: stat tiles, charts and maps that members of a project arrange over the indicator table that script 3 published. It is the third tab of a project, after [Performance](performance-dashboard.md) and [Clean data](clean-data-dashboard.md). Every member can see it and export the table; analysts and admins build it.
+The indicators dashboard is a canvas of **widgets**: stat tiles, charts and maps that members of a project arrange over the tables its indicator scripts published. Each widget plots **one indicator**. It is the third tab of a project, after [Performance](performance-dashboard.md) and [Clean data](clean-data-dashboard.md). Every member can see it and export the tables; analysts and admins build it.
 
-It shows what the last successful run of [script 3](scripts.md#3-compute_indicatorscleaned-ctx) published, and nothing else: it does not read the stored submissions, does not contact Kobo and never starts a run. When a run fails, the table of the last successful run stays on screen. Without a published table the page says that no indicators are published yet; analysts and admins get a link to the scripts, and the widgets already configured are kept and listed, so a dashboard can be laid out before the first run.
+It shows what the last successful run of each [indicator script](scripts.md#3-indicator-scripts-computecleaned-ctx) published, and nothing else: it does not read the stored submissions, does not contact Kobo and never starts a run. When a run fails, or one indicator fails, the table of the last successful run stays on screen. At the top the page lists the project's indicators with their label, unit and format and whether each has published a table. While none has, the page says that no indicator has published yet; analysts and admins get a link to the scripts, and the widgets already configured are kept and listed, so a dashboard can be laid out before the first run.
 
-## What script 3 must provide
+## What an indicator script must provide
 
-Script 3 returns one DataFrame, published as the table `indicators`, with the five required columns (see [Rules for what scripts return](scripts.md#rules-for-what-scripts-return)):
+An indicator script returns one DataFrame, published as the table named after the indicator, with **at least one numeric column** (integer or decimal) and any other columns you need (see [Rules for what scripts return](scripts.md#rules-for-what-scripts-return)). There is no fixed set of columns. These are the conventions the dashboard follows:
 
 | Column | Used as |
 |---|---|
-| `indicator` | The name of the indicator. A widget picks the indicators it plots from this column. |
-| `disaggregation` | The group a row belongs to (`total`, `municipality=Cali`). Widgets group by it unless told otherwise. |
-| `value` | The number a widget plots by default. |
-| `numerator`, `denominator` | The other two numbers. A widget can plot one of them instead of `value`. |
+| `value` | The number a widget plots by default. A table without a `value` column starts with its first numeric column. |
+| `numerator`, `denominator` | Let a widget plot a **ratio of sums** (a rate) instead of a single column. |
+| Any text, date or true/false column | A **dimension**: a widget groups by it (a municipality, a `round` or `year` for a trend) and filters on it. |
+| A geometry column | Where a map gets its shapes; see [Maps](#maps). |
 
-A widget can use **any other column** of the table too, to group by it (a `year` or `round` column for a trend) or to filter on it. The columns listed in the widget form are the ones the published table has. The field a widget plots must be a number column (integer or decimal).
+The columns listed in the widget form are the ones the published table has. A widget plots a numeric column or a ratio of two numeric columns.
 
-One DataFrame is one table, so a map needs its geometry in the same rows; see [Maps](#maps).
+## What a value means: format and unit
+
+The indicator says what its numbers are, so the dashboard does not guess. Its **format** decides how every widget shows the values, in the stat tile, the axes, the legends, the tooltips and **Show as table**:
+
+| Format | A value of | Is shown as |
+|---|---|---|
+| `count` | 12450 | `12,450` |
+| `decimal` | 3.14159 | `3.14` |
+| `percent` | 0.42 | `42%` (a **fraction** shown as a percentage) |
+| `currency` | 1250.5 | `1,250.50`, with the unit as the currency when it is a currency code such as `COP` |
+
+The **unit**, when there is one, goes after the value (`12,450 households`). A stat tile over a rate stored as a fraction therefore reads `42%`, not the sum of several percentages.
 
 ## Widget types
 
-Every widget has a title, a type, one or more **indicators**, the column to **group by** (`disaggregation` by default), the **field to plot** (`value`, `numerator` or `denominator`) and up to 50 **filters**. A widget form shows a live preview while you edit.
+Every widget has a title, a type, one **indicator**, what to **plot** (a measure or a ratio, see below), the column to **group by**, up to 50 **filters**, and for a map its **geometry column**. A widget form shows a live preview while you edit.
 
-| Type | Shows | Indicators | Notes |
+| Type | Shows | Group by | Notes |
 |---|---|---|---|
-| **Stat tile** | One number: the plotted field summed over every row the query matches. | Exactly one | Says over how many rows it was summed. |
-| **Bar chart** | Horizontal bars, one per group value. | One or more | One series per indicator, sharing the group values. |
-| **Column chart** | Vertical columns, one per group value. | One or more | As the bar chart. |
-| **Line chart** | A line through the group values. | One or more | Group values are in natural order (2 before 10), so a `round` column of 1, 2, 10 reads as a trend. A group an indicator has no row for leaves a gap. |
-| **Histogram** | How many rows fall in each of a number of equal-width ranges of the plotted value. | One or more | 10 ranges by default, up to 100. The ranges run from the smallest to the largest value and are shared by all the indicators, so they can be compared. |
-| **Pie chart** | One slice per group value, sized by its share of the total. | Exactly one | See below. |
-| **Map** | Regions or points, colored by the plotted field. | Exactly one | Needs a geometry column; see [Maps](#maps). |
+| **Stat tile** | One number: the measure summed, or the ratio of sums, over every row the query matches. | Optional | Says over how many rows it was summed. |
+| **Bar chart** | Horizontal bars, one per group value. | Required | |
+| **Column chart** | Vertical columns, one per group value. | Required | |
+| **Line chart** | A line through the group values. | Required | Group values are in natural order (2 before 10), so a `round` column of 1, 2, 10 reads as a trend. |
+| **Histogram** | How many rows fall in each of a number of equal-width ranges of the plotted value. | Optional | 10 ranges by default, up to 100. Without a group column each row of the table is counted; with one, each group's value. |
+| **Pie chart** | One slice per group value, sized by its share of the total. | Required | See below. |
+| **Map** | Regions or points, colored by the plotted value. | Required | Needs a geometry column; see [Maps](#maps). |
 
-- A widget plots **at most 8 indicators** (the form stops at 8): each is a series with its own color. Colors, light or dark, follow the theme.
-- **Rows with no value** in the plotted field are left out of every widget.
+- **Rows with no value** in the plotted measure are left out of every widget.
 - A group with no value in the group column is shown as **(none)**.
 - The **pie chart** orders slices from the largest. When there are more than 8 groups, the 7 largest keep their slice and the rest are folded into one **Other** slice. A group whose value is zero or negative has no share and is not drawn; the widget says how many, and **Show as table** lists them.
-- The **histogram** counts the rows after duplicates are summed (see below), so each indicator-and-group pair is one row of the count.
+- Colors, light or dark, follow the theme.
+
+### What to plot: a measure or a ratio
+
+- A **measure** is a numeric column of the table. `value` is chosen when the table has it, otherwise its first numeric column. Rows that share a group value are **summed**.
+- A **ratio** is a numerator column and a denominator column. Rows that share a group value are summed in each, and the widget plots `sum(numerator) / sum(denominator)`. A group whose denominator sums to zero has **no value**.
 
 ### Duplicate rows are summed
 
-Rows that share the same indicator and the same group value are **summed** before they are plotted, in the database: `value`, `numerator` and `denominator` are each added up. A script that returns one row per form version, for example, still charts as one bar per disaggregation: two rows for `coverage` and `Cali`, with values 40 and 35, plot 75. Summing is right for counts and wrong for rates; if `value` is a percentage, group by a column that tells the rows apart, filter, or return one row per combination from the script.
+Rows that share the same group value are **summed** before they are plotted, in the database. A table that has one row per form version, for example, still charts as one bar per municipality: two rows for `Cali`, with values 40 and 35, plot 75. Summing is right for counts and wrong for rates, which is why a rate should carry its `numerator` and `denominator` and be plotted as a **ratio**: three rows for `Cali` with numerators 40, 10 and 50 and denominators 100, 50 and 50 plot 0.5, not the sum of three rates.
 
 ### Filters
 
-Filters work as in the [clean data dashboard](clean-data-dashboard.md#filters): **contains**, **is exactly** and **is one of** for text; **is between** for numbers, dates and timestamps; **is one of** for true/false; **is empty** and **is not empty** for any column. A row has to match all of them. A widget takes at most 50 filters, and **is one of** takes at most 100 values. Filters are added once an indicator table is published, because they are chosen from its columns.
+Filters work as in the [clean data dashboard](clean-data-dashboard.md#filters): **contains**, **is exactly** and **is one of** for text; **is between** for numbers, dates and timestamps; **is one of** for true/false; **is empty** and **is not empty** for any column. A row has to match all of them. A widget takes at most 50 filters, and **is one of** takes at most 100 values. Filters are added once the indicator's table is published, because they are chosen from its columns.
 
 ## Maps
 
-A map draws the shapes of its rows in their relative positions, colored by the plotted field on a sequential scale of seven steps, with the lowest and highest value shown as a legend. It reads the shapes from a **geometry column** that script 3 publishes: a text column of WKT, chosen in the widget form (any text column of the table is offered).
+A map draws the shapes of its rows in their relative positions, colored by the plotted value on a sequential scale of seven steps, with the lowest and highest value shown as a legend. It reads the shapes from a **geometry column** that the indicator script publishes: a text column of WKT, chosen in the widget form (any text column of the table is offered).
 
 - Only three WKT types are drawn: `POINT`, `POLYGON` (holes included) and `MULTIPOLYGON`. A `Z` or `M` coordinate and an `SRID=4326;` prefix are accepted and ignored. Anything else (`LINESTRING`, `MULTIPOINT`, `GEOMETRYCOLLECTION`, `EMPTY`, text that does not parse) is not drawn.
 - A polygon is a filled region and a point is a marker, both colored by the value. A row whose geometry is missing or cannot be read is **left out and counted** next to the map; **Show as table** lists it as "Left out".
 - Rows that share a group value are summed, but their shapes are not: the map uses the geometry of one of them. Give each region its own group value, and the same geometry on every row of a region.
 - Coordinates are read as **degrees**, x as longitude and y as latitude. **Project to degrees (EPSG:4326) in the script before returning**: the CRS is not kept when geometry is published, so coordinates in meters (EPSG:3116, UTM) are drawn as if they were degrees. The map fits one flat projection to the extent of its own rows; with degrees it narrows longitude by the middle latitude so shapes keep their proportions.
 
-**There is no basemap.** The map shows the regions of your own data and nothing around them: no streets, no place names, no tiles, no pan or zoom. It is meant for a choropleth of the project's disaggregation values (coverage by municipality), where the region you hover shows its group value and number. Its title and legend carry the units. It does not need an internet connection.
+**There is no basemap.** The map shows the regions of your own data and nothing around them: no streets, no place names, no tiles, no pan or zoom. It is meant for a choropleth of the values of a group column (coverage by municipality), where the region you hover shows its group value and number. Its title and legend carry the units. It does not need an internet connection.
 
-Geometry already publishes from any script, and geopandas is available in them: a geometry column becomes plain text on publishing (see [Rules for what scripts return](scripts.md#rules-for-what-scripts-return)). For example, with a [reference table](scripts.md#reference-data) `municipalities` that holds a `boundary_wkt` text column with each municipality's polygon in a projected CRS:
+Geometry already publishes from any script, and geopandas is available in them: a geometry column becomes plain text on publishing. For example, an indicator `households_per_1000_people`, with a [reference table](scripts.md#reference-data) `municipalities` that holds a `boundary_wkt` text column with each municipality's polygon in a projected CRS:
 
 ```python
 import geopandas as gpd
 
 
-def compute_indicators(cleaned, ctx):
+def compute(cleaned, ctx):
     households = cleaned["main"].groupby("municipality").size().rename("households").reset_index()
     places = ctx.reference["municipalities"]  # municipality, population, boundary_wkt
     merged = households.merge(places, on="municipality")
@@ -72,8 +87,7 @@ def compute_indicators(cleaned, ctx):
     shapes = gpd.GeoSeries.from_wkt(merged["boundary_wkt"], crs="EPSG:3116").to_crs("EPSG:4326")
     return gpd.GeoDataFrame(
         {
-            "indicator": "households_per_1000_people",
-            "disaggregation": merged["municipality"],
+            "municipality": merged["municipality"],
             "value": merged["households"] / merged["population"] * 1000,
             "numerator": merged["households"],
             "denominator": merged["population"],
@@ -82,7 +96,7 @@ def compute_indicators(cleaned, ctx):
     )
 ```
 
-Then add a **Map** widget for `households_per_1000_people` and choose `geometry` as its geometry column. A table that mixes points and polygons draws both.
+Then add a **Map** widget over `households_per_1000_people`, group by `municipality` and choose `geometry` as its geometry column. A table that mixes points and polygons draws both.
 
 ## Building the dashboard
 
@@ -103,34 +117,38 @@ Widgets sit on a grid of 12 columns. A new widget goes below the existing ones, 
 
 ## Show as table
 
-Every widget except the stat tile has a **Show as table** button that replaces the picture with the numbers it plots (a histogram lists its ranges and their counts, a map its groups with the kind of shape each has). The button above the grid, **Show all as tables**, does the same for every widget at once, in reading order. Each chart also carries a text description for assistive technology.
+Every widget except the stat tile has a **Show as table** button that replaces the picture with the numbers it plots, formatted like the chart (a histogram lists its ranges and their counts, a map its groups with the kind of shape each has). The button above the grid, **Show all as tables**, does the same for every widget at once, in reading order. Each chart also carries a text description for assistive technology.
 
 ## Export
 
-**Export** downloads the **whole published indicator table**, exactly as published and without the widgets' filters, as CSV or XLSX. Viewers can export. It is the same file, the same single-use download link and the same limits as the [clean data exports](clean-data-dashboard.md#exports): the CSV has a byte order mark, a geometry column is exported as its WKT text, and an XLSX is refused above 1,048,575 rows. A widget does not export on its own, and a chart cannot be saved as an image; use **Show as table** to see its numbers.
+**Export**, in the indicator's entry of the list, downloads the **whole published table of that indicator**, exactly as published and without the widgets' filters, as CSV or XLSX. Viewers can export. It is the same file, the same single-use download link and the same limits as the [clean data exports](clean-data-dashboard.md#exports): the CSV has a byte order mark, a geometry column is exported as its WKT text, and an XLSX is refused above 1,048,575 rows. Exporting one indicator never delays another indicator's publishing, and a widget does not export on its own; a chart cannot be saved as an image, so use **Show as table** to see its numbers.
 
-## When the table changes
+## When a table changes
 
-A run replaces the published table as a whole. The page shows when it was published and by which run; reload the page to see a newer one.
+A run replaces each indicator's table on its own. The page shows when each indicator published and by which run; reload the page to see a newer one.
 
-A widget that names an **indicator**, a **group column**, a **geometry column** or a **filter column** the new table no longer has does not break the page. It shows **This widget cannot be drawn** and lists what is missing. Edit the widget to choose others, or restore them in the script; the widget draws again as soon as the table has them. The other widgets keep working.
+- A widget whose **indicator has not published** (it was never run, its script was removed, or every run so far failed before publishing) does not break the page. It says `<label> has not published yet`; analysts and admins get a link to the scripts.
+- A widget that names a **measure**, a **ratio column**, a **group column**, a **geometry column** or a **filter column** the new table no longer has shows **This widget cannot be drawn** and lists what is missing. Edit the widget to choose others, or restore them in the script; the widget draws again as soon as the table has them.
+
+The other widgets keep working.
 
 ## Limits
 
 | Limit | Default |
 |---|---|
 | Widgets in a project | 50 |
-| Rows one widget plots (indicator-and-group pairs, after summing) | 5,000 |
+| Rows one widget plots (group values, after summing) | 5,000 |
 | Filters in a widget | 50 |
 | Values in an **is one of** filter | 100 |
-| Indicators in a widget | 8 |
 | Ranges in a histogram | 100 (10 by default) |
+| Indicators in a project | 100 |
 | Length of a title | 200 characters |
 
-An operator can change the first two; see [operations.md](operations.md#common-changes). A widget whose query matches more rows than the limit shows the first ones and says so ("Only the first 5,000 rows are shown"); add a filter or group by a coarser column. A query that takes longer than the dashboard time limit (25 seconds by default, shared with the clean data dashboard) is stopped with a message. An indicator table holds one row per indicator and group value, so these limits are far above what a dashboard usually needs.
+An operator can change the first two; see [operations.md](operations.md#common-changes). A widget whose query matches more rows than the limit shows the first ones and says so ("Only the first 5,000 rows are shown"); add a filter or group by a coarser column. A query that takes longer than the dashboard time limit (25 seconds by default, shared with the clean data dashboard) is stopped with a message.
 
 ## What it does not do
 
+- A widget plots **one indicator**; it does not combine several indicator tables in one chart.
 - It has no basemap, no tiles, no pan or zoom, and no administrative boundaries of its own: the shapes come from your script.
 - It does not filter across widgets or across the whole dashboard; each widget has its own filters.
 - A project has one indicators dashboard.

@@ -286,6 +286,92 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
         Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.dashboard_widgets"));
     }
 
+    [Fact]
+    public async Task Indicator_scripts_script_deletes_script_3_and_its_widgets_and_keeps_the_other_scripts()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(
+            connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql", "0004_add_pipeline_authoring.sql",
+            "0005_add_choice_labels.sql", "0006_add_performance_dashboard.sql", "0007_add_indicators_dashboard.sql");
+        const string project = "00000000-0000-0000-0000-0000000000aa";
+        const string user = "00000000-0000-0000-0000-000000000001";
+        const string indicatorsSchema = "p_000000000000000000000000000000aa_indicators";
+        const string cleanSchema = "p_000000000000000000000000000000aa_clean";
+        await ExecuteAsync(connectionString, $"""
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('{user}', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('{project}', 'Existing', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(), '{user}', now(), now());
+            INSERT INTO tamiza.script_versions (id, project_id, kind, number, code, author_id, created_at) VALUES
+                ('00000000-0000-0000-0000-0000000000c1', '{project}', 'clean', 1, 'def clean(raw, ctx): return raw', '{user}', now()),
+                ('00000000-0000-0000-0000-0000000000c3', '{project}', 'indicators', 1, 'def compute_indicators(cleaned, ctx): pass', '{user}', now());
+            INSERT INTO tamiza.runs (id, project_id, trigger, status, clean_version_id, indicators_version_id, queued_at) VALUES
+                ('00000000-0000-0000-0000-0000000000d1', '{project}', 'manual', 'succeeded',
+                 '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000c3', now());
+            INSERT INTO tamiza.run_steps (run_id, step, status) VALUES
+                ('00000000-0000-0000-0000-0000000000d1', 'clean', 'succeeded'),
+                ('00000000-0000-0000-0000-0000000000d1', 'indicators', 'succeeded');
+            INSERT INTO tamiza.script_tests (id, project_id, requested_by, kind, code, sample_size, status, queued_at) VALUES
+                (gen_random_uuid(), '{project}', '{user}', 'clean', 'x', 500, 'succeeded', now()),
+                (gen_random_uuid(), '{project}', '{user}', 'indicators', 'x', 500, 'succeeded', now());
+            INSERT INTO tamiza.dashboard_widgets (project_id, chart_type, title, created_by, updated_by)
+            VALUES ('{project}', 'stat', 'Total', '{user}', '{user}');
+            CREATE SCHEMA {indicatorsSchema};
+            CREATE TABLE {indicatorsSchema}.indicators (indicator text, value numeric);
+            CREATE SCHEMA {cleanSchema};
+            CREATE TABLE {cleanSchema}.main (id integer);
+            """);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        Assert.Contains("0008_split_indicator_scripts.sql", Scripts);
+        // Everything of script 3 is gone: its versions, tests and steps, the widgets that read it and its published schema.
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.script_versions WHERE kind NOT IN ('clean', 'output')"));
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.script_tests WHERE kind NOT IN ('clean', 'output')"));
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.run_steps WHERE step NOT IN ('flatten', 'clean', 'output')"));
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+        Assert.False(await ScalarAsync<bool>(connectionString, $"SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = '{indicatorsSchema}')"));
+        // The other scripts, their tests and steps, the run and the clean schema stay.
+        Assert.True(await ScalarAsync<bool>(connectionString, $"SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = '{cleanSchema}')"));
+        Assert.Equal(1L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.script_versions WHERE kind = 'clean'"));
+        Assert.Equal(1L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.script_tests WHERE kind = 'clean'"));
+        Assert.Equal("clean|", await ScalarAsync<string>(connectionString, "SELECT step || '|' || name FROM tamiza.run_steps"));
+        Assert.Equal("[]", await ScalarAsync<string>(connectionString, "SELECT indicator_versions::text FROM tamiza.runs"));
+
+        // Indicator versions are numbered per indicator and need a name; the clean script still has one sequence.
+        await ExecuteAsync(connectionString, $"""
+            INSERT INTO tamiza.script_versions (id, project_id, kind, name, number, code, label, format, author_id, created_at) VALUES
+                (gen_random_uuid(), '{project}', 'indicator', 'coverage', 1, 'x', 'Coverage', 'percent', '{user}', now()),
+                (gen_random_uuid(), '{project}', 'indicator', 'attendance', 1, 'x', 'Attendance', 'count', '{user}', now());
+            """);
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, $"""
+            INSERT INTO tamiza.script_versions (id, project_id, kind, name, number, code, label, format, author_id, created_at)
+            VALUES (gen_random_uuid(), '{project}', 'indicator', 'coverage', 1, 'x', 'Again', 'count', '{user}', now())
+            """));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, $"""
+            INSERT INTO tamiza.script_versions (id, project_id, kind, number, code, author_id, created_at)
+            VALUES (gen_random_uuid(), '{project}', 'clean', 1, 'x', '{user}', now())
+            """));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, $"""
+            INSERT INTO tamiza.script_versions (id, project_id, kind, number, code, author_id, created_at)
+            VALUES (gen_random_uuid(), '{project}', 'indicator', 1, 'x', '{user}', now())
+            """));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, $"""
+            INSERT INTO tamiza.script_versions (id, project_id, kind, name, number, code, label, format, author_id, created_at)
+            VALUES (gen_random_uuid(), '{project}', 'indicator', 'other', 1, 'x', 'Other', 'ratio', '{user}', now())
+            """));
+        // An indicator step needs its name, and the fixed steps have none.
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString,
+            "INSERT INTO tamiza.run_steps (run_id, step, status) VALUES ('00000000-0000-0000-0000-0000000000d1', 'indicator', 'succeeded')"));
+        await ExecuteAsync(connectionString, """
+            INSERT INTO tamiza.run_steps (run_id, step, name, status) VALUES
+                ('00000000-0000-0000-0000-0000000000d1', 'indicator', 'coverage', 'succeeded'),
+                ('00000000-0000-0000-0000-0000000000d1', 'indicator', 'attendance', 'failed')
+            """);
+        Assert.Equal(3L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.run_steps"));
+    }
+
     /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>
     private static void ApplyScripts(string connectionString, params string[] names)
     {

@@ -1,7 +1,8 @@
-"""Claims queued tests and runs, and executes the chain: flatten → clean → output and indicators.
+"""Claims queued tests and runs, and executes the chain: flatten → clean → output, then the indicators one by one.
 
 Each step records itself in ``tamiza.run_steps`` as it ends. A step whose script is absent falls back to the default
-behavior (clean = flattened data; output and indicators are removed). Scripts 2 and 3 depend only on script 1.
+behavior (clean = flattened data; output is removed, and so is the indicator schema when the project has no
+indicators). Script 2 and every indicator script depend only on script 1.
 """
 
 import logging
@@ -27,20 +28,29 @@ from tamiza.settings import Settings
 
 logger = logging.getLogger("tamiza.pipeline")
 
-STEPS = ("flatten", "clean", "output", "indicators")
 INTERRUPTED = "run.interrupted"
+INDICATOR = "indicator"
+
+
+@dataclass(frozen=True)
+class IndicatorVersion:
+    name: str
+    version_id: UUID
+    number: int
 
 
 @dataclass(frozen=True)
 class ClaimedRun:
     id: UUID
     project_id: UUID
-    versions: dict[str, UUID | None]  # script kind → version id, resolved when the run was claimed
+    versions: dict[str, UUID | None]  # script 1 and 2 → version id, resolved when the run was claimed
+    indicators: list[IndicatorVersion] = field(default_factory=list)  # current indicator versions, in name order
 
 
 @dataclass
 class StepRecord:
     step: str
+    name: str = ""  # the indicator's name for an indicator step
     status: str = "skipped"
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -65,11 +75,22 @@ def fail_interrupted(connection: psycopg.Connection) -> int:
 
 
 def claim(connection: psycopg.Connection) -> ClaimedRun | None:
-    """Starts the oldest queued run, recording the current version of each script for it."""
+    """Starts the oldest queued run, recording the current version of each script, and of each indicator, for it."""
     latest = (
         "(SELECT v.id FROM tamiza.script_versions v"
         " WHERE v.project_id = r.project_id AND v.kind = '{}' ORDER BY v.number DESC LIMIT 1)"
     )
+    # The latest version of each indicator name, unless it marks the indicator as removed; a list in name order.
+    indicators = """
+        COALESCE((
+            SELECT jsonb_agg(jsonb_build_object('name', l.name, 'versionId', l.id, 'number', l.number)
+                             ORDER BY l.name COLLATE "C")
+            FROM (
+                SELECT DISTINCT ON (v.name) v.id, v.name, v.number, v.code FROM tamiza.script_versions v
+                WHERE v.project_id = r.project_id AND v.kind = 'indicator' ORDER BY v.name, v.number DESC
+            ) l WHERE l.code IS NOT NULL
+        ), '[]'::jsonb)
+    """
     with connection.transaction():
         row = connection.execute(
             f"""
@@ -80,9 +101,9 @@ def claim(connection: psycopg.Connection) -> ClaimedRun | None:
             SET status = 'running', started_at = now(),
                 clean_version_id = {latest.format("clean")},
                 output_version_id = {latest.format("output")},
-                indicators_version_id = {latest.format("indicators")}
+                indicator_versions = {indicators}
             FROM next WHERE r.id = next.id
-            RETURNING r.id, r.project_id, r.clean_version_id, r.output_version_id, r.indicators_version_id
+            RETURNING r.id, r.project_id, r.clean_version_id, r.output_version_id, r.indicator_versions
             """
         ).fetchone()
         if row is not None:
@@ -96,7 +117,12 @@ def claim(connection: psycopg.Connection) -> ClaimedRun | None:
             )
     if row is None:
         return None
-    return ClaimedRun(row[0], row[1], {"clean": row[2], "output": row[3], "indicators": row[4]})
+    return ClaimedRun(
+        row[0],
+        row[1],
+        {"clean": row[2], "output": row[3]},
+        [IndicatorVersion(i["name"], UUID(i["versionId"]), i["number"]) for i in row[4]],
+    )
 
 
 class Processor:
@@ -137,12 +163,14 @@ def execute(connection: psycopg.Connection, run: ClaimedRun, settings: Settings)
     work_dir = settings.run_work_dir / str(run.id)
     shutil.rmtree(work_dir, ignore_errors=True)
     work_dir.mkdir(parents=True)
-    records = {step: StepRecord(step) for step in STEPS}
+    # In the order the steps run: the three fixed ones, then the indicators by name.
+    records = {(step, ""): StepRecord(step) for step in ("flatten", "clean", "output")}
+    records.update({(INDICATOR, i.name): StepRecord(INDICATOR, i.name) for i in run.indicators})
     try:
         _execute_steps(connection, run, settings, work_dir, records)
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
-    failed = next((records[step] for step in STEPS if records[step].status == "failed"), None)
+    failed = next((record for record in records.values() if record.status == "failed"), None)
     connection.execute(
         """
         UPDATE tamiza.runs SET status = %s, finished_at = now(), error_code = %s, error = %s WHERE id = %s
@@ -150,11 +178,19 @@ def execute(connection: psycopg.Connection, run: ClaimedRun, settings: Settings)
         (
             "failed" if failed else "succeeded",
             f"step.{failed.step}" if failed else None,
-            failed.error.splitlines()[0] if failed and failed.error else None,
+            _run_error(failed),
             run.id,
         ),
     )
     logger.info("Run %s of project %s %s.", run.id, run.project_id, "failed" if failed else "succeeded")
+
+
+def _run_error(failed: StepRecord | None) -> str | None:
+    """The first line of the first failed step's error; for an indicator it names the indicator."""
+    if failed is None or not failed.error:
+        return None
+    line = failed.error.splitlines()[0]
+    return f"Indicator {failed.name}: {line}" if failed.step == INDICATOR else line
 
 
 @dataclass(frozen=True)
@@ -229,7 +265,19 @@ def _publish(
         record.log = f"{record.log}\n{line}".strip()
 
 
-def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Path, records: dict[str, StepRecord]):
+def _publish_table(connection, run: ClaimedRun, settings: Settings, record: StepRecord, table: publish.Table) -> None:
+    """Publishes one indicator's table; when the swap had to wait for readers (an export), the step's log says so."""
+    waited = publish.publish_table(
+        connection, run.project_id, "indicators", table, max_wait_seconds=settings.publish_wait_seconds
+    )
+    if waited > _NOTEWORTHY_PUBLISH_WAIT_SECONDS:
+        line = f"Publishing waited {waited:.0f} s for readers of the published table."
+        record.log = f"{record.log}\n{line}".strip()
+
+
+def _execute_steps(
+    connection, run: ClaimedRun, settings: Settings, work_dir: Path, records: dict[tuple[str, str], StepRecord]
+):
     project = project_context(connection, run.project_id)
     form_fields, context = project.form_fields, project.context
     codes = _codes(connection, run)
@@ -266,9 +314,9 @@ def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Pa
         record.input_rows = result.input_rows
         _set_outputs(record, raw)
 
-    _run_step(connection, run, records["flatten"], do_flatten)
+    _run_step(connection, run, records[("flatten", "")], do_flatten)
     if raw is None:
-        _record_skipped(connection, run, records, ("clean", "output", "indicators"), "Not run: flattening failed.")
+        _record_skipped(connection, run, records, "Not run: flattening failed.")
         return
 
     # Script 1, or the flattened tables as the clean data.
@@ -296,28 +344,71 @@ def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Pa
         record.input_rows = sum(t.rows for t in raw)
         _set_outputs(record, cleaned)
 
-    _run_step(connection, run, records["clean"], do_clean)
+    _run_step(connection, run, records[("clean", "")], do_clean)
     if cleaned is None:
-        _record_skipped(connection, run, records, ("output", "indicators"), "Not run: the clean step failed.")
+        _record_skipped(connection, run, records, "Not run: the clean step failed.")
         return
 
-    # Scripts 2 and 3 each depend only on the clean step.
-    for kind in ("output", "indicators"):
+    # Script 2 and the indicator scripts each depend only on the clean step.
+    def do_output(record: StepRecord) -> None:
+        if codes["output"] is None:
+            publish.drop(connection, run.project_id, "output")
+            record.status = "skipped"
+            record.log = "No output script: nothing is published for this step."
+            return
+        outputs = _script(record, work_dir, "output", codes["output"], cleaned, context, limits, references)
+        if outputs is None:
+            return
+        _publish(connection, run, settings, record, "output", [publish.Table(t.name, t.path) for t in outputs])
+        record.input_rows = sum(t.rows for t in cleaned)
+        _set_outputs(record, outputs)
 
-        def do_script(record: StepRecord, kind: str = kind) -> None:
-            if codes[kind] is None:
-                publish.drop(connection, run.project_id, kind)
-                record.status = "skipped"
-                record.log = f"No {kind} script: nothing is published for this step."
-                return
-            outputs = _script(record, work_dir, kind, codes[kind], cleaned, context, limits, references)
+    _run_step(connection, run, records[("output", "")], do_output)
+
+    # The indicators, one at a time in name order: a failing one keeps its previous table and does not stop the rest.
+    if not run.indicators:
+        publish.drop(connection, run.project_id, "indicators")
+        return
+    removal_note = _drop_removed_indicators(connection, run, settings)
+    for position, indicator in enumerate(run.indicators):
+
+        def do_indicator(
+            record: StepRecord, indicator: IndicatorVersion = indicator, first: bool = position == 0
+        ) -> None:
+            code = _code(connection, indicator.version_id)
+            if code is None:
+                raise RuntimeError(f"Version {indicator.number} of the indicator has no code.")
+            outputs = _script(
+                record, work_dir, INDICATOR, code, cleaned, context, limits, references, name=indicator.name
+            )
+            if first and removal_note:
+                record.log = f"{removal_note}\n{record.log}".strip()
             if outputs is None:
                 return
-            _publish(connection, run, settings, record, kind, [publish.Table(t.name, t.path) for t in outputs])
+            _publish_table(connection, run, settings, record, publish.Table(outputs[0].name, outputs[0].path))
             record.input_rows = sum(t.rows for t in cleaned)
             _set_outputs(record, outputs)
 
-        _run_step(connection, run, records[kind], do_script)
+        _run_step(connection, run, records[(INDICATOR, indicator.name)], do_indicator)
+
+
+def _drop_removed_indicators(connection, run: ClaimedRun, settings: Settings) -> str:
+    """
+    Drops the tables of indicators the project no longer has, before the indicators run. A table that stays in use past
+    the publish wait is left for the next run; the first indicator's log says what happened.
+    """
+    try:
+        removed = publish.drop_tables_except(
+            connection,
+            run.project_id,
+            "indicators",
+            [i.name for i in run.indicators],
+            max_wait_seconds=settings.publish_wait_seconds,
+        )
+    except publish.PublishError as error:
+        logger.warning("Run %s could not remove tables of removed indicators: %s", run.id, error)
+        return f"Tables of removed indicators were kept: {error}"
+    return f"Removed the tables of indicators that no longer exist: {', '.join(removed)}." if removed else ""
 
 
 def _run_step(connection, run: ClaimedRun, record: StepRecord, action: Callable[[StepRecord], None]) -> None:
@@ -337,16 +428,19 @@ def _run_step(connection, run: ClaimedRun, record: StepRecord, action: Callable[
     _save(connection, run, record)
 
 
-def _script(record, work_dir, kind, code, inputs, context, limits, references) -> list[OutputTable] | None:
+def _script(
+    record, work_dir, kind, code, inputs, context, limits, references, name: str | None = None
+) -> list[OutputTable] | None:
     outcome = run_script(
         work_dir / "steps",
         kind,
         code,
         {t.name: t.path for t in inputs},
         context,
-        work_dir / kind,
+        work_dir / kind if name is None else work_dir / "indicators" / name,
         limits,
         references,
+        name,
     )
     record.log = outcome.log
     if not outcome.succeeded:
@@ -361,10 +455,12 @@ def _set_outputs(record: StepRecord, tables: list[OutputTable]) -> None:
     record.output_rows = sum(t.rows for t in tables)
 
 
-def _record_skipped(connection, run, records, steps, reason) -> None:
-    for step in steps:
-        records[step].log = reason
-        _save(connection, run, records[step])
+def _record_skipped(connection, run, records, reason) -> None:
+    """Records every step that has not run yet as skipped."""
+    for record in records.values():
+        if record.started_at is None:
+            record.log = reason
+            _save(connection, run, record)
 
 
 def capped_log(log: str) -> str:
@@ -381,15 +477,16 @@ def _save(connection, run: ClaimedRun, record: StepRecord) -> None:
     connection.execute(
         """
         INSERT INTO tamiza.run_steps
-            (run_id, step, status, started_at, finished_at, input_rows, output_rows, tables, log, error)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (run_id, step) DO UPDATE SET status = excluded.status, started_at = excluded.started_at,
+            (run_id, step, name, status, started_at, finished_at, input_rows, output_rows, tables, log, error)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (run_id, step, name) DO UPDATE SET status = excluded.status, started_at = excluded.started_at,
             finished_at = excluded.finished_at, input_rows = excluded.input_rows, output_rows = excluded.output_rows,
             tables = excluded.tables, log = excluded.log, error = excluded.error
         """,
         (
             run.id,
             record.step,
+            record.name,
             record.status,
             record.started_at,
             record.finished_at,
@@ -403,14 +500,15 @@ def _save(connection, run: ClaimedRun, record: StepRecord) -> None:
 
 
 def _codes(connection, run: ClaimedRun) -> dict[str, str | None]:
-    """The code of each script version the run uses; None when there is no script or it was removed."""
-    codes: dict[str, str | None] = {}
-    for kind, version_id in run.versions.items():
-        row = None
-        if version_id is not None:
-            row = connection.execute("SELECT code FROM tamiza.script_versions WHERE id = %s", (version_id,)).fetchone()
-        codes[kind] = row[0] if row else None
-    return codes
+    """The code of script 1 and script 2 as the run uses them; None when there is no script or it was removed."""
+    return {
+        kind: None if version_id is None else _code(connection, version_id) for kind, version_id in run.versions.items()
+    }
+
+
+def _code(connection, version_id: UUID) -> str | None:
+    row = connection.execute("SELECT code FROM tamiza.script_versions WHERE id = %s", (version_id,)).fetchone()
+    return row[0] if row else None
 
 
 def _submissions(database_url: str, project_id: UUID):

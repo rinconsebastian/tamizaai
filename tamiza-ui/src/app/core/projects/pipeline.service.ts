@@ -2,8 +2,23 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { InjectionToken, Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
-export type ScriptKind = 'clean' | 'output' | 'indicators';
-export const scriptKinds: ScriptKind[] = ['clean', 'output', 'indicators'];
+export type ScriptKind = 'clean' | 'output' | 'indicator';
+
+/** The two scripts a project has at most once; the indicator scripts are named. */
+export type FixedScriptKind = 'clean' | 'output';
+export const fixedScriptKinds: FixedScriptKind[] = ['clean', 'output'];
+
+/** Which script: script 1, script 2, or one indicator by name. */
+export type ScriptRef = { kind: FixedScriptKind } | { kind: 'indicator'; name: string };
+
+export type IndicatorFormat = 'count' | 'decimal' | 'percent' | 'currency';
+export const indicatorFormats: IndicatorFormat[] = ['count', 'decimal', 'percent', 'currency'];
+
+/** At most this many indicators with a current version per project. */
+export const maxIndicators = 100;
+
+/** Lowercase letters, digits and underscores, starting with a letter, at most 63 characters: the rule for table names. */
+export const indicatorNamePattern = /^[a-z][a-z0-9_]{0,62}$/;
 
 export interface Person {
   id: string;
@@ -13,27 +28,60 @@ export interface Person {
 export interface ScriptVersionSummary {
   versionId: string;
   kind: ScriptKind;
+  /** Set for indicators. */
+  name: string | null;
+  label: string | null;
   number: number;
   removed: boolean;
   author: Person;
   createdAt: string;
 }
 
+/** An indicator's metadata, saved with each version of its script. */
+export interface IndicatorMetadata {
+  label: string;
+  description: string;
+  unit: string;
+  format: IndicatorFormat;
+}
+
+/** The code of a version and, for an indicator, its metadata; all null for a removal. */
 export interface ScriptVersionDetails extends ScriptVersionSummary {
   code: string | null;
+  description: string | null;
+  unit: string | null;
+  format: IndicatorFormat | null;
 }
 
 export interface ProjectScript {
-  kind: ScriptKind;
+  kind: FixedScriptKind;
   current: ScriptVersionDetails | null;
 }
 
+/** An indicator with the metadata and code of its current version. */
+export interface IndicatorScript {
+  name: string;
+  label: string;
+  description: string | null;
+  unit: string | null;
+  format: IndicatorFormat;
+  current: ScriptVersionDetails;
+}
+
+export interface ScriptList {
+  clean: ProjectScript;
+  output: ProjectScript;
+  indicators: IndicatorScript[];
+}
+
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed';
-export type RunStepName = 'flatten' | 'clean' | 'output' | 'indicators';
+export type RunStepName = 'flatten' | 'clean' | 'output' | 'indicator';
 export type RunStepStatus = 'succeeded' | 'failed' | 'skipped';
 
 export interface StepSummary {
   step: RunStepName;
+  /** The indicator's name for an indicator step; empty for the three fixed steps. */
+  name: string;
   status: RunStepStatus;
   inputRows: number | null;
   outputRows: number | null;
@@ -47,13 +95,15 @@ export interface RunSummary {
   queuedAt: string;
   startedAt: string | null;
   finishedAt: string | null;
-  versions: { clean: number | null; output: number | null; indicators: number | null };
+  versions: { clean: number | null; output: number | null; indicators: { name: string; number: number }[] };
   steps: StepSummary[];
   errorCode: string | null;
   error: string | null;
 }
 
 export interface StepDetails extends StepSummary {
+  /** The indicator's label in the version the run used. */
+  label: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   tables: { name: string; rows: number }[];
@@ -106,6 +156,8 @@ export interface TestStep {
 export interface ScriptTest {
   id: string;
   kind: ScriptKind;
+  /** The indicator tested; null for script 1 and script 2. */
+  name: string | null;
   status: RunStatus;
   sampleSize: number;
   code: string;
@@ -142,32 +194,38 @@ export const SCRIPT_TEST_POLL_MS = new InjectionToken<number>('SCRIPT_TEST_POLL_
 
 const base = '/api/v1/projects';
 
+function scriptUrl(projectId: string, script: ScriptRef): string {
+  const path = script.kind === 'indicator' ? `indicators/${script.name}` : script.kind;
+  return `${base}/${projectId}/scripts/${path}`;
+}
+
 @Injectable({ providedIn: 'root' })
 export class PipelineService {
   private readonly http = inject(HttpClient);
 
-  scripts(projectId: string): Observable<ProjectScript[]> {
-    return this.http.get<ProjectScript[]>(`${base}/${projectId}/scripts`);
+  scripts(projectId: string): Observable<ScriptList> {
+    return this.http.get<ScriptList>(`${base}/${projectId}/scripts`);
   }
 
-  save(projectId: string, kind: ScriptKind, code: string): Observable<ScriptVersionDetails> {
-    return this.http.put<ScriptVersionDetails>(`${base}/${projectId}/scripts/${kind}`, { code });
+  /** Saves script 1 or 2 with `{ code }`, or an indicator with its metadata too; the first save of a name creates the indicator. */
+  save(projectId: string, script: ScriptRef, body: { code: string } | ({ code: string } & IndicatorMetadata)): Observable<ScriptVersionDetails> {
+    return this.http.put<ScriptVersionDetails>(scriptUrl(projectId, script), body);
   }
 
-  remove(projectId: string, kind: ScriptKind): Observable<ScriptVersionDetails> {
-    return this.http.delete<ScriptVersionDetails>(`${base}/${projectId}/scripts/${kind}`);
+  remove(projectId: string, script: ScriptRef): Observable<ScriptVersionDetails> {
+    return this.http.delete<ScriptVersionDetails>(scriptUrl(projectId, script));
   }
 
-  versions(projectId: string, kind: ScriptKind): Observable<ScriptVersionSummary[]> {
-    return this.http.get<ScriptVersionSummary[]>(`${base}/${projectId}/scripts/${kind}/versions`);
+  versions(projectId: string, script: ScriptRef): Observable<ScriptVersionSummary[]> {
+    return this.http.get<ScriptVersionSummary[]>(`${scriptUrl(projectId, script)}/versions`);
   }
 
-  version(projectId: string, kind: ScriptKind, number: number): Observable<ScriptVersionDetails> {
-    return this.http.get<ScriptVersionDetails>(`${base}/${projectId}/scripts/${kind}/versions/${number}`);
+  version(projectId: string, script: ScriptRef, number: number): Observable<ScriptVersionDetails> {
+    return this.http.get<ScriptVersionDetails>(`${scriptUrl(projectId, script)}/versions/${number}`);
   }
 
-  restore(projectId: string, kind: ScriptKind, number: number): Observable<ScriptVersionDetails> {
-    return this.http.post<ScriptVersionDetails>(`${base}/${projectId}/scripts/${kind}/versions/${number}/restore`, null);
+  restore(projectId: string, script: ScriptRef, number: number): Observable<ScriptVersionDetails> {
+    return this.http.post<ScriptVersionDetails>(`${scriptUrl(projectId, script)}/versions/${number}/restore`, null);
   }
 
   startRun(projectId: string): Observable<RunSummary> {
@@ -183,8 +241,10 @@ export class PipelineService {
     return this.http.get<RunDetails>(`${base}/${projectId}/runs/${runId}`);
   }
 
-  startTest(projectId: string, kind: ScriptKind, code: string, sampleSize: number): Observable<ScriptTest> {
-    return this.http.post<ScriptTest>(`${base}/${projectId}/script-tests`, { kind, code, sampleSize });
+  /** Tests unsaved code as script 1, script 2 or, with its name, an indicator. */
+  startTest(projectId: string, script: ScriptRef, code: string, sampleSize: number): Observable<ScriptTest> {
+    const target = script.kind === 'indicator' ? { kind: script.kind, name: script.name } : { kind: script.kind };
+    return this.http.post<ScriptTest>(`${base}/${projectId}/script-tests`, { ...target, code, sampleSize });
   }
 
   test(projectId: string, testId: string): Observable<ScriptTest> {
@@ -225,19 +285,20 @@ export const scriptTemplates: Record<ScriptKind, string> = {
     """
     return {"main": cleaned["main"]}
 `,
-  indicators: `import pandas as pd
+  indicator: `import pandas as pd
 
 
-def compute_indicators(cleaned, ctx):
-    """Script 3: compute the indicators.
+def compute(cleaned, ctx):
+    """Compute one indicator.
 
-    Return one DataFrame with the columns indicator, disaggregation, value, numerator
-    and denominator (other columns are allowed).
+    Return one DataFrame: a column for each dimension to break the figure down by (a
+    municipality, a round) and at least one numeric column. By convention the dashboard
+    plots value, and plots a ratio of sums, such as a rate, from numerator and denominator.
     """
     main = cleaned["main"]
     total = len(main)
     return pd.DataFrame(
-        [{"indicator": "submissions", "disaggregation": "total", "value": total, "numerator": total, "denominator": total}]
+        [{"group": "total", "value": 1.0, "numerator": total, "denominator": total}]
     )
 `,
 };

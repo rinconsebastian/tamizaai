@@ -1,7 +1,8 @@
-"""Runs one user script in a child process: ``python -I -u -m tamiza.runner <step dir> <kind>``.
+"""Runs one user script in a child process: ``python -I -u -m tamiza.runner <step dir> <kind> [<name>]``.
 
 The step directory holds ``script.py``, ``context.json``, ``input/<table>.parquet`` and ``reference/<table>.parquet``.
-The runner calls the script's contract function and writes ``output/<table>.parquet`` and ``result.json``. Everything
+The runner calls the script's contract function and writes ``output/<table>.parquet`` and ``result.json``; an
+indicator script returns one DataFrame, written as the table named after the indicator (``<name>``). Everything
 the script prints, and its ``ctx.log`` messages, go to stdout, which the worker captures as the step's log. The runner
 never touches the database.
 """
@@ -18,8 +19,7 @@ import pandas as pd
 
 from tamiza import interchange, names
 
-FUNCTIONS = {"clean": "clean", "output": "prepare_output", "indicators": "compute_indicators"}
-INDICATOR_COLUMNS = ("indicator", "disaggregation", "value", "numerator", "denominator")
+FUNCTIONS = {"clean": "clean", "output": "prepare_output", "indicator": "compute"}
 SCRIPT_FILE = "script.py"
 REFERENCE_DIR = "reference"
 
@@ -138,8 +138,11 @@ class Context:
         self.reference = reference if reference is not None else ReferenceTables(Path("/nonexistent"))
 
 
-def run_step(step_dir: Path, kind: str) -> dict:
-    """Runs the script and returns the result written to ``result.json``. Never raises."""
+def run_step(step_dir: Path, kind: str, name: str | None = None) -> dict:
+    """
+    Runs the script and returns the result written to ``result.json``. Never raises. ``name`` is the indicator's name
+    for the ``indicator`` kind: the table its DataFrame is published as.
+    """
     try:
         if kind not in FUNCTIONS:
             raise ScriptError(f"Unknown script kind {kind!r}.")
@@ -147,7 +150,7 @@ def run_step(step_dir: Path, kind: str) -> dict:
         inputs = {path.stem: interchange.read_parquet(path) for path in sorted((step_dir / "input").glob("*.parquet"))}
         function = _load(step_dir / SCRIPT_FILE, FUNCTIONS[kind])
         returned = function(inputs, context)
-        tables = _validated(kind, returned)
+        tables = _validated(kind, returned, name)
         written = _write(step_dir / "output", tables)
         return {"status": "succeeded", "tables": written}
     except ScriptError as error:
@@ -183,12 +186,14 @@ def _load(path: Path, function_name: str):
     return function
 
 
-def _validated(kind: str, returned: object) -> dict[str, pd.DataFrame]:
+def _validated(kind: str, returned: object, name: str | None = None) -> dict[str, pd.DataFrame]:
     function = FUNCTIONS[kind]
-    if kind == "indicators":
+    if kind == "indicator":
         if not isinstance(returned, pd.DataFrame):
-            raise ScriptError(f"{function} must return a DataFrame, not {type(returned).__name__}.")
-        tables = {"indicators": returned}
+            raise ScriptError(f"{function} must return a DataFrame, not {_describe(returned)}.")
+        if not names.is_valid_table_name(name):
+            raise ScriptError(f"The indicator name {name!r} is not allowed.")
+        tables = {name: returned}
     else:
         if not isinstance(returned, Mapping) or not all(isinstance(v, pd.DataFrame) for v in returned.values()):
             raise ScriptError(
@@ -197,21 +202,22 @@ def _validated(kind: str, returned: object) -> dict[str, pd.DataFrame]:
         if not returned:
             raise ScriptError(f"{function} returned no tables.")
         tables = dict(returned)
-        for name in tables:
-            if not names.is_valid_table_name(name):
+        for table in tables:
+            if not names.is_valid_table_name(table):
                 raise ScriptError(
-                    f"The table name {name!r} is not allowed. Use lowercase letters, digits and underscores, starting "
+                    f"The table name {table!r} is not allowed. Use lowercase letters, digits and underscores, starting "
                     "with a letter, at most 63 characters."
                 )
 
-    normalized = {name: _normalize_columns(name, frame) for name, frame in tables.items()}
-    if kind == "indicators":
-        missing = [column for column in INDICATOR_COLUMNS if column not in normalized["indicators"].columns]
-        if missing:
-            raise ScriptError(
-                f"The indicator table is missing the column{'s' if len(missing) > 1 else ''} {', '.join(missing)}."
-            )
+    normalized = {table: _normalize_columns(table, frame) for table, frame in tables.items()}
+    if kind == "indicator" and not any(_is_numeric(dtype) for dtype in normalized[name].dtypes):
+        raise ScriptError("The indicator table has no numeric column; add at least one, such as `value`.")
     return normalized
+
+
+def _is_numeric(dtype: object) -> bool:
+    """Integer, floating point and nullable numeric columns; booleans are not measures."""
+    return pd.api.types.is_numeric_dtype(dtype) and not pd.api.types.is_bool_dtype(dtype)
 
 
 def _normalize_columns(table: str, frame: pd.DataFrame) -> pd.DataFrame:
@@ -280,7 +286,7 @@ def _script_traceback(error: BaseException) -> str:
 
 def main(argv: list[str]) -> int:
     step_dir, kind = Path(argv[1]), argv[2]
-    result = run_step(step_dir, kind)
+    result = run_step(step_dir, kind, argv[3] if len(argv) > 3 else None)
     sys.stdout.flush()
     (step_dir / "result.json").write_text(json.dumps(result), encoding="utf-8")
     return 0

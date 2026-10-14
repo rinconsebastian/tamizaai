@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { IndicatorsService, WidgetConfig, emptyConfig, takesOneIndicator } from './indicators.service';
+import { IndicatorsService, WidgetConfig, chartTypes, emptyConfig, needsGroup } from './indicators.service';
 
 const base = '/api/v1/projects/p1/indicators';
 
@@ -17,22 +17,29 @@ describe('IndicatorsService', () => {
 
   afterEach(() => http.verify());
 
-  const config: WidgetConfig = { ...emptyConfig(), indicators: ['coverage'], filters: [{ column: 'year', op: 'range', min: '2024' }] };
+  const config: WidgetConfig = {
+    ...emptyConfig('coverage'),
+    groupBy: 'municipality',
+    ratio: { numerator: 'numerator', denominator: 'denominator' },
+    filters: [{ column: 'year', op: 'range', min: '2024' }],
+  };
 
-  it('reads the overview and the column catalog', () => {
+  it('reads the overview, and the columns of one indicator\'s table', () => {
     service.overview('p1').subscribe();
-    service.columns('p1').subscribe();
+    service.columns('p1', 'piped_water_rate').subscribe();
 
     expect(http.expectOne(base).request.method).toBe('GET');
-    expect(http.expectOne(`${base}/columns`).request.method).toBe('GET');
+    expect(http.expectOne(`${base}/piped_water_rate/columns`).request.method).toBe('GET');
   });
 
-  it('posts the widget configuration as the query body', () => {
+  it('posts the widget configuration as the query body, with the chart type when it is known', () => {
     service.query('p1', config).subscribe();
+    service.query('p1', config, 'histogram').subscribe();
 
-    const request = http.expectOne(`${base}/query`);
-    expect(request.request.method).toBe('POST');
-    expect(request.request.body).toEqual(config);
+    const [plain, typed] = http.match(`${base}/query`);
+    expect(plain.request.method).toBe('POST');
+    expect(plain.request.body).toEqual({ config });
+    expect(typed.request.body).toEqual({ config, chartType: 'histogram' });
   });
 
   it('creates a widget, leaving the layout out when there is none', () => {
@@ -54,19 +61,27 @@ describe('IndicatorsService', () => {
     expect(http.expectOne((r) => r.method === 'DELETE').request.url).toBe(`${base}/widgets/w1`);
   });
 
-  it('asks for the export of the whole table in the chosen format', () => {
-    service.export('p1', 'xlsx').subscribe();
+  it('asks for the export of one indicator\'s whole table in the chosen format', () => {
+    service.export('p1', 'coverage', 'xlsx').subscribe();
 
-    const request = http.expectOne(`${base}/exports`);
+    const request = http.expectOne(`${base}/coverage/exports`);
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({ format: 'xlsx' });
   });
 
-  it('defaults to grouping by disaggregation and plotting the value', () => {
-    expect(emptyConfig()).toEqual({ indicators: [], groupBy: 'disaggregation', valueField: 'value', filters: [], geometryColumn: null, buckets: null });
+  it('starts a query with an indicator and nothing else chosen: the default measure, no group', () => {
+    expect(emptyConfig('coverage')).toEqual({ indicator: 'coverage', measure: null, ratio: null, groupBy: null, filters: [], geometryColumn: null, buckets: null });
   });
 
-  it('knows which chart types take exactly one indicator', () => {
-    expect(['stat', 'pie', 'map', 'bar', 'column', 'line', 'histogram'].map((t) => takesOneIndicator(t as never))).toEqual([true, true, true, false, false, false, false]);
+  it('knows which chart types need a column to group by', () => {
+    expect(chartTypes.map((t) => [t, needsGroup(t)])).toEqual([
+      ['stat', false],
+      ['bar', true],
+      ['column', true],
+      ['line', true],
+      ['histogram', false],
+      ['pie', true],
+      ['map', true],
+    ]);
   });
 });

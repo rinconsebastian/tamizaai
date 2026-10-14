@@ -171,11 +171,22 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
     {
         modelBuilder.Entity<ScriptVersion>(version =>
         {
-            version.ToTable("script_versions", table => table.HasCheckConstraint("ck_script_versions_kind", "kind IN ('clean', 'output', 'indicators')"));
+            version.ToTable("script_versions", table =>
+            {
+                table.HasCheckConstraint("ck_script_versions_kind", "kind IN ('clean', 'output', 'indicator')");
+                table.HasCheckConstraint("ck_script_versions_name", "(kind = 'indicator') = (name IS NOT NULL)");
+                table.HasCheckConstraint("ck_script_versions_format", "format IS NULL OR format IN ('count', 'decimal', 'percent', 'currency')");
+            });
             version.HasKey(v => v.Id);
             version.Property(v => v.Id).ValueGeneratedNever();
             version.Property(v => v.Kind).HasConversion(LowercaseEnum<ScriptKind>()).HasMaxLength(16);
-            version.HasIndex(v => new { v.ProjectId, v.Kind, v.Number }).IsUnique();
+            version.Property(v => v.Name).HasMaxLength(63);
+            version.Property(v => v.Label).HasColumnType("text");
+            version.Property(v => v.Description).HasColumnType("text");
+            version.Property(v => v.Unit).HasMaxLength(32);
+            version.Property(v => v.Format).HasMaxLength(16);
+            // Versions are numbered per indicator; the clean and output scripts have no name and still collide.
+            version.HasIndex(v => new { v.ProjectId, v.Kind, v.Name, v.Number }).IsUnique().AreNullsDistinct(false);
             version.HasOne<Project>().WithMany().HasForeignKey(v => v.ProjectId).OnDelete(DeleteBehavior.Cascade);
             version.HasOne(v => v.Author).WithMany().HasForeignKey(v => v.AuthorId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -193,6 +204,7 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             run.Property(r => r.Status).HasConversion(LowercaseEnum<RunStatus>()).HasMaxLength(16);
             run.Property(r => r.ErrorCode).HasMaxLength(64);
             run.Property(r => r.ReferenceTables).HasJsonColumn().HasDefaultValueSql("'[]'::jsonb");
+            run.Property(r => r.IndicatorVersions).HasJsonColumn().HasDefaultValueSql("'[]'::jsonb");
             // At most one queued run per project; a running run may have one queued behind it.
             run.HasIndex(r => r.ProjectId).IsUnique().HasFilter("status = 'queued'").HasDatabaseName("ix_runs_project_id_queued");
             run.HasIndex(r => new { r.ProjectId, r.QueuedAt }).IsDescending(false, true);
@@ -201,7 +213,6 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             // NO ACTION: a project's deletion cascades to runs and script versions in the same statement.
             run.HasOne<ScriptVersion>().WithMany().HasForeignKey(r => r.CleanVersionId).OnDelete(DeleteBehavior.NoAction);
             run.HasOne<ScriptVersion>().WithMany().HasForeignKey(r => r.OutputVersionId).OnDelete(DeleteBehavior.NoAction);
-            run.HasOne<ScriptVersion>().WithMany().HasForeignKey(r => r.IndicatorsVersionId).OnDelete(DeleteBehavior.NoAction);
             run.HasMany(r => r.Steps).WithOne().HasForeignKey(s => s.RunId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -209,10 +220,12 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
         {
             step.ToTable("run_steps", table =>
             {
-                table.HasCheckConstraint("ck_run_steps_step", "step IN ('flatten', 'clean', 'output', 'indicators')");
+                table.HasCheckConstraint("ck_run_steps_step", "step IN ('flatten', 'clean', 'output', 'indicator')");
+                table.HasCheckConstraint("ck_run_steps_name", "(step = 'indicator') = (name <> '')");
                 table.HasCheckConstraint("ck_run_steps_status", "status IN ('succeeded', 'failed', 'skipped')");
             });
-            step.HasKey(s => new { s.RunId, s.Step });
+            step.HasKey(s => new { s.RunId, s.Step, s.Name });
+            step.Property(s => s.Name).HasMaxLength(63).HasDefaultValue("");
             step.Property(s => s.Step).HasConversion(LowercaseEnum<RunStepName>()).HasMaxLength(16);
             step.Property(s => s.Status).HasConversion(LowercaseEnum<RunStepStatus>()).HasMaxLength(16);
             step.Property(s => s.Tables).HasJsonColumn().HasDefaultValueSql("'[]'::jsonb");
@@ -223,13 +236,15 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
         {
             test.ToTable("script_tests", table =>
             {
-                table.HasCheckConstraint("ck_script_tests_kind", "kind IN ('clean', 'output', 'indicators')");
+                table.HasCheckConstraint("ck_script_tests_kind", "kind IN ('clean', 'output', 'indicator')");
+                table.HasCheckConstraint("ck_script_tests_name", "(kind = 'indicator') = (name IS NOT NULL)");
                 table.HasCheckConstraint("ck_script_tests_status", "status IN ('queued', 'running', 'succeeded', 'failed')");
                 table.HasCheckConstraint("ck_script_tests_sample_size", "sample_size BETWEEN 1 AND 5000");
             });
             test.HasKey(t => t.Id);
             test.Property(t => t.Id).ValueGeneratedNever();
             test.Property(t => t.Kind).HasConversion(LowercaseEnum<ScriptKind>()).HasMaxLength(16);
+            test.Property(t => t.Name).HasMaxLength(63);
             test.Property(t => t.Status).HasConversion(LowercaseEnum<RunStatus>()).HasMaxLength(16);
             test.Property(t => t.ErrorCode).HasMaxLength(64);
             test.Property(t => t.Steps).HasJsonColumn().HasDefaultValueSql("'[]'::jsonb");

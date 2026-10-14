@@ -34,7 +34,17 @@ public static class ScriptTestEndpoints
         var errors = new FieldErrors();
         if (!Enum.TryParse<ScriptKind>(request.Kind, ignoreCase: true, out var kind) || !Enum.IsDefined(kind) || int.TryParse(request.Kind, out _))
         {
-            errors.Add("kind", "Choose the script to test: clean, output or indicators.");
+            errors.Add("kind", "Choose the script to test: clean, output or indicator.");
+        }
+
+        string? name = null;
+        if (kind == ScriptKind.Indicator)
+        {
+            name = request.Name;
+            if (!ColumnNames.IsValidTableName(name))
+            {
+                errors.Add("name", "Name the indicator to test, using lowercase letters, digits and underscores, starting with a letter.");
+            }
         }
 
         if (string.IsNullOrWhiteSpace(request.Code))
@@ -57,7 +67,7 @@ public static class ScriptTestEndpoints
             return Problems.Validation(errors.ToDictionary());
         }
 
-        var test = await QueueAsync(db, projectId, user.Id, kind, request.Code!, sampleSize, time.GetUtcNow(), ct);
+        var test = await QueueAsync(db, projectId, user.Id, kind, name, request.Code!, sampleSize, time.GetUtcNow(), ct);
         return TypedResults.Accepted($"/api/v1/projects/{projectId}/script-tests/{test.Id}", await DetailsAsync(db, test, ct));
     }
 
@@ -73,7 +83,7 @@ public static class ScriptTestEndpoints
 
     /// <summary>Replaces the user's queued test in the project, if any, with a new one; a running test is never touched.</summary>
     private static async Task<ScriptTest> QueueAsync(
-        TamizaDbContext db, Guid projectId, Guid userId, ScriptKind kind, string code, int sampleSize, DateTimeOffset now, CancellationToken ct)
+        TamizaDbContext db, Guid projectId, Guid userId, ScriptKind kind, string? name, string code, int sampleSize, DateTimeOffset now, CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
         {
@@ -83,6 +93,7 @@ public static class ScriptTestEndpoints
                 ProjectId = projectId,
                 RequestedBy = userId,
                 Kind = kind,
+                Name = name,
                 Code = code,
                 SampleSize = sampleSize,
                 Status = RunStatus.Queued,
@@ -112,7 +123,7 @@ public static class ScriptTestEndpoints
             ? await db.ScriptVersions.Where(v => v.Id == versionId).Select(v => (int?)v.Number).SingleOrDefaultAsync(ct)
             : null;
         return new ScriptTestDetails(
-            test.Id, test.Kind, test.Status, test.SampleSize, test.Code, await WaitingForAsync(db, test, ct), cleanVersion,
+            test.Id, test.Kind, test.Name, test.Status, test.SampleSize, test.Code, await WaitingForAsync(db, test, ct), cleanVersion,
             test.QueuedAt, test.StartedAt, test.FinishedAt, test.ErrorCode, test.Error, test.Steps);
     }
 

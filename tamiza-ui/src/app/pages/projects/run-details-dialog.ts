@@ -35,10 +35,20 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
       <div class="overflow-y-auto p-4 md:px-6">
         @if (details(); as details) {
           <ol class="flex flex-col gap-5">
-            @for (step of details.steps; track step.step) {
-              <li [attr.data-testid]="'step-' + step.step">
+            @for (step of details.steps; track step.step + ':' + step.name) {
+              <li [attr.data-testid]="step.step === 'indicator' ? 'step-indicator-' + step.name : 'step-' + step.step">
                 <div class="mb-2 flex flex-wrap items-center gap-2">
-                  <h3 class="font-medium text-heading">{{ t('runs.steps.' + step.step) }}</h3>
+                  @if (step.step === 'indicator') {
+                    <h3 class="font-medium text-heading">
+                      {{ step.label ?? step.name }}
+                      <code class="text-sm font-normal text-body" data-testid="step-name">{{ step.name }}</code>
+                    </h3>
+                    @if (indicatorVersion(details, step.name); as number) {
+                      <tmz-badge>{{ t('scripts.versionShort', { number }) }}</tmz-badge>
+                    }
+                  } @else {
+                    <h3 class="font-medium text-heading">{{ t('runs.steps.' + step.step) }}</h3>
+                  }
                   <tmz-badge [tone]="tone(step.status)">{{ t('runs.stepStatus.' + step.status) }}</tmz-badge>
                   @if (duration(step.startedAt, step.finishedAt); as duration) {
                     <span class="text-sm text-body">{{ duration }}</span>
@@ -107,5 +117,10 @@ export class RunDetailsDialog {
 
   protected tone(status: RunStepStatus): Tone {
     return stepTones[status];
+  }
+
+  /** The version of an indicator's script the run used. */
+  protected indicatorVersion(details: RunDetails, name: string): number | undefined {
+    return details.run.versions.indicators.find((i) => i.name === name)?.number;
   }
 }

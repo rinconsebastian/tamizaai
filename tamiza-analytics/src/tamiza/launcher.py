@@ -55,10 +55,12 @@ def run_script(
     out_dir: Path,
     limits: Limits,
     reference: dict[str, Path] | None = None,
+    name: str | None = None,
 ) -> ScriptOutcome:
     """
     Prepares ``work_dir/<kind>``, runs the script there, moves its Parquet outputs into ``out_dir`` and removes the
     step directory, whatever happened. ``reference`` maps the project's reference tables to their Parquet files.
+    ``name`` is the indicator an ``indicator`` script computes, which names the table it produces.
     """
     step_dir = work_dir / kind
     shutil.rmtree(step_dir, ignore_errors=True)
@@ -67,23 +69,23 @@ def run_script(
     (step_dir / "tmp").mkdir()
     try:
         # Copies, not links: a script writing to its files must not change what later steps receive.
-        for name, path in inputs.items():
-            shutil.copyfile(path, step_dir / "input" / f"{name}.parquet")
-        for name, path in (reference or {}).items():
-            shutil.copyfile(path, step_dir / "reference" / f"{name}.parquet")
+        for table, path in inputs.items():
+            shutil.copyfile(path, step_dir / "input" / f"{table}.parquet")
+        for table, path in (reference or {}).items():
+            shutil.copyfile(path, step_dir / "reference" / f"{table}.parquet")
         (step_dir / "script.py").write_text(code, encoding="utf-8")
         (step_dir / "context.json").write_text(json.dumps(context), encoding="utf-8")
-        return _collect(step_dir, out_dir, *launch(step_dir, kind, limits))
+        return _collect(step_dir, out_dir, *launch(step_dir, kind, limits, name))
     finally:
         shutil.rmtree(step_dir, ignore_errors=True)
 
 
-def launch(step_dir: Path, kind: str, limits: Limits) -> tuple[dict | None, str, str | None]:
+def launch(step_dir: Path, kind: str, limits: Limits, name: str | None = None) -> tuple[dict | None, str, str | None]:
     """Runs the child and returns its result (or None), its log and the limit it hit (``time``/``memory``) if any."""
     log_path = step_dir / "log.txt"
     with log_path.open("wb") as log_file:
         process = subprocess.Popen(
-            [sys.executable, "-I", "-u", "-m", "tamiza.runner", str(step_dir), kind],
+            [sys.executable, "-I", "-u", "-m", "tamiza.runner", str(step_dir), kind, *([name] if name else [])],
             cwd=step_dir,
             env=child_environment(step_dir),
             stdin=subprocess.DEVNULL,

@@ -12,8 +12,8 @@ namespace Tamiza.Api.IntegrationTests.Indicators;
 /// </summary>
 public sealed class IndicatorsHarness : IAsyncDisposable
 {
-    /// <summary>The five columns script 3 must return.</summary>
-    public const string RequiredColumns = "indicator text, disaggregation text, value numeric, numerator numeric, denominator numeric";
+    /// <summary>A typical indicator table: one dimension and the three conventional numeric columns.</summary>
+    public const string StandardColumns = "municipality text, value numeric, numerator numeric, denominator numeric";
 
     private IndicatorsHarness(
         TamizaApiFactory factory, string db, Guid projectId, string exportDirectory,
@@ -75,9 +75,42 @@ public sealed class IndicatorsHarness : IAsyncDisposable
             TestData.ClientFor(factory, "mallory", "mallory@example.org"));
     }
 
-    /// <summary>Replaces the project's indicator schema with the table <c>indicators</c> and records the step as succeeded.</summary>
-    public Task<Guid> PublishAsync(string columns, string rows) =>
-        PublishedTables.PublishAsync(Db, ProjectId, "indicators", ("indicators", columns, rows));
+    /// <summary>The schema the worker publishes the project's indicator tables to.</summary>
+    public string Schema => PublishedTables.Schema(ProjectId, "indicators");
+
+    private readonly HashSet<string> _scripts = [];
+
+    /// <summary>
+    /// Creates the indicator script <paramref name="name"/> through the API as the analyst, once, so the overview lists it. The label
+    /// is the name with its first letter capitalized unless one is given.
+    /// </summary>
+    public async Task AddIndicatorAsync(string name, string? label = null, string format = "decimal", string? unit = null, string? description = null)
+    {
+        if (!_scripts.Add(name))
+        {
+            return;
+        }
+
+        var response = await Analyst.PutAsJsonAsync(
+            $"/api/v1/projects/{ProjectId}/scripts/indicators/{name}",
+            new { code = "def compute(cleaned, ctx):\n    pass\n", label = label ?? char.ToUpperInvariant(name[0]) + name[1..], description, unit, format });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    /// <summary>
+    /// Publishes the table <paramref name="name"/> as the worker's per-table publish does (the project's other indicator tables stay)
+    /// and records the indicator's step as succeeded. Unless <paramref name="script"/> is false, the indicator script exists too.
+    /// </summary>
+    public async Task<Guid> PublishAsync(
+        string name, string columns, string rows, string? label = null, string format = "decimal", string? unit = null, string? description = null, bool script = true)
+    {
+        if (script)
+        {
+            await AddIndicatorAsync(name, label, format, unit, description);
+        }
+
+        return await PublishedTables.PublishTableAsync(Db, ProjectId, "indicators", name, columns, rows);
+    }
 
     public Task ExecuteAsync(string sql, params (string Name, object Value)[] parameters) => TestData.ExecuteAsync(Db, sql, parameters);
 
@@ -97,15 +130,16 @@ public sealed class IndicatorsHarness : IAsyncDisposable
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
-    public async Task<JsonElement> QueryAsync(object body, HttpClient? client = null)
+    /// <summary>Runs a widget's query (<paramref name="config"/> is the widget's <c>config</c>) and returns the response.</summary>
+    public async Task<JsonElement> QueryAsync(object config, string? chartType = null, HttpClient? client = null)
     {
-        var response = await (client ?? Viewer).PostAsJsonAsync(Url + "/query", body);
+        var response = await PostQueryAsync(config, chartType, client);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
-    public Task<HttpResponseMessage> PostQueryAsync(object body, HttpClient? client = null) =>
-        (client ?? Viewer).PostAsJsonAsync(Url + "/query", body);
+    public Task<HttpResponseMessage> PostQueryAsync(object config, string? chartType = null, HttpClient? client = null) =>
+        (client ?? Viewer).PostAsJsonAsync(Url + "/query", new { config, chartType });
 
     public Task<HttpResponseMessage> PostWidgetAsync(object body, HttpClient? client = null) =>
         (client ?? Analyst).PostAsJsonAsync(Url + "/widgets", body);
@@ -121,10 +155,10 @@ public sealed class IndicatorsHarness : IAsyncDisposable
     public static string[] Errors(JsonElement problem, string field) =>
         problem.GetProperty("errors").GetProperty(field).EnumerateArray().Select(e => e.GetString()!).ToArray();
 
-    /// <summary>The rows of a query response as <c>indicator|group|value</c>.</summary>
+    /// <summary>The rows of a query response as <c>group|value</c>.</summary>
     public static string[] Rows(JsonElement result) =>
         result.GetProperty("rows").EnumerateArray()
-            .Select(r => $"{r.GetProperty("indicator").GetString()}|{r.GetProperty("group").GetString()}|{r.GetProperty("value").GetDouble():0.##}")
+            .Select(r => $"{r.GetProperty("group").GetString()}|{r.GetProperty("value").GetDouble().ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}")
             .ToArray();
 
     public static string[] Strings(JsonElement array) => array.EnumerateArray().Select(e => e.GetString()!).ToArray();

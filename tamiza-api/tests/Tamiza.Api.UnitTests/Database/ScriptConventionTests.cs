@@ -45,4 +45,26 @@ public sealed class ScriptConventionTests
         Assert.All(System.Text.RegularExpressions.Regex.Matches(sql, @"CREATE (?:UNIQUE )?INDEX (\w+)").Select(m => m.Groups[1].Value),
             name => Assert.StartsWith("ix_dashboard_widgets_", name));
     }
+
+    [Fact]
+    public void The_indicator_scripts_script_names_every_constraint_and_index_it_adds()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0008_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0008_split_indicator_scripts.sql", resource);
+        Assert.Contains("ADD CONSTRAINT pk_run_steps PRIMARY KEY (run_id, step, name)", sql);
+        foreach (var check in new[] { "ck_run_steps_step", "ck_run_steps_name", "ck_script_tests_kind", "ck_script_tests_name", "ck_script_versions_kind", "ck_script_versions_name", "ck_script_versions_format" })
+        {
+            Assert.Contains($"ADD CONSTRAINT {check} CHECK", sql);
+        }
+
+        // Every key, check and foreign key the script adds is introduced by a CONSTRAINT name; every index it creates has an ix_ name.
+        Assert.Equal(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count,
+            System.Text.RegularExpressions.Regex.Matches(sql, @"ADD CONSTRAINT (?:pk|fk|ck)_\w+ (?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count);
+        Assert.All(System.Text.RegularExpressions.Regex.Matches(sql, @"CREATE (?:UNIQUE )?INDEX (\w+)").Select(m => m.Groups[1].Value),
+            name => Assert.StartsWith("ix_script_versions_", name));
+        Assert.Contains("CREATE UNIQUE INDEX ix_script_versions_project_id_kind_name_number", sql);
+    }
 }

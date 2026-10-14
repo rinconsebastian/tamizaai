@@ -64,8 +64,10 @@ def examples() -> dict[str, str]:
             found["dictionary"] = block
         elif "def prepare_output(" in block:
             found["output"] = block
-        elif "def compute_indicators(" in block:
-            found["reference" if "ctx.reference" in block else "indicators"] = block
+        elif "def compute(" in block:
+            found[
+                "reference" if "ctx.reference" in block else "series" if "_submission_time" in block else "indicators"
+            ] = block
     return found
 
 
@@ -121,12 +123,14 @@ def run(database, settings, project) -> str:
 
 
 def test_the_document_has_every_example():
-    assert set(examples()) == {"clean", "output", "indicators", "reference", "dictionary"}
+    assert set(examples()) == {"clean", "output", "indicators", "series", "reference", "dictionary"}
 
 
-def test_the_three_examples_run_on_submissions_of_two_versions_that_relabel_a_choice(database, surveyed, settings):
-    for kind in ("clean", "output", "indicators"):
-        add_script(database, surveyed, kind, examples()[kind])
+def test_the_examples_run_on_submissions_of_two_versions_that_relabel_a_choice(database, surveyed, settings):
+    add_script(database, surveyed, "clean", examples()["clean"])
+    add_script(database, surveyed, "output", examples()["output"])
+    add_script(database, surveyed, "indicator", examples()["indicators"], name="piped_water_rate", format="percent")
+    add_script(database, surveyed, "indicator", examples()["series"], name="households_surveyed", format="count")
 
     run(database, settings, surveyed)
 
@@ -143,22 +147,22 @@ def test_the_three_examples_run_on_submissions_of_two_versions_that_relabel_a_ch
         " ORDER BY _id"
     )
     assert households == [(1, "cali", 2), (3, "cali", 3), (4, "buga", 1)]
-    indicators = database.rows(
-        f'SELECT disaggregation, numerator, denominator FROM "{schema_name(surveyed.id, "indicators")}".indicators'
-        " ORDER BY 1"
-    )
-    assert ("total", 3, 3) in indicators
-    assert {row[0] for row in indicators} == {
-        "total",
-        "municipality=Buga",
-        "municipality=Cali",
-        "municipality=Cali (old)",
-    }
+    indicators = schema_name(surveyed.id, "indicators")
+    # A rate by municipality: the dimension, the rate and the two sums it comes from.
+    assert database.rows(
+        f'SELECT municipality, value, numerator, denominator FROM "{indicators}".piped_water_rate ORDER BY 1'
+    ) == [
+        ("Buga", 1.0, 1, 1),
+        ("Cali", 1.0, 1, 1),
+        ("Cali (old)", 1.0, 1, 1),
+    ]
+    # A series by month, from a named index published as a column.
+    assert database.rows(f'SELECT month, value FROM "{indicators}".households_surveyed') == [("2026-09", 3)]
 
 
 def test_the_reference_data_example_joins_labels_to_codes_without_losing_a_row(database, surveyed, settings):
     add_script(database, surveyed, "clean", examples()["clean"])
-    add_script(database, surveyed, "indicators", examples()["reference"])
+    add_script(database, surveyed, "indicator", examples()["reference"], name="households_per_1000_people")
     add_reference_table(
         database,
         surveyed,
@@ -170,11 +174,11 @@ def test_the_reference_data_example_joins_labels_to_codes_without_losing_a_row(d
     run(database, settings, surveyed)
 
     rows = database.rows(
-        f'SELECT disaggregation, numerator, denominator FROM "{schema_name(surveyed.id, "indicators")}".indicators'
-        " ORDER BY 1"
+        "SELECT municipality_code, numerator, denominator"
+        f' FROM "{schema_name(surveyed.id, "indicators")}".households_per_1000_people ORDER BY 1'
     )
     # Both labels of Cali (the old one and the current one) join the same code; nothing is lost.
-    assert rows == [("municipality=buga", 1, 120_000), ("municipality=cali", 2, 2_200_000)]
+    assert rows == [("buga", 1, 120_000), ("cali", 2, 2_200_000)]
 
 
 def test_the_data_dictionary_example_lists_every_column_with_its_question_label(database, surveyed, settings):

@@ -9,18 +9,18 @@ namespace Tamiza.Api.IntegrationTests.Indicators;
 [Collection(PostgresCollection.Name)]
 public sealed class IndicatorWidgetTests(PostgresFixture postgres)
 {
-    private const string Columns = IndicatorsHarness.RequiredColumns + ", year bigint, geometry text";
+    private const string Columns = IndicatorsHarness.StandardColumns + ", year bigint, geometry text";
 
     private const string Rows = """
-        ('coverage', 'Cali',    40, 4, 10, 2025, 'POINT(1 1)'),
-        ('coverage', 'Palmira', 60, 6, 10, 2025, 'POINT(2 2)'),
-        ('target',   'Cali',    90, 9, 10, 2025, NULL)
+        ('Cali',    40, 4, 10, 2025, 'POINT(1 1)'),
+        ('Palmira', 60, 6, 10, 2025, 'POINT(2 2)')
         """;
 
     private async Task<IndicatorsHarness> PublishedAsync(Dictionary<string, string?>? settings = null)
     {
         var h = await IndicatorsHarness.CreateAsync(postgres, settings);
-        await h.PublishAsync(Columns, Rows);
+        await h.PublishAsync("coverage", Columns, Rows);
+        await h.PublishAsync("target", IndicatorsHarness.StandardColumns, "('Cali', 90, 9, 10)");
         return h;
     }
 
@@ -28,7 +28,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     {
         title,
         chartType = "column",
-        config = new { indicators = new[] { "coverage" } },
+        config = new { indicator = "coverage", groupBy = "municipality" },
         layout,
     };
 
@@ -65,21 +65,22 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
-    // Default grouping
+    // Configuration
 
     [Fact]
-    public async Task A_widget_created_without_a_group_column_groups_by_disaggregation_and_every_default_is_filled()
+    public async Task A_widget_created_with_only_an_indicator_and_a_group_keeps_the_measure_open_and_every_other_default_is_filled()
     {
         await using var h = await PublishedAsync();
 
         var config = (await h.AddWidgetAsync(Column())).GetProperty("config");
 
-        Assert.Equal("disaggregation", config.GetProperty("groupBy").GetString());
-        Assert.Equal("value", config.GetProperty("valueField").GetString());
+        Assert.Equal("coverage", config.GetProperty("indicator").GetString());
+        Assert.Equal("municipality", config.GetProperty("groupBy").GetString());
+        Assert.Equal(JsonValueKind.Null, config.GetProperty("measure").ValueKind); // the table's default measure applies when it is queried
+        Assert.Equal(JsonValueKind.Null, config.GetProperty("ratio").ValueKind);
         Assert.Equal(0, config.GetProperty("filters").GetArrayLength());
         Assert.Equal(JsonValueKind.Null, config.GetProperty("geometryColumn").ValueKind);
         Assert.Equal(JsonValueKind.Null, config.GetProperty("buckets").ValueKind);
-        Assert.Equal(["coverage"], IndicatorsHarness.Strings(config.GetProperty("indicators")));
     }
 
     [Fact]
@@ -93,22 +94,58 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
             chartType = "histogram",
             config = new
             {
-                indicators = new[] { "coverage", "target" },
+                indicator = "coverage",
                 groupBy = "year",
-                valueField = "numerator",
-                filters = new[] { new { column = "disaggregation", op = "in", values = new[] { "Cali" } } },
+                measure = "numerator",
+                filters = new[] { new { column = "municipality", op = "in", values = new[] { "Cali" } } },
                 buckets = 20,
             },
             layout = new { x = 6, y = 2, w = 6, h = 5 },
         });
         var overview = await h.GetAsync();
 
+        var config = widget.GetProperty("config");
         Assert.Equal(widget.ToString(), overview.GetProperty("widgets")[0].ToString());
-        Assert.Equal(("year", "numerator", 20), (widget.GetProperty("config").GetProperty("groupBy").GetString(),
-            widget.GetProperty("config").GetProperty("valueField").GetString(), widget.GetProperty("config").GetProperty("buckets").GetInt32()));
-        Assert.Equal("Cali", widget.GetProperty("config").GetProperty("filters")[0].GetProperty("values")[0].GetString());
+        Assert.Equal(("coverage", "year", "numerator", 20), (config.GetProperty("indicator").GetString(), config.GetProperty("groupBy").GetString(),
+            config.GetProperty("measure").GetString(), config.GetProperty("buckets").GetInt32()));
+        Assert.Equal("Cali", config.GetProperty("filters")[0].GetProperty("values")[0].GetString());
         Assert.Equal((6, 2, 6, 5), (widget.GetProperty("layout").GetProperty("x").GetInt32(), widget.GetProperty("layout").GetProperty("y").GetInt32(),
             widget.GetProperty("layout").GetProperty("w").GetInt32(), widget.GetProperty("layout").GetProperty("h").GetInt32()));
+    }
+
+    [Fact]
+    public async Task A_ratio_is_saved_and_returned_with_no_measure()
+    {
+        await using var h = await PublishedAsync();
+
+        var widget = await h.AddWidgetAsync(new
+        {
+            title = "Rate",
+            chartType = "bar",
+            config = new { indicator = "coverage", groupBy = "municipality", ratio = new { numerator = "numerator", denominator = "denominator" } },
+        });
+        var overview = await h.GetAsync();
+
+        var ratio = overview.GetProperty("widgets")[0].GetProperty("config").GetProperty("ratio");
+        Assert.Equal(("numerator", "denominator"), (ratio.GetProperty("numerator").GetString(), ratio.GetProperty("denominator").GetString()));
+        Assert.Equal(JsonValueKind.Null, widget.GetProperty("config").GetProperty("measure").ValueKind);
+    }
+
+    [Fact]
+    public async Task A_measure_together_with_a_ratio_is_rejected()
+    {
+        await using var h = await PublishedAsync();
+
+        var response = await h.PostWidgetAsync(new
+        {
+            title = "Both",
+            chartType = "bar",
+            config = new { indicator = "coverage", groupBy = "municipality", measure = "value", ratio = new { numerator = "numerator", denominator = "denominator" } },
+        });
+        var problem = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Single(IndicatorsHarness.Errors(problem, "config.measure"));
     }
 
     // Default layout
@@ -125,7 +162,10 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     {
         await using var h = await PublishedAsync();
 
-        var widget = await h.AddWidgetAsync(new { title = "W", chartType, config = new { indicators = new[] { "coverage" }, geometryColumn = "geometry" } });
+        var widget = await h.AddWidgetAsync(new
+        {
+            title = "W", chartType, config = new { indicator = "coverage", groupBy = "municipality", geometryColumn = "geometry" },
+        });
 
         var layout = widget.GetProperty("layout");
         Assert.Equal((0, 0, w, height), (layout.GetProperty("x").GetInt32(), layout.GetProperty("y").GetInt32(), layout.GetProperty("w").GetInt32(), layout.GetProperty("h").GetInt32()));
@@ -138,7 +178,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         await h.AddWidgetAsync(Column(layout: new { x = 0, y = 0, w = 6, h = 4 }));
         await h.AddWidgetAsync(Column(layout: new { x = 6, y = 3, w = 6, h = 5 })); // bottom edge at 8
 
-        var next = await h.AddWidgetAsync(new { title = "Next", chartType = "stat", config = new { indicators = new[] { "coverage" } } });
+        var next = await h.AddWidgetAsync(new { title = "Next", chartType = "stat", config = new { indicator = "coverage" } });
 
         Assert.Equal(8, next.GetProperty("layout").GetProperty("y").GetInt32());
         Assert.Equal(0, next.GetProperty("layout").GetProperty("x").GetInt32());
@@ -250,48 +290,65 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         Assert.Equal((7, 123), (limits.GetProperty("maxWidgets").GetInt32(), limits.GetProperty("maxQueryRows").GetInt32()));
     }
 
-    // Chart type constraints
-
-    [Theory]
-    [InlineData("stat")]
-    [InlineData("pie")]
-    [InlineData("map")]
-    public async Task A_chart_type_that_plots_one_indicator_rejects_two_and_names_its_type(string chartType)
-    {
-        await using var h = await PublishedAsync();
-
-        var response = await h.PostWidgetAsync(new
-        {
-            title = "W", chartType, config = new { indicators = new[] { "coverage", "target" }, geometryColumn = "geometry" },
-        });
-        var problem = await ReadAsync(response);
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains($"A {chartType} widget uses exactly one indicator", IndicatorsHarness.Errors(problem, "config.indicators")[0]);
-    }
+    // Chart type constraints (a missing groupBy on a column chart rejected)
 
     [Theory]
     [InlineData("bar")]
     [InlineData("column")]
     [InlineData("line")]
-    [InlineData("histogram")]
-    public async Task The_other_chart_types_accept_several_indicators(string chartType)
+    [InlineData("pie")]
+    public async Task A_chart_that_groups_is_rejected_without_a_group_column_and_names_its_type(string chartType)
     {
         await using var h = await PublishedAsync();
 
-        var response = await h.PostWidgetAsync(new { title = "W", chartType, config = new { indicators = new[] { "coverage", "target" } } });
+        var response = await h.PostWidgetAsync(new { title = "W", chartType, config = new { indicator = "coverage" } });
+        var problem = await ReadAsync(response);
 
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains($"A {chartType} widget needs a column to group by", IndicatorsHarness.Errors(problem, "config.groupBy")[0]);
+        Assert.Equal(0, (await h.GetAsync()).GetProperty("widgets").GetArrayLength());
     }
 
     [Theory]
     [InlineData("stat")]
-    [InlineData("bar")]
-    public async Task Every_chart_type_needs_at_least_one_indicator(string chartType)
+    [InlineData("histogram")]
+    public async Task A_stat_tile_and_a_histogram_need_no_group_column(string chartType)
     {
         await using var h = await PublishedAsync();
 
-        var response = await h.PostWidgetAsync(new { title = "W", chartType, config = new { indicators = Array.Empty<string>() } });
+        var widget = await h.AddWidgetAsync(new { title = "W", chartType, config = new { indicator = "coverage" } });
+
+        Assert.Equal(JsonValueKind.Null, widget.GetProperty("config").GetProperty("groupBy").ValueKind);
+    }
+
+    [Fact]
+    public async Task A_widget_over_no_indicator_is_rejected()
+    {
+        await using var h = await PublishedAsync();
+
+        var response = await h.PostWidgetAsync(new { title = "W", chartType = "stat", config = new { } });
+        var problem = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Single(IndicatorsHarness.Errors(problem, "config.indicator"));
+    }
+
+    [Fact]
+    public async Task A_widget_without_a_config_is_rejected()
+    {
+        await using var h = await PublishedAsync();
+
+        var response = await h.PostWidgetAsync(new { title = "W", chartType = "stat" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task An_indicator_that_is_not_a_valid_name_is_rejected()
+    {
+        await using var h = await PublishedAsync();
+
+        var response = await h.PostWidgetAsync(new { title = "W", chartType = "stat", config = new { indicator = "Piped water" } });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -301,7 +358,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     {
         await using var h = await PublishedAsync();
 
-        var response = await h.PostWidgetAsync(new { title = "Map", chartType = "map", config = new { indicators = new[] { "coverage" } } });
+        var response = await h.PostWidgetAsync(new { title = "Map", chartType = "map", config = new { indicator = "coverage", groupBy = "municipality" } });
         var problem = await ReadAsync(response);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -313,7 +370,10 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     {
         await using var h = await PublishedAsync();
 
-        var widget = await h.AddWidgetAsync(new { title = "Map", chartType = "map", config = new { indicators = new[] { "coverage" }, geometryColumn = "geometry" } });
+        var widget = await h.AddWidgetAsync(new
+        {
+            title = "Map", chartType = "map", config = new { indicator = "coverage", groupBy = "municipality", geometryColumn = "geometry" },
+        });
 
         Assert.Equal("geometry", widget.GetProperty("config").GetProperty("geometryColumn").GetString());
     }
@@ -329,7 +389,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         {
             title = "  ",
             chartType = "radar",
-            config = new { indicators = new[] { "coverage" }, buckets = 101 },
+            config = new { indicator = "coverage", buckets = 101 },
             layout = new { x = 10, y = -1, w = 5, h = 41 },
         });
         var problem = await ReadAsync(response);
@@ -404,7 +464,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
             chartType = "map",
             config = new
             {
-                indicators = new[] { "coverage" },
+                indicator = "coverage",
                 groupBy = "round",
                 geometryColumn = "shape",
                 filters = new[] { new { column = "region", op = "equals", value = "x" } },
@@ -419,6 +479,26 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task While_the_table_is_published_the_measure_and_ratio_columns_must_be_numeric_columns_of_it()
+    {
+        await using var h = await PublishedAsync();
+
+        var missing = await h.PostWidgetAsync(new { title = "W", chartType = "bar", config = new { indicator = "coverage", groupBy = "municipality", measure = "total" } });
+        var text = await h.PostWidgetAsync(new { title = "W", chartType = "bar", config = new { indicator = "coverage", groupBy = "municipality", measure = "municipality" } });
+        var ratio = await h.PostWidgetAsync(new
+        {
+            title = "W", chartType = "bar", config = new { indicator = "coverage", groupBy = "municipality", ratio = new { numerator = "geometry", denominator = "population" } },
+        });
+        var ratioProblem = await ReadAsync(ratio);
+
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        Assert.Contains("'total'", IndicatorsHarness.Errors(await ReadAsync(missing), "config.measure")[0]);
+        Assert.Contains("is not a number", IndicatorsHarness.Errors(await ReadAsync(text), "config.measure")[0]);
+        Assert.Contains("is not a number", IndicatorsHarness.Errors(ratioProblem, "config.ratio.numerator")[0]);
+        Assert.Contains("'population'", IndicatorsHarness.Errors(ratioProblem, "config.ratio.denominator")[0]);
+    }
+
+    [Fact]
     public async Task A_filter_that_does_not_fit_its_column_is_rejected_when_the_table_is_published()
     {
         await using var h = await PublishedAsync();
@@ -427,7 +507,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         {
             title = "W",
             chartType = "bar",
-            config = new { indicators = new[] { "coverage" }, filters = new[] { new { column = "disaggregation", op = "range", min = "1" } } },
+            config = new { indicator = "coverage", groupBy = "municipality", filters = new[] { new { column = "municipality", op = "range", min = "1" } } },
         });
         var problem = await ReadAsync(response);
 
@@ -436,19 +516,31 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task A_widget_can_be_configured_before_script_3_has_published()
+    public async Task The_widgets_columns_are_checked_against_its_own_indicators_table_not_another()
+    {
+        await using var h = await PublishedAsync();
+
+        // `year` is a column of coverage, not of target.
+        var response = await h.PostWidgetAsync(new { title = "W", chartType = "bar", config = new { indicator = "target", groupBy = "year" } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_widget_can_be_configured_before_its_indicator_has_published()
     {
         await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.AddIndicatorAsync("attendance");
 
         var widget = await h.AddWidgetAsync(new
         {
             title = "Early",
             chartType = "line",
-            config = new { indicators = new[] { "not_yet" }, groupBy = "round", filters = new[] { new { column = "region", op = "notEmpty" } } },
+            config = new { indicator = "attendance", groupBy = "round", filters = new[] { new { column = "region", op = "notEmpty" } } },
         });
         var overview = await h.GetAsync();
 
-        Assert.False(overview.GetProperty("published").GetBoolean());
+        Assert.False(overview.GetProperty("indicators")[0].GetProperty("published").GetBoolean());
         Assert.Equal(widget.GetProperty("id").GetGuid(), overview.GetProperty("widgets")[0].GetProperty("id").GetGuid());
     }
 
@@ -461,7 +553,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         {
             title = "Early",
             chartType = "line",
-            config = new { indicators = new[] { "x" }, filters = new[] { new { column = "region", op = "contains-ish" } } },
+            config = new { indicator = "x", groupBy = "round", filters = new[] { new { column = "region", op = "contains-ish" } } },
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -477,7 +569,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         {
             title = "Original",
             chartType = "bar",
-            config = new { indicators = new[] { "coverage" }, groupBy = "year" },
+            config = new { indicator = "coverage", groupBy = "year" },
             layout = new { x = 0, y = 0, w = 6, h = 4 },
         });
         var id = created.GetProperty("id").GetGuid();
@@ -498,24 +590,24 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         Assert.Equal(6, renamed.GetProperty("layout").GetProperty("x").GetInt32());
 
         var reconfigured = await ReadAsync(await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}",
-            new { config = new { indicators = new[] { "target" } } }));
-        Assert.Equal(["target"], IndicatorsHarness.Strings(reconfigured.GetProperty("config").GetProperty("indicators")));
-        Assert.Equal("disaggregation", reconfigured.GetProperty("config").GetProperty("groupBy").GetString()); // replaced whole, defaults apply
+            new { config = new { indicator = "target", groupBy = "municipality" } }));
+        Assert.Equal("target", reconfigured.GetProperty("config").GetProperty("indicator").GetString());
+        Assert.Equal("municipality", reconfigured.GetProperty("config").GetProperty("groupBy").GetString()); // the config is replaced whole
     }
 
     [Fact]
     public async Task A_change_of_chart_type_is_checked_against_the_saved_query()
     {
         await using var h = await PublishedAsync();
-        var id = (await h.AddWidgetAsync(new { title = "Two", chartType = "bar", config = new { indicators = new[] { "coverage", "target" } } })).GetProperty("id").GetGuid();
+        var id = (await h.AddWidgetAsync(new { title = "Total", chartType = "stat", config = new { indicator = "coverage" } })).GetProperty("id").GetGuid();
 
         var response = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { chartType = "pie" });
         var problem = await ReadAsync(response);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("A pie widget uses exactly one indicator", IndicatorsHarness.Errors(problem, "config.indicators")[0]);
+        Assert.Contains("A pie widget needs a column to group by", IndicatorsHarness.Errors(problem, "config.groupBy")[0]);
 
-        var fixedUp = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { chartType = "pie", config = new { indicators = new[] { "coverage" } } });
+        var fixedUp = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { chartType = "pie", config = new { indicator = "coverage", groupBy = "municipality" } });
         Assert.Equal(HttpStatusCode.OK, fixedUp.StatusCode);
         Assert.Equal("pie", (await ReadAsync(fixedUp)).GetProperty("chartType").GetString());
     }
@@ -536,11 +628,11 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     public async Task A_widget_whose_query_went_stale_can_still_be_moved_and_renamed()
     {
         await using var h = await PublishedAsync();
-        var id = (await h.AddWidgetAsync(new { title = "By year", chartType = "bar", config = new { indicators = new[] { "coverage" }, groupBy = "year" } })).GetProperty("id").GetGuid();
-        await h.PublishAsync(IndicatorsHarness.RequiredColumns, "('coverage', 'Cali', 1, 1, 1)"); // no year column any more
+        var id = (await h.AddWidgetAsync(new { title = "By year", chartType = "bar", config = new { indicator = "coverage", groupBy = "year" } })).GetProperty("id").GetGuid();
+        await h.PublishAsync("coverage", IndicatorsHarness.StandardColumns, "('Cali', 1, 1, 1)"); // no year column any more
 
         var moved = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { layout = new { x = 3, y = 0, w = 3, h = 2 }, title = "Still here" });
-        var reconfigured = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { config = new { indicators = new[] { "coverage" }, groupBy = "year" } });
+        var reconfigured = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { config = new { indicator = "coverage", groupBy = "year" } });
 
         Assert.Equal(HttpStatusCode.OK, moved.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, reconfigured.StatusCode); // a new query is checked against the table
@@ -595,10 +687,13 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     public async Task A_saved_widgets_config_can_be_posted_to_the_query_endpoint_as_it_is()
     {
         await using var h = await PublishedAsync();
-        var widget = await h.AddWidgetAsync(new { title = "Both", chartType = "bar", config = new { indicators = new[] { "coverage", "target" }, groupBy = "disaggregation" } });
+        var widget = await h.AddWidgetAsync(new
+        {
+            title = "Rate", chartType = "bar", config = new { indicator = "coverage", groupBy = "municipality", ratio = new { numerator = "numerator", denominator = "denominator" } },
+        });
 
-        var result = await h.QueryAsync(JsonSerializer.Deserialize<JsonElement>(widget.GetProperty("config").GetRawText()));
+        var result = await h.QueryAsync(JsonSerializer.Deserialize<JsonElement>(widget.GetProperty("config").GetRawText()), widget.GetProperty("chartType").GetString());
 
-        Assert.Equal(["coverage|Cali|40", "coverage|Palmira|60", "target|Cali|90"], IndicatorsHarness.Rows(result));
+        Assert.Equal(["Cali|0.4", "Palmira|0.6"], IndicatorsHarness.Rows(result));
     }
 }

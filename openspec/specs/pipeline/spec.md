@@ -41,7 +41,7 @@ Table names SHALL be `main` for the submissions and the repeat group's name for 
 - **THEN** the main table has the columns `age` and `spouse_age`
 
 ### Requirement: Three scripts with a fixed contract
-Each project SHALL have up to three optional Python scripts, each defining one function with a fixed signature: script 1 `clean(raw, ctx)` returning a dictionary of table names to pandas DataFrames, script 2 `prepare_output(cleaned, ctx)` returning a dictionary of DataFrames, and script 3 `compute_indicators(cleaned, ctx)` returning one DataFrame. `raw` and `cleaned` SHALL be dictionaries of table names to pandas DataFrames. A script that does not define its function, raises an exception or returns another type SHALL fail its step with a message naming the problem; a Python traceback SHALL be shown for exceptions.
+Each project SHALL have two optional scripts with a fixed signature, script 1 `clean(raw, ctx)` returning a dictionary of table names to pandas DataFrames and script 2 `prepare_output(cleaned, ctx)` returning a dictionary of DataFrames, and any number of indicator scripts, each defining `compute(cleaned, ctx)` returning one DataFrame. `raw` and `cleaned` SHALL be dictionaries of table names to pandas DataFrames. A script that does not define its function, raises an exception or returns another type SHALL fail its step with a message naming the problem; a Python traceback SHALL be shown for exceptions.
 
 #### Scenario: Script 1 cleans the main table
 - **WHEN** script 1 returns `{"main": df}` where `df` drops the rows of test submissions
@@ -55,9 +55,13 @@ Each project SHALL have up to three optional Python scripts, each defining one f
 - **WHEN** script 1 returns a list
 - **THEN** the step fails with a message that `clean` must return a dictionary of DataFrames
 
+#### Scenario: Indicator returns a dictionary
+- **WHEN** an indicator script's `compute` returns `{"rate": df}`
+- **THEN** its step fails with a message that `compute` must return a DataFrame
+
 #### Scenario: Exception in a script
-- **WHEN** script 3 raises `KeyError: 'age'`
-- **THEN** the step fails and its log shows the traceback with the line of the script that raised it
+- **WHEN** an indicator script raises `KeyError: 'age'`
+- **THEN** its step fails and its log shows the traceback with the line of the script that raised it
 
 ### Requirement: Script context
 Each script SHALL receive a `ctx` object that exposes the form dictionary, the project's reference tables and a logger. The form dictionary SHALL describe the project's current form: for each question, its name, path, type, label and choice list, and for each choice list its choice names and labels; it SHALL give the label of a code, and the code of a label used by the current form or by an earlier form version. It SHALL also list every column of the flattened tables that holds answers, not the system columns, with its table, the path of its question (the submission key for a column whose question the form no longer has) and its question label, and SHALL give the question label of a column by its table and column name. `ctx.reference` SHALL give each of the project's reference tables as a pandas DataFrame by its name, with the column names and types shown for that table in the project, and SHALL list the available names. Asking for a name the project does not have SHALL raise an error that lists the available names. Messages written through `ctx.log` and output printed by the script SHALL be stored in the step's log and shown in the run's details.
@@ -102,30 +106,23 @@ Each script SHALL receive a `ctx` object that exposes the form dictionary, the p
 - **WHEN** a script lists the names in `ctx.reference` in a project without reference tables
 - **THEN** it obtains an empty list and the step continues
 
-### Requirement: Optional scripts with default behavior
-Every script SHALL be optional. Without script 1, the cleaned data SHALL be the flattened data and SHALL be published as the clean schema. Without script 2 or script 3, that step SHALL be skipped and the corresponding published schema SHALL be removed, so later readers know there is no output or indicator table.
-
-#### Scenario: No scripts at all
-- **WHEN** a project without scripts runs
-- **THEN** the raw and clean schemas contain the flattened tables, there are no output or indicator schemas, and the run succeeds with steps 2 and 3 marked as skipped
-
-#### Scenario: Script 3 removed
-- **WHEN** an analyst removes script 3 and a run follows
-- **THEN** the indicator schema no longer exists after the run
-
 ### Requirement: Execution order
-Flattening SHALL run first, then script 1. Scripts 2 and 3 SHALL depend only on the result of script 1: each SHALL run when script 1 succeeded or is absent, regardless of the other's outcome. If flattening or script 1 fails, scripts 2 and 3 SHALL NOT run and SHALL be marked as skipped.
+Flattening SHALL run first, then script 1. Script 2 and the indicator scripts SHALL depend only on the result of script 1: each SHALL run when script 1 succeeded or is absent, regardless of the others' outcome. Indicator scripts SHALL run after script 2, one at a time, in the order of their names. If flattening or script 1 fails, script 2 and the indicator scripts SHALL NOT run and SHALL be marked as skipped.
 
 #### Scenario: Script 1 fails
 - **WHEN** script 1 raises an exception
-- **THEN** scripts 2 and 3 do not run, and the run ends as failed
+- **THEN** script 2 and the indicator scripts do not run, and the run ends as failed
 
 #### Scenario: Script 2 fails
-- **WHEN** script 2 fails and script 3 succeeds
-- **THEN** script 3's indicators are published and the run ends as failed with script 2's error
+- **WHEN** script 2 fails and every indicator script succeeds
+- **THEN** the indicator tables are published and the run ends as failed with script 2's error
+
+#### Scenario: One indicator fails
+- **WHEN** the indicator `attendance` raises an exception and the indicators `coverage` and `piped_water_rate` succeed
+- **THEN** `coverage` and `piped_water_rate` are published, `attendance` keeps its previous table, and the run ends as failed naming `attendance`
 
 ### Requirement: Atomic publishing
-Each step SHALL write its tables to a temporary schema and SHALL replace its published schema in a single transaction only when the step finished without errors and its output passed validation. Readers SHALL see either the previous published tables or the new ones, never a mix. A failed step SHALL leave its previously published schema unchanged.
+Script 1, script 2 and the flattening SHALL write their tables to a temporary schema and SHALL replace their published schema in a single transaction only when the step finished without errors and its output passed validation. Each indicator SHALL replace only its own table the same way. Readers SHALL see either the previous published tables or the new ones, never a mix. A failed step SHALL leave its previously published schema or table unchanged.
 
 #### Scenario: Script failure
 - **WHEN** a script raises an exception
@@ -135,27 +132,8 @@ Each step SHALL write its tables to a temporary schema and SHALL replace its pub
 - **WHEN** script 2 succeeds with tables `households` and `persons`
 - **THEN** the output schema contains exactly those two tables, and tables from earlier runs that script 2 no longer returns are gone
 
-### Requirement: Output validation
-Scripts 1 and 2 SHALL return at least one table. Table names SHALL already consist of lowercase letters, digits and underscores, start with a letter and have at most 63 characters. Column names SHALL be reduced with the naming rules, the renaming SHALL be reported in the step's log, and two columns of a table SHALL NOT reduce to the same name. The output of script 3 SHALL contain the columns `indicator`, `disaggregation`, `value`, `numerator` and `denominator`; other columns are allowed. If validation fails, the step SHALL fail with a message naming the problem and nothing SHALL be published for that step. Geometry columns SHALL be published as text in WKT format.
-
-#### Scenario: Missing indicator column
-- **WHEN** script 3 returns a DataFrame without the column `denominator`
-- **THEN** the step fails with a message naming `denominator` and the previous indicators stay published
-
-#### Scenario: Invalid table name
-- **WHEN** script 2 returns a table named `my table!`
-- **THEN** the step fails with a message naming the table and the allowed characters
-
-#### Scenario: Column names from pandas
-- **WHEN** script 1 returns a table with the columns `Household size` and `Age`
-- **THEN** the published table has the columns `household_size` and `age`, and the step's log lists both renamings
-
-#### Scenario: Columns that collide
-- **WHEN** script 2 returns a table with the columns `Age` and `age`
-- **THEN** the step fails with a message naming both columns
-
 ### Requirement: Script versioning
-An `analyst` or `admin` SHALL be able to save a script; every save SHALL create a new immutable version with its author and time, and the latest version SHALL be the one runs use. Removing a script SHALL also create a version, marked as removed. Every member SHALL be able to read every version of every script. Restoring an older version SHALL save its code as a new version. A script larger than 200 KB SHALL be rejected.
+An `analyst` or `admin` SHALL be able to save a script; every save SHALL create a new immutable version with its author and time, and the latest version SHALL be the one runs use. For an indicator script the version SHALL also hold the indicator's metadata. Removing a script SHALL also create a version, marked as removed. Every member SHALL be able to read every version of every script. Restoring an older version SHALL save its code, and for an indicator its metadata, as a new version. A script larger than 200 KB SHALL be rejected.
 
 #### Scenario: Save creates a version
 - **WHEN** an analyst saves script 1 twice
@@ -169,16 +147,24 @@ An `analyst` or `admin` SHALL be able to save a script; every save SHALL create 
 - **WHEN** an analyst restores version 3 of script 2 while version 5 is current
 - **THEN** version 6 is created with the code of version 3 and becomes current
 
+#### Scenario: Indicator versions are per indicator
+- **WHEN** an analyst saves the indicator `coverage` three times and the indicator `attendance` once
+- **THEN** `coverage` is at version 3 and `attendance` at version 1
+
 ### Requirement: Runs and the run log
-Each run SHALL record its trigger, the user who started it when manual, its status (`queued`, `running`, `succeeded` or `failed`), its start and end, the version of each script it used, the reference tables it used with their row counts and the time each was last updated, and one entry per step (flatten, clean, output, indicators) with its status (`succeeded`, `failed` or `skipped`), duration, input and output row counts, log and error. A run SHALL read the reference tables once when it starts, so replacing a reference table during a run SHALL NOT affect that run. A run SHALL succeed only when no step failed. Every project member SHALL be able to list the project's runs, newest first, and read each run's details. A run interrupted by a restart of the worker SHALL be recorded as failed.
+Each run SHALL record its trigger, the user who started it when manual, its status (`queued`, `running`, `succeeded` or `failed`), its start and end, the version of script 1 and script 2 it used and the version of each indicator script by name, the reference tables it used with their row counts and the time each was last updated, and one entry per step (flatten, clean, output, and one per indicator with its name) with its status (`succeeded`, `failed` or `skipped`), duration, input and output row counts, log and error. A run SHALL read the reference tables once when it starts, so replacing a reference table during a run SHALL NOT affect that run. A run SHALL succeed only when no step failed; a run with a failed indicator step SHALL name that indicator in its error. Every project member SHALL be able to list the project's runs, newest first, and read each run's details. A run interrupted by a restart of the worker SHALL be recorded as failed.
 
 #### Scenario: Run details
 - **WHEN** a member opens a finished run
-- **THEN** they see each step with status, duration, rows in and out, its log and, for a failed step, the error and traceback, and the reference tables the run used
+- **THEN** they see each step, the indicator steps by label and name, with status, duration, rows in and out, its log and, for a failed step, the error and traceback, and the reference tables the run used
 
 #### Scenario: Run uses the current versions
-- **WHEN** script 1 is at version 4 and script 3 at version 2 when a run starts, and an analyst saves script 1 again during the run
-- **THEN** the run records and uses version 4 of script 1 and version 2 of script 3
+- **WHEN** script 1 is at version 4 and the indicator `coverage` at version 2 when a run starts, and an analyst saves script 1 again during the run
+- **THEN** the run records and uses version 4 of script 1 and version 2 of `coverage`
+
+#### Scenario: Indicator added during a run
+- **WHEN** an analyst creates the indicator `attendance` while a run is running
+- **THEN** that run does not compute `attendance`, and the next run does
 
 #### Scenario: Reference table replaced during a run
 - **WHEN** an analyst replaces the reference table `population` while a run is running
@@ -255,45 +241,6 @@ Each script SHALL run in a separate process that receives its input as files and
 #### Scenario: Files left behind
 - **WHEN** a script writes a file in its working directory
 - **THEN** the file no longer exists after the step ends
-
-### Requirement: Sample test run
-An `analyst` or `admin` SHALL be able to test one script on a sample of the project's submissions, using code they send with the request that need not be saved. The sample SHALL hold the requested number of non-deleted submissions, from 1 to 5,000 and 500 by default, or all of them when the project has fewer; it SHALL be spread across the project's submissions rather than only the newest, and consecutive tests SHALL use the same submissions while the project's submissions do not change. A test SHALL flatten the sample; a test of script 2 or 3 SHALL then run the current saved version of script 1, or use the flattened tables when there is none; and it SHALL run the tested code with the same contract, `ctx`, output validation and time and memory limits as a run. A test SHALL NOT create a script version, change any published schema or appear in the project's run list. Viewers SHALL NOT be able to start tests.
-
-#### Scenario: Draft tested without saving
-- **WHEN** an analyst tests script 1 with code that differs from its current version
-- **THEN** the test runs that code, script 1 keeps the same current version, and the published clean schema is unchanged
-
-#### Scenario: Testing script 2
-- **WHEN** an analyst tests a draft of script 2 while script 1 is at version 3
-- **THEN** the test flattens the sample, runs version 3 of script 1 on it, and runs the draft on its result
-
-#### Scenario: Script 1 fails in a test of script 3
-- **WHEN** the current version of script 1 raises an exception during a test of script 3
-- **THEN** the test fails with script 1's error and traceback, and the draft of script 3 is not run
-
-#### Scenario: Small project
-- **WHEN** an analyst tests with a sample of 500 in a project with 120 non-deleted submissions
-- **THEN** the test uses all 120 submissions
-
-#### Scenario: Same sample twice
-- **WHEN** an analyst runs two tests one after the other and no submission was added, changed or deleted in between
-- **THEN** both tests use the same submissions
-
-#### Scenario: Invalid output in a test
-- **WHEN** a draft of script 3 returns a DataFrame without the column `denominator`
-- **THEN** the test fails with the same message a run would show and nothing is published
-
-#### Scenario: Time limit in a test
-- **WHEN** a draft runs longer than the deployment's time limit
-- **THEN** it is stopped and the test fails with a message that it exceeded the time limit
-
-#### Scenario: Sample size out of range
-- **WHEN** an analyst requests a test with a sample of 10,000 submissions
-- **THEN** the API rejects the request with a validation error and nothing is queued
-
-#### Scenario: Viewer tests a script
-- **WHEN** a `viewer` tries to start a test
-- **THEN** the API responds 403 and nothing is queued
 
 ### Requirement: Test queue and lifetime
 Tests SHALL be executed by the same worker as runs, one at a time. A queued test SHALL start before any queued run, but SHALL wait for a running run or test to finish; while it waits, its status SHALL say whether it waits for a run or for another test. A user SHALL have at most one queued test per project: a new test SHALL replace that user's queued test in the project, and SHALL NOT affect a test that is already running. A test SHALL be visible only to the user who requested it. A finished test SHALL be deleted 24 hours after it ended. A test interrupted by a restart of the worker SHALL be recorded as failed.
@@ -537,3 +484,131 @@ When a reader, such as a dashboard page or an export, is reading a step's publis
 #### Scenario: Tables in use for too long
 - **WHEN** the output tables are read without pause for longer than the step's publishing time limit
 - **THEN** the step fails with a message that the published tables were in use, and the previous output tables stay published
+
+### Requirement: Indicator scripts
+A project SHALL have any number of indicator scripts, up to 100, each with a name that follows the rules for table names and cannot be changed. Each indicator script SHALL define `compute(cleaned, ctx)` returning one pandas DataFrame, which SHALL be published as the table with the indicator's name in the project's indicator schema.
+
+#### Scenario: Indicator created
+- **WHEN** an analyst creates the indicator `piped_water_rate` with a script
+- **THEN** the project lists that indicator at version 1, and the next run publishes the table `piped_water_rate` in the indicator schema
+
+#### Scenario: Invalid name
+- **WHEN** an analyst creates an indicator named `Piped water`
+- **THEN** the API rejects it with a message naming the allowed characters
+
+#### Scenario: Indicator limit
+- **WHEN** a project already has 100 indicators and an analyst creates another
+- **THEN** the API rejects it with a message naming the limit
+
+### Requirement: Indicator metadata
+An indicator SHALL have a label, an optional description, an optional unit, and a format that is one of `count`, `decimal`, `percent` (a fraction shown as a percentage) or `currency`. The metadata SHALL be saved with every version of the indicator's script.
+
+#### Scenario: Metadata saved
+- **WHEN** an analyst creates the indicator `piped_water_rate` with the label `Households with piped water` and the format `percent`
+- **THEN** the project lists the indicator with that label and format
+
+#### Scenario: Metadata restored with a version
+- **WHEN** an analyst saves version 2 of an indicator with a new label and then restores version 1
+- **THEN** version 3 has the code and the label of version 1
+
+### Requirement: Indicator output contract
+An indicator script's table SHALL have at least one numeric column; any other columns are its dimensions. By convention, and not by rule, `value` is the measure a widget plots by default, and `numerator` and `denominator` let a widget plot a ratio of sums. A geometry column SHALL be published as WKT text. A table without a numeric column SHALL fail the indicator's step with a message saying so, and nothing SHALL be published for that indicator.
+
+#### Scenario: Rate by municipality
+- **WHEN** the indicator `piped_water_rate` returns a table with the columns `municipality`, `value`, `numerator` and `denominator`
+- **THEN** the table is published with those four columns and the dashboard offers `municipality` as a group column and `value` as the default measure
+
+#### Scenario: No numeric column
+- **WHEN** an indicator returns a table whose columns are all text
+- **THEN** its step fails with a message that the table has no numeric column, and its previous table stays published
+
+### Requirement: Publishing one indicator table
+Each indicator SHALL replace only its own table in the indicator schema, in a single transaction that waits for readers under the same rules as a schema replacement, so readers of other indicator tables are not held. Tables of indicators the project no longer has SHALL be removed at the start of the run's indicator steps, and the schema SHALL be removed when the project has no indicators.
+
+#### Scenario: Indicator removed
+- **WHEN** an analyst removes the indicator `old_rate` and a run follows
+- **THEN** the table `old_rate` no longer exists after the run and the other indicator tables are untouched
+
+#### Scenario: Export of another indicator during a publish
+- **WHEN** an export of `piped_water_rate` is running while `attendance` publishes
+- **THEN** `attendance` publishes without waiting for the export
+
+### Requirement: Optional scripts and their defaults
+Every script SHALL be optional. Without script 1, the cleaned data SHALL be the flattened data and SHALL be published as the clean schema. Without script 2, that step SHALL be skipped and the output schema SHALL be removed. Without indicator scripts, no indicator step SHALL run and the indicator schema SHALL be removed, so later readers know there is no output or indicator table.
+
+#### Scenario: No scripts at all
+- **WHEN** a project without scripts runs
+- **THEN** the raw and clean schemas contain the flattened tables, there are no output or indicator schemas, and the run succeeds with step 2 marked as skipped and no indicator steps
+
+#### Scenario: Last indicator removed
+- **WHEN** an analyst removes the project's only indicator and a run follows
+- **THEN** the indicator schema no longer exists after the run
+
+### Requirement: Output validation of scripts
+Scripts 1 and 2 SHALL return at least one table, named by the rules for table names. Column names SHALL be reduced with the naming rules, the renaming SHALL be reported in the step's log, and two columns of a table SHALL NOT reduce to the same name. An indicator script's table SHALL have at least one numeric column. If validation fails, the step SHALL fail with a message naming the problem and nothing SHALL be published for that step. Geometry columns SHALL be published as text in WKT format.
+
+#### Scenario: Indicator without a numeric column
+- **WHEN** an indicator script returns a DataFrame with only the text column `municipality`
+- **THEN** the step fails with a message that the table has no numeric column and the previous table of that indicator stays published
+
+#### Scenario: Invalid table name
+- **WHEN** script 2 returns a table named `my table!`
+- **THEN** the step fails with a message naming the table and the allowed characters
+
+#### Scenario: Column names from pandas
+- **WHEN** script 1 returns a table with the columns `Household size` and `Age`
+- **THEN** the published table has the columns `household_size` and `age`, and the step's log lists both renamings
+
+#### Scenario: Columns that collide
+- **WHEN** script 2 returns a table with the columns `Age` and `age`
+- **THEN** the step fails with a message naming both columns
+
+### Requirement: Test sample
+A test's sample SHALL hold the requested number of non-deleted submissions, from 1 to 5,000 and 500 by default, or all of them when the project has fewer; it SHALL be spread across the project's submissions rather than only the newest, and consecutive tests SHALL use the same submissions while the project's submissions do not change.
+
+#### Scenario: Sample spread across submissions
+- **WHEN** an analyst tests with a sample of 500 in a project with 20,000 submissions
+- **THEN** the sample is not the 500 newest submissions
+
+### Requirement: Sample test of one script
+An `analyst` or `admin` SHALL be able to test script 1, script 2 or one indicator script by name on a sample, with unsaved code sent in the request. A test SHALL flatten the sample, then for script 2 or an indicator run the saved script 1 (or use the flattened tables without one), then run the tested code with a run's contract, `ctx`, validation and limits. A test SHALL NOT create a version, change a published schema or appear in the run list. Viewers SHALL NOT start tests.
+
+#### Scenario: Draft tested without saving
+- **WHEN** an analyst tests script 1 with code that differs from its current version
+- **THEN** the test runs that code, script 1 keeps the same current version, and the published clean schema is unchanged
+
+#### Scenario: Testing script 2
+- **WHEN** an analyst tests a draft of script 2 while script 1 is at version 3
+- **THEN** the test flattens the sample, runs version 3 of script 1 on it, and runs the draft on its result
+
+#### Scenario: Testing an indicator
+- **WHEN** an analyst tests a draft of the indicator `coverage`
+- **THEN** the test runs the draft as `coverage` and its preview shows the table `coverage`
+
+#### Scenario: Script 1 fails in a test of an indicator
+- **WHEN** the current version of script 1 raises an exception during a test of an indicator
+- **THEN** the test fails with script 1's error and traceback, and the draft is not run
+
+#### Scenario: Small project
+- **WHEN** an analyst tests with a sample of 500 in a project with 120 non-deleted submissions
+- **THEN** the test uses all 120 submissions
+
+#### Scenario: Same sample twice
+- **WHEN** an analyst runs two tests one after the other and no submission was added, changed or deleted in between
+- **THEN** both tests use the same submissions
+
+#### Scenario: Invalid output in a test
+- **WHEN** a draft of an indicator returns a DataFrame without a numeric column
+- **THEN** the test fails with the same message a run would show and nothing is published
+
+#### Scenario: Time limit in a test
+- **WHEN** a draft runs longer than the deployment's time limit
+- **THEN** it is stopped and the test fails with a message that it exceeded the time limit
+
+#### Scenario: Sample size out of range
+- **WHEN** an analyst requests a test with a sample of 10,000 submissions
+- **THEN** the API rejects the request with a validation error and nothing is queued
+
+#### Scenario: Viewer tests a script
+- **WHEN** a `viewer` tries to start a test
+- **THEN** the API responds 403 and nothing is queued

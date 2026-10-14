@@ -1,8 +1,9 @@
-import { LOCALE_ID, Component, ElementRef, computed, inject, input, viewChild } from '@angular/core';
+import { Component, ElementRef, computed, inject, input, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
 import { observeSize } from './chart-data';
-import { Point, plainNumber, ringsPath, sequentialColor, sequentialStep, sequentialSteps } from './chart-scales';
+import { Point, ringsPath, sequentialColor, sequentialStep, sequentialSteps } from './chart-scales';
+import { ValueFormatter, plotted } from './format';
 import { Geometry, Position, parseWkt, positionsOf } from './wkt';
 import { TableModel, WidgetTable } from './widget-table';
 
@@ -32,7 +33,7 @@ const markerRadius = 6;
   imports: [TranslocoDirective, WidgetTable],
   template: `
     <ng-container *transloco="let t">
-      <p class="shrink-0 text-xs text-body" data-testid="chart-caption">{{ t('indicators.map.caption', { indicator: config().indicators[0], field: t('indicators.valueFields.' + config().valueField), group: config().groupBy }) }}</p>
+      <p class="shrink-0 text-xs text-body" data-testid="chart-caption">{{ t('indicators.map.caption', { what: what(), group: config().groupBy }) }}</p>
       @if (asTable()) {
         <app-widget-table class="flex-1 overflow-auto" [model]="table(t)" />
       } @else {
@@ -41,11 +42,11 @@ const markerRadius = 6;
             @for (shape of shapes(); track $index) {
               @if (shape.kind === 'polygon') {
                 <path class="stroke-neutral-primary-soft hover:opacity-80" stroke-width="1" fill-rule="evenodd" stroke-linejoin="round" [attr.d]="shape.d" [style.fill]="shape.color" data-testid="map-region">
-                  <title>{{ shape.group }}: {{ format(shape.value) }}</title>
+                  <title>{{ shape.group }}: {{ format()(shape.value) }}</title>
                 </path>
               } @else {
                 <circle class="stroke-neutral-primary-soft hover:opacity-80" stroke-width="2" [attr.cx]="shape.cx" [attr.cy]="shape.cy" [attr.r]="markerRadius" [style.fill]="shape.color" data-testid="map-point">
-                  <title>{{ shape.group }}: {{ format(shape.value) }}</title>
+                  <title>{{ shape.group }}: {{ format()(shape.value) }}</title>
                 </circle>
               }
             }
@@ -53,13 +54,13 @@ const markerRadius = 6;
         </div>
         @if (shapes().length) {
           <div class="flex shrink-0 flex-wrap items-center gap-2 text-xs text-body" data-testid="map-legend">
-            <span class="tabular-nums" data-testid="map-legend-min">{{ format(range().min) }}</span>
+            <span class="tabular-nums" data-testid="map-legend-min">{{ format()(range().min) }}</span>
             <span class="flex" aria-hidden="true">
               @for (step of steps; track step) {
                 <span class="h-2.5 w-5 first:rounded-s-sm last:rounded-e-sm" [style.background]="color(step)"></span>
               }
             </span>
-            <span class="tabular-nums" data-testid="map-legend-max">{{ format(range().max) }}</span>
+            <span class="tabular-nums" data-testid="map-legend-max">{{ format()(range().max) }}</span>
           </div>
         }
         @if (leftOut() > 0) {
@@ -75,10 +76,12 @@ const markerRadius = 6;
 })
 export class MapWidget {
   private readonly transloco = inject(TranslocoService);
-  private readonly locale = inject(LOCALE_ID);
 
   readonly rows = input.required<QueryRow[]>();
   readonly config = input.required<WidgetConfig>();
+  /** The indicator's label and the formatter of its values. */
+  readonly label = input.required<string>();
+  readonly format = input.required<ValueFormatter>();
   readonly asTable = input(false);
 
   protected readonly markerRadius = markerRadius;
@@ -86,7 +89,7 @@ export class MapWidget {
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private readonly size = observeSize(() => this.box());
-  private readonly plain = plainNumber(this.locale);
+  protected readonly what = computed(() => plotted(this.config(), this.label()));
 
   private readonly parsed = computed(() => this.rows().map((row) => ({ row, geometry: parseWkt(row.geometry) })));
   protected readonly leftOut = computed(() => this.parsed().filter((entry) => entry.geometry === null).length);
@@ -148,28 +151,24 @@ export class MapWidget {
     return sequentialColor(step);
   }
 
-  protected format(value: number): string {
-    return this.plain(value);
-  }
-
   protected summary(t: Translate): string {
     const shapes = this.shapes();
     const { min, max } = this.range();
     return t('indicators.map.summary', {
-      indicator: this.config().indicators[0],
+      what: this.what(),
       count: shapes.length,
-      min: this.plain(min),
-      max: this.plain(max),
+      min: this.format()(min),
+      max: this.format()(max),
       left: this.leftOut(),
     });
   }
 
   protected table(t: Translate): TableModel {
     return {
-      headers: [this.config().groupBy, t(`indicators.valueFields.${this.config().valueField}`), t('indicators.map.geometry')],
+      headers: [this.config().groupBy ?? '', this.what(), t('indicators.map.geometry')],
       rows: this.parsed().map(({ row, geometry }) => [
         row.group ?? t('indicators.chart.noGroup'),
-        row.value,
+        this.format()(row.value),
         geometry === null ? t('indicators.map.kind.none') : t(`indicators.map.kind.${geometry.type === 'point' ? 'point' : 'polygon'}`),
       ]),
     };

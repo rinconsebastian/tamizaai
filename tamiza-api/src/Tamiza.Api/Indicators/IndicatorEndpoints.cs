@@ -7,11 +7,12 @@ using Tamiza.Api.Auth;
 using Tamiza.Api.CleanData;
 using Tamiza.Api.Data;
 using Tamiza.Api.Http;
+using Tamiza.Api.Pipeline;
 using Tamiza.Api.Projects;
 
 namespace Tamiza.Api.Indicators;
 
-/// <summary>The indicators dashboard: a canvas of widgets over the table script 3 published.</summary>
+/// <summary>The indicators dashboard: a canvas of widgets, each over the table one indicator script published.</summary>
 public static class IndicatorEndpoints
 {
     public const string NotPublishedCode = "indicators.notPublished";
@@ -22,30 +23,39 @@ public static class IndicatorEndpoints
     {
         var indicators = api.MapGroup("/projects/{projectId:guid}/indicators").WithTags("Indicators");
         indicators.MapGet("", GetOverviewAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetIndicatorsDashboard");
-        indicators.MapGet("/columns", GetColumnsAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetIndicatorColumns");
+        indicators.MapGet("/{name}/columns", GetColumnsAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetIndicatorColumns");
         indicators.MapPost("/query", QueryAsync).RequireProjectRole(ProjectRole.Viewer).WithName("QueryIndicators");
         indicators.MapPost("/widgets", CreateWidgetAsync).RequireProjectRole(ProjectRole.Analyst).WithName("CreateIndicatorWidget");
         indicators.MapPatch("/widgets/{widgetId:guid}", UpdateWidgetAsync).RequireProjectRole(ProjectRole.Analyst).WithName("UpdateIndicatorWidget");
         indicators.MapDelete("/widgets/{widgetId:guid}", DeleteWidgetAsync).RequireProjectRole(ProjectRole.Analyst).WithName("DeleteIndicatorWidget");
-        indicators.MapPost("/exports", ExportAsync).RequireProjectRole(ProjectRole.Viewer).WithName("ExportIndicators");
+        indicators.MapPost("/{name}/exports", ExportAsync).RequireProjectRole(ProjectRole.Viewer).WithName("ExportIndicators");
         return api;
     }
 
-    /// <summary>Whether script 3 has published, and the widgets in reading order, listed either way.</summary>
+    /// <summary>The project's indicators with whether each has published a table, and the widgets in reading order, listed either way.</summary>
     private static async Task<Results<Ok<IndicatorOverview>, ProblemHttpResult>> GetOverviewAsync(
         Guid projectId, IndicatorDashboard dashboard, TamizaDbContext db, IOptions<IndicatorDashboardOptions> options, CancellationToken ct)
     {
         try
         {
-            var publication = await dashboard.GetPublicationAsync(projectId, ct);
+            var scripts = await ScriptEndpoints.CurrentIndicatorsAsync(db, projectId, ct);
+            var publications = await dashboard.GetPublicationsAsync(projectId, ct);
+            var indicators = scripts
+                .Select(script =>
+                {
+                    var publication = publications.GetValueOrDefault(script.Name!, IndicatorPublication.None);
+                    return new IndicatorEntry(
+                        script.Name!, script.Label ?? script.Name!, script.Description, script.Unit, script.Format ?? "decimal",
+                        publication.Published, publication.PublishedAt, publication.RunId, publication.Rows);
+                })
+                .ToList();
             var widgets = (await db.DashboardWidgets.AsNoTracking().Where(w => w.ProjectId == projectId).ToListAsync(ct))
                 .Select(w => (Widget: ToWidget(w), w.CreatedAt))
                 .OrderBy(w => w.Widget.Layout.Y).ThenBy(w => w.Widget.Layout.X).ThenBy(w => w.CreatedAt)
                 .Select(w => w.Widget)
                 .ToList();
             return TypedResults.Ok(new IndicatorOverview(
-                publication.Published, publication.PublishedAt, publication.RunId, widgets,
-                new IndicatorLimits(options.Value.MaxWidgetsPerProject, options.Value.MaxWidgetQueryRows)));
+                indicators, widgets, new IndicatorLimits(options.Value.MaxWidgetsPerProject, options.Value.MaxWidgetQueryRows)));
         }
         catch (DataTimeoutException)
         {
@@ -53,13 +63,13 @@ public static class IndicatorEndpoints
         }
     }
 
-    /// <summary>Every column of the published table and the indicators it holds.</summary>
+    /// <summary>Every column of one indicator's published table, those a widget can plot, and the defaults for a new widget.</summary>
     private static async Task<Results<Ok<IndicatorColumns>, ProblemHttpResult>> GetColumnsAsync(
-        Guid projectId, IndicatorDashboard dashboard, CancellationToken ct)
+        Guid projectId, string name, IndicatorDashboard dashboard, CancellationToken ct)
     {
         try
         {
-            return TypedResults.Ok(await dashboard.GetColumnsAsync(projectId, ct));
+            return TypedResults.Ok(await dashboard.GetColumnsAsync(projectId, name, ct));
         }
         catch (DataTimeoutException)
         {
@@ -67,13 +77,13 @@ public static class IndicatorEndpoints
         }
     }
 
-    /// <summary>One widget's rows: the plotted field summed per indicator and group. Used to draw a saved widget and to preview a draft.</summary>
+    /// <summary>One widget's rows: the measure summed, or the ratio of sums, per group. Used to draw a saved widget and to preview a draft.</summary>
     private static async Task<Results<Ok<IndicatorQueryResponse>, ValidationProblem, ProblemHttpResult>> QueryAsync(
-        Guid projectId, WidgetConfigInput? config, IndicatorDashboard dashboard, CancellationToken ct)
+        Guid projectId, IndicatorQueryRequest? request, IndicatorDashboard dashboard, CancellationToken ct)
     {
         try
         {
-            var outcome = await dashboard.QueryAsync(projectId, config ?? new WidgetConfigInput(), ct);
+            var outcome = await dashboard.QueryAsync(projectId, request?.Config ?? new WidgetConfigInput(), request?.ChartType, ct);
             return outcome.Errors is { } errors ? Problems.Validation(errors) : TypedResults.Ok(outcome.Response!);
         }
         catch (DataTimeoutException)
@@ -209,9 +219,9 @@ public static class IndicatorEndpoints
         return TypedResults.NoContent();
     }
 
-    /// <summary>Prepares a file with the whole published table and returns the link that downloads it once.</summary>
+    /// <summary>Prepares a file with the whole published table of one indicator and returns the link that downloads it once.</summary>
     private static async Task<Results<Ok<DataExportResult>, ValidationProblem, ProblemHttpResult>> ExportAsync(
-        Guid projectId, IndicatorExportRequest? request, IndicatorDashboard dashboard, ICurrentUser user, CancellationToken ct)
+        Guid projectId, string name, IndicatorExportRequest? request, IndicatorDashboard dashboard, ICurrentUser user, CancellationToken ct)
     {
         if (request?.Format is not (DataDashboard.Csv or DataDashboard.Xlsx))
         {
@@ -220,7 +230,7 @@ public static class IndicatorEndpoints
 
         try
         {
-            var result = await dashboard.ExportAsync(projectId, user.Id, request.Format, ct);
+            var result = await dashboard.ExportAsync(projectId, user.Id, name, request.Format, ct);
             return result?.Export is { } export ? TypedResults.Ok(export) : NotPublished();
         }
         catch (DataTimeoutException)
@@ -286,7 +296,7 @@ public static class IndicatorEndpoints
     private static ProblemHttpResult NotPublished() =>
         TypedResults.Problem(
             statusCode: StatusCodes.Status404NotFound,
-            title: "The indicators are not published.",
-            detail: "Script 3 has not published the indicator table. A run may have replaced it.",
+            title: "The indicator is not published.",
+            detail: "The indicator has not published its table yet, or a run removed it.",
             extensions: new Dictionary<string, object?> { ["code"] = NotPublishedCode });
 }

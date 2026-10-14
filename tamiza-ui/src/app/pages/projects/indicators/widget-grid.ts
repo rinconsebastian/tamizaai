@@ -1,7 +1,7 @@
 import { CdkDrag, CdkDragEnd, CdkDragHandle, CdkDragMove } from '@angular/cdk/drag-drop';
 import { Component, ElementRef, computed, inject, input, output, signal, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
-import { Layout, Widget } from '../../../core/projects/indicators.service';
+import { IndicatorEntry, Layout, Widget } from '../../../core/projects/indicators.service';
 import { Placed, changed, movedBy, readingOrder, reflow, resizedBy, unitsFor } from './grid-layout';
 import { WidgetView } from './widget-view';
 
@@ -83,7 +83,8 @@ const fallbackWidth = 1200;
                 [projectId]="projectId()"
                 [chartType]="widget.chartType"
                 [config]="widget.config"
-                [enabled]="published()"
+                [indicator]="indicatorOf(widget)"
+                [scriptsLink]="editable()"
                 [allTables]="allTables()"
               />
             </div>
@@ -166,8 +167,8 @@ export class WidgetGrid {
   readonly projectId = input.required<string>();
   /** Analysts and admins: widgets get their move, resize, edit and remove controls. */
   readonly editable = input(false);
-  /** False while nothing is published: widgets do not ask for rows. */
-  readonly published = input(true);
+  /** The project's indicators: a widget draws with the format of its own, and does not ask for rows while that one has no table. */
+  readonly indicators = input<IndicatorEntry[]>([]);
   readonly allTables = input(false);
 
   /** Every layout a move or resize changed, the dropped widget's and those it pushed down. */
@@ -179,6 +180,10 @@ export class WidgetGrid {
   protected readonly dragging = signal<string | null>(null);
   protected readonly ghost = signal<Layout | null>(null);
   protected readonly status = signal('');
+
+  protected indicatorOf(widget: Widget): IndicatorEntry | null {
+    return this.indicators().find((indicator) => indicator.name === widget.config.indicator) ?? null;
+  }
 
   protected help(): string {
     return this.transloco.translate('indicators.grid.help');

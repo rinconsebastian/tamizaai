@@ -7,8 +7,22 @@ import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { Downloader } from '../../core/download.service';
 import { ExportFormat } from '../../core/projects/data.service';
-import { IndicatorsOverview, IndicatorsService, Layout, Widget } from '../../core/projects/indicators.service';
-import { Alert, Button, Card, ConfirmDialog, Skeleton, ToastService } from '../../shared/ui';
+import { IndicatorEntry, IndicatorsOverview, IndicatorsService, Layout, Widget } from '../../core/projects/indicators.service';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  ConfirmDialog,
+  Skeleton,
+  Table,
+  TableContainer,
+  ToastService,
+  tableCell,
+  tableHead,
+  tableHeaderCell,
+  tableRow,
+} from '../../shared/ui';
 import { Placed } from './indicators/grid-layout';
 import { WidgetDialog, WidgetDialogData } from './indicators/widget-dialog';
 import { WidgetGrid } from './indicators/widget-grid';
@@ -18,13 +32,13 @@ import { ProjectContext } from './project-context';
 export const layoutSaveDelayMs = 400;
 
 /**
- * The indicators dashboard: a canvas of widgets, each a chart or map over the project's published indicator table. Every member
- * sees it; analysts and admins add, edit, arrange and remove widgets (design D3, D7). While script 3 has never published, it says
- * so and still lists the widgets already configured.
+ * The indicators dashboard: the project's indicators with whether each has published its table, and a canvas of widgets, each a
+ * chart or map over one indicator's table. Every member sees it and exports a table; analysts and admins add, edit, arrange and
+ * remove widgets (design D5, D6). While no indicator has published, it says so and still lists the widgets already configured.
  */
 @Component({
   selector: 'app-project-indicators',
-  imports: [DatePipe, RouterLink, TranslocoDirective, CdkMenu, CdkMenuItem, CdkMenuTrigger, Alert, Button, Card, Skeleton, WidgetGrid],
+  imports: [DatePipe, RouterLink, TranslocoDirective, CdkMenu, CdkMenuItem, CdkMenuTrigger, Alert, Badge, Button, Card, Skeleton, Table, TableContainer, WidgetGrid],
   template: `
     <div class="flex flex-col gap-6" *transloco="let t" [attr.aria-busy]="!overview() && !error()">
       @if (error(); as message) {
@@ -32,7 +46,7 @@ export const layoutSaveDelayMs = 400;
       }
 
       @if (overview(); as overview) {
-        @if (!overview.published) {
+        @if (!anyPublished()) {
           <tmz-card [heading]="t('indicators.empty.title')" data-testid="indicators-empty">
             <p class="text-sm text-body">{{ t('indicators.empty.body') }}</p>
             @if (context.can('analyst')) {
@@ -47,39 +61,88 @@ export const layoutSaveDelayMs = 400;
           </tmz-card>
         }
 
+        @if (overview.indicators.length) {
+          <tmz-card [heading]="t('indicators.list.title', { count: overview.indicators.length })" data-testid="indicator-table-card">
+            <tmz-table-container class="max-h-80 overflow-y-auto">
+              <table tmzTable data-testid="indicator-table">
+                <thead [class]="tableHead + ' sticky top-0'">
+                  <tr>
+                    <th scope="col" [class]="tableHeaderCell">{{ t('indicators.list.indicator') }}</th>
+                    <th scope="col" [class]="tableHeaderCell">{{ t('indicators.list.format') }}</th>
+                    <th scope="col" [class]="tableHeaderCell">{{ t('indicators.list.status') }}</th>
+                    <th scope="col" [class]="tableHeaderCell + ' text-end'">{{ t('indicators.list.rows') }}</th>
+                    <th scope="col" [class]="tableHeaderCell"><span class="sr-only">{{ t('indicators.export.button') }}</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (indicator of overview.indicators; track indicator.name) {
+                    <tr [class]="tableRow" [attr.data-testid]="'indicator-row-' + indicator.name">
+                      <td [class]="tableCell + ' max-w-xs'">
+                        <span class="block break-words font-medium text-heading" data-testid="indicator-label">{{ indicator.label }}</span>
+                        <code class="text-xs" data-testid="indicator-name">{{ indicator.name }}</code>
+                        @if (indicator.description) {
+                          <span class="block break-words text-xs">{{ indicator.description }}</span>
+                        }
+                      </td>
+                      <td [class]="tableCell + ' whitespace-nowrap'" data-testid="indicator-format">
+                        {{ t('scripts.formats.' + indicator.format) }}{{ indicator.unit ? ' · ' + indicator.unit : '' }}
+                      </td>
+                      <td [class]="tableCell">
+                        @if (indicator.published) {
+                          <tmz-badge tone="success">{{ t('indicators.list.published') }}</tmz-badge>
+                          <span class="block text-xs" data-testid="indicator-published">
+                            {{ t('indicators.published', { time: (indicator.publishedAt | date: 'medium') }) }}
+                            @if (indicator.runId; as run) {
+                              {{ t('indicators.publishedRun', { run: run.slice(0, 8) }) }}
+                            }
+                          </span>
+                        } @else {
+                          <tmz-badge tone="neutral" data-testid="indicator-unpublished">{{ t('indicators.list.notPublished') }}</tmz-badge>
+                        }
+                      </td>
+                      <td [class]="tableCell + ' text-end tabular-nums'">{{ indicator.rows === null ? '—' : indicator.rows.toLocaleString('en') }}</td>
+                      <td [class]="tableCell + ' text-end'">
+                        <button
+                          tmzButton
+                          variant="secondary"
+                          size="sm"
+                          type="button"
+                          [cdkMenuTriggerFor]="exportMenu"
+                          [cdkMenuTriggerData]="{ name: indicator.name }"
+                          [disabled]="exporting() || !indicator.published"
+                          [attr.title]="t('indicators.export.help')"
+                          [attr.data-testid]="'indicator-export-' + indicator.name"
+                        >
+                          {{ t('indicators.export.button') }}
+                        </button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </tmz-table-container>
+          </tmz-card>
+        }
+
         <tmz-card>
           <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div class="flex min-w-0 flex-col gap-1 text-sm text-body">
-              @if (overview.published && overview.publishedAt) {
-                <p data-testid="indicators-published">
-                  {{ t('indicators.published', { time: (overview.publishedAt | date: 'medium') }) }}
-                  @if (overview.runId; as run) {
-                    {{ t('indicators.publishedRun', { run: run.slice(0, 8) }) }}
-                  }
-                  <a [routerLink]="['..', 'scripts']" class="ms-1 text-fg-brand hover:underline">{{ t('indicators.runsLink') }}</a>
-                </p>
-              }
-              <p data-testid="indicators-count">{{ t('indicators.count', { count: widgets().length, max: overview.limits.maxWidgets }) }}</p>
-            </div>
+            <p class="text-sm text-body" data-testid="indicators-count">{{ t('indicators.count', { count: widgets().length, max: overview.limits.maxWidgets }) }}</p>
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
               @if (hasTables()) {
                 <button tmzButton variant="secondary" type="button" [attr.aria-pressed]="allTables()" (click)="allTables.set(!allTables())" data-testid="tables-toggle">
                   {{ allTables() ? t('indicators.showCharts') : t('indicators.showTables') }}
                 </button>
               }
-              <button
-                tmzButton
-                variant="secondary"
-                type="button"
-                [cdkMenuTriggerFor]="exportMenu"
-                [disabled]="exporting() || !overview.published"
-                [attr.title]="t('indicators.export.help')"
-                data-testid="indicators-export"
-              >
-                {{ exporting() ? t('indicators.export.preparing') : t('indicators.export.button') }}
-              </button>
               @if (context.can('analyst')) {
-                <button tmzButton type="button" [disabled]="opening() || widgets().length >= overview.limits.maxWidgets" (click)="addWidget()" data-testid="widget-add">{{ t('indicators.add') }}</button>
+                <button
+                  tmzButton
+                  type="button"
+                  [disabled]="widgets().length >= overview.limits.maxWidgets || !overview.indicators.length"
+                  (click)="addWidget()"
+                  data-testid="widget-add"
+                >
+                  {{ t('indicators.add') }}
+                </button>
               }
             </div>
           </div>
@@ -88,12 +151,12 @@ export const layoutSaveDelayMs = 400;
           }
         </tmz-card>
 
-        <ng-template #exportMenu>
+        <ng-template #exportMenu let-name="name">
           <div cdkMenu class="z-10 min-w-48 rounded-base border border-default-medium bg-neutral-primary-medium py-2 shadow-lg" data-testid="indicators-export-menu">
-            <button cdkMenuItem type="button" class="block min-h-10 w-full px-4 py-2 text-left text-sm text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:bg-neutral-tertiary-medium focus:outline-none" (cdkMenuItemTriggered)="exportTable('csv')" data-testid="indicators-export-csv">
+            <button cdkMenuItem type="button" class="block min-h-10 w-full px-4 py-2 text-left text-sm text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:bg-neutral-tertiary-medium focus:outline-none" (cdkMenuItemTriggered)="exportTable(name, 'csv')" data-testid="indicators-export-csv">
               {{ t('indicators.export.csv') }}
             </button>
-            <button cdkMenuItem type="button" class="block min-h-10 w-full px-4 py-2 text-left text-sm text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:bg-neutral-tertiary-medium focus:outline-none" (cdkMenuItemTriggered)="exportTable('xlsx')" data-testid="indicators-export-xlsx">
+            <button cdkMenuItem type="button" class="block min-h-10 w-full px-4 py-2 text-left text-sm text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:bg-neutral-tertiary-medium focus:outline-none" (cdkMenuItemTriggered)="exportTable(name, 'xlsx')" data-testid="indicators-export-xlsx">
               {{ t('indicators.export.xlsx') }}
             </button>
           </div>
@@ -104,13 +167,13 @@ export const layoutSaveDelayMs = 400;
             [widgets]="widgets()"
             [projectId]="projectId"
             [editable]="context.can('analyst')"
-            [published]="overview.published"
+            [indicators]="overview.indicators"
             [allTables]="allTables()"
             (layoutsChange)="layoutsChanged($event)"
             (edit)="editWidget($event)"
             (remove)="removeWidget($event)"
           />
-        } @else if (overview.published) {
+        } @else if (anyPublished()) {
           <tmz-card [heading]="t('indicators.noWidgets.title')" data-testid="no-widgets">
             <p class="text-sm text-body">{{ context.can('analyst') ? t('indicators.noWidgets.editor') : t('indicators.noWidgets.viewer') }}</p>
           </tmz-card>
@@ -135,11 +198,18 @@ export class ProjectIndicators {
   protected readonly widgets = signal<Widget[]>([]);
   protected readonly error = signal<string | null>(null);
   protected readonly exporting = signal(false);
-  protected readonly opening = signal(false);
   protected readonly allTables = signal(false);
 
+  protected readonly tableHead = tableHead;
+  protected readonly tableHeaderCell = tableHeaderCell;
+  protected readonly tableRow = tableRow;
+  protected readonly tableCell = tableCell;
+
+  /** True once any indicator has a published table; until then the page explains how an indicator publishes. */
+  protected readonly anyPublished = computed(() => !!this.overview()?.indicators.some((i: IndicatorEntry) => i.published));
+
   /** Some widget has a chart or map whose table can be shown. */
-  protected readonly hasTables = computed(() => (this.overview()?.published ?? false) && this.widgets().some((w) => w.chartType !== 'stat'));
+  protected readonly hasTables = computed(() => this.anyPublished() && this.widgets().some((w) => w.chartType !== 'stat'));
 
   /** Layouts waiting for the pause after the last drag before they are saved, by widget. */
   private readonly pending = new Map<string, { layout: Layout; timer: ReturnType<typeof setTimeout> }>();
@@ -203,31 +273,21 @@ export class ProjectIndicators {
   }
 
   private openDialog(widget: Widget | null): void {
-    this.opening.set(true);
-    this.service.columns(this.projectId).subscribe({
-      next: (catalog) => {
-        this.opening.set(false);
-        const ref = this.dialog.open<Widget, WidgetDialogData>(WidgetDialog, {
-          data: { projectId: this.projectId, widget, catalog, timeZone: this.context.project()?.timeZone ?? 'UTC' },
-          ariaLabelledBy: 'widget-dialog-title',
-          autoFocus: 'first-tabbable',
-          restoreFocus: true,
-          backdropClass: ['cdk-overlay-dark-backdrop'],
-          maxWidth: '100vw',
-          maxHeight: '100dvh',
-        });
-        ref.closed.subscribe((saved) => {
-          if (!saved) {
-            return;
-          }
-          this.widgets.update((list) => (widget ? list.map((w) => (w.id === saved.id ? saved : w)) : [...list, saved]));
-          this.toasts.success(this.transloco.translate(widget ? 'indicators.saved' : 'indicators.added', { title: saved.title }));
-        });
-      },
-      error: (failure) => {
-        this.opening.set(false);
-        this.errors.report(failure);
-      },
+    const ref = this.dialog.open<Widget, WidgetDialogData>(WidgetDialog, {
+      data: { projectId: this.projectId, widget, indicators: this.overview()?.indicators ?? [], timeZone: this.context.project()?.timeZone ?? 'UTC' },
+      ariaLabelledBy: 'widget-dialog-title',
+      autoFocus: 'first-tabbable',
+      restoreFocus: true,
+      backdropClass: ['cdk-overlay-dark-backdrop'],
+      maxWidth: '100vw',
+      maxHeight: '100dvh',
+    });
+    ref.closed.subscribe((saved) => {
+      if (!saved) {
+        return;
+      }
+      this.widgets.update((list) => (widget ? list.map((w) => (w.id === saved.id ? saved : w)) : [...list, saved]));
+      this.toasts.success(this.transloco.translate(widget ? 'indicators.saved' : 'indicators.added', { title: saved.title }));
     });
   }
 
@@ -257,13 +317,13 @@ export class ProjectIndicators {
     });
   }
 
-  protected exportTable(format: ExportFormat): void {
+  protected exportTable(indicator: string, format: ExportFormat): void {
     if (this.exporting()) {
       return;
     }
     this.exporting.set(true);
     this.toasts.info(this.transloco.translate('indicators.export.preparing'));
-    this.service.export(this.projectId, format).subscribe({
+    this.service.export(this.projectId, indicator, format).subscribe({
       next: (result) => {
         this.exporting.set(false);
         this.downloader.start(result.downloadUrl);

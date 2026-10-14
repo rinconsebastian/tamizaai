@@ -9,7 +9,7 @@ from helpers import column_comments
 
 from tamiza import interchange
 from tamiza.names import schema_name
-from tamiza.publish import PublishError, Table, drop, publish
+from tamiza.publish import PublishError, Table, drop, drop_tables_except, publish, publish_table
 
 
 @pytest.fixture
@@ -323,3 +323,141 @@ def test_a_step_gives_up_when_the_tables_stay_in_use_and_keeps_the_previous_ones
     assert database.scalar(f'SELECT count(*) FROM "{schema}".main') == 2
     assert database.scalar(f'SELECT max(v) FROM "{schema}".main') == 1
     assert database.scalar("SELECT count(*) FROM pg_namespace WHERE nspname LIKE '%%__next'") == 0
+
+
+# Publishing one indicator table at a time
+
+
+def publish_indicator(database, tmp_path, project_id, name, rows, **options):
+    with database.connect() as connection:
+        return publish_table(
+            connection, project_id, "indicators", table(tmp_path, name, pd.DataFrame({"value": rows})), **options
+        )
+
+
+def indicator_tables(database, project_id):
+    schema = schema_name(project_id, "indicators")
+    return [
+        name
+        for (name,) in database.rows(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = %s ORDER BY table_name", schema
+        )
+    ]
+
+
+def test_an_indicator_table_is_created_and_replaced_without_touching_the_others(database, tmp_path, project_id):
+    publish_indicator(database, tmp_path, project_id, "coverage", [1, 2])
+    publish_indicator(database, tmp_path, project_id, "attendance", [5])
+    publish_indicator(database, tmp_path, project_id, "coverage", [1, 2, 3])
+
+    schema = schema_name(project_id, "indicators")
+    assert indicator_tables(database, project_id) == ["attendance", "coverage"]
+    assert database.scalar(f'SELECT count(*) FROM "{schema}".coverage') == 3
+    assert database.scalar(f'SELECT count(*) FROM "{schema}".attendance') == 1
+    assert database.scalar("SELECT count(*) FROM pg_namespace WHERE nspname LIKE '%%__next'") == 0
+
+
+def test_a_failed_indicator_load_keeps_its_previous_table(database, tmp_path, project_id):
+    publish_indicator(database, tmp_path, project_id, "coverage", [1, 2])
+    bad = Table("coverage", tmp_path / "missing.parquet")
+
+    with database.connect() as connection, pytest.raises(Exception):  # noqa: B017, PT011 — whatever the load raises
+        publish_table(connection, project_id, "indicators", bad)
+
+    schema = schema_name(project_id, "indicators")
+    assert database.scalar(f'SELECT count(*) FROM "{schema}".coverage') == 2
+    assert database.scalar("SELECT count(*) FROM pg_namespace WHERE nspname LIKE '%%__next'") == 0
+
+
+def test_a_reader_of_one_indicator_does_not_delay_another(database, tmp_path, project_id):
+    publish_indicator(database, tmp_path, project_id, "coverage", [1])
+    publish_indicator(database, tmp_path, project_id, "attendance", [1])
+    reader = Reader(database, schema_name(project_id, "indicators"), "coverage")
+    try:
+        started = time.monotonic()
+        waited = publish_indicator(
+            database,
+            tmp_path,
+            project_id,
+            "attendance",
+            [1, 2],
+            lock_timeout_seconds=0.3,
+            sleep=lambda s: pytest.fail(),
+        )
+    finally:
+        reader.release()
+
+    assert time.monotonic() - started < 3.0
+    assert waited < 0.3
+    schema = schema_name(project_id, "indicators")
+    assert database.scalar(f'SELECT count(*) FROM "{schema}".attendance') == 2
+
+
+def test_the_table_swap_waits_for_a_reader_of_the_same_table_and_then_succeeds(database, tmp_path, project_id):
+    publish_indicator(database, tmp_path, project_id, "coverage", [1])
+    schema = schema_name(project_id, "indicators")
+    reader = Reader(database, schema, "coverage")
+    pauses = []
+
+    def pause(seconds):
+        pauses.append(seconds)
+        reader.release()  # the export finished while the step was waiting
+
+    waited = publish_indicator(
+        database, tmp_path, project_id, "coverage", [1, 2, 3], lock_timeout_seconds=0.3, sleep=pause
+    )
+
+    assert pauses[0] == 1.0
+    assert waited >= 0.3
+    assert database.scalar(f'SELECT count(*) FROM "{schema}".coverage') == 3
+
+
+def test_an_indicator_gives_up_when_its_table_stays_in_use_and_keeps_the_previous_one(database, tmp_path, project_id):
+    publish_indicator(database, tmp_path, project_id, "coverage", [1])
+    schema = schema_name(project_id, "indicators")
+    reader = Reader(database, schema, "coverage")
+    try:
+        with pytest.raises(PublishError, match="previous tables stay published"):
+            publish_indicator(
+                database, tmp_path, project_id, "coverage", [1, 2], max_wait_seconds=3, lock_timeout_seconds=0.5
+            )
+    finally:
+        reader.release()
+
+    assert database.scalar(f'SELECT count(*) FROM "{schema}".coverage') == 1
+    assert database.scalar("SELECT count(*) FROM pg_namespace WHERE nspname LIKE '%%__next'") == 0
+
+
+def test_tables_of_removed_indicators_are_dropped_and_the_others_stay(database, tmp_path, project_id):
+    for name in ("coverage", "attendance", "old_rate"):
+        publish_indicator(database, tmp_path, project_id, name, [1])
+
+    with database.connect() as connection:
+        removed = drop_tables_except(connection, project_id, "indicators", ["coverage", "attendance"])
+
+    assert removed == ["old_rate"]
+    assert indicator_tables(database, project_id) == ["attendance", "coverage"]
+
+
+def test_dropping_removed_tables_creates_the_schema_when_there_is_none(database, project_id):
+    with database.connect() as connection:
+        assert drop_tables_except(connection, project_id, "indicators", ["coverage"]) == []
+
+    assert (
+        database.scalar("SELECT count(*) FROM pg_namespace WHERE nspname = %s", schema_name(project_id, "indicators"))
+        == 1
+    )
+
+
+def test_a_removed_indicator_table_in_use_is_waited_for(database, tmp_path, project_id):
+    publish_indicator(database, tmp_path, project_id, "old_rate", [1])
+    reader = Reader(database, schema_name(project_id, "indicators"), "old_rate")
+
+    def pause(seconds):
+        reader.release()
+
+    with database.connect() as connection:
+        removed = drop_tables_except(connection, project_id, "indicators", [], lock_timeout_seconds=0.3, sleep=pause)
+
+    assert removed == ["old_rate"]
+    assert indicator_tables(database, project_id) == []

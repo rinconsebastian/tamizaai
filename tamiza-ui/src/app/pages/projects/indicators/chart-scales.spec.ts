@@ -14,7 +14,7 @@ import {
   truncate,
 } from './chart-scales';
 
-const r = (indicator: string, group: string | null, value: number): QueryRow => ({ indicator, group, value, geometry: null });
+const r = (group: string | null, value: number): QueryRow => ({ group, value, geometry: null });
 
 describe('chart scales', () => {
   describe('linearScale', () => {
@@ -113,51 +113,36 @@ describe('chart scales', () => {
 
 describe('chart data', () => {
   describe('pivot', () => {
-    const rows = [r('coverage', 'Cali', 5), r('target', 'Cali', 8), r('coverage', 'Bogotá', 3), r('coverage', null, 1)];
+    const rows = [r('Cali', 5), r('Bogotá', 3), r(null, 1)];
 
-    it('makes a category per group and a series per indicator, in the order listed', () => {
-      const data = pivot(rows, ['coverage', 'target'], '(none)', 'listed');
+    it('makes a category per group with its value, in the order listed', () => {
+      const data = pivot(rows, '(none)', 'listed');
 
       expect(data.categories).toEqual(['Cali', 'Bogotá', '(none)']);
-      expect(data.series).toEqual([
-        { name: 'coverage', values: [5, 3, 1] },
-        { name: 'target', values: [8, null, null] },
-      ]);
+      expect(data.values).toEqual([5, 3, 1]);
     });
 
-    it('orders categories naturally on request, a missing group last', () => {
-      const data = pivot([r('a', null, 1), r('a', '10', 1), r('a', '2', 1)], ['a'], '(none)', 'natural');
+    it('orders categories naturally on request, a missing group last, each keeping its value', () => {
+      const data = pivot([r(null, 1), r('10', 3), r('2', 2)], '(none)', 'natural');
 
       expect(data.categories).toEqual(['2', '10', '(none)']);
-    });
-
-    it('keeps a series for a named indicator that has no rows, and adds one for an unnamed indicator', () => {
-      const data = pivot([r('extra', 'A', 1)], ['coverage'], '(none)', 'listed');
-
-      expect(data.series.map((s) => s.name)).toEqual(['coverage', 'extra']);
-      expect(data.series[0].values).toEqual([null]);
-    });
-
-    it('sums rows that share an indicator and a group', () => {
-      const data = pivot([r('coverage', 'Cali', 40), r('coverage', 'Cali', 35)], ['coverage'], '(none)', 'listed');
-
-      expect(data.series[0].values).toEqual([75]);
+      expect(data.values).toEqual([2, 3, 1]);
     });
   });
 
   describe('histogram', () => {
     it('counts rows in equal-width ranges between the smallest and the largest value', () => {
-      const { buckets } = histogram([r('a', '1', 0), r('a', '2', 2), r('a', '3', 5), r('a', '4', 9), r('a', '5', 10)], ['a'], 2);
+      const buckets = histogram([r('1', 0), r('2', 2), r('3', 5), r('4', 9), r('5', 10)], 2);
 
-      expect(buckets.map((b) => [b.from, b.to, b.counts])).toEqual([[0, 5, [2]], [5, 10, [3]]]);
+      expect(buckets.map((b) => [b.from, b.to, b.count])).toEqual([[0, 5, 2], [5, 10, 3]]);
     });
 
     it('answers no buckets when there are no rows', () => {
-      expect(histogram([], ['a'], 10).buckets).toEqual([]);
+      expect(histogram([], 10)).toEqual([]);
     });
 
     it('treats a bucket count below one as one', () => {
-      expect(histogram([r('a', '1', 1), r('a', '2', 3)], ['a'], 0).buckets).toHaveLength(1);
+      expect(histogram([r('1', 1), r('2', 3)], 0)).toHaveLength(1);
     });
   });
 });

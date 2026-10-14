@@ -1,9 +1,9 @@
 import { settle } from '../../../../testing/project-harness';
 import { Layout } from '../../../core/projects/indicators.service';
-import { Context, all, answerQueries, clearOverlay, indicatorsUrl, isPatch, open, result, row, text, wait, widget } from './indicators-testing';
+import { Context, all, answerQueries, clearOverlay, indicatorsUrl, isPatch, open, overview, result, row, text, wait, widget } from './indicators-testing';
 import { layoutSaveDelayMs } from '../project-indicators';
 
-const rows = result([row('coverage', 'Cali', 75)]);
+const rows = result([row('Cali', 75)]);
 const left = widget('w1', { title: 'Left', layout: { x: 0, y: 0, w: 6, h: 4 } });
 const right = widget('w2', { title: 'Right', layout: { x: 6, y: 0, w: 6, h: 4 } });
 
@@ -193,7 +193,7 @@ describe('the widget grid', () => {
       await settle(context.harness);
 
       const reload = context.http.expectOne((r) => r.method === 'GET' && r.url === indicatorsUrl);
-      reload.flush({ published: true, publishedAt: null, runId: null, widgets: [left, right], limits: { maxWidgets: 50, maxQueryRows: 5000 } });
+      reload.flush(overview([left, right]));
       await settle(context.harness);
       await answerQueries(context, rows);
       expect(place(context, 'w1')).toEqual({ column: '1 / span 6', row: '1 / span 4' });

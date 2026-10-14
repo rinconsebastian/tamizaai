@@ -1,14 +1,15 @@
 import { DIALOG_DATA, Dialog, DialogRef } from '@angular/cdk/dialog';
 import { Component, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
-import { Observable, of } from 'rxjs';
+import { Observable, catchError, of, switchMap, tap } from 'rxjs';
 import { ApiErrors } from '../../../core/api-error';
-import { DataColumn, DataFilter } from '../../../core/projects/data.service';
+import { DataFilter } from '../../../core/projects/data.service';
 import {
   ChartType,
-  IndicatorsColumns,
+  IndicatorColumns,
+  IndicatorEntry,
   IndicatorsService,
-  ValueField,
   Widget,
   WidgetConfig,
   chartTypes,
@@ -16,8 +17,7 @@ import {
   maxBuckets,
   maxFilters,
   maxTitleLength,
-  takesOneIndicator,
-  valueFields,
+  needsGroup,
 } from '../../../core/projects/indicators.service';
 import { Alert, Button, FormField, Input } from '../../../shared/ui';
 import { DataFilterDialog, DataFilterDialogData, DataFilterDialogResult } from '../data-filter-dialog';
@@ -28,24 +28,22 @@ export interface WidgetDialogData {
   projectId: string;
   /** The widget to edit; null for a new one. */
   widget: Widget | null;
-  /** The published table's columns and indicators; empty (published false) while nothing is published. */
-  catalog: IndicatorsColumns;
+  /** The project's indicators, whether or not they have published. */
+  indicators: IndicatorEntry[];
   timeZone: string;
 }
 
-/** Most series the palette has colors for: a chart of several indicators takes this many. */
-export const maxSeries = 8;
 /** Debounce of the live preview: one request once the draft stops changing. */
 export const previewDelayMs = 400;
-/** Past this many indicators the picker offers a search box. */
-const searchFrom = 8;
 
-type Problems = Partial<Record<'title' | 'indicators' | 'groupBy' | 'geometryColumn' | 'buckets', string>>;
+type Mode = 'measure' | 'ratio';
+type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'groupBy' | 'geometryColumn' | 'buckets', string>>;
 
 /**
- * Adds or edits a widget (design D7, D9): its chart type and title, its query (indicators the chart type allows, group-by column,
- * plotted field, filters, geometry column for a map, histogram buckets) and a live preview from the same query endpoint that
- * renders a saved widget. A draft the server refuses shows that refusal where the preview is, never the previous chart.
+ * Adds or edits a widget (design D6, D8): its chart type and title, its query (the indicator, a measure or a ratio of two numeric
+ * columns, the group-by column, filters, the geometry column of a map, the buckets of a histogram) and a live preview from the
+ * same query endpoint that renders a saved widget. The columns offered are those of the chosen indicator's published table. A draft
+ * the server refuses shows that refusal where the preview is, never the previous chart.
  */
 @Component({
   selector: 'app-widget-dialog',
@@ -73,96 +71,97 @@ type Problems = Partial<Record<'title' | 'indicators' | 'groupBy' | 'geometryCol
         </tmz-form-field>
       </div>
 
-      <fieldset class="min-w-0" data-testid="dialog-indicators" [attr.aria-describedby]="shown().indicators ? 'widgetIndicatorsError' : null">
-        <legend class="mb-2 text-sm font-medium text-heading">{{ t('indicators.dialog.indicators') }}</legend>
-        <p class="mb-2 text-xs text-body" data-testid="indicators-rule">{{ single() ? t('indicators.dialog.indicatorsOne') : t('indicators.dialog.indicatorsMany', { count: maxSeries }) }}</p>
-        @if (catalog.published) {
-          @if (catalog.indicators.length > searchFrom) {
-            <input tmzInput type="search" class="mb-2" autocomplete="off" [attr.aria-label]="t('indicators.dialog.search')" [placeholder]="t('indicators.dialog.search')" [value]="search()" (input)="search.set($any($event.target).value)" data-testid="indicator-search" />
+      <tmz-form-field [label]="t('indicators.dialog.indicator')" fieldId="widgetIndicator" [error]="shown().indicator" [hint]="entry()?.description ?? null">
+        <select tmzInput id="widgetIndicator" (change)="pick($any($event.target).value)" data-testid="dialog-indicator">
+          <option value="" [selected]="!indicator()">{{ t('indicators.dialog.indicatorChoose') }}</option>
+          @for (option of listed(); track option.name) {
+            <option [value]="option.name" [selected]="option.name === indicator()">{{ optionText(option, t) }}</option>
           }
-          <ul class="max-h-44 divide-y divide-default overflow-y-auto rounded-base border border-default" data-testid="indicator-list">
-            @for (name of listed(); track name) {
-              <li>
-                <label class="flex min-h-10 cursor-pointer items-start gap-3 px-3 py-2 text-sm">
-                  @if (single()) {
-                    <input type="radio" name="widgetIndicator" class="mt-0.5 size-4 shrink-0" [value]="name" [checked]="indicators().includes(name)" (change)="pick(name)" data-testid="indicator-option" />
-                  } @else {
-                    <input
-                      type="checkbox"
-                      name="widgetIndicator"
-                      class="mt-0.5 size-4 shrink-0"
-                      [value]="name"
-                      [checked]="indicators().includes(name)"
-                      [disabled]="!indicators().includes(name) && indicators().length >= maxSeries"
-                      (change)="pick(name)"
-                      data-testid="indicator-option"
-                    />
-                  }
-                  <span class="min-w-0 flex-1 break-all text-heading">{{ name }}</span>
-                  @if (!known(name)) {
-                    <span class="shrink-0 text-xs text-fg-warning" data-testid="indicator-gone">{{ t('indicators.dialog.notPublished') }}</span>
-                  }
-                </label>
-              </li>
-            } @empty {
-              <li class="px-3 py-2 text-sm text-body">{{ t('indicators.dialog.noIndicators') }}</li>
-            }
-          </ul>
-        } @else {
-          <input tmzInput autocomplete="off" [attr.aria-label]="t('indicators.dialog.indicatorsText')" [value]="indicators().join(', ')" (input)="typeIndicators($any($event.target).value)" data-testid="indicator-text" />
-          <p class="mt-2 text-xs text-body">{{ t('indicators.dialog.unpublishedHelp') }}</p>
+        </select>
+      </tmz-form-field>
+      @if (entry(); as entry) {
+        <p class="-mt-2 text-xs text-body" data-testid="dialog-format-note">
+          {{ entry.unit ? t('indicators.dialog.formatNoteUnit', { format: t('scripts.formats.' + entry.format), unit: entry.unit }) : t('indicators.dialog.formatNote', { format: t('scripts.formats.' + entry.format) }) }}
+        </p>
+      }
+      @if (catalog(); as catalog) {
+        @if (!catalog.published) {
+          <tmz-alert tone="warning" data-testid="dialog-unpublished">{{ t('indicators.dialog.unpublished', { label: entry()?.label ?? indicator() }) }}</tmz-alert>
         }
-        <p class="mt-2 text-sm text-body" data-testid="indicators-selected">{{ t('indicators.dialog.selected', { count: indicators().length }) }}</p>
-        @if (shown().indicators; as message) {
-          <p id="widgetIndicatorsError" class="mt-1 text-sm text-fg-danger-strong" data-testid="field-error">{{ message }}</p>
-        }
-      </fieldset>
+      }
 
       <div class="grid gap-4 sm:grid-cols-2">
-        <tmz-form-field [label]="t('indicators.dialog.groupBy')" fieldId="widgetGroupBy" [error]="shown().groupBy">
-          @if (catalog.published) {
-            <select tmzInput id="widgetGroupBy" (change)="groupBy.set($any($event.target).value)" data-testid="dialog-group-by">
-              @for (column of groupColumns(); track column.name) {
-                <option [value]="column.name" [selected]="column.name === groupBy()">{{ column.name }}</option>
-              }
-            </select>
-          } @else {
-            <input tmzInput id="widgetGroupBy" autocomplete="off" [value]="groupBy()" (input)="groupBy.set($any($event.target).value)" data-testid="dialog-group-by" />
-          }
-        </tmz-form-field>
-        <tmz-form-field [label]="t('indicators.dialog.valueField')" fieldId="widgetValueField">
-          <select tmzInput id="widgetValueField" (change)="valueField.set($any($event.target).value)" data-testid="dialog-value-field">
-            @for (field of valueFields; track field) {
-              <option [value]="field" [selected]="field === valueField()">{{ t('indicators.valueFields.' + field) }}</option>
-            }
+        <tmz-form-field [label]="t('indicators.dialog.plot')" fieldId="widgetMode">
+          <select tmzInput id="widgetMode" (change)="setMode($any($event.target).value)" data-testid="dialog-mode">
+            <option value="measure" [selected]="mode() === 'measure'">{{ t('indicators.dialog.modeMeasure') }}</option>
+            <option value="ratio" [selected]="mode() === 'ratio'">{{ t('indicators.dialog.modeRatio') }}</option>
           </select>
         </tmz-form-field>
-      </div>
-
-      @if (chartType() === 'map') {
-        <tmz-form-field [label]="t('indicators.dialog.geometry')" fieldId="widgetGeometry" [error]="shown().geometryColumn" [hint]="t('indicators.dialog.geometryHelp')">
-          @if (catalog.published) {
-            <select tmzInput id="widgetGeometry" (change)="geometryColumn.set($any($event.target).value)" data-testid="dialog-geometry">
-              <option value="" [selected]="!geometryColumn()">{{ t('indicators.dialog.geometryChoose') }}</option>
-              @for (column of geometryColumns(); track column.name) {
-                <option [value]="column.name" [selected]="column.name === geometryColumn()">{{ column.name }}</option>
+        @if (mode() === 'measure') {
+          <tmz-form-field [label]="t('indicators.dialog.measure')" fieldId="widgetMeasure" [error]="shown().measure">
+            <select tmzInput id="widgetMeasure" (change)="measure.set($any($event.target).value)" data-testid="dialog-measure">
+              <option value="" [selected]="!measure()">{{ defaultMeasureText(t) }}</option>
+              @for (column of numericColumns(); track column) {
+                <option [value]="column" [selected]="column === measure()">{{ column }}</option>
               }
             </select>
-          } @else {
-            <input tmzInput id="widgetGeometry" autocomplete="off" [value]="geometryColumn()" (input)="geometryColumn.set($any($event.target).value)" data-testid="dialog-geometry" />
-          }
-        </tmz-form-field>
+          </tmz-form-field>
+        }
+      </div>
+      @if (mode() === 'ratio') {
+        <div class="grid gap-4 sm:grid-cols-2">
+          <tmz-form-field [label]="t('indicators.dialog.numerator')" fieldId="widgetNumerator" [error]="shown().ratio">
+            <select tmzInput id="widgetNumerator" (change)="numerator.set($any($event.target).value)" data-testid="dialog-numerator">
+              <option value="" [selected]="!numerator()">{{ t('indicators.dialog.columnChoose') }}</option>
+              @for (column of numericColumns(); track column) {
+                <option [value]="column" [selected]="column === numerator()">{{ column }}</option>
+              }
+            </select>
+          </tmz-form-field>
+          <tmz-form-field [label]="t('indicators.dialog.denominator')" fieldId="widgetDenominator" [hint]="t('indicators.dialog.ratioHelp')">
+            <select tmzInput id="widgetDenominator" (change)="denominator.set($any($event.target).value)" data-testid="dialog-denominator">
+              <option value="" [selected]="!denominator()">{{ t('indicators.dialog.columnChoose') }}</option>
+              @for (column of numericColumns(); track column) {
+                <option [value]="column" [selected]="column === denominator()">{{ column }}</option>
+              }
+            </select>
+          </tmz-form-field>
+        </div>
       }
 
-      @if (chartType() === 'histogram') {
-        <tmz-form-field class="sm:w-56" [label]="t('indicators.dialog.buckets')" fieldId="widgetBuckets" [error]="shown().buckets" [hint]="t('indicators.dialog.bucketsHelp', { max: maxBuckets })">
-          <input tmzInput id="widgetBuckets" type="number" min="1" [attr.max]="maxBuckets" step="1" inputmode="numeric" [value]="buckets()" (input)="buckets.set($any($event.target).value)" data-testid="dialog-buckets" />
-        </tmz-form-field>
-      }
+      <div class="grid gap-4 sm:grid-cols-2">
+        @if (chartType() !== 'stat') {
+          <tmz-form-field [label]="t('indicators.dialog.groupBy')" fieldId="widgetGroupBy" [error]="shown().groupBy" [hint]="groups() ? null : t('indicators.dialog.groupByOptional')">
+            <select tmzInput id="widgetGroupBy" (change)="groupBy.set($any($event.target).value)" data-testid="dialog-group-by">
+              <option value="" [selected]="!groupBy()">{{ groups() ? t('indicators.dialog.columnChoose') : t('indicators.dialog.groupByNone') }}</option>
+              @for (column of allColumns(); track column) {
+                <option [value]="column" [selected]="column === groupBy()">{{ column }}</option>
+              }
+            </select>
+          </tmz-form-field>
+        }
+
+        @if (chartType() === 'map') {
+          <tmz-form-field [label]="t('indicators.dialog.geometry')" fieldId="widgetGeometry" [error]="shown().geometryColumn" [hint]="t('indicators.dialog.geometryHelp')">
+            <select tmzInput id="widgetGeometry" (change)="geometryColumn.set($any($event.target).value)" data-testid="dialog-geometry">
+              <option value="" [selected]="!geometryColumn()">{{ t('indicators.dialog.columnChoose') }}</option>
+              @for (column of geometryColumns(); track column) {
+                <option [value]="column" [selected]="column === geometryColumn()">{{ column }}</option>
+              }
+            </select>
+          </tmz-form-field>
+        }
+
+        @if (chartType() === 'histogram') {
+          <tmz-form-field [label]="t('indicators.dialog.buckets')" fieldId="widgetBuckets" [error]="shown().buckets" [hint]="t('indicators.dialog.bucketsHelp', { max: maxBuckets })">
+            <input tmzInput id="widgetBuckets" type="number" min="1" [attr.max]="maxBuckets" step="1" inputmode="numeric" [value]="buckets()" (input)="buckets.set($any($event.target).value)" data-testid="dialog-buckets" />
+          </tmz-form-field>
+        }
+      </div>
 
       <section aria-labelledby="widgetFiltersTitle" data-testid="dialog-filters">
         <h3 id="widgetFiltersTitle" class="mb-2 text-sm font-medium text-heading">{{ t('indicators.dialog.filters') }}</h3>
-        @if (catalog.published) {
+        @if (catalog()?.published) {
           @if (filters().length) {
             <ul class="mb-3 flex flex-wrap items-center gap-2">
               @for (filter of filters(); track $index) {
@@ -180,8 +179,8 @@ type Problems = Partial<Record<'title' | 'indicators' | 'groupBy' | 'geometryCol
               <div class="min-w-0 sm:w-64">
                 <label for="widgetFilterColumn" class="mb-2 block text-sm text-body">{{ t('indicators.dialog.filterColumn') }}</label>
                 <select tmzInput id="widgetFilterColumn" data-testid="filter-column" #filterColumn>
-                  @for (column of catalog.columns; track column.name) {
-                    <option [value]="column.name">{{ column.name }}</option>
+                  @for (column of allColumns(); track column) {
+                    <option [value]="column">{{ column }}</option>
                   }
                 </select>
               </div>
@@ -202,7 +201,7 @@ type Problems = Partial<Record<'title' | 'indicators' | 'groupBy' | 'geometryCol
             [projectId]="data.projectId"
             [chartType]="chartType()"
             [config]="previewConfig()"
-            [enabled]="catalog.published"
+            [indicator]="entry()"
             [debounceMs]="previewDelayMs"
             [placeholder]="t('indicators.dialog.previewIncomplete')"
           />
@@ -228,64 +227,76 @@ export class WidgetDialog {
   private readonly dialog = inject(Dialog);
   private readonly transloco = inject(TranslocoService);
 
-  protected readonly catalog = this.data.catalog;
   protected readonly chartTypes = chartTypes;
-  protected readonly valueFields = valueFields;
-  protected readonly maxSeries = maxSeries;
   protected readonly maxBuckets = maxBuckets;
   protected readonly maxFilters = maxFilters;
   protected readonly maxTitleLength = maxTitleLength;
   protected readonly previewDelayMs = previewDelayMs;
-  protected readonly searchFrom = searchFrom;
 
   private readonly start = this.data.widget?.config ?? emptyConfig();
 
   protected readonly chartType = signal<ChartType>(this.data.widget?.chartType ?? 'column');
   protected readonly title = signal(this.data.widget?.title ?? '');
-  protected readonly indicators = signal<string[]>([...this.start.indicators]);
-  protected readonly groupBy = signal(this.start.groupBy);
-  protected readonly valueField = signal<ValueField>(this.start.valueField);
+  /** A new widget starts on the first indicator that has published, or the first there is. */
+  protected readonly indicator = signal(
+    this.data.widget ? this.start.indicator : (this.data.indicators.find((i) => i.published) ?? this.data.indicators[0])?.name ?? '',
+  );
+  protected readonly mode = signal<Mode>(this.start.ratio ? 'ratio' : 'measure');
+  protected readonly measure = signal(this.start.measure ?? '');
+  protected readonly numerator = signal(this.start.ratio?.numerator ?? '');
+  protected readonly denominator = signal(this.start.ratio?.denominator ?? '');
+  protected readonly groupBy = signal(this.start.groupBy ?? '');
   protected readonly filters = signal<DataFilter[]>(this.start.filters.map(normalizeFilter));
   protected readonly geometryColumn = signal(this.start.geometryColumn ?? '');
   protected readonly buckets = signal(this.start.buckets === null ? '' : String(this.start.buckets));
-  protected readonly search = signal('');
+
+  /** The chosen indicator's published table; null while it loads, when none is chosen or when it cannot be read. */
+  protected readonly catalog = signal<IndicatorColumns | null>(null);
+  /** The next table to arrive fills in the defaults: a new widget, or another indicator just chosen. */
+  private fresh = !this.data.widget;
 
   protected readonly submitted = signal(false);
   protected readonly busy = signal(false);
   protected readonly error = signal<string | null>(null);
   private readonly serverFieldErrors = signal<Problems>({});
 
-  protected readonly single = computed(() => takesOneIndicator(this.chartType()));
+  protected readonly entry = computed(() => this.data.indicators.find((i) => i.name === this.indicator()) ?? null);
 
-  /** The indicators to choose from, with any the widget names that the table no longer has kept on top. */
-  protected readonly listed = computed(() => {
-    const all = this.catalog.indicators;
-    const gone = this.indicators().filter((name) => !all.includes(name));
-    const term = this.search().trim().toLowerCase();
-    return [...gone, ...all.filter((name) => !term || name.toLowerCase().includes(term))];
+  /** The indicators to choose from, with the one the widget names kept on top when the project no longer lists it. */
+  protected readonly listed = computed<IndicatorEntry[]>(() => {
+    const chosen = this.indicator();
+    const all = this.data.indicators;
+    return chosen && !all.some((i) => i.name === chosen)
+      ? [{ name: chosen, label: chosen, description: null, unit: null, format: 'decimal', published: false, publishedAt: null, runId: null, rows: null }, ...all]
+      : all;
   });
 
-  protected readonly groupColumns = computed(() => {
-    const columns = this.catalog.columns;
-    return columns.some((c) => c.name === this.groupBy()) ? columns : [{ name: this.groupBy(), type: 'text', label: null } as DataColumn, ...columns];
-  });
+  /** Whether the chart type plots one value per group, so the group column is required. */
+  protected readonly groups = computed(() => needsGroup(this.chartType()));
 
+  /** The table's columns, with any the widget names that the table no longer has kept so the form shows what is saved. */
+  private columnsWith(names: readonly string[], current: readonly string[]): string[] {
+    return [...current.filter((name) => name && !names.includes(name)), ...names];
+  }
+
+  protected readonly numericColumns = computed(() =>
+    this.columnsWith(this.catalog()?.numeric ?? [], [this.measure(), this.numerator(), this.denominator()]).filter((name, i, all) => all.indexOf(name) === i),
+  );
+  protected readonly allColumns = computed(() => this.columnsWith(this.catalog()?.columns.map((c) => c.name) ?? [], [this.groupBy()]));
   /** A geometry is WKT text. */
-  protected readonly geometryColumns = computed(() => {
-    const text = this.catalog.columns.filter((c) => c.type === 'text');
-    const current = this.geometryColumn();
-    return current && !text.some((c) => c.name === current) ? [{ name: current, type: 'text', label: null } as DataColumn, ...text] : text;
-  });
+  protected readonly geometryColumns = computed(() =>
+    this.columnsWith(this.catalog()?.columns.filter((c) => c.type === 'text').map((c) => c.name) ?? [], [this.geometryColumn()]),
+  );
 
   private readonly draft = computed<WidgetConfig>(() => {
-    const type = this.chartType();
     const buckets = this.buckets().trim();
-    return queryFor(type, {
-      indicators: this.indicators(),
-      groupBy: this.groupBy().trim(),
-      valueField: this.valueField(),
+    return queryFor(this.chartType(), {
+      indicator: this.indicator(),
+      measure: this.mode() === 'measure' && this.measure() ? this.measure() : null,
+      ratio: this.mode() === 'ratio' ? { numerator: this.numerator(), denominator: this.denominator() } : null,
+      groupBy: this.groupBy() || null,
       filters: this.filters(),
-      geometryColumn: this.geometryColumn().trim() || null,
+      geometryColumn: this.geometryColumn() || null,
       buckets: buckets === '' ? null : Number(buckets),
     });
   });
@@ -302,12 +313,13 @@ export class WidgetDialog {
     } else if (title.length > maxTitleLength) {
       problems.title = t('indicators.dialog.errors.titleLong', { max: maxTitleLength });
     }
-    if (takesOneIndicator(type) ? config.indicators.length !== 1 : config.indicators.length < 1) {
-      problems.indicators = takesOneIndicator(type) ? t('indicators.dialog.errors.indicatorsOne') : t('indicators.dialog.errors.indicatorsMany');
-    } else if (!takesOneIndicator(type) && config.indicators.length > maxSeries) {
-      problems.indicators = t('indicators.dialog.errors.indicatorsMax', { count: maxSeries });
+    if (!config.indicator) {
+      problems.indicator = t('indicators.dialog.errors.indicator');
     }
-    if (!config.groupBy) {
+    if (config.ratio && (!config.ratio.numerator || !config.ratio.denominator)) {
+      problems.ratio = t('indicators.dialog.errors.ratio');
+    }
+    if (needsGroup(type) && !config.groupBy) {
       problems.groupBy = t('indicators.dialog.errors.groupBy');
     }
     if (type === 'map' && !config.geometryColumn) {
@@ -328,8 +340,52 @@ export class WidgetDialog {
     return Object.keys(query).length ? null : this.draft();
   });
 
-  protected known(name: string): boolean {
-    return this.catalog.indicators.includes(name);
+  constructor() {
+    toObservable(this.indicator)
+      .pipe(
+        tap(() => this.catalog.set(null)),
+        switchMap((name) =>
+          name
+            ? this.service.columns(this.data.projectId, name).pipe(
+                catchError((failure) => {
+                  this.errors.report(failure);
+                  return of(null);
+                }),
+              )
+            : of(null),
+        ),
+        takeUntilDestroyed(),
+      )
+      .subscribe((catalog) => {
+        this.catalog.set(catalog);
+        if (catalog?.published && this.fresh) {
+          this.fillDefaults(catalog);
+        }
+        this.fresh = false;
+      });
+  }
+
+  /** What a new widget over the table starts with: its default group column and, for a ratio, the conventional columns. */
+  private fillDefaults(catalog: IndicatorColumns): void {
+    if (!this.groupBy()) {
+      this.groupBy.set(catalog.defaults.groupBy ?? '');
+    }
+    if (!this.numerator() && catalog.numeric.includes('numerator')) {
+      this.numerator.set('numerator');
+    }
+    if (!this.denominator() && catalog.numeric.includes('denominator')) {
+      this.denominator.set('denominator');
+    }
+  }
+
+  protected optionText(option: IndicatorEntry, t: (key: string, params?: Record<string, unknown>) => string): string {
+    const text = `${option.label} (${option.name})`;
+    return option.published ? text : `${text} · ${t('indicators.dialog.notPublished')}`;
+  }
+
+  protected defaultMeasureText(t: (key: string, params?: Record<string, unknown>) => string): string {
+    const measure = this.catalog()?.defaults.measure;
+    return measure ? t('indicators.dialog.measureDefault', { column: measure }) : t('indicators.dialog.measureDefaultUnknown');
   }
 
   protected describe(filter: DataFilter, t: (key: string, params?: Record<string, unknown>) => string): string {
@@ -337,30 +393,29 @@ export class WidgetDialog {
   }
 
   protected setType(value: string): void {
-    const type = value as ChartType;
-    this.chartType.set(type);
-    if (takesOneIndicator(type) && this.indicators().length > 1) {
-      this.indicators.update((list) => list.slice(0, 1)); // a second indicator does not fit this chart type
-    }
+    this.chartType.set(value as ChartType);
     this.serverFieldErrors.set({});
   }
 
+  protected setMode(value: string): void {
+    this.mode.set(value as Mode);
+    this.serverFieldErrors.set({});
+  }
+
+  /** Another indicator has other columns: what was chosen from the old table is dropped, and the new one's defaults fill in. */
   protected pick(name: string): void {
-    if (this.single()) {
-      this.indicators.set([name]);
-    } else {
-      this.indicators.update((list) => (list.includes(name) ? list.filter((n) => n !== name) : list.length < maxSeries ? [...list, name] : list));
+    if (name === this.indicator()) {
+      return;
     }
+    this.indicator.set(name);
+    this.measure.set('');
+    this.numerator.set('');
+    this.denominator.set('');
+    this.groupBy.set('');
+    this.geometryColumn.set('');
+    this.filters.set([]);
+    this.fresh = true;
     this.serverFieldErrors.set({});
-  }
-
-  /** While nothing is published there is no list to choose from: indicators are typed, separated by commas. */
-  protected typeIndicators(text: string): void {
-    const names = text
-      .split(',')
-      .map((n) => n.trim())
-      .filter((n, i, all) => n && all.indexOf(n) === i);
-    this.indicators.set(this.single() ? names.slice(0, 1) : names);
   }
 
   protected removeFilter(column: string): void {
@@ -369,7 +424,7 @@ export class WidgetDialog {
 
   /** Opens the clean data dashboard's filter dialog for a column; one filter per column, so an existing one is edited. */
   protected openFilter(columnName: string): void {
-    const column = this.catalog.columns.find((c) => c.name === columnName);
+    const column = this.catalog()?.columns.find((c) => c.name === columnName);
     if (!column) {
       return;
     }
@@ -378,8 +433,9 @@ export class WidgetDialog {
       column,
       filter: existing,
       timeZone: this.data.timeZone,
-      allowTypedValues: columnName !== 'indicator',
-      loadValues: (search) => of(this.indicatorValues(columnName, search)),
+      // The table cannot list a column's values, so they are typed.
+      allowTypedValues: true,
+      loadValues: () => of([]),
       check: (filter) => this.check(filter),
     };
     const ref = this.dialog.open<DataFilterDialogResult, DataFilterDialogData>(DataFilterDialog, {
@@ -404,23 +460,14 @@ export class WidgetDialog {
     });
   }
 
-  /** The column `indicator` can list its values; no other column can, so values are typed. */
-  private indicatorValues(column: string, search: string): { value: string; count: number | null }[] {
-    if (column !== 'indicator') {
-      return [];
-    }
-    const term = search.toLowerCase();
-    return this.catalog.indicators.filter((name) => !term || name.toLowerCase().includes(term)).map((value) => ({ value, count: null }));
-  }
-
   /** The server's verdict on a filter, asked with the rest of the draft as it stands; there is nothing to ask until an indicator is chosen. */
   private check(filter: DataFilter): Observable<unknown> {
     const config = this.draft();
-    if (!config.indicators.length || !config.groupBy) {
+    if (!config.indicator) {
       return of(null);
     }
     const others = config.filters.filter((f) => f.column !== filter.column);
-    return this.service.query(this.data.projectId, { ...config, filters: [...others, normalizeFilter(filter)] });
+    return this.service.query(this.data.projectId, { ...config, filters: [...others, normalizeFilter(filter)] }, this.chartType());
   }
 
   protected save(): void {
@@ -455,7 +502,9 @@ export class WidgetDialog {
   private fieldFor(path: string): keyof Problems | null {
     const name = path.toLowerCase();
     if (name.includes('title')) return 'title';
-    if (name.includes('indicators')) return 'indicators';
+    if (name.includes('ratio')) return 'ratio';
+    if (name.includes('measure')) return 'measure';
+    if (name.includes('indicator')) return 'indicator';
     if (name.includes('groupby')) return 'groupBy';
     if (name.includes('geometrycolumn')) return 'geometryColumn';
     if (name.includes('buckets')) return 'buckets';

@@ -58,9 +58,12 @@ public static class RunEndpoints
 
         var steps = await db.RunSteps.AsNoTracking().Where(s => s.RunId == runId).ToListAsync(ct);
         var referenceTables = await db.Runs.Where(r => r.Id == runId).Select(r => r.ReferenceTables).SingleAsync(ct);
+        var versions = await db.Runs.Where(r => r.Id == runId).Select(r => r.IndicatorVersions).SingleAsync(ct);
+        var versionIds = versions.Select(v => v.VersionId).ToList();
+        var labels = await db.ScriptVersions.AsNoTracking().Where(v => versionIds.Contains(v.Id)).ToDictionaryAsync(v => v.Name!, v => v.Label, ct);
         return TypedResults.Ok(new RunDetails(summary, steps
-            .OrderBy(s => s.Step)
-            .Select(s => new StepDetails(s.Step, s.Status, s.StartedAt, s.FinishedAt, s.InputRows, s.OutputRows, s.Tables, s.Log, s.Error))
+            .OrderBy(s => s.Step).ThenBy(s => s.Name, StringComparer.Ordinal)
+            .Select(s => new StepDetails(s.Step, s.Name, labels.GetValueOrDefault(s.Name), s.Status, s.StartedAt, s.FinishedAt, s.InputRows, s.OutputRows, s.Tables, s.Log, s.Error))
             .ToList(), referenceTables));
     }
 
@@ -113,8 +116,7 @@ public static class RunEndpoints
                 RequestedBy = r.RequestedByUser == null ? null : new Person(r.RequestedByUser.Id, r.RequestedByUser.Name),
                 Clean = db.ScriptVersions.Where(v => v.Id == r.CleanVersionId).Select(v => (int?)v.Number).FirstOrDefault(),
                 Output = db.ScriptVersions.Where(v => v.Id == r.OutputVersionId).Select(v => (int?)v.Number).FirstOrDefault(),
-                Indicators = db.ScriptVersions.Where(v => v.Id == r.IndicatorsVersionId).Select(v => (int?)v.Number).FirstOrDefault(),
-                Steps = r.Steps.Select(s => new { s.Step, s.Status, s.InputRows, s.OutputRows }).ToList(),
+                Steps = r.Steps.Select(s => new { s.Step, s.Name, s.Status, s.InputRows, s.OutputRows }).ToList(),
             })
             .ToListAsync(ct);
         return rows.Select(row => new RunSummary(
@@ -125,8 +127,9 @@ public static class RunEndpoints
                 row.Run.QueuedAt,
                 row.Run.StartedAt,
                 row.Run.FinishedAt,
-                new RunVersions(row.Clean, row.Output, row.Indicators),
-                row.Steps.OrderBy(s => s.Step).Select(s => new StepSummary(s.Step, s.Status, s.InputRows, s.OutputRows)).ToList(),
+                new RunVersions(
+                    row.Clean, row.Output, row.Run.IndicatorVersions.OrderBy(v => v.Name, StringComparer.Ordinal).Select(v => new RunIndicatorNumber(v.Name, v.Number)).ToList()),
+                row.Steps.OrderBy(s => s.Step).ThenBy(s => s.Name, StringComparer.Ordinal).Select(s => new StepSummary(s.Step, s.Name, s.Status, s.InputRows, s.OutputRows)).ToList(),
                 row.Run.ErrorCode,
                 row.Run.Error))
             .ToList();

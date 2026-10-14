@@ -63,18 +63,17 @@ def test_clean_returns_tables(step):
     assert output(step_dir, "main")["age"].tolist() == [30, 41]
 
 
-def test_prepare_output_and_compute_indicators(step):
+def test_prepare_output_and_an_indicator(step):
     step_dir = step("""
         import pandas as pd
 
         def prepare_output(cleaned, ctx):
             return {"by_municipality": cleaned["main"].groupby("municipality").size().rename("n").to_frame()}
 
-        def compute_indicators(cleaned, ctx):
+        def compute(cleaned, ctx):
             main = cleaned["main"]
             adults = (main["age"] >= 18).sum()
-            return pd.DataFrame([{"indicator": "adults", "disaggregation": "total", "value": adults / len(main),
-                                  "numerator": adults, "denominator": len(main)}])
+            return pd.DataFrame([{"value": adults / len(main), "numerator": adults, "denominator": len(main)}])
     """)
 
     assert run_step(step_dir, "output")["status"] == "succeeded"
@@ -82,8 +81,9 @@ def test_prepare_output_and_compute_indicators(step):
         {"municipality": "buga", "n": 1},
         {"municipality": "cali", "n": 2},
     ]
-    assert run_step(step_dir, "indicators")["tables"] == [{"name": "indicators", "rows": 1}]
-    assert output(step_dir, "indicators")["numerator"].tolist() == [2]
+    # The table is named after the indicator.
+    assert run_step(step_dir, "indicator", "adult_rate")["tables"] == [{"name": "adult_rate", "rows": 1}]
+    assert output(step_dir, "adult_rate")["numerator"].tolist() == [2]
 
 
 def test_missing_function(step):
@@ -105,11 +105,16 @@ def test_missing_function(step):
         ("def clean(raw, ctx):\n    return {'a': 1}\n", "clean", "not a dictionary of int"),
         ("def clean(raw, ctx):\n    return None\n", "clean", "not None"),
         ("def clean(raw, ctx):\n    return {}\n", "clean", "returned no tables"),
-        ("def compute_indicators(cleaned, ctx):\n    return {}\n", "indicators", "must return a DataFrame, not dict"),
+        (
+            "def compute(cleaned, ctx):\n    return {'rate': 1}\n",
+            "indicator",
+            "compute must return a DataFrame, not a dictionary",
+        ),
+        ("def compute(cleaned, ctx):\n    return [1]\n", "indicator", "compute must return a DataFrame, not a list"),
     ],
 )
 def test_wrong_return_types(step, code, kind, message):
-    result = run_step(step(code), kind)
+    result = run_step(step(code), kind, "rate")
 
     assert result["status"] == "failed"
     assert message in result["error"]
@@ -312,28 +317,105 @@ def test_columns_that_collide_after_normalizing_fail(step):
     assert "'Age'" in result["error"] and "'age'" in result["error"]
 
 
-@pytest.mark.parametrize("missing", ["indicator", "disaggregation", "value", "numerator", "denominator"])
-def test_indicators_need_the_five_columns(step, missing):
-    columns = {
-        c: [1] for c in ["indicator", "disaggregation", "value", "numerator", "denominator", "unit"] if c != missing
-    }
-    code = f"import pandas as pd\ndef compute_indicators(cleaned, ctx):\n    return pd.DataFrame({columns!r})\n"
-
-    result = run_step(step(code), "indicators")
-
-    assert result["status"] == "failed"
-    assert result["error"].endswith(f"missing the column {missing}.")
-
-
-def test_indicator_columns_are_matched_after_normalizing(step):
+def test_indicator_publishes_the_columns_it_returns(step):
     step_dir = step("""
         import pandas as pd
-        def compute_indicators(cleaned, ctx):
-            columns = ["Indicator", "Disaggregation", "Value", "Numerator", "Denominator"]
-            return pd.DataFrame([["a", "t", 1.0, 1, 1]], columns=columns)
+        def compute(cleaned, ctx):
+            main = cleaned["main"]
+            rows = main.groupby("municipality").agg(numerator=("age", lambda ages: (ages >= 18).sum()),
+                                                    denominator=("age", "size")).reset_index()
+            rows["value"] = rows["numerator"] / rows["denominator"]
+            return rows
     """)
 
-    assert run_step(step_dir, "indicators")["status"] == "succeeded"
+    result = run_step(step_dir, "indicator", "adult_rate")
+
+    assert result == {"status": "succeeded", "tables": [{"name": "adult_rate", "rows": 2}]}
+    assert list(output(step_dir, "adult_rate").columns) == ["municipality", "numerator", "denominator", "value"]
+
+
+def test_indicator_without_a_numeric_column_fails(step):
+    step_dir = step("""
+        import pandas as pd
+        def compute(cleaned, ctx):
+            return pd.DataFrame({"municipality": ["cali", "buga"], "note": ["a", "b"]})
+    """)
+
+    result = run_step(step_dir, "indicator", "coverage")
+
+    assert result["status"] == "failed"
+    assert result["error"] == "The indicator table has no numeric column; add at least one, such as `value`."
+    assert not (step_dir / "output").exists()
+
+
+def test_a_boolean_column_is_not_a_numeric_column(step):
+    step_dir = step("""
+        import pandas as pd
+        def compute(cleaned, ctx):
+            return pd.DataFrame({"municipality": ["cali"], "flag": [True]})
+    """)
+
+    assert "no numeric column" in run_step(step_dir, "indicator", "coverage")["error"]
+
+
+def test_an_all_missing_nullable_numeric_column_is_accepted(step):
+    step_dir = step("""
+        import pandas as pd
+        def compute(cleaned, ctx):
+            return pd.DataFrame({"municipality": ["cali", "buga"], "value": pd.array([None, None], dtype="Float64")})
+    """)
+
+    assert run_step(step_dir, "indicator", "coverage")["status"] == "succeeded"
+
+
+def test_indicator_column_names_are_reduced_and_reported(step, capfd):
+    step_dir = step("""
+        import pandas as pd
+        def compute(cleaned, ctx):
+            return pd.DataFrame([["cali", 1.0]], columns=["Municipality Name", "Value"])
+    """)
+
+    assert run_step(step_dir, "indicator", "coverage")["status"] == "succeeded"
+    assert list(output(step_dir, "coverage").columns) == ["municipality_name", "value"]
+    assert "column 'Municipality Name' published as 'municipality_name'" in capfd.readouterr().out
+
+
+def test_indicator_columns_that_collide_fail(step):
+    step_dir = step("""
+        import pandas as pd
+        def compute(cleaned, ctx):
+            return pd.DataFrame([[1, 2]], columns=["Value", "value"])
+    """)
+
+    result = run_step(step_dir, "indicator", "coverage")
+
+    assert result["status"] == "failed"
+    assert "'Value'" in result["error"] and "'value'" in result["error"]
+
+
+def test_an_indicator_name_that_is_not_a_table_name_fails(step):
+    step_dir = step("""
+        import pandas as pd
+        def compute(cleaned, ctx):
+            return pd.DataFrame({"value": [1]})
+    """)
+
+    assert "not allowed" in run_step(step_dir, "indicator", "Piped Water")["error"]
+    assert "not allowed" in run_step(step_dir, "indicator")["error"]
+
+
+def test_an_indicator_may_have_a_geometry_column(step):
+    step_dir = step("""
+        import geopandas
+        def compute(cleaned, ctx):
+            points = geopandas.GeoDataFrame(
+                {"value": [3.0]}, geometry=geopandas.points_from_xy([-76.5], [3.4]), crs="EPSG:4326"
+            )
+            return points
+    """)
+
+    assert run_step(step_dir, "indicator", "sites")["status"] == "succeeded"
+    assert output(step_dir, "sites")["geometry"].tolist() == ["POINT (-76.5 3.4)"]
 
 
 def test_geometry_columns_are_published_as_wkt(step):
@@ -367,13 +449,12 @@ def test_a_script_reads_a_reference_table(with_reference):
         """
         import pandas as pd
 
-        def compute_indicators(cleaned, ctx):
+        def compute(cleaned, ctx):
             population = ctx.reference["population"]
             counts = cleaned["main"].groupby("municipality").size().rename("n").reset_index()
             merged = counts.merge(population, on="municipality")
             return pd.DataFrame({
-                "indicator": "per_100k",
-                "disaggregation": merged["municipality"],
+                "municipality": merged["municipality"],
                 "value": merged["n"] / merged["population_2026"] * 100_000,
                 "numerator": merged["n"],
                 "denominator": merged["population_2026"],
@@ -382,10 +463,10 @@ def test_a_script_reads_a_reference_table(with_reference):
         {"population": population},
     )
 
-    result = run_step(step_dir, "indicators")
+    result = run_step(step_dir, "indicator", "per_100k")
 
     assert result["status"] == "succeeded", result
-    indicators = output(step_dir, "indicators").sort_values("disaggregation")
+    indicators = output(step_dir, "per_100k").sort_values("municipality")
     assert indicators["denominator"].tolist() == [130_000, 2_300_000]
 
 
