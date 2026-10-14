@@ -51,7 +51,7 @@ context: |
     to the parent).
   - `p_<id>_clean`: output of script 1.
   - `p_<id>_output`: output of script 2.
-  - `p_<id>_indicators`: output of script 3.
+  - `p_<id>_indicators`: one table per indicator script, named after the indicator.
 
   Schema and table names are never built from user text without validation (allow list +
   quoted identifiers).

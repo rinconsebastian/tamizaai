@@ -71,7 +71,7 @@ Each script SHALL receive a `ctx` object that exposes the form dictionary, the p
 - **THEN** it obtains the label `Cali` as defined in the form
 
 #### Scenario: Code for a label
-- **WHEN** script 3 asks `ctx.form` for the code of the label `Cali` of the question `municipality`
+- **WHEN** an indicator script asks `ctx.form` for the code of the label `Cali` of the question `municipality`
 - **THEN** it obtains `cali`, and can join the main table with a reference table keyed by codes
 
 #### Scenario: Label of an earlier version
@@ -95,11 +95,11 @@ Each script SHALL receive a `ctx` object that exposes the form dictionary, the p
 - **THEN** both lines appear in the log of the clean step, in order
 
 #### Scenario: Reference table in a script
-- **WHEN** the project has a reference table `population` with the integer column `population_2026`, and script 3 divides a count by `ctx.reference["population"]["population_2026"]`
+- **WHEN** the project has a reference table `population` with the integer column `population_2026`, and an indicator script divides a count by `ctx.reference["population"]["population_2026"]`
 - **THEN** the script receives that column as integers and its indicators use those values
 
 #### Scenario: Unknown reference table
-- **WHEN** script 3 reads `ctx.reference["populaton"]` and the project only has `population`
+- **WHEN** an indicator script reads `ctx.reference["populaton"]` and the project only has `population`
 - **THEN** the step fails and its log names `populaton` and lists `population` as available
 
 #### Scenario: Project without reference tables

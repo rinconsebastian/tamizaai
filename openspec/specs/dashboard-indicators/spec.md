@@ -49,11 +49,11 @@ A line chart SHALL plot the group values of its indicator, ordered by their natu
 - **THEN** it draws one line through the three points in that order
 
 ### Requirement: Histogram
-A histogram SHALL bucket the plotted field's values, over the rows the query matches, into equal-width ranges and count how many rows fall in each, with a configurable number of buckets.
+A histogram SHALL bucket the values of its measure or ratio, over the rows the query matches (or over the group values when it groups by a column), into equal-width ranges and count how many fall in each, with a configurable number of buckets.
 
 #### Scenario: Distribution across many groups
-- **WHEN** a histogram is configured for the indicator `coverage` with 10 buckets, over 80 disaggregation values ranging from 10% to 140%
-- **THEN** it shows 10 bars, each counting the disaggregation values whose coverage falls in that bar's range
+- **WHEN** a histogram is configured for the indicator `coverage` with 10 buckets, grouped by `municipality`, over 80 municipalities with coverage ranging from 10% to 140%
+- **THEN** it shows 10 bars, each counting the municipalities whose coverage falls in that bar's range
 
 ### Requirement: Pie chart
 A pie chart SHALL show its indicator's measure as one slice per group value, sized by its share of the total.
