@@ -80,6 +80,9 @@
       "reference": {
         "exists": "The project already has a reference table with this name. Replace it from the list, or choose another name.",
         "limit": "The project already has 50 reference tables. Delete one before adding another."
+      },
+      "dashboard": {
+        "timeout": "Computing the dashboard took too long and was stopped. Try a shorter date range, or try again in a few minutes."
       }
     }
   },
@@ -125,6 +128,7 @@
     "notFoundTitle": "Project not found",
     "notFoundBody": "It does not exist, or you are not a member of it.",
     "tabs": {
+      "performance": "Performance",
       "overview": "Overview",
       "data": "Data",
       "scripts": "Scripts",
@@ -144,8 +148,8 @@
     "recheck": "Re-check the form",
     "replaceToken": "Replace API token",
     "saveToken": "Save token",
-    "checkTitle": "Performance dashboard",
-    "checkIntro": "Which field metrics the form allows. Missing fields can be added to the form in Kobo.",
+    "checkTitle": "Form check",
+    "checkIntro": "Which dashboard metrics the form and the sampling frame allow. Missing fields can be added to the form in Kobo.",
     "available": "Available",
     "unavailable": "Unavailable",
     "missing": "Missing in the form: {{ fields }}",
@@ -159,13 +163,115 @@
     "renamed": "Project renamed.",
     "unavailableVersionsOne": "1 form version has no labels yet. Its answers use the current form's labels until Tamiza can read it.",
     "unavailableVersions": "{{ count }} form versions have no labels yet. Their answers use the current form's labels until Tamiza can read them.",
-    "unavailableVersionsAction": "See the form versions"
+    "unavailableVersionsAction": "See the form versions",
+    "openDashboard": "Open the performance dashboard",
+    "hints": {
+      "defineSamplingFrame": "Define a sampling frame to see coverage.",
+      "defineSamplingFrameViewer": "Ask an analyst or admin to define the sampling frame.",
+      "updateSamplingFrame": "The sampling frame uses fields the form no longer has. Update the frame, or put those questions back in the form.",
+      "updateSamplingFrameViewer": "The sampling frame uses fields the form no longer has. Ask an analyst or admin to update it.",
+      "selectEnumeratorField": "Select the question that identifies the enumerator below.",
+      "selectEnumeratorFieldViewer": "Ask a project admin to select the question that identifies the enumerator.",
+      "openFrame": "Open the sampling frame"
+    },
+    "timeZone": "Time zone",
+    "timeZoneHint": "The dashboard counts each day in this time zone. Names follow the IANA database, for example America/Bogota.",
+    "timeZoneSaved": "Time zone saved."
   },
   "metrics": {
     "dailyEvolution": "Submissions per day",
     "completionTime": "Completion time",
     "perEnumerator": "Detail per enumerator",
     "coverage": "Sampling frame coverage"
+  },
+  "performance": {
+    "from": "From",
+    "to": "To",
+    "clear": "Clear",
+    "refresh": "Refresh",
+    "computedAt": "Computed at {{ time }}",
+    "daysUtc": "Days are counted in UTC.",
+    "daysUtcAction": "Set the project time zone in the Overview.",
+    "daysZone": "Days are counted in the {{ zone }} time zone.",
+    "seeOverview": "See the Overview",
+    "sortBy": "Sort by",
+    "previous": "Previous",
+    "next": "Next",
+    "pageInfo": "{{ from }}–{{ to }} of {{ total }}",
+    "duration": {
+      "seconds": "{{ n }} s",
+      "minutes": "{{ n }} min",
+      "hours": "{{ h }} h {{ m }} min"
+    },
+    "submissions": {
+      "title": "Submissions",
+      "total": "Submissions",
+      "withoutTime": "Without reception time",
+      "perDay": "Submissions per day",
+      "showTable": "Show as table",
+      "showChart": "Show as chart",
+      "day": "Day",
+      "count": "Submissions",
+      "peak": "Most in one day: {{ count }}",
+      "noDays": "No submissions with a reception time in this period.",
+      "chartLabel": "Bar chart of submissions per day, from {{ first }} to {{ last }}: {{ total }} submissions in {{ days }} days, at most {{ peak }} in one day. The table view lists every day."
+    },
+    "completion": {
+      "title": "Completion time",
+      "median": "Median",
+      "mean": "Mean without outliers",
+      "outliers": "Outliers",
+      "unusable": "Unusable durations",
+      "fences": "Outliers are surveys shorter than {{ lower }} min or longer than {{ upper }} min. Durations that cannot be used (end before start, or a missing or invalid time) are left out of every figure.",
+      "noneUsable": "No submission has a usable duration in this period.",
+      "unavailable": "Completion time needs the form to record when each survey starts and ends. Missing in the form: {{ fields }}.",
+      "howTo": "In Kobo, enable the start and end metadata of the form, deploy it again, then re-check it in the Overview."
+    },
+    "enumerators": {
+      "title": "Enumerators",
+      "empty": "No submissions in this period.",
+      "none": "No enumerator",
+      "name": "Enumerator",
+      "submissions": "Submissions",
+      "mean": "Mean time",
+      "outliers": "Outliers",
+      "last": "Last submission",
+      "sortSubmissions": "Submissions, most first",
+      "sortName": "Name, A to Z",
+      "unavailable": "Tamiza cannot tell who collected each submission: the form has no username field and no question is selected as the enumerator.",
+      "adminHow": "Select the question that identifies the enumerator.",
+      "adminLink": "Open the Overview",
+      "askAdmin": "Ask a project admin to select the question that identifies the enumerator."
+    },
+    "coverage": {
+      "title": "Sampling frame coverage",
+      "none": "No sampling frame is defined for this project.",
+      "noneEditor": "Define the combinations and targets to follow how the fieldwork covers them.",
+      "noneViewer": "An analyst or admin can define it.",
+      "define": "Define the sampling frame",
+      "warningsTitle": "Some dimensions cannot be counted",
+      "warning": {
+        "missingField": "The dimension {{ name }} maps to {{ field }}, a field the form no longer has.",
+        "repeat": "The dimension {{ name }} cannot be counted because its question ({{ field }}) is answered once per repeat.",
+        "multipleChoice": "The dimension {{ name }} cannot be counted because an answer to {{ field }} can hold several choices."
+      },
+      "overall": "Overall progress",
+      "overallHelp": "Surveys above a target do not make up for another combination falling short.",
+      "overallNone": "No combination has a target above 0.",
+      "outside": "Outside the frame",
+      "outsideHelp": "Submissions that match no combination of the frame, or leave a dimension empty.",
+      "outsideTop": "Most frequent combinations outside the frame",
+      "empty": "(empty)",
+      "submissionsCount": "{{ count }} submissions",
+      "rowsTitle": "Targets and progress",
+      "noRows": "The sampling frame has no combinations.",
+      "target": "Target",
+      "achieved": "Achieved",
+      "percent": "Progress",
+      "sortFrame": "Order of the frame",
+      "sortPercentAsc": "Progress, lowest first",
+      "sortPercentDesc": "Progress, highest first"
+    }
   },
   "data": {
     "statusTitle": "Submissions",

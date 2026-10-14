@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using Tamiza.Api.Auth;
 using Tamiza.Api.Configuration;
 using Tamiza.Api.Data;
@@ -123,7 +124,7 @@ public static partial class ProjectEndpoints
         await db.SaveChangesAsync(ct);
         ingestion.Wake();
 
-        var details = ToDetails(project, ProjectRole.Admin, tokenUnreadable: false, unavailableFormVersions: 0);
+        var details = ToDetails(project, ProjectRole.Admin, tokenUnreadable: false, unavailableFormVersions: 0, frameDimensions: null);
         var webhook = new WebhookSettings(WebhookUrl(options.Value, project.Id), WebhookSecret.Username, webhookSecret, false);
         return TypedResults.Created($"/api/v1/projects/{project.Id}", new CreatedProject(details, webhook));
     }
@@ -132,7 +133,7 @@ public static partial class ProjectEndpoints
         Guid projectId, HttpContext http, TamizaDbContext db, FormVersionStore versions, SecretProtector secrets, CancellationToken ct)
     {
         var project = await db.Projects.AsNoTracking().SingleAsync(p => p.Id == projectId, ct);
-        return TypedResults.Ok(await DetailsAsync(project, http, versions, secrets, ct));
+        return TypedResults.Ok(await DetailsAsync(db, project, http, versions, secrets, ct));
     }
 
     private static async Task<Results<Ok<ProjectDetails>, ValidationProblem>> UpdateAsync(
@@ -163,6 +164,19 @@ public static partial class ProjectEndpoints
             }
         }
 
+        if (request.TimeZone is not null)
+        {
+            var zone = request.TimeZone.Trim();
+            if (await TimeZoneKnownAsync(db, zone, ct))
+            {
+                project.TimeZone = zone;
+            }
+            else
+            {
+                errors.Add("timeZone", $"'{zone}' is not a time zone name. Use a name such as UTC or America/Bogota.");
+            }
+        }
+
         if (errors.Any)
         {
             return Problems.Validation(errors.ToDictionary());
@@ -170,8 +184,15 @@ public static partial class ProjectEndpoints
 
         project.UpdatedAt = time.GetUtcNow();
         await db.SaveChangesAsync(ct);
-        return TypedResults.Ok(await DetailsAsync(project, http, versions, secrets, ct));
+        return TypedResults.Ok(await DetailsAsync(db, project, http, versions, secrets, ct));
     }
+
+    /// <summary>Whether PostgreSQL knows <paramref name="zone"/>; the database applies the zone, so it is the judge.</summary>
+    private static async Task<bool> TimeZoneKnownAsync(TamizaDbContext db, string zone, CancellationToken ct) =>
+        zone.Length > 0
+        && await db.Database.SqlQueryRaw<bool>(
+                "SELECT EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = @name) AS \"Value\"", new NpgsqlParameter("name", zone))
+            .SingleAsync(ct);
 
     private static async Task<Results<Ok<ProjectDetails>, ValidationProblem, ProblemHttpResult>> ReplaceTokenAsync(
         Guid projectId, ReplaceTokenRequest request, HttpContext http, TamizaDbContext db, KoboClient kobo, FormSnapshot snapshot, FormVersionStore versions,
@@ -198,7 +219,7 @@ public static partial class ProjectEndpoints
         project.EncryptedApiToken = secrets.Protect(token);
         await snapshot.ApplyAsync(project, asset!, token, now, ct);
         await db.SaveChangesAsync(ct);
-        return TypedResults.Ok(await DetailsAsync(project, http, versions, secrets, ct, tokenUnreadable: false));
+        return TypedResults.Ok(await DetailsAsync(db, project, http, versions, secrets, ct, tokenUnreadable: false));
     }
 
     private static async Task<Results<Ok<ProjectDetails>, ProblemHttpResult>> RecheckAsync(
@@ -224,7 +245,7 @@ public static partial class ProjectEndpoints
         // Every version whose definition is failed or not found gets another try. The ones the budget leaves over stay
         // due for the background worker, and the details report how many are still unavailable.
         await fetcher.FetchAsync(project, token, FetchMode.All, ingestion.Value.RecheckVersionBudget, ct);
-        return TypedResults.Ok(await DetailsAsync(project, http, versions, secrets, ct, tokenUnreadable: false));
+        return TypedResults.Ok(await DetailsAsync(db, project, http, versions, secrets, ct, tokenUnreadable: false));
     }
 
     private static async Task<Ok<List<FormField>>> GetFormFieldsAsync(Guid projectId, TamizaDbContext db, CancellationToken ct) =>
@@ -275,14 +296,18 @@ public static partial class ProjectEndpoints
         $"{options.PublicUrl.TrimEnd('/')}/api/v1/webhooks/kobo/{projectId}";
 
     private static async Task<ProjectDetails> DetailsAsync(
-        Project project, HttpContext http, FormVersionStore versions, SecretProtector secrets, CancellationToken ct, bool? tokenUnreadable = null) =>
+        TamizaDbContext db, Project project, HttpContext http, FormVersionStore versions, SecretProtector secrets, CancellationToken ct,
+        bool? tokenUnreadable = null) =>
         ToDetails(
             project,
             http.GetProjectRole(),
             tokenUnreadable ?? !secrets.TryUnprotect(project.EncryptedApiToken, out _),
-            await versions.CountUnavailableAsync(project.Id, ct));
+            await versions.CountUnavailableAsync(project.Id, ct),
+            // Only the dimensions: the check needs the fields they map to, not the frame's thousands of targets.
+            await db.SamplingFrames.AsNoTracking().Where(f => f.ProjectId == project.Id).Select(f => f.Dimensions).SingleOrDefaultAsync(ct));
 
-    private static ProjectDetails ToDetails(Project project, ProjectRole role, bool tokenUnreadable, int unavailableFormVersions) => new(
+    private static ProjectDetails ToDetails(
+        Project project, ProjectRole role, bool tokenUnreadable, int unavailableFormVersions, IReadOnlyList<SamplingDimension>? frameDimensions) => new(
         project.Id,
         project.Name,
         project.KoboServerUrl,
@@ -290,9 +315,10 @@ public static partial class ProjectEndpoints
         project.FormName,
         project.FormCheckedAt,
         project.EnumeratorField,
-        FieldCheck.Evaluate(project.FormFields, project.EnumeratorField),
+        FieldCheck.Evaluate(project.FormFields, project.EnumeratorField, frameDimensions),
         role,
         tokenUnreadable,
         project.CreatedAt,
-        unavailableFormVersions);
+        unavailableFormVersions,
+        project.TimeZone);
 }

@@ -68,6 +68,36 @@ public sealed class KoboFormTests
     }
 
     [Fact]
+    public void Questions_inside_a_repeat_group_are_marked_also_through_a_plain_group_but_a_plain_group_alone_is_not()
+    {
+        const string form = """
+            {
+              "name": "Repeats",
+              "content": {
+                "survey": [
+                  { "type": "begin_group", "name": "respondent" },
+                  { "type": "text", "name": "municipality" },
+                  { "type": "end_group" },
+                  { "type": "begin_repeat", "name": "members" },
+                  { "type": "integer", "name": "member_age" },
+                  { "type": "begin_group", "name": "health" },
+                  { "type": "text", "name": "condition" },
+                  { "type": "end_group" },
+                  { "type": "end_repeat" },
+                  { "type": "integer", "name": "household_size" }
+                ]
+              }
+            }
+            """;
+
+        var fields = KoboForm.Parse(JsonDocument.Parse(form).RootElement).Fields;
+
+        Assert.Equal(
+            ["respondent/municipality=False", "members/member_age=True", "members/health/condition=True", "household_size=False"],
+            fields.Select(f => $"{f.Xpath}={f.InRepeat}"));
+    }
+
+    [Fact]
     public void A_document_without_content_has_no_fields() =>
         Assert.Empty(KoboForm.Parse(JsonDocument.Parse("""{ "name": "Empty" }""").RootElement).Fields);
 

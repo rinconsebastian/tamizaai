@@ -315,6 +315,8 @@ export class ProjectSamplingFrame {
       next: (frame) => {
         this.setFrame(frame);
         this.saving.set(false);
+        // The Form check on the Overview depends on the frame; the details are loaded once per page.
+        this.context.refresh();
         this.toasts.success(this.transloco.translate('frame.saved'));
       },
       error: (error) => {

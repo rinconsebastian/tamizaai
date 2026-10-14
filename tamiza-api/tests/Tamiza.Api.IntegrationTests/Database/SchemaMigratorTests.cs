@@ -222,6 +222,30 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
         Assert.True(await ScalarAsync<bool>(connectionString, "SELECT form_version IS NULL FROM tamiza.projects"));
     }
 
+    [Fact]
+    public async Task Performance_dashboard_script_gives_existing_projects_the_utc_time_zone_and_adds_its_index()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(
+            connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql", "0004_add_pipeline_authoring.sql",
+            "0005_add_choice_labels.sql");
+        await ExecuteAsync(connectionString, """
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('00000000-0000-0000-0000-000000000001', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('00000000-0000-0000-0000-0000000000aa', 'Existing', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(),
+                    '00000000-0000-0000-0000-000000000001', now(), now());
+            """);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        Assert.Equal("UTC", await ScalarAsync<string>(connectionString, "SELECT time_zone FROM tamiza.projects"));
+        Assert.Equal(
+            "CREATE INDEX ix_raw_submissions_project_id_submitted_at ON tamiza.raw_submissions USING btree (project_id, submitted_at) WHERE (NOT deleted)",
+            await ScalarAsync<string>(connectionString, "SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_raw_submissions_project_id_submitted_at'"));
+    }
+
     /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>
     private static void ApplyScripts(string connectionString, params string[] names)
     {

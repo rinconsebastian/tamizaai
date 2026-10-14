@@ -28,6 +28,12 @@ public sealed class Project
     /// <summary>XPath of the question that identifies the enumerator, when the form has no <c>username</c>.</summary>
     public string? EnumeratorField { get; set; }
 
+    /// <summary>
+    /// The IANA time zone that defines the project's days in the performance dashboard (a name PostgreSQL knows).
+    /// <c>UTC</c> until an admin sets another.
+    /// </summary>
+    public string TimeZone { get; set; } = "UTC";
+
     /// <summary>Hours between scheduled synchronizations (1–168).</summary>
     public int SyncIntervalHours { get; set; } = 12;
 
@@ -68,9 +74,10 @@ public sealed class Project
 /// <summary>
 /// A field of the Kobo form, as read from the asset's <c>content.survey</c>. <see cref="Xpath"/> is the full path of the
 /// answer in a submission, built from the group nesting. <see cref="ListName"/> names the choice list of select
-/// questions, and <see cref="OrOther"/> marks the ones with Kobo's "or other" option.
+/// questions, <see cref="OrOther"/> marks the ones with Kobo's "or other" option, and <see cref="InRepeat"/> the ones inside a
+/// repeat group, which a submission answers once per repeat.
 /// </summary>
-public sealed record FormField(string Name, string Xpath, string Type, string? Label, string? ListName = null, bool OrOther = false);
+public sealed record FormField(string Name, string Xpath, string Type, string? Label, string? ListName = null, bool OrOther = false, bool InRepeat = false);
 
 /// <summary>A choice of one of the form's choice lists, as read from the asset's <c>content.choices</c>.</summary>
 public sealed record FormChoice(string ListName, string Name, string? Label);

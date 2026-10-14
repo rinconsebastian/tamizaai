@@ -1,4 +1,12 @@
-import { byTestId, openProjectSection, projectId, settle, typeInto } from '../../../testing/project-harness';
+import { MetricAvailability } from '../../core/projects/projects.service';
+import { byTestId, details, openProjectSection, projectId, settle, typeInto } from '../../../testing/project-harness';
+
+const coverage = (check: Partial<MetricAvailability>): MetricAvailability[] => [
+  { metric: 'dailyEvolution', available: true, missingFields: [], hint: null },
+  { metric: 'completionTime', available: true, missingFields: [], hint: null },
+  { metric: 'perEnumerator', available: true, missingFields: [], hint: null },
+  { metric: 'coverage', available: true, missingFields: [], hint: null, ...check },
+];
 
 describe('ProjectSamplingFrame', () => {
   const url = `/api/v1/projects/${projectId}/sampling-frame`;
@@ -98,5 +106,77 @@ describe('ProjectSamplingFrame', () => {
 
     expect(byTestId(root, 'import-errors')?.textContent).toContain('Row 7: The target must be a whole number');
     expect(byTestId(root, 'apply-import')).toBeNull();
+  });
+
+  describe('the Overview\'s form check', () => {
+    const projectUrl = `/api/v1/projects/${projectId}`;
+    const withoutFrame = { fieldCheck: coverage({ available: false, hint: 'defineSamplingFrame' }) };
+
+    async function saveAFrame(role: 'analyst' | 'admin') {
+      const context = await openProjectSection('sampling-frame', role, withoutFrame);
+      context.http.expectOne(url).flush(null);
+      await settle(context.harness);
+      byTestId<HTMLButtonElement>(context.root, 'add-dimension')!.click();
+      await settle(context.harness);
+      const dimension = byTestId(context.root, 'dimension-0')!;
+      typeInto(dimension.querySelector('input')!, 'Sex');
+      typeInto(dimension.querySelector('select')!, 'sex');
+      byTestId<HTMLButtonElement>(context.root, 'add-row')!.click();
+      await settle(context.harness);
+      const cells = byTestId(context.root, 'targets-grid')!.querySelectorAll<HTMLInputElement>('tbody input');
+      typeInto(cells[0], 'f');
+      typeInto(cells[1], '75');
+      byTestId<HTMLButtonElement>(context.root, 'save-frame')!.click();
+      await settle(context.harness);
+      return context;
+    }
+
+    it('turns coverage available without a reload after a frame is saved', async () => {
+      const { http, harness, root } = await saveAFrame('analyst');
+      http.expectOne(url).flush({ ...frame, dimensions: [{ name: 'Sex', field: 'sex' }], targets: [{ values: ['f'], target: 75 }] });
+      await settle(harness);
+
+      // The details are read again, and only once.
+      const refetch = http.expectOne(projectUrl);
+      expect(refetch.request.method).toBe('GET');
+      refetch.flush(details('analyst', { fieldCheck: coverage({}) }));
+      await settle(harness);
+
+      await harness.navigateByUrl(`/projects/${projectId}/overview`);
+      await settle(harness);
+      const metric = byTestId(root, 'metric-coverage')!;
+      expect(metric.textContent).toContain('Available');
+      expect(byTestId(root, 'hint-coverage')).toBeNull();
+      http.verify();
+    });
+
+    it('shows the old check until the new details arrive', async () => {
+      const { http, harness, root } = await saveAFrame('admin');
+      http.expectOne(url).flush(frame);
+      await settle(harness);
+      http.expectOne(projectUrl);
+
+      await harness.navigateByUrl(`/projects/${projectId}/overview`);
+      await settle(harness);
+      expect(byTestId(root, 'metric-coverage')!.textContent).toContain('Unavailable');
+    });
+
+    it('does not read the details again when saving fails', async () => {
+      const { http, harness } = await saveAFrame('analyst');
+      http.expectOne(url).flush({ errors: { 'targets[0].target': ['Invalid.'] } }, { status: 400, statusText: 'Bad Request' });
+      await settle(harness);
+
+      http.expectNone(projectUrl);
+    });
+
+    it('keeps the frame saved when reading the details fails', async () => {
+      const { http, harness, root } = await saveAFrame('analyst');
+      http.expectOne(url).flush(frame);
+      await settle(harness);
+      http.expectOne(projectUrl).flush(null, { status: 500, statusText: 'Server Error' });
+      await settle(harness);
+
+      expect(byTestId(root, 'save-frame')).not.toBeNull();
+    });
   });
 });

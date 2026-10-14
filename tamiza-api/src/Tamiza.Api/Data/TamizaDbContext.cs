@@ -68,6 +68,7 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             project.Property(p => p.FormName).HasMaxLength(500);
             project.Property(p => p.FormFields).HasJsonColumn();
             project.Property(p => p.EnumeratorField).HasMaxLength(1024);
+            project.Property(p => p.TimeZone).HasMaxLength(64).HasDefaultValue("UTC");
             project.Property(p => p.SyncIntervalHours).HasDefaultValue(12);
             project.Property(p => p.ReconcileIntervalHours).HasDefaultValue(24);
             project.Property(p => p.NextSyncAt).HasDefaultValueSql("now()");
@@ -132,6 +133,8 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             submission.HasIndex(s => new { s.ProjectId, s.KoboUuid });
             // Per-version counts and the re-recording of versions at each synchronization read only live submissions.
             submission.HasIndex(s => new { s.ProjectId, s.FormVersion }).HasFilter("NOT deleted");
+            // The performance dashboard's date range and daily counts read live submissions by reception time.
+            submission.HasIndex(s => new { s.ProjectId, s.SubmittedAt }).HasFilter("NOT deleted");
             submission.HasOne<Project>().WithMany().HasForeignKey(s => s.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
 

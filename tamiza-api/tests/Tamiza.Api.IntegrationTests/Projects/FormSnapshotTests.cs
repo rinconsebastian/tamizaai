@@ -140,6 +140,34 @@ public sealed class FormSnapshotTests(PostgresFixture postgres) : IDisposable
     }
 
     [Fact]
+    public async Task Questions_in_repeat_groups_are_marked_in_the_snapshot()
+    {
+        const string form = """
+            {
+              "name": "Repeats",
+              "content": {
+                "survey": [
+                  { "type": "begin_group", "name": "respondent", "label": ["Respondent"] },
+                  { "type": "select_one municipalities", "name": "municipality", "label": ["Municipality"] },
+                  { "type": "end_group" },
+                  { "type": "begin_repeat", "name": "members", "label": ["Members"] },
+                  { "type": "integer", "name": "member_age", "label": ["Age"] },
+                  { "type": "end_repeat" }
+                ],
+                "choices": [ { "list_name": "municipalities", "name": "cali", "label": ["Cali"] } ]
+              }
+            }
+            """;
+        _kobo.WithForm(form);
+        await using var harness = await HarnessAsync();
+
+        var marks = await TestData.ScalarAsync<string>(harness.Db,
+            "SELECT string_agg(format('%s=%s', f->>'name', f->>'inRepeat'), ',' ORDER BY f->>'name') FROM tamiza.projects, jsonb_array_elements(form_fields) f");
+
+        Assert.Equal("member_age=true,municipality=false", marks);
+    }
+
+    [Fact]
     public async Task A_second_synchronization_reads_the_stored_deployed_version_without_a_request()
     {
         _kobo.WithForm(KoboStub.Deployed(DraftJson, deployedVersionId: "vLive", versionId: "vDraft")).WithVersion("vLive", KoboStub.FormJson);

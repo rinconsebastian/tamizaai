@@ -49,7 +49,7 @@ public static class KoboForm
 
         // Paths come from the nesting, not from $xpath: it prefers `name` over the deployed name, ignores rank and
         // matrix groups and is missing in old versions.
-        var enclosing = new List<string>();
+        var enclosing = new List<(string Name, bool Repeat)>();
         foreach (var row in Rows(content, "survey"))
         {
             var rawType = TypeText(row);
@@ -62,7 +62,7 @@ public static class KoboForm
             var name = Text(row, "$autoname") ?? Text(row, "name");
             if (type.StartsWith("begin_", StringComparison.Ordinal) && NestingTypes.Contains(type[6..]))
             {
-                enclosing.Add(name ?? "");
+                enclosing.Add((name ?? "", type == "begin_repeat"));
                 continue;
             }
 
@@ -81,8 +81,8 @@ public static class KoboForm
                 continue;
             }
 
-            var path = string.Join('/', enclosing.Append(name).Where(segment => segment.Length > 0));
-            fields.Add(new FormField(name, path, type, Label(row), ListName(row, rawType), OrOther(row)));
+            var path = string.Join('/', enclosing.Select(group => group.Name).Append(name).Where(segment => segment.Length > 0));
+            fields.Add(new FormField(name, path, type, Label(row), ListName(row, rawType), OrOther(row), enclosing.Any(group => group.Repeat)));
         }
 
         // A list may repeat a choice name (allow_choice_duplicates); as in Kobo's exports, the last one wins.

@@ -18,6 +18,10 @@ public static class Problems
     public static ProblemHttpResult Conflict(string code, string detail) =>
         TypedResults.Problem(statusCode: StatusCodes.Status409Conflict, title: "The request conflicts with the project's current state.",
             detail: detail, extensions: new Dictionary<string, object?> { ["code"] = code });
+
+    public static ProblemHttpResult Unavailable(string code, string detail) =>
+        TypedResults.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "The request could not be completed in time.",
+            detail: detail, extensions: new Dictionary<string, object?> { ["code"] = code });
 }
 
 /// <summary>Collects field errors keyed by camelCase path.</summary>

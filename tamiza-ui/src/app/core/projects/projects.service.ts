@@ -21,7 +21,8 @@ export interface MetricAvailability {
   metric: 'dailyEvolution' | 'completionTime' | 'perEnumerator' | 'coverage';
   available: boolean;
   missingFields: string[];
-  hint: string | null;
+  /** What to do about an unavailable metric; null when available or when there is nothing to suggest. */
+  hint: 'selectEnumeratorField' | 'defineSamplingFrame' | 'updateSamplingFrame' | null;
 }
 
 export interface ProjectDetails {
@@ -38,6 +39,8 @@ export interface ProjectDetails {
   createdAt: string;
   /** Form versions used by the project's submissions whose definition (and so labels) is not available. */
   unavailableFormVersions: number;
+  /** IANA name of the zone that defines the dashboard's days; `UTC` until an admin sets another. */
+  timeZone: string;
 }
 
 export type FormVersionStatus = 'available' | 'pending' | 'failed' | 'not_found';
@@ -83,6 +86,7 @@ export interface FormField {
   xpath: string;
   type: string;
   label: string | null;
+  inRepeat?: boolean;
 }
 
 export interface Member {
@@ -151,7 +155,7 @@ export class ProjectsService {
     return this.http.get<ProjectDetails>(`${base}/${id}`);
   }
 
-  update(id: string, changes: { name?: string; enumeratorField?: string }): Observable<ProjectDetails> {
+  update(id: string, changes: { name?: string; enumeratorField?: string; timeZone?: string }): Observable<ProjectDetails> {
     return this.http.patch<ProjectDetails>(`${base}/${id}`, changes);
   }
 

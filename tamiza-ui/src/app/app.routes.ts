@@ -17,7 +17,8 @@ export const routes: Routes = [
         path: 'projects/:id',
         loadComponent: () => import('./pages/projects/project-page').then((m) => m.ProjectPage),
         children: [
-          { path: '', pathMatch: 'full', redirectTo: 'overview' },
+          { path: '', pathMatch: 'full', redirectTo: 'performance' },
+          { path: 'performance', loadComponent: () => import('./pages/projects/project-performance').then((m) => m.ProjectPerformance) },
           { path: 'overview', loadComponent: () => import('./pages/projects/project-overview').then((m) => m.ProjectOverview) },
           { path: 'data', loadComponent: () => import('./pages/projects/project-data').then((m) => m.ProjectData) },
           {

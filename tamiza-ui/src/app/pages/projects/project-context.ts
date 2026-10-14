@@ -21,6 +21,17 @@ export class ProjectContext {
     }
   }
 
+  /**
+   * Reads the details again, for changes made outside the Overview that its checks depend on (the sampling frame).
+   * A failure keeps the details already shown: the change that prompted this has been reported by its own page.
+   */
+  refresh(): void {
+    const project = this.project();
+    if (project) {
+      this.service.get(project.id).subscribe({ next: (fresh) => this.update(fresh), error: () => undefined });
+    }
+  }
+
   /** Replaces the details after an update; a new form check invalidates the field list. */
   update(project: ProjectDetails): void {
     if (project.formCheckedAt !== this.project()?.formCheckedAt) {

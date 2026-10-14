@@ -33,6 +33,7 @@ const apiErrorCodes = [
   'test.interrupted',
   'reference.exists',
   'reference.limit',
+  'dashboard.timeout',
 ];
 
 function lookup(root: unknown, path: string): unknown {

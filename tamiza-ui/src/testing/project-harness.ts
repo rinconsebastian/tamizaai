@@ -32,6 +32,7 @@ export function details(role: ProjectRole, overrides: Partial<ProjectDetails> = 
     tokenUnreadable: false,
     createdAt: '2026-10-01T12:00:00Z',
     unavailableFormVersions: 0,
+    timeZone: 'UTC',
     ...overrides,
   };
 }

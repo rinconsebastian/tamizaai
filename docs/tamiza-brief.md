@@ -214,11 +214,11 @@ An `analyst` SHALL be able to upload reference tables (CSV/XLSX), for example po
 ### 5.5 Dashboard 1: project performance (`dashboard-performance`)
 
 #### Requirement: Field metrics on raw data
-The dashboard SHALL be computed on the non-deleted raw submissions (it does not depend on the scripts) and show:
-- Total records and their daily evolution.
-- Mean completion time (`end` − `start`), with outlier detection.
-- Per-enumerator detail: records, mean time, last submission.
-- Sampling frame coverage: achieved vs target per combination of dimensions, with progress percentage.
+The dashboard SHALL be computed on Tamiza's stored copy of the non-deleted raw submissions (it does not contact Kobo and does not depend on the scripts), for an optional range of days, and show:
+- Total records and their daily evolution. A day is the date Kobo received the submission, in the project's time zone (UTC by default; an admin sets it).
+- Completion time (`end` − `start`): median and mean without outliers (Tukey's fences), with unusable durations counted apart.
+- Per-enumerator detail: records, mean time, outliers, last submission. The enumerator is the question an admin selected or else `username`; values are compared ignoring case and spaces.
+- Sampling frame coverage: achieved vs target per combination of dimensions, matching the form's codes ignoring case and spaces, with an uncapped progress percentage, overall progress, the submissions outside the frame, and warnings for dimensions that cannot be counted (field removed, inside a repeat group, multiple choice).
 
 ##### Scenario: Form without `start`/`end`
 - WHEN the form does not have those fields
@@ -249,7 +249,7 @@ The user SHALL be able to export the indicator table to XLSX.
 ## 6. Minimal data model (metadata)
 
 - `users`: id, keycloak_sub, name, email.
-- `projects`: id, name, kobo_server_url, asset_uid, encrypted_api_token, encrypted_webhook_secret, sync_interval, settings, form_fields and form_choices (the snapshot of the form's deployed version), form_version (the uid of that version).
+- `projects`: id, name, kobo_server_url, asset_uid, encrypted_api_token, encrypted_webhook_secret, sync_interval, settings, form_fields and form_choices (the snapshot of the form's deployed version), form_version (the uid of that version), time_zone (the IANA zone that defines the project's days, UTC by default).
 - `project_members`: project_id, user_id, role.
 - `raw_submissions`: id, project_id, kobo_uuid (unique per project), kobo_id, form_version, data (JSONB), origin, received_at, deleted.
 - `syncs`: id, project_id, type, started_at, finished_at, created_count, updated_count, deleted_count, error.
@@ -284,7 +284,7 @@ Implement in this order, one change per line:
 4b. `add-pipeline-authoring`: sample test run with preview, reference data available from `ctx`.
 4c. `add-choice-labels`: the flattened tables show choice labels, from the form version of each submission, instead of codes (BREAKING for scripts that compare select columns with codes); `ctx.form.name`; form versions listed in the Data section.
 4d. `add-question-labels`: the flattened columns carry their question's label, from the latest deployed form version only, as column comments, in `ctx.form.columns` and in the sample-test preview. Not breaking.
-5. `add-performance-dashboard`
+5. `add-performance-dashboard`: the first dashboard (submissions per day, completion time, enumerators, sampling frame coverage) computed in SQL on the stored submissions, with a per-project time zone and a date range; the field check reports coverage unavailable without a usable frame.
 6. `add-clean-data-dashboard`
 7. `add-indicators-dashboard`
 

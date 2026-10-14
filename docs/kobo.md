@@ -58,16 +58,18 @@ If the secret is ever exposed, use **Regenerate secret** in Tamiza and update th
 
 ## 5. Check the form for the performance dashboard
 
-The project's **Overview** shows which performance-dashboard metrics the form supports:
+The project's **Overview** has a **Form check** card that shows which metrics of the performance dashboard (see [performance-dashboard.md](performance-dashboard.md)) the form supports:
 
 | Metric | Needs |
 |---|---|
 | Submissions per day | Nothing extra. |
 | Completion time | The `start` and `end` metadata fields. |
 | Detail per enumerator | The `username` metadata field, or a question that identifies the enumerator. |
-| Sampling frame coverage | A sampling frame (see below). |
+| Sampling frame coverage | A sampling frame whose dimensions all map to questions the form still has (see [Sampling frame](#sampling-frame)). Without a frame the check says to define one; if a redeploy removed a mapped question, it names the question so the frame can be updated. |
 
-To add the metadata fields, edit the form in Kobo's form builder, open **Layout & Settings → Meta questions**, enable *start time*, *end time* and *username*, then redeploy the form. If the form has no `username` field but asks for the enumerator's name or code in a question, a project admin can select that question as the **enumerator question**.
+To add the metadata fields, edit the form in Kobo's form builder, open **Layout & Settings → Meta questions**, enable *start time*, *end time* and *username*, then redeploy the form. If the form has no `username` field but asks for the enumerator's name or code in a question, a project admin can select that question as the **enumerator question**. A selected question takes precedence over `username`, and admins can select one even when the form has `username`. If a redeploy removes the selected question, Tamiza goes back to `username` when the form has it.
+
+**Time zone.** The dashboard counts submissions per day, and a day depends on the time zone. Admins set the project's time zone in the Overview, under the project settings (for example `America/Bogota`); until they do, days are counted in UTC.
 
 After changing and redeploying the form in Kobo, press **Re-check the form** (admins and analysts) so Tamiza reads the new version. Tamiza describes the form's **deployed** version: questions you add or edit in Kobo's form builder do not count until you redeploy the form (see [Form versions and choice labels](#7-form-versions-and-choice-labels)).
 
@@ -134,7 +136,7 @@ The tables' columns also carry the text of their questions, as labels (see [scri
 |---|---|
 | Admin | Everything below, plus project settings, the synchronization and script schedules, the Kobo token, the webhook and members. |
 | Analyst | Edit the sampling frame, re-check the form, run **Sync now** and **Full resync**, and write and run the [scripts](scripts.md). |
-| Viewer | Read the project, including its Data section and synchronization log. |
+| Viewer | Read the project, including the performance dashboard, its Data section and synchronization log. |
 
 Admins add people in the **Members** section by email and role:
 
@@ -145,7 +147,7 @@ A project always keeps at least one admin; make someone else admin before steppi
 
 ## Sampling frame
 
-The sampling frame lists the dimensions of the sample (for example municipality, sex, age range), the form field each one maps to, and the target number of surveys for each combination of values. Admins and analysts edit it in the **Sampling frame** section, or import it from a file.
+The sampling frame lists the dimensions of the sample (for example municipality, sex, age range), the form field each one maps to, and the target number of surveys for each combination of values. Admins and analysts edit it in the **Sampling frame** section, or import it from a file. The performance dashboard measures coverage against it.
 
 The file can be **CSV** (comma- or semicolon-separated, UTF-8) or **XLSX** (first sheet). The first row names the dimensions plus a `target` column; each following row is one combination:
 
@@ -155,6 +157,8 @@ The file can be **CSV** (comma- or semicolon-separated, UTF-8) or **XLSX** (firs
 | cali | m | 18_29 | 110 |
 
 Importing shows a preview with any row errors, and asks for the form field of each dimension. Nothing is saved until you load the preview into the editor and press **Save sampling frame**. Limits: 10 dimensions, 10,000 rows, 5 MB per file. Values are matched against the raw submissions as text, so use the same codes the form stores (the choice *names*, as in the example above, not their labels). This is different from the tables the scripts receive, which show labels (see [Form versions and choice labels](#7-form-versions-and-choice-labels)).
+
+The performance dashboard compares them ignoring case and surrounding spaces, so `Cali` in the frame counts the answers `cali` and ` cali`. Nothing else is adjusted: a code that lost its leading zero in a spreadsheet (`5001` for `05001`) matches nothing, and those submissions appear as **outside the frame** in the dashboard (keep such codes as text in the file). The dashboard cannot count a dimension that maps to a question inside a repeat group or to a multiple-choice question, or whose question a redeploy removed, and says so (see [performance-dashboard.md](performance-dashboard.md#sampling-frame-coverage)). A frame cannot express ranges (an age range over an integer question): store the range as a code in the form, for example in a `calculate` question.
 
 ## Self-hosted Kobo on a private network
 

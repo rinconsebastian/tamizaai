@@ -55,6 +55,32 @@ public sealed class SamplingFrameApiTests(PostgresFixture postgres)
 
     private static byte[] Csv(string text) => Encoding.UTF8.GetBytes(text);
 
+    // The Overview's field check follows the frame.
+
+    private static JsonElement Coverage(JsonElement details) =>
+        details.GetProperty("fieldCheck").EnumerateArray().Single(m => m.GetProperty("metric").GetString() == "coverage");
+
+    [Fact]
+    public async Task The_field_check_reports_coverage_unavailable_until_a_frame_is_saved_and_when_a_field_leaves_the_form()
+    {
+        await using var s = await ProjectAsync();
+        var projectUrl = $"/api/v1/projects/{s.ProjectId}";
+
+        var without = Coverage(await s.Viewer.GetFromJsonAsync<JsonElement>(projectUrl));
+        await s.Analyst.PutAsJsonAsync(s.Url, ValidFrame);
+        var saved = Coverage(await s.Viewer.GetFromJsonAsync<JsonElement>(projectUrl));
+        await TestData.ExecuteAsync(s.Db,
+            """UPDATE tamiza.projects SET form_fields = '[{"name":"sex","xpath":"sex","type":"select_one","label":"Sex"}]'::jsonb""");
+        var removed = Coverage(await s.Viewer.GetFromJsonAsync<JsonElement>(projectUrl));
+
+        Assert.False(without.GetProperty("available").GetBoolean());
+        Assert.Equal("defineSamplingFrame", without.GetProperty("hint").GetString());
+        Assert.True(saved.GetProperty("available").GetBoolean());
+        Assert.False(removed.GetProperty("available").GetBoolean());
+        Assert.Equal("updateSamplingFrame", removed.GetProperty("hint").GetString());
+        Assert.Equal(["municipality"], removed.GetProperty("missingFields").EnumerateArray().Select(f => f.GetString()));
+    }
+
     // 5.2
 
     [Fact]

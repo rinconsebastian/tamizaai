@@ -7,6 +7,12 @@ import { ProjectDetails, ProjectsService } from '../../core/projects/projects.se
 import { Alert, Badge, Button, Card, FormField, Input, ToastService } from '../../shared/ui';
 import { ProjectContext } from './project-context';
 
+/** The names the browser knows, plus UTC (the default, which it does not list). The API judges the final choice. */
+function zoneNames(): string[] {
+  const supported = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
+  return ['UTC', ...supported.filter((name) => name !== 'UTC')];
+}
+
 const metadataTypes = new Set(['start', 'end', 'today', 'deviceid', 'username', 'audit', 'calculate', 'note']);
 
 @Component({
@@ -59,7 +65,10 @@ const metadataTypes = new Set(['start', 'end', 'today', 'deviceid', 'username', 
         </tmz-card>
 
         <tmz-card [heading]="t('overview.checkTitle')">
-          <p class="mb-4 text-sm text-body">{{ t('overview.checkIntro') }}</p>
+          <p class="mb-2 text-sm text-body">{{ t('overview.checkIntro') }}</p>
+          <p class="mb-4 text-sm">
+            <a [routerLink]="['..', 'performance']" class="font-medium text-fg-brand hover:underline" data-testid="dashboard-link">{{ t('overview.openDashboard') }}</a>
+          </p>
           <ul class="flex flex-col gap-4">
             @for (metric of project.fieldCheck; track metric.metric) {
               <li class="flex flex-col gap-1" [attr.data-testid]="'metric-' + metric.metric">
@@ -70,9 +79,17 @@ const metadataTypes = new Set(['start', 'end', 'today', 'deviceid', 'username', 
                   </tmz-badge>
                 </div>
                 @if (!metric.available && metric.missingFields.length) {
-                  <p class="text-sm text-body">{{ t('overview.missing', { fields: metric.missingFields.join(', ') }) }}</p>
+                  <p class="text-sm text-body wrap-anywhere">{{ t('overview.missing', { fields: metric.missingFields.join(', ') }) }}</p>
                 }
-                @if (metric.metric === 'perEnumerator' && context.can('admin') && (!metric.available || project.enumeratorField)) {
+                @if (!metric.available && metric.hint; as hint) {
+                  <p class="text-sm text-body" [attr.data-testid]="'hint-' + metric.metric">
+                    {{ t(hintKey(hint)) }}
+                    @if (hint !== 'selectEnumeratorField' && context.can('analyst')) {
+                      <a [routerLink]="['..', 'sampling-frame']" class="font-medium text-fg-brand hover:underline" data-testid="hint-link">{{ t('overview.hints.openFrame') }}</a>
+                    }
+                  </p>
+                }
+                @if (metric.metric === 'perEnumerator' && context.can('admin') && questionFields().length > 0) {
                   <form class="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end" (submit)="$event.preventDefault(); saveEnumerator(enumerator.value)" data-testid="enumerator-form">
                     <tmz-form-field class="flex-1" [label]="t('overview.enumeratorField')" fieldId="enumeratorField" [hint]="t('overview.enumeratorHint')">
                       <select tmzInput #enumerator id="enumeratorField">
@@ -98,6 +115,16 @@ const metadataTypes = new Set(['start', 'end', 'today', 'deviceid', 'username', 
               </tmz-form-field>
               <button tmzButton type="submit" [disabled]="busy()">{{ t('common.save') }}</button>
             </form>
+            <form class="mt-5 flex flex-col gap-3 border-t border-default pt-5 sm:flex-row sm:items-end" (submit)="$event.preventDefault(); saveTimeZone(zone.value)" data-testid="time-zone-form">
+              <tmz-form-field class="flex-1" [label]="t('overview.timeZone')" fieldId="timeZone" [error]="timeZoneError()" [hint]="t('overview.timeZoneHint')">
+                <select tmzInput #zone id="timeZone">
+                  @for (name of timeZones(); track name) {
+                    <option [value]="name" [selected]="name === project.timeZone">{{ name }}</option>
+                  }
+                </select>
+              </tmz-form-field>
+              <button tmzButton type="submit" [disabled]="busy()">{{ t('common.save') }}</button>
+            </form>
           </tmz-card>
         }
       </div>
@@ -116,6 +143,12 @@ export class ProjectOverview {
   protected readonly replacing = signal(false);
   protected readonly tokenError = signal<string | null>(null);
   protected readonly nameError = signal<string | null>(null);
+  protected readonly timeZoneError = signal<string | null>(null);
+  private readonly knownZones = zoneNames();
+  protected readonly timeZones = computed(() => {
+    const current = this.project()?.timeZone;
+    return !current || this.knownZones.includes(current) ? this.knownZones : [current, ...this.knownZones];
+  });
   protected readonly questionFields = computed(() => (this.context.formFields() ?? []).filter((f) => !metadataTypes.has(f.type)));
 
   constructor() {
@@ -135,6 +168,17 @@ export class ProjectOverview {
 
   protected saveEnumerator(field: string): void {
     this.run(this.service.update(this.id(), { enumeratorField: field }), 'overview.enumeratorSaved');
+  }
+
+  protected saveTimeZone(timeZone: string): void {
+    this.timeZoneError.set(null);
+    this.run(this.service.update(this.id(), { timeZone }), 'overview.timeZoneSaved', (message, fields) => this.timeZoneError.set(fields['timeZone'] ?? message));
+  }
+
+  /** Text of a metric's hint: admins are told to act, other roles whom to ask. */
+  protected hintKey(hint: string): string {
+    const canAct = hint === 'selectEnumeratorField' ? this.context.can('admin') : this.context.can('analyst');
+    return `overview.hints.${hint}${canAct ? '' : 'Viewer'}`;
   }
 
   protected rename(name: string): void {

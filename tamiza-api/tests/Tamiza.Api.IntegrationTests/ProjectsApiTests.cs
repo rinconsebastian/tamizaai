@@ -176,6 +176,67 @@ public sealed class ProjectsApiTests(PostgresFixture postgres) : IDisposable
         Assert.True((await unknown.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors").TryGetProperty("enumeratorField", out _));
     }
 
+    [Fact]
+    public async Task An_admin_sets_the_time_zone_and_every_member_sees_it()
+    {
+        var (factory, db) = await FactoryAsync();
+        await using var owner = factory;
+        using var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
+        var created = await CreateProjectAsync(admin);
+        var id = created.GetProperty("project").GetProperty("id").GetGuid();
+        var viewerId = await TestData.SignInAsync(factory, "linus", "linus@example.org");
+        await TestData.AddMemberAsync(db, id, viewerId, "viewer");
+        using var viewer = TestData.ClientFor(factory, "linus", "linus@example.org");
+
+        var set = await admin.PatchAsJsonAsync($"/api/v1/projects/{id}", new { timeZone = "America/Bogota" });
+        var seen = await viewer.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{id}");
+
+        Assert.Equal("UTC", created.GetProperty("project").GetProperty("timeZone").GetString());
+        Assert.Equal(HttpStatusCode.OK, set.StatusCode);
+        Assert.Equal("America/Bogota", (await set.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("timeZone").GetString());
+        Assert.Equal("America/Bogota", seen.GetProperty("timeZone").GetString());
+    }
+
+    [Theory]
+    [InlineData("Mars/Olympus")]
+    [InlineData("")]
+    [InlineData("  ")]
+    public async Task An_unknown_time_zone_is_rejected_naming_the_value_and_changes_nothing(string zone)
+    {
+        var (factory, _) = await FactoryAsync();
+        await using var owner = factory;
+        using var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
+        var id = (await CreateProjectAsync(admin)).GetProperty("project").GetProperty("id").GetGuid();
+
+        var rejected = await admin.PatchAsJsonAsync($"/api/v1/projects/{id}", new { timeZone = zone });
+        var details = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{id}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        var message = (await rejected.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors").GetProperty("timeZone")[0].GetString();
+        Assert.Contains($"'{zone.Trim()}'", message);
+        Assert.Equal("UTC", details.GetProperty("timeZone").GetString());
+    }
+
+    [Fact]
+    public async Task An_analyst_cannot_set_the_time_zone_and_the_openapi_document_lists_it()
+    {
+        var (factory, db) = await FactoryAsync();
+        await using var owner = factory;
+        using var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
+        var id = (await CreateProjectAsync(admin)).GetProperty("project").GetProperty("id").GetGuid();
+        var analystId = await TestData.SignInAsync(factory, "grace", "grace@example.org");
+        await TestData.AddMemberAsync(db, id, analystId, "analyst");
+        using var analyst = TestData.ClientFor(factory, "grace", "grace@example.org");
+
+        var forbidden = await analyst.PatchAsJsonAsync($"/api/v1/projects/{id}", new { timeZone = "America/Bogota" });
+        var details = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{id}");
+        var openApi = await admin.GetStringAsync("/api/v1/openapi.json");
+
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.Equal("UTC", details.GetProperty("timeZone").GetString());
+        Assert.Contains("\"timeZone\"", openApi);
+    }
+
     // 3.4 — token replacement and re-check
 
     [Fact]
