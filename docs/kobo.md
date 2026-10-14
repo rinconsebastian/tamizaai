@@ -118,6 +118,16 @@ Answers whose version has no definition yet (pending, failed or not found), and 
 
 The raw submissions are never changed: they stay exactly as Kobo sent them. The sampling frame reads them, so it still matches choice **names**, not labels (see [Sampling frame](#sampling-frame)).
 
+### Question labels
+
+The tables' columns also carry the text of their questions, as labels (see [scripts.md](scripts.md#question-labels)). They work differently from choice labels:
+
+- They come from **one** definition, the form's **latest deployed version**, in the form's default language, whatever version each submission was made with. A question that a later version relabeled shows its new text for all its answers.
+- Redeploying the form with a new question text changes the labels at the next run, once Tamiza has read the new deployed version (a synchronization or **Re-check the form** does it). Edits in the form builder that are not deployed do not count.
+- Tamiza reads them from the stored definition of the deployed version, so it needs that version's status in the **Form versions** card to be *Labels available*. While it is pending, failed or not found, runs publish the tables without question labels and the flatten log says so; they appear at the first run after the definition is read.
+- A question that the deployed version dropped, or renamed, has no label. If a later version reuses a name for a different question, the old answers are under the new question's label: choose a new name in the form builder when a question changes meaning.
+- Questions with no label in the default language have none; Tamiza does not borrow another language's text.
+
 ## Members and roles
 
 | Role | Can |

@@ -146,6 +146,42 @@ def add_form_version(
     )
 
 
+def deploy_form_version(
+    database: Database,
+    project: Project,
+    uid: str,
+    fields: list[dict] | None = None,
+    status: str = "available",
+    record: bool = True,
+) -> None:
+    """
+    Makes ``uid`` the version the project's form is deployed with, as the API's snapshot records it: the
+    ``projects.form_version`` column and, unless ``record`` is false, the version's ``form_versions`` row (whose
+    ``fields`` are where question labels are read from).
+    """
+    if record:
+        add_form_version(database, project, uid, status=status, fields=fields)
+    database.execute("UPDATE tamiza.projects SET form_version = %s WHERE id = %s", uid, project.id)
+
+
+def column_comments(database: Database, schema: str, table: str) -> dict[str, str | None]:
+    """The comment of each column of ``schema.table`` (None when it has none), by column name."""
+    return dict(
+        database.rows(
+            """
+            SELECT a.attname, d.description
+            FROM pg_attribute a
+            JOIN pg_class c ON c.oid = a.attrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = a.attnum
+            WHERE n.nspname = %s AND c.relname = %s AND a.attnum > 0 AND NOT a.attisdropped
+            """,
+            schema,
+            table,
+        )
+    )
+
+
 def add_script(database: Database, project: Project, kind: str, code: str | None) -> uuid.UUID:
     """Saves a new version of a script (None marks it removed) and returns its id."""
     version_id = uuid.uuid4()

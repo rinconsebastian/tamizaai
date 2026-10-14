@@ -69,7 +69,7 @@ def test_a_run_publishes_each_answer_with_the_label_of_its_own_version(database,
     # With no script 1, the flattened tables are published as the clean data.
     assert municipalities(database, versioned, "clean") == expected
     log = flatten_log(database, run_id)
-    assert "form version" not in log and "without a label" not in log
+    assert "used the current form" not in log and "without a label" not in log
     # The raw submissions are not touched.
     assert database.scalar("SELECT data->>'municipality' FROM tamiza.raw_submissions WHERE kobo_id = 1") == "cali"
 

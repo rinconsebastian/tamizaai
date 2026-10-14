@@ -99,7 +99,7 @@ def test_a_draft_of_script_1_runs_without_a_version_or_a_publication(database, s
     assert sorted(column(table(outcome["steps"]["flatten"], "members"), "member_name")) == ["m1"] * 3 + ["m2"] * 3
     cleaned = table(outcome["steps"]["clean"], "main")
     assert cleaned["rows"] == 2 and sorted(column(cleaned, "age")) == [35, 40]
-    assert {"name": "age", "type": "integer"} in cleaned["columns"]
+    assert {"name": "age", "type": "integer", "label": None} in cleaned["columns"]
     assert outcome["steps"]["clean"]["inputRows"] == 9 and outcome["steps"]["clean"]["outputRows"] == 8
     assert database.scalar("SELECT count(*) FROM tamiza.script_versions") == 1
     assert database.scalar("SELECT count(*) FROM tamiza.runs") == 0

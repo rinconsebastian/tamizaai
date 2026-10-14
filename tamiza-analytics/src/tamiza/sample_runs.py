@@ -144,8 +144,15 @@ def _execute_steps(connection, test: ClaimedTest, settings: Settings, work_dir: 
         sample = _sample(settings.database_url, test.project_id, test.sample_size)
         labels = load_labels(connection, test.project_id, project.form_fields, project.form_choices)
         project.context["label_codes"] = labels.label_codes()
-        result = flatten(project.form_fields, lambda: sample, work_dir / "raw", labels=labels)
-        raw = [OutputTable(t.name, t.rows, t.path) for t in result.tables]
+        result = flatten(
+            project.form_fields,
+            lambda: sample,
+            work_dir / "raw",
+            labels=labels,
+            question_labels=project.question_labels,
+        )
+        project.context["columns"] = pipeline.column_context(result.tables)
+        raw = [OutputTable(t.name, t.rows, t.path, t.column_labels) for t in result.tables]
         step.input_rows = result.input_rows
         step.log = "\n".join([f"Sample: {len(sample):,} submissions.", reference_log, *result.log])
         _set_outputs(step, raw)
@@ -208,7 +215,7 @@ def _script(step, work_dir, kind, code, inputs, context, limits, references) -> 
 
 def _set_outputs(step: TestStep, tables: list[OutputTable]) -> None:
     step.output_rows = sum(t.rows for t in tables)
-    step.tables = preview.step_tables([(t.name, t.rows, t.path) for t in tables])
+    step.tables = preview.step_tables([(t.name, t.rows, t.path, t.column_labels) for t in tables])
 
 
 def _clean_code(connection, test: ClaimedTest) -> str | None:

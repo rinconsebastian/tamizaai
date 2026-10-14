@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 import pytest
-from helpers import add_form_version, add_reference_table, add_script, add_submissions, queue_run
+from helpers import add_form_version, add_reference_table, add_script, add_submissions, column_comments, queue_run
 from psycopg.types.json import Jsonb
 
 from tamiza import pipeline
@@ -60,6 +60,8 @@ def examples() -> dict[str, str]:
     for block in blocks:
         if "def clean(raw, ctx)" in block:
             found["clean"] = block
+        elif "def prepare_output(" in block and "ctx.form.columns" in block:
+            found["dictionary"] = block
         elif "def prepare_output(" in block:
             found["output"] = block
         elif "def compute_indicators(" in block:
@@ -96,6 +98,8 @@ def surveyed(database, project):
     )
     add_form_version(database, project, "vA", VERSION_A, deployed_at="2026-09-01T00:00:00Z", fields=FIELDS)
     add_form_version(database, project, "vB", VERSION_B, deployed_at="2026-09-10T00:00:00Z", fields=FIELDS)
+    # vB is the deployed version: the column labels are read from its definition.
+    database.execute("UPDATE tamiza.projects SET form_version = 'vB' WHERE id = %s", project.id)
     rows = [
         answers(1, "ana", "cali", "piped", [30, 200]),  # 200 is a data-entry error the example removes
         answers(2, "test-1", "buga", "well", [5]),
@@ -117,7 +121,7 @@ def run(database, settings, project) -> str:
 
 
 def test_the_document_has_every_example():
-    assert set(examples()) == {"clean", "output", "indicators", "reference"}
+    assert set(examples()) == {"clean", "output", "indicators", "reference", "dictionary"}
 
 
 def test_the_three_examples_run_on_submissions_of_two_versions_that_relabel_a_choice(database, surveyed, settings):
@@ -171,3 +175,22 @@ def test_the_reference_data_example_joins_labels_to_codes_without_losing_a_row(d
     )
     # Both labels of Cali (the old one and the current one) join the same code; nothing is lost.
     assert rows == [("municipality=buga", 1, 120_000), ("municipality=cali", 2, 2_200_000)]
+
+
+def test_the_data_dictionary_example_lists_every_column_with_its_question_label(database, surveyed, settings):
+    add_script(database, surveyed, "clean", examples()["clean"])
+    add_script(database, surveyed, "output", examples()["dictionary"])
+
+    run(database, settings, surveyed)
+
+    dictionary = database.rows(
+        f'SELECT "table", "column", path, label FROM "{schema_name(surveyed.id, "output")}".data_dictionary'
+        ' ORDER BY "table", "column"'
+    )
+    assert ("main", "municipality", "municipality", "Municipality") in dictionary
+    assert ("main", "water_source", "water_source", "Water source") in dictionary
+    assert ("members", "member_age", "members/member_age", "Age") in dictionary
+    assert ("main", "start", "start", None) in dictionary  # a question without a label is listed, with no label
+    assert not [row for row in dictionary if row[1].startswith("_")]  # no system columns
+    # The flattened tables of the same run carry the labels as column comments.
+    assert column_comments(database, schema_name(surveyed.id, "raw"), "main")["municipality"] == "Municipality"

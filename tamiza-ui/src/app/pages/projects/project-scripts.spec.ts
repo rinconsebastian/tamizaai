@@ -495,6 +495,66 @@ describe('ProjectScripts', () => {
     expect(flatten.querySelector('tbody')?.textContent).toContain('cut at 500 characters');
   });
 
+  it('shows the question label of a column as a cut line with the full text in its title, as text', async () => {
+    const opened = await open('analyst');
+    const { root, http, harness } = opened;
+    await startTest(opened);
+
+    const water = 'Does the household have running water?';
+    const long = 'How many people who usually live in this household were away for more than six months during the last year? '.repeat(4).trim();
+    const markup = '<b>x</b> **bold** [link](http://example.org)';
+    const labeled: TestStep = {
+      ...flattenStep,
+      tables: [
+        {
+          ...flattenStep.tables[0],
+          columns: [
+            { name: '_id', type: 'integer', label: null },
+            { name: 'has_water', type: 'text', label: water },
+            { name: 'away', type: 'text', label: long },
+            { name: 'markup', type: 'text', label: markup },
+            { name: 'empty', type: 'text', label: '' },
+            { name: 'old', type: 'text' },
+          ],
+          preview: [[1, 'yes', 'no', 'a', 'b', 'c']],
+          previewRows: 1,
+          cutCells: [],
+        },
+      ],
+    };
+    http
+      .expectOne((r) => r.url === testsUrl && r.method === 'POST')
+      .flush(scriptTest({ status: 'succeeded', steps: [labeled] }));
+    await settle(harness);
+
+    const headers = [...byTestId(root, 'test-step-flatten')!.querySelectorAll('thead th')];
+    expect(headers.length).toBe(6);
+    const labelOf = (th: Element) => th.querySelector<HTMLElement>('[data-testid="column-label"]');
+
+    const have = labelOf(headers[1])!;
+    expect(have.textContent?.trim()).toBe(water);
+    expect(have.getAttribute('title')).toBe(water);
+    expect(have.classList.contains('truncate')).toBe(true);
+    expect(have.classList.contains('max-w-xs')).toBe(true);
+    // The label sits between the name and the type.
+    expect(have.nextElementSibling?.getAttribute('data-testid')).toBe('column-type');
+
+    expect(labelOf(headers[2])!.getAttribute('title')).toBe(long);
+    expect(labelOf(headers[2])!.textContent?.trim()).toBe(long);
+
+    const literal = labelOf(headers[3])!;
+    expect(literal.textContent?.trim()).toBe(markup);
+    expect(literal.getAttribute('title')).toBe(markup);
+    expect(literal.querySelector('b, a')).toBeNull();
+
+    // No line at all for a null, empty or missing label; the type line stays.
+    for (const index of [0, 4, 5]) {
+      expect(labelOf(headers[index])).toBeNull();
+      expect(headers[index].querySelector('[data-testid="column-type"]')).not.toBeNull();
+    }
+    expect(root.querySelectorAll('[data-testid="column-label"]').length).toBe(3);
+  });
+
   it('names the saved script 1 a test of script 2 ran first, and says when the editor changed', async () => {
     const opened = await open('analyst');
     const { root, http, harness, editor } = opened;

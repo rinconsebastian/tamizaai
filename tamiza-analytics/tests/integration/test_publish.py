@@ -4,6 +4,7 @@ import uuid
 
 import pandas as pd
 import pytest
+from helpers import column_comments
 
 from tamiza import interchange
 from tamiza.names import schema_name
@@ -144,3 +145,85 @@ def test_readers_never_see_a_mix_of_old_and_new_tables(database, tmp_path, proje
 
     assert seen <= {(1, 1), (2, 2)}
     assert errors == []
+
+
+# Column comments (question labels)
+
+
+def labeled_table(tmp_path, name, frame, labels):
+    path = tmp_path / f"{name}-{uuid.uuid4().hex}.parquet"
+    interchange.write_parquet(frame, path)
+    return Table(name, path, labels)
+
+
+def comments(database, project_id, step, name):
+    return column_comments(database, schema_name(project_id, step), name)
+
+
+def test_labels_are_published_as_column_comments_with_their_tables(database, tmp_path, project_id):
+    frame = pd.DataFrame({"has_water": ["Yes"], "age": [30]})
+    with database.connect() as connection:
+        publish(
+            connection, project_id, "raw", [labeled_table(tmp_path, "main", frame, {"has_water": "Has running water?"})]
+        )
+
+    assert comments(database, project_id, "raw", "main") == {"has_water": "Has running water?", "age": None}
+
+
+def test_a_label_is_stored_exactly_as_written(database, tmp_path, project_id):
+    labels = {
+        "quote": 'It\'s the "age"',
+        "backslash": "a \\ b \\\\ c",
+        "newline": "first line\nsecond line",
+        "injection": "x'; DROP SCHEMA public CASCADE; --",
+        "long": "L" * 2000,
+        "accents": "¿Cuántos años tiene? ñ ü",
+    }
+    frame = pd.DataFrame({column: [1] for column in labels})
+    with database.connect() as connection:
+        publish(connection, project_id, "raw", [labeled_table(tmp_path, "main", frame, labels)])
+
+    assert comments(database, project_id, "raw", "main") == labels
+    assert database.scalar("SELECT count(*) FROM pg_namespace WHERE nspname = 'public'") == 1
+
+
+def test_a_label_for_a_column_the_table_does_not_have_is_ignored(database, tmp_path, project_id):
+    with database.connect() as connection:
+        publish(
+            connection,
+            project_id,
+            "raw",
+            [labeled_table(tmp_path, "main", pd.DataFrame({"a": [1]}), {"a": "Kept", "gone": "Ignored"})],
+        )
+
+    assert comments(database, project_id, "raw", "main") == {"a": "Kept"}
+
+
+def test_publishing_again_replaces_the_comments(database, tmp_path, project_id):
+    frame = pd.DataFrame({"a": [1], "b": [2]})
+    with database.connect() as connection:
+        publish(connection, project_id, "raw", [labeled_table(tmp_path, "main", frame, {"a": "First", "b": "Second"})])
+        publish(connection, project_id, "raw", [labeled_table(tmp_path, "main", frame, {"a": "Renewed"})])
+
+    assert comments(database, project_id, "raw", "main") == {"a": "Renewed", "b": None}
+
+
+def test_publishing_without_labels_leaves_no_comments(database, tmp_path, project_id):
+    frame = pd.DataFrame({"a": [1]})
+    with database.connect() as connection:
+        publish(connection, project_id, "raw", [labeled_table(tmp_path, "main", frame, {"a": "First"})])
+        publish(connection, project_id, "raw", [table(tmp_path, "main", frame)])
+
+    assert comments(database, project_id, "raw", "main") == {"a": None}
+
+
+def test_a_failed_load_leaves_the_published_tables_and_their_comments_untouched(database, tmp_path, project_id):
+    good = labeled_table(tmp_path, "main", pd.DataFrame({"a": [1]}), {"a": "Original"})
+    bad = labeled_table(tmp_path, "main", pd.DataFrame({"Not Valid": [2]}), {"Not Valid": "Never published"})
+    with database.connect() as connection:
+        publish(connection, project_id, "raw", [good])
+        with pytest.raises(PublishError):
+            publish(connection, project_id, "raw", [bad])
+
+    assert comments(database, project_id, "raw", "main") == {"a": "Original"}
+    assert database.scalar("SELECT count(*) FROM pg_namespace WHERE nspname LIKE '%%__next'") == 0

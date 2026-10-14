@@ -116,6 +116,30 @@ public sealed class FormSnapshotTests(PostgresFixture postgres) : IDisposable
     }
 
     [Fact]
+    public async Task A_question_label_missing_in_the_default_language_is_recorded_without_a_label()
+    {
+        const string form = """
+            {
+              "name": "Languages",
+              "content": {
+                "translations": ["Spanish (es)", "English (en)"],
+                "survey": [
+                  { "type": "text", "name": "name", "$xpath": "name", "label": ["Nombre", "Name"] },
+                  { "type": "text", "name": "notes", "$xpath": "notes", "label": [null, "Notes"] }
+                ]
+              }
+            }
+            """;
+        _kobo.WithForm(form);
+        await using var harness = await HarnessAsync();
+
+        var labels = await TestData.ScalarAsync<string>(harness.Db,
+            "SELECT string_agg(format('%s=%s', f->>'name', coalesce(f->>'label', '<none>')), ',' ORDER BY f->>'name') FROM tamiza.projects, jsonb_array_elements(form_fields) f");
+
+        Assert.Equal("name=Nombre,notes=<none>", labels);
+    }
+
+    [Fact]
     public async Task A_second_synchronization_reads_the_stored_deployed_version_without_a_request()
     {
         _kobo.WithForm(KoboStub.Deployed(DraftJson, deployedVersionId: "vLive", versionId: "vDraft")).WithVersion("vLive", KoboStub.FormJson);

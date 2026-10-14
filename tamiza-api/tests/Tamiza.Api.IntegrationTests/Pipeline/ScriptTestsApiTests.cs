@@ -174,7 +174,7 @@ public sealed class ScriptTestsApiTests(PostgresFixture postgres) : IDisposable
         const string steps = """
             [{"step": "flatten", "status": "succeeded", "startedAt": "2026-10-03T10:00:00+00:00", "finishedAt": "2026-10-03T10:00:01+00:00",
               "inputRows": 2, "outputRows": 2, "log": "", "error": null,
-              "tables": [{"name": "main", "rows": 2, "columns": [{"name": "_id", "type": "integer"}, {"name": "note", "type": "text"}],
+              "tables": [{"name": "main", "rows": 2, "columns": [{"name": "_id", "type": "integer", "label": null}, {"name": "note", "type": "text", "label": "Observaciones"}],
                           "previewRows": 2, "preview": [[1, "a"], [9007199254740993, "bb…"]], "cutCells": [[1, 1]]}]},
              {"step": "clean", "status": "failed", "startedAt": null, "finishedAt": null, "inputRows": 2, "outputRows": null,
               "log": "Traceback ...", "error": "KeyError: 'age'", "tables": []}]
@@ -190,6 +190,8 @@ public sealed class ScriptTestsApiTests(PostgresFixture postgres) : IDisposable
         var table = flatten.GetProperty("tables")[0];
         Assert.Equal("flatten", flatten.GetProperty("step").GetString());
         Assert.Equal("integer", table.GetProperty("columns")[0].GetProperty("type").GetString());
+        Assert.Equal(JsonValueKind.Null, table.GetProperty("columns")[0].GetProperty("label").ValueKind);
+        Assert.Equal("Observaciones", table.GetProperty("columns")[1].GetProperty("label").GetString());
         Assert.Equal(9007199254740993, table.GetProperty("preview")[1][0].GetInt64());
         Assert.Equal([1, 1], table.GetProperty("cutCells")[0].EnumerateArray().Select(v => v.GetInt32()));
         Assert.Equal("KeyError: 'age'", read.GetProperty("steps")[1].GetProperty("error").GetString());

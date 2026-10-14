@@ -159,7 +159,7 @@ Each raw submission SHALL record its origin (`webhook` or `sync`), the form vers
 ### 5.4 Python script chain (`pipeline`)
 
 #### Requirement: Automatic flattening
-Before the user scripts, the system SHALL flatten the non-deleted raw submissions into the `p_<id>_raw` schema: one main table and one table per repeat group with a key to the parent record. Answers to select questions are written as choice labels in the form's default language, taken from the definition of the form version each submission was made with.
+Before the user scripts, the system SHALL flatten the non-deleted raw submissions into the `p_<id>_raw` schema: one main table and one table per repeat group with a key to the parent record. Answers to select questions are written as choice labels in the form's default language, taken from the definition of the form version each submission was made with. Each column that holds the answers to a question carries that question's label, in the default language, from the form's latest deployed version only, as a PostgreSQL column comment published with the table.
 
 #### Requirement: Three scripts with a fixed contract
 Each project SHALL have up to three optional scripts, each with a fixed-signature function:
@@ -283,6 +283,7 @@ Implement in this order, one change per line:
 4. `add-python-pipeline`: flattening, run queue, the three scripts, versioning, atomic publishing, run triggers and limits.
 4b. `add-pipeline-authoring`: sample test run with preview, reference data available from `ctx`.
 4c. `add-choice-labels`: the flattened tables show choice labels, from the form version of each submission, instead of codes (BREAKING for scripts that compare select columns with codes); `ctx.form.name`; form versions listed in the Data section.
+4d. `add-question-labels`: the flattened columns carry their question's label, from the latest deployed form version only, as column comments, in `ctx.form.columns` and in the sample-test preview. Not breaking.
 5. `add-performance-dashboard`
 6. `add-clean-data-dashboard`
 7. `add-indicators-dashboard`

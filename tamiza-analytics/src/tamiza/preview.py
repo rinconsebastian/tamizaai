@@ -9,7 +9,7 @@ import datetime
 import decimal
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pyarrow as pa
@@ -38,12 +38,15 @@ def column_type(kind: pa.DataType) -> str:
     return "text"
 
 
-def step_tables(tables: Sequence[tuple[str, int, Path]]) -> list[dict]:
-    """``(name, rows, path)`` of each table a step produced, as the test records them."""
+def step_tables(tables: Sequence[tuple[str, int, Path] | tuple[str, int, Path, Mapping[str, str]]]) -> list[dict]:
+    """
+    ``(name, rows, path)`` of each table a step produced, as the test records them, with the question labels of
+    its columns by name as a fourth item when it has any.
+    """
     previews = []
-    for index, (name, rows, path) in enumerate(tables):
+    for index, (name, rows, path, *labels) in enumerate(tables):
         if index < MAX_TABLES:
-            previews.append(table_preview(name, rows, path))
+            previews.append(table_preview(name, rows, path, labels[0] if labels else None))
         else:
             previews.append(
                 {"name": name, "rows": rows, "columns": None, "previewRows": 0, "preview": None, "cutCells": None}
@@ -51,10 +54,13 @@ def step_tables(tables: Sequence[tuple[str, int, Path]]) -> list[dict]:
     return previews
 
 
-def table_preview(name: str, rows: int, path: Path) -> dict:
+def table_preview(name: str, rows: int, path: Path, column_labels: Mapping[str, str] | None = None) -> dict:
     parquet = pq.ParquetFile(path)
     schema = parquet.schema_arrow
-    columns = [{"name": field.name, "type": column_type(field.type)} for field in schema]
+    labels = column_labels or {}
+    columns = [
+        {"name": field.name, "type": column_type(field.type), "label": labels.get(field.name)} for field in schema
+    ]
     batch = next(parquet.iter_batches(batch_size=MAX_ROWS), None)
     preview: list[list] = []
     cut_cells: list[list[int]] = []

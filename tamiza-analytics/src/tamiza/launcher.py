@@ -33,6 +33,8 @@ class OutputTable:
     name: str
     rows: int
     path: Path
+    column_labels: dict[str, str] = field(default_factory=dict)  # question labels of flattened columns, by name
+    column_labels: dict[str, str] = field(default_factory=dict)  # question labels of flattened columns, by name
 
 
 @dataclass

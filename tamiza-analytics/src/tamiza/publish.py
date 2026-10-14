@@ -5,8 +5,8 @@ the new one into place, so readers see either the previous tables or the new one
 the published schema untouched.
 """
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import UUID
 
@@ -24,6 +24,7 @@ class PublishError(Exception):
 class Table:
     name: str
     path: Path
+    column_labels: Mapping[str, str] = field(default_factory=dict)  # published as column comments
 
 
 def publish(connection: psycopg.Connection, project_id: UUID | str, step: str, tables: Sequence[Table]) -> None:
@@ -53,6 +54,21 @@ def drop(connection: psycopg.Connection, project_id: UUID | str, step: str) -> N
     )
 
 
+def _comment_columns(connection: psycopg.Connection, schema: str, table: Table, columns: list[str]) -> None:
+    """
+    Sets the table's column comments in one statement. COMMENT is a utility statement, which takes no bound
+    parameters, so each label goes through ``sql.Literal``, which escapes it. Labels for columns the table does not
+    have are ignored. The comments belong to the staging table, so they are swapped in with it.
+    """
+    comments = [
+        sql.SQL("COMMENT ON COLUMN {} IS {}").format(sql.Identifier(schema, table.name, column), sql.Literal(label))
+        for column in columns
+        if (label := table.column_labels.get(column)) is not None
+    ]
+    if comments:
+        connection.execute(sql.SQL("; ").join(comments))
+
+
 def _load(connection: psycopg.Connection, schema: str, table: Table) -> None:
     if not names.is_identifier(table.name):
         raise PublishError(f"Invalid table name {table.name!r}.")
@@ -67,6 +83,7 @@ def _load(connection: psycopg.Connection, schema: str, table: Table) -> None:
         for column, kind in columns
     )
     connection.execute(sql.SQL("CREATE TABLE {} ({})").format(target, definition))
+    _comment_columns(connection, schema, table, [column for column, _ in columns])
     if not columns:
         return
     column_list = sql.SQL(", ").join(sql.Identifier(column) for column, _ in columns)

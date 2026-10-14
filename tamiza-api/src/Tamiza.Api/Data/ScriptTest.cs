@@ -65,5 +65,8 @@ public sealed record TestTable(
     List<List<JsonElement>>? Preview,
     List<List<int>>? CutCells);
 
-/// <summary><see cref="Type"/> is <c>integer</c>, <c>decimal</c>, <c>boolean</c>, <c>date</c>, <c>timestamp</c> or <c>text</c>.</summary>
-public sealed record TestColumn(string Name, string Type);
+/// <summary>
+/// <see cref="Type"/> is <c>integer</c>, <c>decimal</c>, <c>boolean</c>, <c>date</c>, <c>timestamp</c> or <c>text</c>.
+/// <see cref="Label"/> is the question's label in the form's default language, or null when the column has none.
+/// </summary>
+public sealed record TestColumn(string Name, string Type, string? Label = null);

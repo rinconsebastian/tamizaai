@@ -84,7 +84,7 @@ export type ColumnType = 'integer' | 'decimal' | 'boolean' | 'date' | 'timestamp
 export interface TestTable {
   name: string;
   rows: number;
-  columns: { name: string; type: ColumnType }[] | null;
+  columns: { name: string; type: ColumnType; label?: string | null }[] | null;
   previewRows: number;
   preview: unknown[][] | null;
   cutCells: number[][] | null;
@@ -209,8 +209,9 @@ export const scriptTemplates: Record<ScriptKind, string> = {
     table per repeat group. Answers to select questions are choice labels, not codes
     (select_multiple answers are labels joined by "; "); ctx.form.name(question, label)
     gives the code of a label. ctx.form.questions, ctx.form.choices and
-    ctx.form.label(question, code) describe the form; ctx.log.info(...) writes to the
-    run log. Return a dictionary of table names to DataFrames.
+    ctx.form.label(question, code) describe the form; ctx.form.columns and
+    ctx.form.column_label(table, column) give the question label of each column;
+    ctx.log.info(...) writes to the run log. Return a dictionary of table names to DataFrames.
     """
     main = raw["main"]
     ctx.log.info("%d submissions", len(main))

@@ -25,7 +25,7 @@ Scripts receive a dictionary of pandas DataFrames.
 - **One table per repeat group**, named after the group (for example `members`), with one row per repeat answer. Nested repeat groups get their own table too.
 - **Groups that are not repeats** do not create tables: their questions are columns of the table they sit in.
 
-**Columns** are named after the questions (`age`, not `respondent/age`), lowercased, with accents removed and other characters turned into underscores. When two questions of the same table have the same name (for example `age` in the groups `head` and `spouse`), the second one gets its full path: `spouse_age`.
+**Columns** are named after the questions (`age`, not `respondent/age`), lowercased, with accents removed and other characters turned into underscores. When two questions of the same table have the same name (for example `age` in the groups `head` and `spouse`), the second one gets its full path: `spouse_age`. Each of these columns also carries the text of its question as a label; see [Question labels](#question-labels).
 
 **System columns:**
 
@@ -93,6 +93,30 @@ piped = main["water_source"].map(lambda label: ctx.form.name("water_source", lab
 ```
 
 For a `select_multiple` column, split it first with `main["services"].str.split("; ")` and compare each label.
+
+### Question labels
+
+A column is named after its question (`has_water`), which is short and meant for scripts. The text the question asks (`Does the household have running water?`) is kept as the column's **label**, so people reading the tables, and tools such as Power BI, can tell what a column holds. A label never changes a column's name, order, type or values.
+
+- **Where to find it.**
+  - In PostgreSQL, as the **column comment** of the published tables: `\d+ main` in `psql`, or `SELECT col_description('p_<id>_raw.main'::regclass, 2)` for the second column. Dashboards and BI tools that read column descriptions show it.
+  - In scripts, with `ctx.form.column_label(table, column)`, or all at once in the DataFrame `ctx.form.columns`.
+  - In a test on a sample, under the column's name in the preview of the flattened tables.
+- **Only the latest deployed version.** Unlike [choice labels](#choice-labels), which follow the version of each submission, a column has one label for all its rows, taken from the form's **latest deployed version** in its default language. If a question was relabeled in a later version, every answer, including those given with the earlier one, is under the new text. Edits that were not deployed do not count.
+- **Columns without a label.** These have none: system columns (`_id`, `_index`...); columns of questions that the deployed version no longer has, which the flatten log lists per table (`main: 2 columns are not in the deployed form version and have no question label: old_question, legacy_age.`); and questions with no label in the default language, which the log does not list.
+- **The "or other" text.** What the respondent typed for an "or other" option (`water_source_other`) belongs to its select question and is labeled with the question's label and `: Specify other`.
+- **When labels are not applied.** If the form has no deployed version recorded, or Tamiza has not been able to read the deployed version's definition yet (the **Data** section shows its status), the run publishes the tables without labels, and the flatten log says so (`Question labels not applied: the definition of the deployed form version vC is not available (failed).`). The next run after the definition is read publishes them. Re-checking the form in the Overview retries it.
+- **Redeploying.** The published comments change at the next run, like the rest of the published tables; **Run now** applies them at once.
+- **Tables a script returns carry no labels.** Script 1 can rename, merge and compute columns, so Tamiza cannot tell which question an output column comes from. The clean tables are the exception when there is no script 1: they are the flattened tables, so they keep the labels. Output column names are always reduced to lowercase letters, digits and underscores (see [Rules for what scripts return](#rules-for-what-scripts-return)), so a label cannot be used as a name either.
+
+To give readers the labels with an output, publish a **data dictionary** from script 2: a table that lists each column, where it comes from and what its question asks.
+
+```python
+def prepare_output(cleaned, ctx):
+    # One row per column of the flattened tables: its table, name, question path and label.
+    # Columns of questions the deployed version no longer has are listed too, with an empty label.
+    return {"data_dictionary": ctx.form.columns[["table", "column", "path", "label"]]}
+```
 
 ## The scripts
 
@@ -166,6 +190,8 @@ def compute_indicators(cleaned, ctx):
 | `ctx.form.choices` | DataFrame of the choice lists of the current form: `list_name`, `name`, `label`. |
 | `ctx.form.label(question, value)` | The label of a choice code in the current form, by question name or path; `None` if unknown. Use it for codes that come from outside the tables, such as a reference table. |
 | `ctx.form.name(question, label)` | The code (choice name) a label stands for, by question name or path; `None` if there is none. It searches the current form first, then earlier versions from the newest to the oldest, so a label an older version used still resolves after a later one relabeled the choice. `None` also for a label that two choices of a version share, since it does not identify one. `Other` gives `other` for questions with the "or other" option. |
+| `ctx.form.columns` | DataFrame of the columns of the flattened tables that hold answers: `table`, `column`, `path` (the question's path, or the submission key for a column whose question the form no longer has) and `label` (its [question label](#question-labels), empty when it has none). System columns are not listed, and neither are the columns of tables a script builds. |
+| `ctx.form.column_label(table, column)` | The question label of a column of the flattened tables, from the latest deployed version; `None` for a system column, a column whose question is not in that version, a question without a label, a table a script built, or when the labels were not applied. |
 | `ctx.reference` | The project's [reference tables](#reference-data) by name: `ctx.reference["population"]` is a DataFrame. `list(ctx.reference)` gives the names and `"population" in ctx.reference` checks one. |
 | `ctx.log` | A Python logger: `ctx.log.info(...)`, `ctx.log.warning(...)`. Messages appear in the run log. |
 | `ctx.project_name` | The project's name. |
@@ -182,7 +208,7 @@ Asking for a reference table the project does not have, such as `ctx.reference["
 - **The sample.** 500 submissions by default; choose from 1 to 5,000. They are spread across the whole project, not only the newest, and consecutive tests use the same submissions as long as the data does not change, so you can compare one attempt with the next. Submissions deleted in Kobo are left out. A project with fewer submissions than the sample size uses all of them.
 - **The same rules as a run.** The test uses the same contract, `ctx` (reference tables included), validation and time and memory limits, and the tables the draft receives hold choice labels, as in a run. A test that passes predicts a run that passes, apart from problems that only appear with more data.
 - **Waiting.** Tests run in the same worker as runs, one job at a time. A test goes ahead of runs that are waiting, but waits for a run that has already started, which can take a few minutes on a large project; the panel says what it is waiting for. Starting another test replaces your test that has not started yet.
-- **The result.** Each step shows its status, duration, rows in and out, log and, if it failed, the error with the traceback. For each table a step produced you see its columns with their types (`integer`, `decimal`, `boolean`, `date`, `timestamp`, `text`) and its first 100 rows. Text longer than 500 characters is cut, and fewer rows are shown when 100 would exceed 1 MB; only the first 20 tables of a step are previewed. If you edit the code after testing, the panel says the result no longer matches the editor.
+- **The result.** Each step shows its status, duration, rows in and out, log and, if it failed, the error with the traceback. For each table a step produced you see its columns with their types (`integer`, `decimal`, `boolean`, `date`, `timestamp`, `text`) and its first 100 rows. In the flattened tables, a column whose question has a [label](#question-labels) shows it under the column's name, cut when it is long, with the whole text on hover; the tables a script returns show none. Text longer than 500 characters is cut, and fewer rows are shown when 100 would exceed 1 MB; only the first 20 tables of a step are previewed. If you edit the code after testing, the panel says the result no longer matches the editor.
 - **How long it is kept.** Only you can see your tests, and each is deleted 24 hours after it ended.
 
 ## Reference data
@@ -253,7 +279,7 @@ Saving a script does not start a run; the next run uses the latest version. A ru
 - **Failed**, with the error. For an exception, the traceback shows the lines of your script that raised it.
 - **Skipped**, when the script does not exist or an earlier step failed.
 
-The log of each step holds your `ctx.log` messages and printed output, and for flattening the reference tables the run read, the count of values that could not be read, and every choice-label fallback (see [Choice labels](#choice-labels)). Below the steps, **Reference data used** lists those tables with their row counts and when each was last updated.
+The log of each step holds your `ctx.log` messages and printed output, and for flattening the reference tables the run read, the count of values that could not be read, every choice-label fallback (see [Choice labels](#choice-labels)), and where the column labels came from, the columns that have none because their question is not in the deployed version, or why no labels were applied (see [Question labels](#question-labels)). Below the steps, **Reference data used** lists those tables with their row counts and when each was last updated.
 
 ## Limits
 
@@ -280,3 +306,12 @@ For people who query the database directly: each project's tables are in Postgre
 | `p_<id>_indicators` | The `indicators` table (absent without script 3). |
 
 Each schema is replaced as a whole when its step succeeds.
+
+**Column comments.** The columns of the flattened tables hold their [question labels](#question-labels) as PostgreSQL column comments, in `p_<id>_raw` and, when there is no script 1, in `p_<id>_clean`. They are published in the same swap as the tables, so a reader never sees tables with the comments of another run. To list them:
+
+```sql
+SELECT a.attname AS "column", d.description AS label
+FROM pg_attribute a
+JOIN pg_description d ON d.objoid = a.attrelid AND d.objsubid = a.attnum
+WHERE a.attrelid = 'p_<id>_raw.main'::regclass;
+```

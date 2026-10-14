@@ -45,6 +45,29 @@ public sealed class KoboFormTests
     }
 
     [Fact]
+    public void A_question_in_a_group_has_its_default_language_label_and_the_nested_path()
+    {
+        // English is the default language (first); the group is not a field, and the path comes from the nesting.
+        const string form = """
+            {
+              "name": "Groups",
+              "content": {
+                "translations": ["English (en)", "Spanish (es)"],
+                "survey": [
+                  { "type": "begin_group", "name": "respondent", "label": ["Respondent", "Encuestado"] },
+                  { "type": "integer", "name": "age", "label": ["Age of the respondent", "Edad del encuestado"] },
+                  { "type": "end_group" }
+                ]
+              }
+            }
+            """;
+
+        var asset = KoboForm.Parse(JsonDocument.Parse(form).RootElement);
+
+        Assert.Equal([new FormField("age", "respondent/age", "integer", "Age of the respondent")], asset.Fields);
+    }
+
+    [Fact]
     public void A_document_without_content_has_no_fields() =>
         Assert.Empty(KoboForm.Parse(JsonDocument.Parse("""{ "name": "Empty" }""").RootElement).Fields);
 

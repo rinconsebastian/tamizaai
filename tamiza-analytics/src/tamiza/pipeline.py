@@ -21,6 +21,7 @@ from tamiza import publish, reference
 from tamiza.flatten import flatten
 from tamiza.labels import load as load_labels
 from tamiza.launcher import MAX_LOG_BYTES, Limits, OutputTable, run_script
+from tamiza.question_labels import QuestionLabels, question_labels
 from tamiza.reference import ReferenceTable
 from tamiza.settings import Settings
 
@@ -161,12 +162,21 @@ class ProjectContext:
     form_fields: list[dict]
     form_choices: list[dict]
     context: dict  # what context.json gives the runner: project name and form dictionary
+    question_labels: QuestionLabels  # the labels of the deployed form version, for the flattened columns
 
 
 def project_context(connection: psycopg.Connection, project_id: UUID) -> ProjectContext:
     """The form snapshot and the ``ctx`` data every script of the project receives, in runs and tests alike."""
-    project_name, form_fields, form_choices = connection.execute(
-        "SELECT name, form_fields, form_choices FROM tamiza.projects WHERE id = %s", (project_id,)
+    # The question labels come from the stored definition of the deployed version, not from the snapshot, which holds
+    # the form's latest content after a failed fetch. Same query, so the version and its labels agree.
+    project_name, form_fields, form_choices, form_version, version_status, version_fields = connection.execute(
+        """
+        SELECT p.name, p.form_fields, p.form_choices, p.form_version, v.status, v.fields
+        FROM tamiza.projects p
+        LEFT JOIN tamiza.form_versions v ON v.project_id = p.id AND v.uid = p.form_version
+        WHERE p.id = %s
+        """,
+        (project_id,),
     ).fetchone()
     context = {
         "project_name": project_name,
@@ -184,7 +194,17 @@ def project_context(connection: psycopg.Connection, project_id: UUID) -> Project
             {"list_name": c.get("listName"), "name": c.get("name"), "label": c.get("label")} for c in form_choices
         ],
     }
-    return ProjectContext(form_fields, form_choices, context)
+    return ProjectContext(
+        form_fields, form_choices, context, question_labels(form_version, version_status, version_fields)
+    )
+
+
+def column_context(tables) -> list[dict]:
+    """
+    What ``ctx.form.columns`` is built from: the table, column, path and question label of every column of the
+    flattened tables that holds answers (the system columns are left out).
+    """
+    return [{"table": t.name, "column": c.name, "path": c.path, "label": c.label} for t in tables for c in t.columns]
 
 
 def load_reference(settings: Settings, project_id: UUID, work_dir: Path) -> tuple[list[ReferenceTable], str]:
@@ -218,10 +238,17 @@ def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Pa
         # Scripts resolve a label back to its code with ctx.form.name, across the versions the run translated with.
         context["label_codes"] = labels.label_codes()
         result = flatten(
-            form_fields, lambda: _submissions(settings.database_url, run.project_id), work_dir / "raw", labels=labels
+            form_fields,
+            lambda: _submissions(settings.database_url, run.project_id),
+            work_dir / "raw",
+            labels=labels,
+            question_labels=project.question_labels,
         )
-        raw = [OutputTable(t.name, t.rows, t.path) for t in result.tables]
-        publish.publish(connection, run.project_id, "raw", [publish.Table(t.name, t.path) for t in raw])
+        context["columns"] = column_context(result.tables)
+        raw = [OutputTable(t.name, t.rows, t.path, t.column_labels) for t in result.tables]
+        publish.publish(
+            connection, run.project_id, "raw", [publish.Table(t.name, t.path, t.column_labels) for t in raw]
+        )
         record.input_rows = result.input_rows
         record.log = "\n".join([reference_log, *result.log])
         _set_outputs(record, raw)
@@ -243,7 +270,11 @@ def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Pa
             cleaned = _script(record, work_dir, "clean", codes["clean"], raw, context, limits, references)
             if cleaned is None:
                 return
-        publish.publish(connection, run.project_id, "clean", [publish.Table(t.name, t.path) for t in cleaned])
+        # Without script 1 the clean tables are the flattened ones, so they keep their column labels; a script's
+        # tables carry none.
+        publish.publish(
+            connection, run.project_id, "clean", [publish.Table(t.name, t.path, t.column_labels) for t in cleaned]
+        )
         record.input_rows = sum(t.rows for t in raw)
         _set_outputs(record, cleaned)
 

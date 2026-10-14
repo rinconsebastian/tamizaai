@@ -15,6 +15,9 @@ import { Table, TableContainer, tableCell, tableHead, tableHeaderCell, tableRow 
             @for (column of columns(); track $index) {
               <th scope="col" [class]="tableHeaderCell">
                 {{ column.name }}
+                @if (column.label) {
+                  <span class="block max-w-xs truncate text-xs font-normal text-body" data-testid="column-label" [attr.title]="column.label">{{ column.label }}</span>
+                }
                 <span class="block text-xs font-normal text-body" data-testid="column-type">{{ t('preview.types.' + column.type) }}</span>
               </th>
             }
@@ -43,7 +46,7 @@ import { Table, TableContainer, tableCell, tableHead, tableHeaderCell, tableRow 
   `,
 })
 export class TablePreview {
-  readonly columns = input.required<{ name: string; type: ColumnType | string }[]>();
+  readonly columns = input.required<{ name: string; type: ColumnType | string; label?: string | null }[]>();
   readonly rows = input.required<unknown[][]>();
   readonly cutCells = input<number[][] | null>(null);
 

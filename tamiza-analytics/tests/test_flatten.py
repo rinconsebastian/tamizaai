@@ -6,6 +6,7 @@ import pytest
 from tamiza import interchange
 from tamiza.flatten import flatten
 from tamiza.labels import Labels, build_definition
+from tamiza.question_labels import question_labels
 
 FORM = [
     {"name": "start", "xpath": "start", "type": "start"},
@@ -52,10 +53,17 @@ def submission(kobo_id, members=3, **answers):
 
 @pytest.fixture
 def run(tmp_path):
-    def run_flatten(rows, batch_rows=4, labels=None, form=None):
+    def run_flatten(rows, batch_rows=4, labels=None, form=None, question_labels=None):
         # A plain dict is paired with its own __version__; a (dict, version) pair is used as given.
         paired = [row if isinstance(row, tuple) else (row, row.get("__version__")) for row in rows]
-        result = flatten(form or FORM, lambda: iter(paired), tmp_path, batch_rows=batch_rows, labels=labels)
+        result = flatten(
+            form or FORM,
+            lambda: iter(paired),
+            tmp_path,
+            batch_rows=batch_rows,
+            labels=labels,
+            question_labels=question_labels,
+        )
         tables = {t.name: interchange.read_parquet(t.path) for t in result.tables}
         return result, tables
 
@@ -384,3 +392,173 @@ def test_labels_do_not_change_column_names_or_order(run):
     _, translated = run([labeled(has_water="1")], labels=labels_for(versions={"vB": EVERYTHING}), form=LABEL_FORM)
 
     assert list(translated["main"].columns) == list(plain["main"].columns)
+
+
+# Question labels
+
+DEPLOYED = [
+    {"name": "start", "xpath": "start", "type": "start", "label": None},
+    {"name": "municipality", "xpath": "respondent/municipality", "type": "select_one_m", "label": "Municipality"},
+    {"name": "age", "xpath": "head/age", "type": "integer", "label": "Age of the head"},
+    {"name": "age", "xpath": "spouse/age", "type": "integer", "label": "Age of the spouse"},
+    {"name": "member_name", "xpath": "members/member_name", "type": "text", "label": "Name of the member"},
+    {"name": "member_age", "xpath": "members/member_age", "type": "integer", "label": None},
+    {"name": "visit_date", "xpath": "members/visits/visit_date", "type": "date", "label": "Date of the visit"},
+]
+
+
+def deployed(fields=DEPLOYED, version="vB"):
+    return question_labels(version, "available", fields)
+
+
+def labels_of(result):
+    """Each table's question labels by column name, as publish and the preview read them."""
+    return {t.name: t.column_labels for t in result.tables}
+
+
+def test_columns_carry_the_label_of_their_question_in_the_deployed_version(run):
+    result, _ = run([submission(1)], question_labels=deployed())
+
+    assert labels_of(result) == {
+        "main": {"municipality": "Municipality", "age": "Age of the head", "spouse_age": "Age of the spouse"},
+        "members": {"member_name": "Name of the member"},
+        "visits": {"visit_date": "Date of the visit"},
+    }
+    assert result.question_labels_version == "vB"
+    assert "Question labels from form version vB." in result.log
+
+
+def test_the_columns_list_names_paths_and_labels_without_the_system_columns(run):
+    result, _ = run([submission(1)], question_labels=deployed())
+    main = next(t for t in result.tables if t.name == "main")
+    members = next(t for t in result.tables if t.name == "members")
+
+    assert [(c.name, c.path, c.label) for c in main.columns] == [
+        ("start", "start", None),
+        ("municipality", "respondent/municipality", "Municipality"),
+        ("age", "head/age", "Age of the head"),
+        ("spouse_age", "spouse/age", "Age of the spouse"),
+    ]
+    assert [(c.name, c.path) for c in members.columns] == [
+        ("member_name", "members/member_name"),
+        ("member_age", "members/member_age"),
+    ]
+
+
+def test_labels_do_not_change_names_order_types_or_values(run):
+    rows = [submission(i) for i in range(1, 4)]
+    _, plain = run(rows)
+    _, with_labels = run(rows, question_labels=deployed())
+
+    for name, table in plain.items():
+        assert list(with_labels[name].columns) == list(table.columns)
+        assert with_labels[name].astype(str).equals(table.astype(str))
+
+
+def test_submissions_of_every_version_get_the_deployed_versions_label(run):
+    rows = [({**submission(1), "__version__": "vA"}, "vA"), (submission(2), "vB")]
+
+    result, _ = run(rows, question_labels=deployed(DEPLOYED, "vB"))
+
+    assert labels_of(result)["main"]["age"] == "Age of the head"
+
+
+def test_columns_without_a_question_in_the_deployed_version_are_reported_per_table(run):
+    result, _ = run([submission(1, old_question="x", legacy_age="3")], question_labels=deployed())
+
+    assert (
+        "main: 2 columns are not in the deployed form version and have no question label: old_question, legacy_age."
+        in result.log
+    )
+    main = labels_of(result)["main"]
+    assert "old_question" not in main and "legacy_age" not in main
+    assert not any(line.startswith("members:") and "deployed" in line for line in result.log)
+
+
+def test_a_single_missing_column_is_reported_in_the_singular(run):
+    result, _ = run([submission(1, old_question="x")], question_labels=deployed())
+
+    assert "main: 1 column is not in the deployed form version and has no question label: old_question." in result.log
+
+
+def test_at_most_20_missing_columns_are_named(run):
+    extra = {f"old_{i:02d}": "x" for i in range(25)}
+
+    result, _ = run([submission(1, **extra)], question_labels=deployed())
+
+    line = next(line for line in result.log if line.startswith("main: 25 columns"))
+    assert "old_19" in line and "old_20" not in line and line.endswith(", and 5 more.")
+
+
+def test_a_question_without_a_default_language_label_is_neither_labeled_nor_reported(run):
+    result, _ = run([submission(1)], question_labels=deployed())
+
+    assert "start" not in labels_of(result)["main"] and "member_age" not in labels_of(result)["members"]
+    assert not any("not in the deployed form version" in line for line in result.log)
+
+
+def test_system_columns_never_carry_a_label_and_are_not_reported(run):
+    result, _ = run([submission(1)], question_labels=deployed())
+
+    system = {"_id", "_uuid", "_submission_time", "_version", "_instance_id"}
+    system |= {"_row_id", "_parent_id", "_parent_table", "_index"}
+    assert not system & {c.name for t in result.tables for c in t.columns}
+    assert not system & {name for labels in labels_of(result).values() for name in labels}
+
+
+OTHER_FORM = [
+    {"name": "water_source", "xpath": "water_source", "type": "select_one_sources", "listName": "s", "orOther": True},
+    {"name": "level", "xpath": "level", "type": "select_one_levels", "listName": "l", "orOther": True},
+]
+OTHER_DEPLOYED = [{**OTHER_FORM[0], "label": "Main water source"}, {**OTHER_FORM[1], "label": None}]
+
+
+def test_the_text_of_an_or_other_option_is_labeled_from_its_question(run):
+    result, _ = run(
+        [labeled(water_source="other", water_source_other="Rain")],
+        form=OTHER_FORM,
+        question_labels=deployed(OTHER_DEPLOYED),
+    )
+
+    assert labels_of(result)["main"] == {
+        "water_source": "Main water source",
+        "water_source_other": "Main water source: Specify other",
+    }
+    assert not any("not in the deployed form version" in line for line in result.log)
+
+
+def test_the_text_of_an_unlabeled_or_other_question_has_no_label_and_is_not_reported(run):
+    result, _ = run(
+        [labeled(level="other", level_other="Third")], form=OTHER_FORM, question_labels=deployed(OTHER_DEPLOYED)
+    )
+
+    assert "level" not in labels_of(result)["main"] and "level_other" not in labels_of(result)["main"]
+    assert not any("not in the deployed form version" in line for line in result.log)
+
+
+@pytest.mark.parametrize(
+    ("version", "status", "line"),
+    [
+        (
+            "vC",
+            "failed",
+            "Question labels not applied: the definition of the deployed form version vC is not available (failed).",
+        ),
+        (None, None, "Question labels not applied: no deployed form version is recorded."),
+    ],
+)
+def test_without_the_deployed_definition_only_the_reason_is_logged_and_no_column_is_labeled(run, version, status, line):
+    result, _ = run([submission(1, old_question="x")], question_labels=question_labels(version, status, None))
+
+    assert not any(labels_of(result).values())
+    assert [entry for entry in result.log if "uestion label" in entry] == [line]
+    assert result.question_labels_version is None
+    main = next(t for t in result.tables if t.name == "main")
+    assert ("age", "head/age", None) in [(c.name, c.path, c.label) for c in main.columns]  # paths are still listed
+
+
+def test_without_question_labels_nothing_about_them_is_logged_or_labeled(run):
+    result, _ = run([submission(1, old_question="x")])
+
+    assert not any("uestion label" in line for line in result.log)
+    assert not any(labels_of(result).values()) and result.question_labels_version is None

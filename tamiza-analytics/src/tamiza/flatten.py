@@ -16,11 +16,13 @@ import pandas as pd
 from tamiza import names
 from tamiza.convert import SQL_TYPES, Unreadable, convert, kind_of
 from tamiza.labels import Definition, Labels
+from tamiza.question_labels import QuestionLabels
 
 # A submission and the form version it was made with (None when it has none).
 Submission = tuple[Mapping[str, object], str | None]
 
 MULTIPLE_SEPARATOR = "; "
+MAX_LISTED_COLUMNS = 20  # columns named per table in the question-label log line
 
 MAIN = "main"
 BATCH_ROWS = 2_000
@@ -51,11 +53,26 @@ class _Table:
     columns: dict[str, _Column] = field(default_factory=dict)  # by key path, in discovery order
 
 
+@dataclass(frozen=True)
+class ColumnInfo:
+    """A column that holds answers: its name, the submission key it comes from, and its question label if any."""
+
+    name: str
+    path: str
+    label: str | None = None
+
+
 @dataclass
 class TableOutput:
     name: str
     rows: int
     path: Path
+    columns: list[ColumnInfo] = field(default_factory=list)  # the columns that hold answers, not the system columns
+
+    @property
+    def column_labels(self) -> dict[str, str]:
+        """The question label of each column that has one, by column name."""
+        return {c.name: c.label for c in self.columns if c.label is not None}
 
 
 @dataclass
@@ -63,6 +80,7 @@ class FlattenResult:
     input_rows: int
     tables: list[TableOutput]
     log: list[str]
+    question_labels_version: str | None = None  # the form version the column labels came from, when applied
 
 
 def flatten(
@@ -71,6 +89,7 @@ def flatten(
     out_dir: Path,
     batch_rows: int = BATCH_ROWS,
     labels: Labels | None = None,
+    question_labels: QuestionLabels | None = None,
 ) -> FlattenResult:
     """
     ``form_fields`` is the project's form snapshot (``name``, ``xpath``, ``type``...); ``submissions`` returns a fresh
@@ -80,6 +99,9 @@ def flatten(
     With ``labels``, the answers to select questions are written as labels, from the definition of the form version of
     each submission (repeat rows use their submission's); see :meth:`_Writer.translate`. Without them the codes Kobo
     sent are kept.
+
+    With ``question_labels``, each table's ``columns`` carry the label of their question in the deployed form version
+    (see :mod:`tamiza.question_labels`). The columns are listed, with their path, whether or not labels are applied.
     """
     types = {str(f["xpath"]): str(f.get("type") or "") for f in form_fields}
     form_order = {str(f["xpath"]): index for index, f in enumerate(form_fields)}
@@ -101,6 +123,9 @@ def flatten(
         outputs = writer.finish()
     finally:
         writer.close()
+    by_name = {table.name: table for table in tables.values()}
+    for output in outputs:
+        output.columns = _column_infos(by_name[output.name], question_labels)
 
     log = [f"Flattened {input_rows} submissions into {len(outputs)} tables."]
     log += [f"{output.name}: {output.rows} rows" for output in outputs]
@@ -109,7 +134,41 @@ def flatten(
         for (table, column, kind), count in sorted(writer.unreadable.items())
     ]
     log += writer.label_log()
-    return FlattenResult(input_rows, outputs, log)
+    log += _question_label_log(outputs, question_labels)
+    version = question_labels.version if question_labels is not None and question_labels.applied else None
+    return FlattenResult(input_rows, outputs, log, version)
+
+
+def _column_infos(table: _Table, question_labels: QuestionLabels | None) -> list[ColumnInfo]:
+    if question_labels is None or not question_labels.applied:
+        return [ColumnInfo(column.name, column.path) for column in table.columns.values()]
+    return [
+        ColumnInfo(column.name, column.path, question_labels.label_of(column.path)) for column in table.columns.values()
+    ]
+
+
+def _question_label_log(outputs: list[TableOutput], question_labels: QuestionLabels | None) -> list[str]:
+    """
+    Where the column labels came from and, per table, the columns whose question the deployed version does not have.
+    Nothing is reported without labels, and when they are off only the reason is, since the deployed version's paths
+    are then unknown.
+    """
+    if question_labels is None:
+        return []
+    lines = [question_labels.log_line()]
+    if not question_labels.applied:
+        return lines
+    for output in outputs:
+        missing = [c.name for c in output.columns if not question_labels.in_deployed_version(c.path)]
+        if missing:
+            listed = ", ".join(missing[:MAX_LISTED_COLUMNS])
+            more = f", and {len(missing) - MAX_LISTED_COLUMNS} more" if len(missing) > MAX_LISTED_COLUMNS else ""
+            plural = len(missing) != 1
+            lines.append(
+                f"{output.name}: {_count(len(missing), 'column')} {'are' if plural else 'is'} not in the deployed form "
+                f"version and {'have' if plural else 'has'} no question label: {listed}{more}."
+            )
+    return lines
 
 
 def _is_dropped(key: str) -> bool:

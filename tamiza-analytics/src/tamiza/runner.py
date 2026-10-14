@@ -31,17 +31,25 @@ class ScriptError(Exception):
 class Form:
     """
     The form dictionary of the project's current form: ``questions`` and ``choices`` as DataFrames, ``label`` to
-    translate a code and ``name`` to find the code a label stands for.
+    translate a code and ``name`` to find the code a label stands for. ``columns`` lists the columns of the
+    flattened tables that hold answers, with the path of their question and its label in the deployed form version,
+    and ``column_label`` looks one up.
     """
 
     def __init__(
-        self, questions: list[dict], choices: list[dict], label_codes: Mapping[str, Mapping[str, str]] | None = None
+        self,
+        questions: list[dict],
+        choices: list[dict],
+        label_codes: Mapping[str, Mapping[str, str]] | None = None,
+        columns: list[dict] | None = None,
     ):
         self.questions = pd.DataFrame(questions, columns=["name", "path", "type", "label", "list_name"])
         self.choices = pd.DataFrame(choices, columns=["list_name", "name", "label"])
         self._lists = {row["name"]: row["list_name"] for row in questions if row.get("list_name")}
         self._lists.update({row["path"]: row["list_name"] for row in questions if row.get("list_name")})
         self._labels = {(row["list_name"], row["name"]): row["label"] for row in choices}
+        self.columns = pd.DataFrame(columns or [], columns=["table", "column", "path", "label"])
+        self._column_labels = {(row["table"], row["column"]): row["label"] for row in columns or [] if row.get("label")}
         self._label_codes = label_codes or {}
         # A question is asked for by its path, or by its name: the current form's names first, then the last segment of
         # the paths of questions only earlier versions had.
@@ -53,6 +61,14 @@ class Form:
         """The label of ``value`` in the choice list of ``question`` (its name or path), or None if unknown."""
         list_name = self._lists.get(question)
         return None if list_name is None else self._labels.get((list_name, str(value)))
+
+    def column_label(self, table: str, column: str) -> str | None:
+        """
+        The label of the question whose answers are in ``column`` of the flattened table ``table``, from the deployed
+        form version, or None: for a system column, a column whose question the deployed version does not have, a
+        question without a label, a column of a table a script built, or when the labels were not available.
+        """
+        return self._column_labels.get((table, column))
 
     def name(self, question: str, label: object) -> str | None:
         """
@@ -151,7 +167,7 @@ def _context(step_dir: Path) -> Context:
     log.addHandler(handler)
     log.setLevel(logging.INFO)
     log.propagate = False
-    form = Form(data.get("questions", []), data.get("choices", []), data.get("label_codes"))
+    form = Form(data.get("questions", []), data.get("choices", []), data.get("label_codes"), data.get("columns"))
     return Context(data.get("project_name", ""), form, log, ReferenceTables(step_dir / REFERENCE_DIR))
 
 

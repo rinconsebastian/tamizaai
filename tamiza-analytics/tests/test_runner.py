@@ -437,3 +437,75 @@ def test_a_project_without_reference_tables_lists_none(step, capsys):
 
     assert result["status"] == "succeeded", result
     assert "names: []" in capsys.readouterr().out
+
+
+# The flattened columns with their question labels (columns), as the pipeline precomputes them.
+COLUMNS_CONTEXT = {
+    **CONTEXT,
+    "columns": [
+        {"table": "main", "column": "municipality", "path": "respondent/municipality", "label": "Municipality"},
+        {"table": "main", "column": "spouse_age", "path": "spouse/age", "label": "Age of the spouse"},
+        {"table": "main", "column": "old_question", "path": "old_question", "label": None},
+        {"table": "members", "column": "member_name", "path": "members/member_name", "label": "Name of the member"},
+    ],
+}
+
+
+def test_ctx_form_columns_lists_the_flattened_columns_with_their_question_and_label(step):
+    step_dir = step(
+        """
+        def clean(raw, ctx):
+            columns = ctx.form.columns
+            assert list(columns.columns) == ["table", "column", "path", "label"]
+            assert len(columns) == 4 and "_id" not in set(columns["column"])
+            row = columns[columns["column"] == "spouse_age"].iloc[0]
+            assert (row["table"], row["path"], row["label"]) == ("main", "spouse/age", "Age of the spouse")
+            return raw
+    """,
+        context=COLUMNS_CONTEXT,
+    )
+
+    assert run_step(step_dir, "clean")["status"] == "succeeded"
+
+
+def test_ctx_form_column_label_gives_the_label_of_a_column(step):
+    step_dir = step(
+        """
+        def clean(raw, ctx):
+            assert ctx.form.column_label("main", "spouse_age") == "Age of the spouse"
+            assert ctx.form.column_label("members", "member_name") == "Name of the member"
+            return raw
+    """,
+        context=COLUMNS_CONTEXT,
+    )
+
+    assert run_step(step_dir, "clean")["status"] == "succeeded"
+
+
+def test_ctx_form_column_label_gives_none_without_a_label(step):
+    step_dir = step(
+        """
+        def clean(raw, ctx):
+            assert ctx.form.column_label("main", "_id") is None  # a system column
+            assert ctx.form.column_label("main", "old_question") is None  # not in the deployed version
+            assert ctx.form.column_label("main", "spouse_age_2") is None  # no such column
+            assert ctx.form.column_label("households", "spouse_age") is None  # a table the script built
+            return raw
+    """,
+        context=COLUMNS_CONTEXT,
+    )
+
+    assert run_step(step_dir, "clean")["status"] == "succeeded"
+
+
+def test_ctx_form_columns_work_in_a_context_without_columns(step):
+    step_dir = step(
+        """
+        def clean(raw, ctx):
+            assert ctx.form.columns.empty and list(ctx.form.columns.columns) == ["table", "column", "path", "label"]
+            assert ctx.form.column_label("main", "municipality") is None
+            return raw
+    """
+    )
+
+    assert run_step(step_dir, "clean")["status"] == "succeeded"
