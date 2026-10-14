@@ -16,7 +16,10 @@ public sealed class SyncRunner(
     SyncQueue queue,
     RunQueue runs,
     SubmissionStore store,
+    FormVersionStore versions,
+    FormVersionFetcher fetcher,
     KoboClient kobo,
+    FormSnapshot snapshot,
     SecretProtector secrets,
     TimeProvider time,
     IOptions<IngestionOptions> options,
@@ -92,7 +95,7 @@ public sealed class SyncRunner(
             throw new KoboReadException(assetError);
         }
 
-        FormSnapshot.Apply(project, asset!, time.GetUtcNow());
+        await snapshot.ApplyAsync(project, asset!, token, time.GetUtcNow(), cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
         var settings = options.Value;
@@ -124,6 +127,31 @@ public sealed class SyncRunner(
         {
             var deleted = await store.MarkDeletedAsync(project.Id, koboIds, sync.StartedAt!.Value, time.GetUtcNow(), cancellationToken);
             await queue.AddCountsAsync(claimed.Id, 0, 0, deleted, cancellationToken);
+        }
+
+        // Before the run is queued, so the run sees the definitions this synchronization could fetch.
+        await FetchFormVersionsAsync(project, token, cancellationToken);
+    }
+
+    /// <summary>
+    /// Records the versions the project's submissions use, including any stored without a record, and fetches the
+    /// definitions that are due. Nothing but a shutdown changes the outcome of the synchronization: the submissions are
+    /// stored, and a version that could not be fetched is retried later.
+    /// </summary>
+    private async Task FetchFormVersionsAsync(Project project, string token, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await versions.RecordUsedVersionsAsync(project.Id, time.GetUtcNow(), cancellationToken);
+            var result = await fetcher.FetchAsync(project, token, FetchMode.Due, null, cancellationToken);
+            if (result.Selected > 0)
+            {
+                logger.LogInformation("Fetched {Fetched} of {Selected} due form versions of project {ProjectId}.", result.Fetched, result.Selected, project.Id);
+            }
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(exception, "The form versions of project {ProjectId} could not be fetched; the synchronization is not affected.", project.Id);
         }
     }
 

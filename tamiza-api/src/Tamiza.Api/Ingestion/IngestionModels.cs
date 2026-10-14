@@ -37,3 +37,21 @@ public sealed record SyncItem(
     string? Error);
 
 public sealed record SyncPage(IReadOnlyList<SyncItem> Items, int Total);
+
+/// <summary>
+/// One form version used by the project's submissions. <see cref="Status"/> is <c>available</c>, <c>pending</c>, <c>failed</c>
+/// or <c>not_found</c>; a version with no record yet reads as <c>pending</c>. <see cref="Current"/> marks the version the
+/// project's form snapshot describes.
+/// </summary>
+public sealed record FormVersionItem(
+    string Uid,
+    bool Current,
+    DateTimeOffset? DeployedAt,
+    long Submissions,
+    string Status,
+    string? ErrorCode,
+    string? Error,
+    DateTimeOffset? NextAttemptAt);
+
+/// <summary>The versions in use, the current one first, and how many submissions have no version.</summary>
+public sealed record FormVersionList(IReadOnlyList<FormVersionItem> Versions, long WithoutVersion);

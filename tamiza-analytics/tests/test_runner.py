@@ -30,7 +30,7 @@ CONTEXT = {
 
 @pytest.fixture
 def step(tmp_path):
-    def make(code, tables=None):
+    def make(code, tables=None, context=None):
         (tmp_path / "input").mkdir(exist_ok=True)
         tables = (
             tables
@@ -39,7 +39,7 @@ def step(tmp_path):
         )
         for name, frame in tables.items():
             interchange.write_parquet(frame, tmp_path / "input" / f"{name}.parquet")
-        (tmp_path / "context.json").write_text(json.dumps(CONTEXT))
+        (tmp_path / "context.json").write_text(json.dumps(context or CONTEXT))
         (tmp_path / "script.py").write_text(textwrap.dedent(code))
         return tmp_path
 
@@ -177,6 +177,98 @@ def test_form_dictionary_and_project_name(step):
 
     assert run_step(step_dir, "clean")["status"] == "succeeded"
     assert output(step_dir, "main")["municipality_label"].tolist() == ["Cali", "Buga", "Cali"]
+
+
+# The reverse lookup the pipeline precomputes (label_codes): the current form's labels, then earlier versions'.
+LABEL_CODES_CONTEXT = {
+    **CONTEXT,
+    "questions": [
+        *CONTEXT["questions"],
+        {"name": "has_water", "path": "has_water", "type": "select_one", "label": "Has water", "list_name": "yes_no"},
+        {"name": "source", "path": "water/source", "type": "select_one", "label": "Source", "list_name": "sources"},
+    ],
+    "label_codes": {
+        "respondent/municipality": {"Cali": "cali", "Buga": "buga"},
+        # "Sí" is the current label of 1 and vA called it "Si"; "Maybe" is shared by two choices: it has no code.
+        "has_water": {"Sí": "1", "Si": "1", "No": "2"},
+        "water/source": {"Piped": "piped", "Other": "other"},
+        "old_question": {"Old answer": "x"},
+    },
+}
+
+
+def test_ctx_form_name_gives_the_code_of_a_label(step):
+    step_dir = step(
+        """
+        def clean(raw, ctx):
+            assert ctx.form.name("municipality", "Cali") == "cali"
+            assert ctx.form.name("respondent/municipality", "Buga") == "buga"
+            main = raw["main"].copy()
+            main["code"] = [ctx.form.name("municipality", label) for label in ["Cali", "Buga", "Cali"]]
+            return {"main": main}
+        """,
+        context=LABEL_CODES_CONTEXT,
+    )
+
+    assert run_step(step_dir, "clean")["status"] == "succeeded"
+    assert output(step_dir, "main")["code"].tolist() == ["cali", "buga", "cali"]
+
+
+def test_ctx_form_name_resolves_the_label_of_an_earlier_version(step):
+    step_dir = step(
+        """
+        def clean(raw, ctx):
+            assert ctx.form.name("has_water", "Sí") == "1"
+            assert ctx.form.name("has_water", "Si") == "1"
+            return {"main": raw["main"]}
+        """,
+        context=LABEL_CODES_CONTEXT,
+    )
+
+    assert run_step(step_dir, "clean")["status"] == "succeeded"
+
+
+def test_ctx_form_name_gives_none_for_an_unknown_or_repeated_label_or_question(step):
+    step_dir = step(
+        """
+        def clean(raw, ctx):
+            assert ctx.form.name("has_water", "Maybe") is None
+            assert ctx.form.name("has_water", "Perhaps") is None
+            assert ctx.form.name("age", 30) is None
+            assert ctx.form.name("no_such_question", "Cali") is None
+            return {"main": raw["main"]}
+        """,
+        context=LABEL_CODES_CONTEXT,
+    )
+
+    assert run_step(step_dir, "clean")["status"] == "succeeded"
+
+
+def test_ctx_form_name_resolves_other_to_other_and_reaches_questions_of_earlier_versions(step):
+    step_dir = step(
+        """
+        def clean(raw, ctx):
+            assert ctx.form.name("source", "Other") == "other"
+            assert ctx.form.name("water/source", "Piped") == "piped"
+            assert ctx.form.name("old_question", "Old answer") == "x"
+            return {"main": raw["main"]}
+        """,
+        context=LABEL_CODES_CONTEXT,
+    )
+
+    assert run_step(step_dir, "clean")["status"] == "succeeded"
+
+
+def test_ctx_form_name_works_in_a_context_without_label_codes(step):
+    step_dir = step(
+        """
+        def clean(raw, ctx):
+            assert ctx.form.name("municipality", "Cali") is None
+            return {"main": raw["main"]}
+        """
+    )
+
+    assert run_step(step_dir, "clean")["status"] == "succeeded"
 
 
 # 4.3 — output validation

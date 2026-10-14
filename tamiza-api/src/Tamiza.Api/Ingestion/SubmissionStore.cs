@@ -26,6 +26,16 @@ public sealed class SubmissionStore(TamizaDbContext db)
         RETURNING (xmax = 0) AS inserted
         """;
 
+    // A version nobody has seen yet starts as pending and due; its definition is fetched later, never from this statement.
+    // ORDER BY inserts in the order of the sorted uids, so concurrent transactions take their row locks in the same order.
+    private const string RecordVersionsSql = """
+        INSERT INTO tamiza.form_versions (project_id, uid, status, recorded_at, next_attempt_at)
+        SELECT @project_id, v.uid, 'pending', @now, @now
+        FROM unnest(@uids) WITH ORDINALITY AS v(uid, position)
+        ORDER BY v.position
+        ON CONFLICT DO NOTHING
+        """;
+
     // Rows received after the listing started may have an _id the listing already passed, so they are never marked.
     private const string MarkDeletedSql = """
         UPDATE tamiza.raw_submissions s SET deleted = true, deleted_at = @now
@@ -57,20 +67,43 @@ public sealed class SubmissionStore(TamizaDbContext db)
         command.Parameters.AddWithValue("datas", unique.Select(r => r.Data).ToArray());
 
         int created = 0, updated = 0;
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
-            if (reader.GetBoolean(0))
+            while (await reader.ReadAsync(cancellationToken))
             {
-                created++;
-            }
-            else
-            {
-                updated++;
+                if (reader.GetBoolean(0))
+                {
+                    created++;
+                }
+                else
+                {
+                    updated++;
+                }
             }
         }
 
+        await RecordVersionsAsync(scope, projectId, unique, now, cancellationToken);
         return new UpsertCounts(created, updated);
+    }
+
+    /// <summary>
+    /// Records the form versions of the stored rows in the same transaction, so a version is never in use without a row
+    /// to fetch it from. It is one primary-key probe per version and contacts nobody, so the webhook keeps its response time.
+    /// A submission without a version records nothing.
+    /// </summary>
+    private static async Task RecordVersionsAsync(ConnectionScope scope, Guid projectId, SubmissionRow[] rows, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var uids = rows.Select(r => r.FormVersion).OfType<string>().Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        if (uids.Length == 0)
+        {
+            return;
+        }
+
+        await using var command = scope.Command(RecordVersionsSql);
+        command.Parameters.AddWithValue("project_id", projectId);
+        command.Parameters.AddWithValue("now", now);
+        command.Parameters.AddWithValue("uids", uids);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     /// <summary>

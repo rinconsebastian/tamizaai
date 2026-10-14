@@ -19,7 +19,8 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from tamiza import pipeline, preview
-from tamiza.flatten import flatten
+from tamiza.flatten import Submission, flatten
+from tamiza.labels import load as load_labels
 from tamiza.launcher import Limits, OutputTable, run_script
 from tamiza.settings import Settings
 
@@ -141,7 +142,9 @@ def _execute_steps(connection, test: ClaimedTest, settings: Settings, work_dir: 
         tables, reference_log = pipeline.load_reference(settings, test.project_id, work_dir)
         references.update({t.name: t.path for t in tables})
         sample = _sample(settings.database_url, test.project_id, test.sample_size)
-        result = flatten(project.form_fields, lambda: sample, work_dir / "raw")
+        labels = load_labels(connection, test.project_id, project.form_fields, project.form_choices)
+        project.context["label_codes"] = labels.label_codes()
+        result = flatten(project.form_fields, lambda: sample, work_dir / "raw", labels=labels)
         raw = [OutputTable(t.name, t.rows, t.path) for t in result.tables]
         step.input_rows = result.input_rows
         step.log = "\n".join([f"Sample: {len(sample):,} submissions.", reference_log, *result.log])
@@ -218,17 +221,17 @@ def _clean_code(connection, test: ClaimedTest) -> str | None:
     return row[0] if row else None
 
 
-def _sample(database_url: str, project_id: UUID, size: int) -> list[dict]:
+def _sample(database_url: str, project_id: UUID, size: int) -> list[Submission]:
     """
-    Up to ``size`` non-deleted submissions in hash order: spread across the project, and the same ones while the
-    submissions do not change. Read once, since flattening passes over them twice.
+    Up to ``size`` non-deleted submissions, each with its form version, in hash order: spread across the project, and
+    the same ones while the submissions do not change. Read once, since flattening passes over them twice.
     """
     with psycopg.connect(database_url) as connection:
         rows = connection.execute(
             """
-            SELECT data FROM tamiza.raw_submissions WHERE project_id = %s AND NOT deleted
+            SELECT data, form_version FROM tamiza.raw_submissions WHERE project_id = %s AND NOT deleted
             ORDER BY md5(kobo_uuid), kobo_id LIMIT %s
             """,
             (project_id, size),
         ).fetchall()
-    return [data for (data,) in rows]
+    return [(data, form_version) for data, form_version in rows]

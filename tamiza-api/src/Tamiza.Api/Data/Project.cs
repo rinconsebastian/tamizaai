@@ -55,6 +55,9 @@ public sealed class Project
     /// <summary>The form's choice lists, from the same snapshot as <see cref="FormFields"/>.</summary>
     public List<FormChoice> FormChoices { get; set; } = [];
 
+    /// <summary>The uid of the deployed form version the snapshot describes; null when the form has no deployment.</summary>
+    public string? FormVersion { get; set; }
+
     public Guid CreatedBy { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
@@ -63,10 +66,11 @@ public sealed class Project
 }
 
 /// <summary>
-/// A field of the Kobo form, as read from the asset's <c>content.survey</c>. <see cref="ListName"/> names the choice list
-/// of select questions.
+/// A field of the Kobo form, as read from the asset's <c>content.survey</c>. <see cref="Xpath"/> is the full path of the
+/// answer in a submission, built from the group nesting. <see cref="ListName"/> names the choice list of select
+/// questions, and <see cref="OrOther"/> marks the ones with Kobo's "or other" option.
 /// </summary>
-public sealed record FormField(string Name, string Xpath, string Type, string? Label, string? ListName = null);
+public sealed record FormField(string Name, string Xpath, string Type, string? Label, string? ListName = null, bool OrOther = false);
 
 /// <summary>A choice of one of the form's choice lists, as read from the asset's <c>content.choices</c>.</summary>
 public sealed record FormChoice(string ListName, string Name, string? Label);

@@ -157,5 +157,91 @@ public sealed class WebhookTests(PostgresFixture postgres) : IDisposable
         Assert.Contains(harness.Factory.Logs.Lines, line => line.Contains("rejected") && line.Contains(harness.ProjectId.ToString()));
     }
 
+
+    // Form versions in use
+
+    private static string VersionedSubmission(long id, string? version) =>
+        JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["_id"] = id,
+            ["_uuid"] = $"uuid-{id}",
+            ["__version__"] = version,
+            ["_submission_time"] = "2026-10-01T10:00:00",
+            ["municipality"] = "cali",
+        });
+
+    private static Task<string?> VersionRowsAsync(string db) =>
+        TestData.ScalarAsync<string>(db, "SELECT string_agg(format('%s %s', uid, status), ',' ORDER BY uid) FROM tamiza.form_versions");
+
+    [Fact]
+    public async Task A_delivery_with_a_new_version_records_it_as_pending_without_contacting_kobo()
+    {
+        await using var harness = await IngestionHarness.CreateAsync(postgres, _kobo);
+        _kobo.Server.ResetLogEntries();
+
+        var response = await harness.DeliverAsync(VersionedSubmission(1, "vB"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("vB pending", await VersionRowsAsync(harness.Db));
+        Assert.True(await TestData.ScalarAsync<bool>(harness.Db, "SELECT next_attempt_at <= now() FROM tamiza.form_versions"));
+        Assert.Empty(_kobo.Server.LogEntries);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task A_delivery_without_a_form_version_records_none(string? version)
+    {
+        await using var harness = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await harness.DeliverAsync(VersionedSubmission(1, version));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(1, await harness.CountAsync());
+        Assert.Null(await VersionRowsAsync(harness.Db));
+    }
+
+    [Fact]
+    public async Task A_version_already_recorded_stays_one_row_and_keeps_its_state()
+    {
+        await using var harness = await IngestionHarness.CreateAsync(postgres, _kobo);
+        await harness.DeliverAsync(VersionedSubmission(1, "vA"));
+        await TestData.ExecuteAsync(harness.Db, "UPDATE tamiza.form_versions SET status = 'available', fetched_at = now(), next_attempt_at = NULL");
+
+        await harness.DeliverAsync(VersionedSubmission(2, "vA"));
+        await harness.DeliverAsync(VersionedSubmission(3, "vA"));
+
+        Assert.Equal("vA available", await VersionRowsAsync(harness.Db));
+    }
+
+    [Fact]
+    public async Task A_delivery_with_a_new_version_answers_within_500_ms_while_a_synchronization_holds_a_page_transaction()
+    {
+        await using var harness = await IngestionHarness.CreateAsync(postgres, _kobo);
+        // What a page of a synchronization has done and not committed yet: submissions and the version they record.
+        await using var connection = new Npgsql.NpgsqlConnection(harness.Db);
+        await connection.OpenAsync();
+        await using var page = await connection.BeginTransactionAsync();
+        await using (var command = new Npgsql.NpgsqlCommand(
+            """
+            INSERT INTO tamiza.raw_submissions (project_id, kobo_id, kobo_uuid, form_version, data, origin, received_at, updated_at)
+            SELECT @project_id, 100000 + n, 'page-' || n, 'vPage', '{}', 'sync', now(), now() FROM generate_series(1, 500) n;
+            INSERT INTO tamiza.form_versions (project_id, uid, status, recorded_at, next_attempt_at) VALUES (@project_id, 'vPage', 'pending', now(), now());
+            """, connection, page))
+        {
+            command.Parameters.AddWithValue("project_id", harness.ProjectId);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var response = await harness.DeliverAsync(VersionedSubmission(1, "vNew"));
+        watch.Stop();
+        await page.CommitAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(watch.ElapsedMilliseconds < 500, $"The delivery took {watch.ElapsedMilliseconds} ms.");
+        Assert.Equal("vNew pending,vPage pending", await VersionRowsAsync(harness.Db));
+    }
+
     public void Dispose() => _kobo.Dispose();
 }

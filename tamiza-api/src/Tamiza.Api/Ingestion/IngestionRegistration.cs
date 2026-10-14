@@ -9,11 +9,14 @@ public static class IngestionRegistration
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddScoped<SubmissionStore>();
+        services.AddScoped<FormVersionStore>();
+        services.AddScoped<FormVersionFetcher>();
         services.AddScoped<WebhookCredentials>();
         services.AddScoped<SyncQueue>();
         services.AddScoped<SyncRunner>();
         services.AddSingleton<IngestionSignal>();
         services.AddHostedService<IngestionScheduler>();
+        services.AddHostedService<FormVersionWorker>();
         return services;
     }
 }

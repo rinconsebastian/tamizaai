@@ -11,6 +11,19 @@ public static class KoboErrorCodes
     public const string Unreachable = "kobo.unreachable";
     public const string UnexpectedResponse = "kobo.unexpected_response";
     public const string TokenUnreadable = "kobo.token_unreadable";
+
+    /// <summary>The form is readable, but Kobo has no such version of it.</summary>
+    public const string VersionNotFound = "kobo.version_not_found";
+
+    /// <summary>Kobo answered 429: the account makes too many automated requests.</summary>
+    public const string RateLimited = "kobo.rate_limited";
+
+    /// <summary>
+    /// Errors that affect every request to the server or form, not one version: the rest of a fetch pass would fail
+    /// the same way.
+    /// </summary>
+    public static bool IsServerWide(string code) =>
+        code is Unreachable or Unauthorized or TokenUnreadable or AddressNotAllowed or RateLimited or FormNotFound;
 }
 
 public sealed record KoboError(string Code, string Message);

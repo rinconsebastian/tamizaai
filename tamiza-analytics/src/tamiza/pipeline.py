@@ -19,6 +19,7 @@ from psycopg.types.json import Jsonb
 
 from tamiza import publish, reference
 from tamiza.flatten import flatten
+from tamiza.labels import load as load_labels
 from tamiza.launcher import MAX_LOG_BYTES, Limits, OutputTable, run_script
 from tamiza.reference import ReferenceTable
 from tamiza.settings import Settings
@@ -158,6 +159,7 @@ def execute(connection: psycopg.Connection, run: ClaimedRun, settings: Settings)
 @dataclass(frozen=True)
 class ProjectContext:
     form_fields: list[dict]
+    form_choices: list[dict]
     context: dict  # what context.json gives the runner: project name and form dictionary
 
 
@@ -182,7 +184,7 @@ def project_context(connection: psycopg.Connection, project_id: UUID) -> Project
             {"list_name": c.get("listName"), "name": c.get("name"), "label": c.get("label")} for c in form_choices
         ],
     }
-    return ProjectContext(form_fields, context)
+    return ProjectContext(form_fields, form_choices, context)
 
 
 def load_reference(settings: Settings, project_id: UUID, work_dir: Path) -> tuple[list[ReferenceTable], str]:
@@ -212,7 +214,12 @@ def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Pa
             "UPDATE tamiza.runs SET reference_tables = %s WHERE id = %s",
             (Jsonb([t.summary() for t in tables]), run.id),
         )
-        result = flatten(form_fields, lambda: _submissions(settings.database_url, run.project_id), work_dir / "raw")
+        labels = load_labels(connection, run.project_id, form_fields, project.form_choices)
+        # Scripts resolve a label back to its code with ctx.form.name, across the versions the run translated with.
+        context["label_codes"] = labels.label_codes()
+        result = flatten(
+            form_fields, lambda: _submissions(settings.database_url, run.project_id), work_dir / "raw", labels=labels
+        )
         raw = [OutputTable(t.name, t.rows, t.path) for t in result.tables]
         publish.publish(connection, run.project_id, "raw", [publish.Table(t.name, t.path) for t in raw])
         record.input_rows = result.input_rows
@@ -358,12 +365,15 @@ def _codes(connection, run: ClaimedRun) -> dict[str, str | None]:
 
 
 def _submissions(database_url: str, project_id: UUID):
-    """Streams the project's non-deleted submissions with a server-side cursor on its own connection."""
+    """
+    Streams the project's non-deleted submissions with a server-side cursor on its own connection, each with the
+    form version the API recorded for it (``__version__``, null when it has none).
+    """
     with psycopg.connect(database_url) as connection, connection.cursor(name="submissions") as cursor:
         cursor.itersize = 2_000
         cursor.execute(
-            "SELECT data FROM tamiza.raw_submissions WHERE project_id = %s AND NOT deleted ORDER BY kobo_id",
+            "SELECT data, form_version FROM tamiza.raw_submissions"
+            " WHERE project_id = %s AND NOT deleted ORDER BY kobo_id",
             (project_id,),
         )
-        for (data,) in cursor:
-            yield data
+        yield from cursor

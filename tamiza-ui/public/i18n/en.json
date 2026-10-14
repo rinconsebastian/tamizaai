@@ -34,7 +34,9 @@
         "form_not_found": "No form with this asset UID was found on the Kobo server.",
         "unreachable": "The Kobo server could not be reached. Check the address and try again.",
         "unexpected_response": "The Kobo server answered unexpectedly. Check the address and try again.",
-        "token_unreadable": "The saved API token can no longer be read. A project admin must replace it."
+        "token_unreadable": "The saved API token can no longer be read. A project admin must replace it.",
+        "version_not_found": "Kobo has no such version of this form.",
+        "rate_limited": "The Kobo server is limiting Tamiza's requests. Tamiza will try again later."
       },
       "member": {
         "exists": "This person is already a member of the project."
@@ -154,7 +156,10 @@
     "rechecked": "Form checked.",
     "tokenReplaced": "API token replaced.",
     "enumeratorSaved": "Enumerator question saved.",
-    "renamed": "Project renamed."
+    "renamed": "Project renamed.",
+    "unavailableVersionsOne": "1 form version has no labels yet. Its answers use the current form's labels until Tamiza can read it.",
+    "unavailableVersions": "{{ count }} form versions have no labels yet. Their answers use the current form's labels until Tamiza can read them.",
+    "unavailableVersionsAction": "See the form versions"
   },
   "metrics": {
     "dailyEvolution": "Submissions per day",
@@ -214,6 +219,32 @@
       "running": "Running",
       "succeeded": "Succeeded",
       "failed": "Failed"
+    },
+    "versions": {
+      "title": "Form versions",
+      "intro": "Answers to select questions are shown with the labels of the form version their submission was made with.",
+      "empty": "No form versions yet. They appear as submissions arrive.",
+      "current": "Current",
+      "notDeployed": "—",
+      "withoutVersion": "{{ count }} submissions have no form version. Their answers use the current form's labels.",
+      "withoutVersionOne": "1 submission has no form version. Its answers use the current form's labels.",
+      "nextAttempt": "Next attempt:",
+      "copied": "Form version copied.",
+      "copy": "Copy the full version ID",
+      "retryHint": "Re-checking the form retries failed and not found versions.",
+      "retryLink": "Open the Overview",
+      "columns": {
+        "version": "Version",
+        "deployed": "Deployed",
+        "submissions": "Submissions",
+        "labels": "Labels"
+      },
+      "status": {
+        "available": "Labels available",
+        "pending": "Pending",
+        "failed": "Failed",
+        "not_found": "Not found"
+      }
     }
   },
   "scripts": {

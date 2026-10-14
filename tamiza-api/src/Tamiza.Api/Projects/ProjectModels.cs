@@ -23,7 +23,8 @@ public sealed record ProjectDetails(
     IReadOnlyList<MetricAvailability> FieldCheck,
     ProjectRole MyRole,
     bool TokenUnreadable,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    int UnavailableFormVersions);
 
 public sealed record WebhookSettings(string Url, string Username, string? Secret, bool SecretUnreadable);
 

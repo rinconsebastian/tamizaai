@@ -126,8 +126,8 @@ def test_a_draft_of_script_2_runs_on_the_saved_script_1(database, seeded, settin
     assert list(outcome["steps"]) == ["flatten", "clean", "output"]
     households = table(outcome["steps"]["output"], "households")
     assert dict(zip(column(households, "municipality"), column(households, "households"), strict=True)) == {
-        "buga": 1,
-        "cali": 1,
+        "Buga": 1,
+        "Cali": 1,
     }
     assert database.scalar("SELECT clean_version_id FROM tamiza.script_tests WHERE id = %s", test_id) == version_3
 
@@ -214,7 +214,9 @@ def test_reference_tables_reach_the_draft(database, seeded, settings):
         """
         def clean(raw, ctx):
             main = raw["main"]
-            return {"main": main[main["municipality"].isin(ctx.reference["codes"]["code"])]}
+            # The table holds labels and the reference table codes, so the labels are turned back into codes.
+            codes = main["municipality"].map(lambda label: ctx.form.name("municipality", label))
+            return {"main": main[codes.isin(ctx.reference["codes"]["code"])]}
         """,
     )
 
@@ -223,6 +225,7 @@ def test_reference_tables_reach_the_draft(database, seeded, settings):
     outcome = result(database, test_id)
     assert outcome["status"] == "succeeded", outcome
     assert "Reference tables: codes (2 rows)." in outcome["steps"]["flatten"]["log"]
+    assert table(outcome["steps"]["clean"], "main")["rows"] == 3
 
 
 def process(database, settings) -> bool:

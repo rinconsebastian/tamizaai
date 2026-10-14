@@ -1,12 +1,14 @@
 import { TestBed } from '@angular/core/testing';
 import { INGESTION_POLL_MS, IngestionStatus, SyncItem, SyncPage } from '../../core/projects/ingestion.service';
-import { ProjectRole } from '../../core/projects/projects.service';
+import { FormVersionItem, FormVersionList, ProjectRole } from '../../core/projects/projects.service';
+import { vi } from 'vitest';
 import { ToastService } from '../../shared/ui';
 import { tick } from '../../../testing/cdk';
 import { byTestId, openProjectSection, projectId, settle, typeInto } from '../../../testing/project-harness';
 
 const statusUrl = `/api/v1/projects/${projectId}/ingestion`;
 const syncsUrl = `/api/v1/projects/${projectId}/syncs`;
+const versionsUrl = `/api/v1/projects/${projectId}/form-versions`;
 
 function sync(overrides: Partial<SyncItem> = {}): SyncItem {
   return {
@@ -43,11 +45,18 @@ function status(overrides: Partial<IngestionStatus> = {}): IngestionStatus {
 }
 
 describe('ProjectData', () => {
-  async function open(role: ProjectRole, current = status(), log: SyncPage = { items: [sync()], total: 1 }, pollMs?: number) {
+  async function open(
+    role: ProjectRole,
+    current = status(),
+    log: SyncPage = { items: [sync()], total: 1 },
+    pollMs?: number,
+    versions: FormVersionList = { versions: [], withoutVersion: 0 },
+  ) {
     const providers = pollMs ? [{ provide: INGESTION_POLL_MS, useValue: pollMs }] : [];
     const opened = await openProjectSection('data', role, {}, providers);
     opened.http.expectOne(statusUrl).flush(current);
     opened.http.expectOne((r) => r.url === syncsUrl && r.method === 'GET').flush(log);
+    opened.http.expectOne(versionsUrl).flush(versions);
     await settle(opened.harness);
     return opened;
   }
@@ -204,5 +213,157 @@ describe('ProjectData', () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
 
     http.expectNone(statusUrl);
+  });
+
+  describe('form versions', () => {
+    function version(overrides: Partial<FormVersionItem> = {}): FormVersionItem {
+      return {
+        uid: 'vAbCdEfGhIjKlMnOpQrStU',
+        current: false,
+        deployedAt: '2026-09-01T10:00:00Z',
+        submissions: 120,
+        status: 'available',
+        errorCode: null,
+        error: null,
+        nextAttemptAt: null,
+        ...overrides,
+      };
+    }
+
+    const mixed: FormVersionList = {
+      withoutVersion: 3,
+      versions: [
+        version({ uid: 'vCurrentCurrentCurrent1', current: true, submissions: 120 }),
+        version({ uid: 'vFailedFailedFailedFa2', status: 'failed', submissions: 15, errorCode: 'kobo.unreachable', error: 'The Kobo server could not be reached.', nextAttemptAt: '2026-10-02T13:00:00Z', deployedAt: null }),
+        version({ uid: 'vPendingPendingPendin3', status: 'pending', submissions: 4, deployedAt: null }),
+        version({ uid: 'vMissingMissingMissin4', status: 'not_found', submissions: 2, errorCode: 'kobo.version_not_found', error: 'Kobo has no version.', deployedAt: null }),
+      ],
+    };
+
+    it.each<ProjectRole>(['viewer', 'analyst', 'admin'])('shows the card to %s', async (role) => {
+      const { root } = await open(role, status(), undefined, undefined, mixed);
+
+      expect(byTestId(root, 'form-versions')?.textContent).toContain('Form versions');
+      expect(root.querySelectorAll('[data-testid="versions-table"] tbody tr').length).toBe(4);
+    });
+
+    it('shows each status with its count, reason and next attempt', async () => {
+      const { root } = await open('viewer', status(), undefined, undefined, mixed);
+      const table = byTestId(root, 'versions-table')!;
+
+      const available = byTestId(table, 'version-row-available')!;
+      expect(available.textContent).toContain('Current');
+      expect(available.textContent).toContain('Labels available');
+      expect(byTestId(available, 'version-submissions')?.textContent?.trim()).toBe('120');
+      expect(byTestId(available, 'version-error')).toBeNull();
+
+      const failed = byTestId(table, 'version-row-failed')!;
+      expect(failed.textContent).toContain('Failed');
+      expect(byTestId(failed, 'version-error')?.textContent).toContain('The Kobo server could not be reached. Check the address and try again.');
+      expect(byTestId(failed, 'version-next-attempt')?.textContent).toContain('Next attempt:');
+      expect(byTestId(failed, 'version-submissions')?.textContent?.trim()).toBe('15');
+
+      const pending = byTestId(table, 'version-row-pending')!;
+      expect(pending.textContent).toContain('Pending');
+      expect(byTestId(pending, 'version-error')).toBeNull();
+      expect(byTestId(pending, 'version-next-attempt')).toBeNull();
+
+      const notFound = byTestId(table, 'version-row-not_found')!;
+      expect(notFound.textContent).toContain('Not found');
+      expect(byTestId(notFound, 'version-error')?.textContent).toContain('Kobo has no such version of this form.');
+      expect(byTestId(notFound, 'version-next-attempt')).toBeNull();
+    });
+
+    it('lists the versions as cards for phones too', async () => {
+      const { root } = await open('viewer', status(), undefined, undefined, mixed);
+
+      const cards = byTestId(root, 'versions-cards')!;
+      expect(cards.children.length).toBe(4);
+      expect(cards.textContent).toContain('Labels available');
+      expect(cards.textContent).toContain('Next attempt:');
+    });
+
+    it('shortens the version id, keeps the full one in the tooltip and copies it', async () => {
+      const writeText = vi.fn(() => Promise.resolve());
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+      const { root } = await open('viewer', status(), undefined, undefined, { versions: [version()], withoutVersion: 0 });
+
+      const uid = byTestId<HTMLButtonElement>(root, 'version-uid')!;
+      expect(uid.textContent?.trim()).toBe('vAbCdEfGh…rStU');
+      expect(uid.getAttribute('title')).toBe('vAbCdEfGhIjKlMnOpQrStU');
+      uid.click();
+      expect(writeText).toHaveBeenCalledWith('vAbCdEfGhIjKlMnOpQrStU');
+    });
+
+    it('says how many submissions have no form version', async () => {
+      const { root } = await open('viewer', status(), undefined, undefined, mixed);
+      expect(byTestId(root, 'without-version')?.textContent).toContain('3 submissions have no form version');
+      TestBed.resetTestingModule();
+
+      const single = await open('viewer', status(), undefined, undefined, { versions: [version()], withoutVersion: 1 });
+      expect(byTestId(single.root, 'without-version')?.textContent).toContain('1 submission has no form version');
+      TestBed.resetTestingModule();
+
+      const none = await open('viewer', status(), undefined, undefined, { versions: [version()], withoutVersion: 0 });
+      expect(byTestId(none.root, 'without-version')).toBeNull();
+    });
+
+    it('points to the re-check only when a version failed or was not found', async () => {
+      const { root } = await open('viewer', status(), undefined, undefined, mixed);
+      const hint = byTestId(root, 'versions-retry-hint')!;
+      expect(hint.textContent).toContain('Re-checking the form retries failed and not found versions.');
+      expect(hint.querySelector('a')?.getAttribute('href')).toBe(`/projects/${projectId}/overview`);
+      TestBed.resetTestingModule();
+
+      const healthy = await open('viewer', status(), undefined, undefined, { versions: [version(), version({ uid: 'vOther', status: 'pending' })], withoutVersion: 0 });
+      expect(byTestId(healthy.root, 'versions-retry-hint')).toBeNull();
+    });
+
+    it('explains an empty list', async () => {
+      const { root } = await open('viewer');
+
+      expect(byTestId(root, 'versions-empty')?.textContent).toContain('No form versions yet');
+      expect(byTestId(root, 'versions-table')).toBeNull();
+    });
+
+    it('polls while a version is pending and stops when none is left', async () => {
+      const pending: FormVersionList = { versions: [version({ status: 'pending' })], withoutVersion: 0 };
+      const { http, harness, root } = await open('viewer', status(), undefined, 30, pending);
+
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      http.expectOne(versionsUrl).flush({ ...pending }); // a response is a new object, as in production
+      await settle(harness);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      http.expectOne(versionsUrl).flush({ versions: [version()], withoutVersion: 0 });
+      await settle(harness);
+
+      expect(byTestId(root, 'version-row-available')).not.toBeNull();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      http.expectNone(versionsUrl);
+    });
+
+    it('does not poll when every version has its labels and no run is active', async () => {
+      const { http } = await open('viewer', status(), undefined, 30, { versions: [version()], withoutVersion: 0 });
+
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      http.expectNone(versionsUrl);
+    });
+
+    it('reloads the versions when a synchronization ends, because it fetched them', async () => {
+      const waiting: FormVersionList = { versions: [version({ status: 'pending' })], withoutVersion: 0 };
+      const { http, harness, root } = await open('viewer', status({ activeSync: sync({ status: 'running' }) }), undefined, 30, waiting);
+
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      http.match(versionsUrl).forEach((request) => request.flush({ ...waiting }));
+      http.expectOne(statusUrl).flush(status());
+      await settle(harness);
+      http.match((r) => r.url === syncsUrl && r.method === 'GET').forEach((request) => request.flush({ items: [sync()], total: 1 }));
+      http.match(versionsUrl).forEach((request) => request.flush({ versions: [version()], withoutVersion: 0 }));
+      await settle(harness);
+
+      expect(byTestId(root, 'version-row-available')).not.toBeNull();
+      expect(byTestId(root, 'version-row-pending')).toBeNull();
+    });
   });
 });

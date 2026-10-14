@@ -206,8 +206,10 @@ export const scriptTemplates: Record<ScriptKind, string> = {
     """Script 1: clean the flattened submissions.
 
     raw is a dictionary of pandas DataFrames: "main" (one row per submission) and one
-    table per repeat group. ctx.form.questions, ctx.form.choices and
-    ctx.form.label(question, value) describe the form; ctx.log.info(...) writes to the
+    table per repeat group. Answers to select questions are choice labels, not codes
+    (select_multiple answers are labels joined by "; "); ctx.form.name(question, label)
+    gives the code of a label. ctx.form.questions, ctx.form.choices and
+    ctx.form.label(question, code) describe the form; ctx.log.info(...) writes to the
     run log. Return a dictionary of table names to DataFrames.
     """
     main = raw["main"]

@@ -69,7 +69,7 @@ The project's **Overview** shows which performance-dashboard metrics the form su
 
 To add the metadata fields, edit the form in Kobo's form builder, open **Layout & Settings → Meta questions**, enable *start time*, *end time* and *username*, then redeploy the form. If the form has no `username` field but asks for the enumerator's name or code in a question, a project admin can select that question as the **enumerator question**.
 
-After changing and redeploying the form in Kobo, press **Re-check the form** (admins and analysts) so Tamiza reads the new version.
+After changing and redeploying the form in Kobo, press **Re-check the form** (admins and analysts) so Tamiza reads the new version. Tamiza describes the form's **deployed** version: questions you add or edit in Kobo's form builder do not count until you redeploy the form (see [Form versions and choice labels](#7-form-versions-and-choice-labels)).
 
 ## 6. Submissions in Tamiza
 
@@ -94,6 +94,30 @@ Every synchronization records when it ran, what started it, how many submissions
 
 By default, a synchronization that brings new, changed or deleted submissions also runs the project's Python scripts, which clean the data and compute the indicators. See [scripts.md](scripts.md).
 
+## 7. Form versions and choice labels
+
+Kobo stores and sends the answers to select questions as the choices' **names**, the codes defined in the form (`1`, `2`), not as their labels (`Yes`, `No`). Tamiza turns them into labels when it flattens the data for the scripts (see [scripts.md](scripts.md)). Because a form is often redeployed during fieldwork, and a choice can be added, removed or relabeled between deployments, each answer is translated with the labels of the form version its submission was made with.
+
+How Tamiza gets those labels:
+
+- Every submission carries the id of the form version it was made with. When Tamiza stores a submission made with a version it has not seen before, it records that version. This never contacts Kobo, so webhook deliveries stay as fast as before.
+- Tamiza then fetches each recorded version's definition (its questions and choice lists) from the Kobo API, once. It does so during every synchronization, before the scripts run, and for versions that arrive by webhook, in the background within about two minutes. A version never changes in Kobo, so a fetched definition is not fetched again.
+- Labels are always in the form's default language, the first language of the form. A choice without a label in that language has no label: Tamiza does not borrow another language's text, and its answers keep their code.
+- The project's **current form**, which the Overview's checks and `ctx.form` in the scripts describe, is the form's deployed version, not the latest draft in the form builder. If Kobo cannot return the deployed version, Tamiza uses the form's latest content and tries again later.
+
+The **Form versions** card in the project's **Data** section lists the versions the project's submissions use, with how many submissions each has and the state of its definition. The **Overview** also shows how many definitions are unavailable. Admins, analysts and viewers can all see them.
+
+| Status | Meaning | What to do |
+|---|---|---|
+| Labels available | The definition is kept. | Nothing. |
+| Pending | The version was recorded and its definition is not fetched yet. | Wait: it is fetched within a couple of minutes, or by the next synchronization. |
+| Failed | The last attempt did not work, for example Kobo was unreachable, rejected the token, limited the requests, or the form can no longer be read. The card shows the reason and when Tamiza tries again: after an hour, then at intervals that double up to once a day. The synchronization that attempted it is not affected. | Fix the cause. After **Replace API token**, Tamiza retries within about two minutes. **Re-check the form** retries at once. |
+| Not found | Kobo answered that this version does not exist, while the form itself can be read. This happens with submissions made with ids Kobo no longer knows. Tamiza does not retry it on its own. | Usually nothing: its answers are translated with the current form, as Kobo's own exports do. If Kobo was at fault, **Re-check the form** tries again. |
+
+Answers whose version has no definition yet (pending, failed or not found), and submissions without any form version, are translated with the project's current form. Every run reports in the flatten step's log how many submissions of each version did, so nothing changes silently. A choice that no version knows keeps its code in the table.
+
+The raw submissions are never changed: they stay exactly as Kobo sent them. The sampling frame reads them, so it still matches choice **names**, not labels (see [Sampling frame](#sampling-frame)).
+
 ## Members and roles
 
 | Role | Can |
@@ -117,10 +141,10 @@ The file can be **CSV** (comma- or semicolon-separated, UTF-8) or **XLSX** (firs
 
 | municipality | sex | age_range | target |
 |---|---|---|---|
-| Cali | F | 18-29 | 120 |
-| Cali | M | 18-29 | 110 |
+| cali | f | 18_29 | 120 |
+| cali | m | 18_29 | 110 |
 
-Importing shows a preview with any row errors, and asks for the form field of each dimension. Nothing is saved until you load the preview into the editor and press **Save sampling frame**. Limits: 10 dimensions, 10,000 rows, 5 MB per file. Values are matched against submissions as text, so use the same codes the form stores (the choice *names*, not their labels).
+Importing shows a preview with any row errors, and asks for the form field of each dimension. Nothing is saved until you load the preview into the editor and press **Save sampling frame**. Limits: 10 dimensions, 10,000 rows, 5 MB per file. Values are matched against the raw submissions as text, so use the same codes the form stores (the choice *names*, as in the example above, not their labels). This is different from the tables the scripts receive, which show labels (see [Form versions and choice labels](#7-form-versions-and-choice-labels)).
 
 ## Self-hosted Kobo on a private network
 
@@ -140,6 +164,9 @@ Tamiza connects to Kobo directly and does not use an outbound HTTP proxy (see [o
 | The Kobo server must use HTTPS | Use the server's `https://` address, or see the private-network setting above. |
 | …points to a private or local network… | The server resolves to a private address. See the private-network setting above. |
 | The saved API token can no longer be read… | The API's encryption keys changed (for example, the `api-keys` volume was lost). An admin must replace the token and regenerate the webhook secret. |
+| Kobo has no version … of the form… | A form version is *Not found* (see [Form versions and choice labels](#7-form-versions-and-choice-labels)). Its submissions use the current form's labels. |
+| The Kobo server is limiting Tamiza's requests (HTTP 429) | Kobo answers 429 when an account makes many automated requests. Tamiza tries again later; nothing is lost. If it keeps happening, lower the load on that account (for example, fewer projects on the same token) or ask the Kobo server's operator. |
+| The Kobo server's response was larger than … | Kobo returned a document bigger than Tamiza reads (10 MB). The version stays *Failed* and is retried once a day. |
 
 **Webhook deliveries failing in Kobo.** Kobo's REST Service page shows the HTTP status of each failed delivery:
 

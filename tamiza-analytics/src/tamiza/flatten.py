@@ -15,6 +15,12 @@ import pandas as pd
 
 from tamiza import names
 from tamiza.convert import SQL_TYPES, Unreadable, convert, kind_of
+from tamiza.labels import Definition, Labels
+
+# A submission and the form version it was made with (None when it has none).
+Submission = tuple[Mapping[str, object], str | None]
+
+MULTIPLE_SEPARATOR = "; "
 
 MAIN = "main"
 BATCH_ROWS = 2_000
@@ -61,30 +67,37 @@ class FlattenResult:
 
 def flatten(
     form_fields: list[Mapping[str, object]],
-    submissions: Callable[[], Iterable[Mapping[str, object]]],
+    submissions: Callable[[], Iterable[Submission]],
     out_dir: Path,
     batch_rows: int = BATCH_ROWS,
+    labels: Labels | None = None,
 ) -> FlattenResult:
     """
     ``form_fields`` is the project's form snapshot (``name``, ``xpath``, ``type``...); ``submissions`` returns a fresh
-    iterable of submission dictionaries each time it is called (it is read twice). Writes ``<table>.parquet`` files
-    into ``out_dir``.
+    iterable of ``(submission, form version)`` pairs each time it is called (it is read twice). Writes
+    ``<table>.parquet`` files into ``out_dir``.
+
+    With ``labels``, the answers to select questions are written as labels, from the definition of the form version of
+    each submission (repeat rows use their submission's); see :meth:`_Writer.translate`. Without them the codes Kobo
+    sent are kept.
     """
     types = {str(f["xpath"]): str(f.get("type") or "") for f in form_fields}
     form_order = {str(f["xpath"]): index for index, f in enumerate(form_fields)}
 
     main = _Table(path=None, parent=None)
     tables: dict[str | None, _Table] = {None: main}
-    for submission in submissions():
+    for submission, _ in submissions():
         _discover(submission, main, tables, types)
     _assign_names(tables, form_order)
 
-    writer = _Writer(out_dir, tables, batch_rows)
+    writer = _Writer(out_dir, tables, batch_rows, labels)
     input_rows = 0
     try:
-        for submission in submissions():
+        for submission, version in submissions():
             input_rows += 1
-            _emit(submission, main, tables, writer, parent_id=None, index=None)
+            _emit(
+                submission, main, tables, writer, parent_id=None, index=None, definition=writer.definition_for(version)
+            )
         outputs = writer.finish()
     finally:
         writer.close()
@@ -95,6 +108,7 @@ def flatten(
         f"{table}.{column}: {count} value{'s' if count != 1 else ''} could not be read as {kind}; stored as empty."
         for (table, column, kind), count in sorted(writer.unreadable.items())
     ]
+    log += writer.label_log()
     return FlattenResult(input_rows, outputs, log)
 
 
@@ -165,6 +179,7 @@ def _emit(
     writer: "_Writer",
     parent_id: int | None,
     index: int | None,
+    definition: Definition | None,
 ) -> None:
     values: dict[str, object] = {}
     if table.path is None:
@@ -178,21 +193,28 @@ def _emit(
     for key, value in row.items():
         column = table.columns.get(key)
         if column is not None:
+            value = writer.translate(table, column.name, key, value, definition)
             values[column.name] = writer.convert(table, column.name, column.kind, value)
         elif key in tables and _is_repeat(value):
             for position, item in enumerate(value, start=1):  # type: ignore[arg-type]
-                _emit(item, tables[key], tables, writer, parent_id=row_id, index=position)  # type: ignore[arg-type]
+                _emit(item, tables[key], tables, writer, parent_id=row_id, index=position, definition=definition)  # type: ignore[arg-type]
     writer.add(table, values)
 
 
 class _Writer:
     """Buffers converted rows per table and appends them to typed DuckDB tables, then exports Parquet."""
 
-    def __init__(self, out_dir: Path, tables: dict[str | None, _Table], batch_rows: int):
+    def __init__(self, out_dir: Path, tables: dict[str | None, _Table], batch_rows: int, labels: Labels | None = None):
         self.out_dir = out_dir
         self.tables = list(tables.values())
         self.batch_rows = batch_rows
+        self.labels = labels
         self.unreadable: Counter[tuple[str, str, str]] = Counter()
+        # Label fallbacks, counted to be reported: per column, per version without a definition, and without a version.
+        self._from_current: Counter[tuple[str, str]] = Counter()
+        self._kept: Counter[tuple[str, str]] = Counter()
+        self._used_current: Counter[str] = Counter()
+        self._without_version = 0
         self._buffers: dict[str, list[dict[str, object]]] = {t.name: [] for t in self.tables}
         self._row_ids: Counter[str] = Counter()
         self._columns = {
@@ -211,6 +233,84 @@ class _Writer:
         except Unreadable:
             self.unreadable[(table.name, column, kind)] += 1
             return None
+
+    def definition_for(self, version: str | None) -> Definition | None:
+        """
+        The definition that translates one submission, resolved once and passed down to its repeat rows: its version's
+        when available, otherwise the current form, which is counted. None when no labels were given.
+        """
+        if self.labels is None:
+            return None
+        definition, own = self.labels.for_submission(version)
+        if not own:
+            if version is None:
+                self._without_version += 1
+            else:
+                self._used_current[version] += 1
+        return definition
+
+    def translate(self, table: _Table, column: str, key: str, value: object, definition: Definition | None) -> object:
+        """
+        Replaces the codes of an answer to a select question with their labels. ``key`` is the answer's path.
+
+        - A code in the submission's definition takes its label there.
+        - A code that definition lacks takes the current form's label for the same path, which is what happens to a
+          submission edited in Kobo with a later version. If the definition has no select at that path but the
+          current form has (a question added by such an edit), the current form's labels are used.
+        - A code without a label anywhere is kept. Both fallbacks are counted per column.
+        - Anything else, such as an answer to a question without a choice list, passes through uncounted.
+
+        A ``select_multiple`` answer becomes its labels in the order of the answer, joined by ``; ``.
+        """
+        if definition is None or self.labels is None or not isinstance(value, str):
+            return value
+        own, current = definition.get(key), self.labels.current.get(key)
+        if own is None and current is None:
+            return value
+        multiple = (own or current).multiple  # type: ignore[union-attr]
+        codes = value.split() if multiple else [value.strip()]
+        if not codes or codes == [""]:
+            return value
+
+        outcomes = set()
+        translated = []
+        for code in codes:
+            if own is not None and code in own.labels:
+                translated.append(own.labels[code])
+            elif current is not None and code in current.labels:
+                translated.append(current.labels[code])
+                outcomes.add("current")
+            else:
+                translated.append(code)
+                outcomes.add("kept")
+        # Each cell counts at most once per outcome.
+        if "current" in outcomes:
+            self._from_current[(table.name, column)] += 1
+        if "kept" in outcomes:
+            self._kept[(table.name, column)] += 1
+        return MULTIPLE_SEPARATOR.join(translated) if multiple else translated[0]
+
+    def label_log(self) -> list[str]:
+        """The label fallbacks of this run, so none is silent."""
+        if self.labels is None:
+            return []
+        lines = [
+            f"Form version {version}: {_count(count, 'submission')} used the current form "
+            f"(definition {self.labels.why_unavailable(version)})."
+            for version, count in sorted(self._used_current.items())
+        ]
+        if self._without_version:
+            lines.append(f"{_count(self._without_version, 'submission')} without a form version used the current form.")
+        lines += [
+            f"{table}.{column}: {_count(count, 'value')} not in {'its' if count == 1 else 'their'} form version; "
+            "labeled from the current form."
+            for (table, column), count in sorted(self._from_current.items())
+        ]
+        lines += [
+            f"{table}.{column}: {_count(count, 'value')} without a label; kept as codes."
+            for (table, column), count in sorted(self._kept.items())
+        ]
+        return lines
 
     def next_row_id(self, table: _Table) -> int:
         self._row_ids[table.name] += 1
@@ -251,6 +351,10 @@ class _Writer:
         self._db.close()
         self._db_path.unlink(missing_ok=True)
         Path(str(self._db_path) + ".wal").unlink(missing_ok=True)
+
+
+def _count(count: int, noun: str) -> str:
+    return f"{count} {noun}{'s' if count != 1 else ''}"
 
 
 def _quote(identifier: str) -> str:

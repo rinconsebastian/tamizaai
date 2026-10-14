@@ -190,6 +190,38 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
         Assert.Equal("[]", await ScalarAsync<string>(connectionString, "SELECT reference_tables::text FROM tamiza.runs"));
     }
 
+    [Fact]
+    public async Task Choice_labels_script_records_the_versions_of_stored_submissions_as_pending()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql", "0004_add_pipeline_authoring.sql");
+        await ExecuteAsync(connectionString, """
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('00000000-0000-0000-0000-000000000001', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('00000000-0000-0000-0000-0000000000aa', 'Existing', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(),
+                    '00000000-0000-0000-0000-000000000001', now(), now());
+            INSERT INTO tamiza.raw_submissions (project_id, kobo_id, kobo_uuid, form_version, data, origin, received_at, updated_at, deleted)
+            VALUES ('00000000-0000-0000-0000-0000000000aa', 1, 'u1', 'vA', '{}', 'sync', now(), now(), false),
+                   ('00000000-0000-0000-0000-0000000000aa', 2, 'u2', 'vA', '{}', 'webhook', now(), now(), false),
+                   ('00000000-0000-0000-0000-0000000000aa', 3, 'u3', 'vB', '{}', 'sync', now(), now(), false),
+                   ('00000000-0000-0000-0000-0000000000aa', 4, 'u4', NULL, '{}', 'sync', now(), now(), false),
+                   ('00000000-0000-0000-0000-0000000000aa', 5, 'u5', 'vGone', '{}', 'sync', now(), now(), true);
+            """);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        // One pending row per version in use, due at once; a submission without a version and a deleted one record nothing.
+        Assert.Equal("vA pending t 0 | vB pending t 0", await ScalarAsync<string>(connectionString, """
+            SELECT string_agg(format('%s %s %s %s', uid, status, next_attempt_at <= now(), attempts), ' | ' ORDER BY uid)
+            FROM tamiza.form_versions
+            """));
+        Assert.Equal(2L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.form_versions"));
+        // The project has no snapshot version until its next synchronization.
+        Assert.True(await ScalarAsync<bool>(connectionString, "SELECT form_version IS NULL FROM tamiza.projects"));
+    }
+
     /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>
     private static void ApplyScripts(string connectionString, params string[] names)
     {

@@ -138,4 +138,26 @@ public sealed class SubmissionStoreTests(PostgresFixture postgres)
         Assert.Equal(2, await MarkAsync(db, projectId, [], T0.AddHours(1)));
         Assert.Equal(0, await MarkAsync(db, projectId, [], T0.AddHours(2)));
     }
+
+    [Fact]
+    public async Task Versions_are_recorded_once_with_the_rows_and_roll_back_with_them()
+    {
+        var (db, projectId) = await SeedAsync();
+        await using (var context = Context(db))
+        {
+            await using var transaction = await context.Database.BeginTransactionAsync();
+            await new SubmissionStore(context).UpsertAsync(projectId, [Row(1)], SubmissionOrigin.Sync, T0, CancellationToken.None);
+            await transaction.RollbackAsync();
+        }
+
+        Assert.Equal(0, await TestData.ScalarAsync<long>(db, "SELECT count(*) FROM tamiza.form_versions"));
+
+        var withoutVersion = new SubmissionRow(3, "u-3", null, T0, "{}");
+        var other = new SubmissionRow(4, "u-4", "v0", T0, "{}");
+        await UpsertAsync(db, projectId, SubmissionOrigin.Sync, T0, Row(1), Row(2), withoutVersion, other);
+        await UpsertAsync(db, projectId, SubmissionOrigin.Sync, T0.AddHours(1), Row(5));
+
+        Assert.Equal("v0 pending,v1 pending", await TestData.ScalarAsync<string>(db,
+            "SELECT string_agg(format('%s %s', uid, status), ',' ORDER BY uid) FROM tamiza.form_versions"));
+    }
 }

@@ -1,5 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { ProjectDetails, ProjectsService } from '../../core/projects/projects.service';
@@ -10,7 +11,7 @@ const metadataTypes = new Set(['start', 'end', 'today', 'deviceid', 'username', 
 
 @Component({
   selector: 'app-project-overview',
-  imports: [DatePipe, TranslocoDirective, Alert, Badge, Button, Card, FormField, Input],
+  imports: [DatePipe, RouterLink, TranslocoDirective, Alert, Badge, Button, Card, FormField, Input],
   template: `
     @if (project(); as project) {
       <div class="grid gap-6 lg:grid-cols-2" *transloco="let t">
@@ -25,6 +26,16 @@ const metadataTypes = new Set(['start', 'end', 'today', 'deviceid', 'username', 
             <div><dt class="text-body">{{ t('overview.assetUid') }}</dt><dd class="font-mono text-heading break-all">{{ project.assetUid }}</dd></div>
             <div><dt class="text-body">{{ t('overview.checkedAt') }}</dt><dd class="text-heading">{{ project.formCheckedAt | date: 'medium' }}</dd></div>
           </dl>
+          @if (project.unavailableFormVersions > 0) {
+            <tmz-alert tone="warning" class="mt-5" data-testid="unavailable-versions">
+              {{
+                project.unavailableFormVersions === 1
+                  ? t('overview.unavailableVersionsOne')
+                  : t('overview.unavailableVersions', { count: project.unavailableFormVersions })
+              }}
+              <a [routerLink]="['..', 'data']" class="font-medium underline">{{ t('overview.unavailableVersionsAction') }}</a>
+            </tmz-alert>
+          }
           <div class="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             @if (context.can('analyst')) {
               <button tmzButton variant="secondary" type="button" [disabled]="busy()" (click)="recheck()" data-testid="recheck">

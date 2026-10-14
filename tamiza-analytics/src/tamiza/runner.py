@@ -29,19 +29,42 @@ class ScriptError(Exception):
 
 
 class Form:
-    """The form dictionary: ``questions`` and ``choices`` as DataFrames, and ``label`` to translate a choice."""
+    """
+    The form dictionary of the project's current form: ``questions`` and ``choices`` as DataFrames, ``label`` to
+    translate a code and ``name`` to find the code a label stands for.
+    """
 
-    def __init__(self, questions: list[dict], choices: list[dict]):
+    def __init__(
+        self, questions: list[dict], choices: list[dict], label_codes: Mapping[str, Mapping[str, str]] | None = None
+    ):
         self.questions = pd.DataFrame(questions, columns=["name", "path", "type", "label", "list_name"])
         self.choices = pd.DataFrame(choices, columns=["list_name", "name", "label"])
         self._lists = {row["name"]: row["list_name"] for row in questions if row.get("list_name")}
         self._lists.update({row["path"]: row["list_name"] for row in questions if row.get("list_name")})
         self._labels = {(row["list_name"], row["name"]): row["label"] for row in choices}
+        self._label_codes = label_codes or {}
+        # A question is asked for by its path, or by its name: the current form's names first, then the last segment of
+        # the paths of questions only earlier versions had.
+        self._paths = {row["name"]: row["path"] for row in questions if row.get("path")}
+        for path in self._label_codes:
+            self._paths.setdefault(path.rsplit("/", 1)[-1], path)
 
     def label(self, question: str, value: object) -> str | None:
         """The label of ``value`` in the choice list of ``question`` (its name or path), or None if unknown."""
         list_name = self._lists.get(question)
         return None if list_name is None else self._labels.get((list_name, str(value)))
+
+    def name(self, question: str, label: object) -> str | None:
+        """
+        The code (choice name) that ``label`` stands for in ``question`` (its name or path), or None. It is searched in
+        the current form, then in earlier versions from the newest to the oldest, so a label an older version used
+        still resolves after a later one relabeled the choice. A label that two choices of a version share is
+        ambiguous in it and is skipped. The "or other" option is labeled ``Other`` and resolves to ``other``.
+        """
+        codes = self._label_codes.get(question)
+        if codes is None:
+            codes = self._label_codes.get(self._paths.get(question, ""))
+        return None if codes is None else codes.get(str(label))
 
 
 class ReferenceTableNotFound(KeyError):
@@ -128,7 +151,7 @@ def _context(step_dir: Path) -> Context:
     log.addHandler(handler)
     log.setLevel(logging.INFO)
     log.propagate = False
-    form = Form(data.get("questions", []), data.get("choices", []))
+    form = Form(data.get("questions", []), data.get("choices", []), data.get("label_codes"))
     return Context(data.get("project_name", ""), form, log, ReferenceTables(step_dir / REFERENCE_DIR))
 
 

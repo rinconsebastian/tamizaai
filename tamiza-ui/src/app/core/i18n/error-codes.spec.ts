@@ -10,6 +10,8 @@ const apiErrorCodes = [
   'kobo.unreachable',
   'kobo.unexpected_response',
   'kobo.token_unreadable',
+  'kobo.version_not_found',
+  'kobo.rate_limited',
   'member.exists',
   'invitation.exists',
   'project.last_admin',

@@ -243,6 +243,52 @@ public sealed class ProjectsApiTests(PostgresFixture postgres) : IDisposable
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
     }
 
+    [Fact]
+    public async Task Paths_built_from_the_group_nesting_keep_the_enumerator_question_and_the_frame_dimension_valid()
+    {
+        // The document has no $xpath, so the paths come from the nesting: respondent/municipality, respondent/enumerator.
+        const string grouped = """
+            {
+              "name": "Grouped form",
+              "content": {
+                "survey": [
+                  { "type": "start", "name": "start" },
+                  { "type": "end", "name": "end" },
+                  { "type": "begin_group", "name": "respondent" },
+                  { "type": "select_one municipalities", "name": "municipality", "label": ["Municipality"] },
+                  { "type": "text", "name": "enumerator", "label": ["Enumerator"] },
+                  { "type": "end_group" }
+                ],
+                "choices": [{ "list_name": "municipalities", "name": "cali", "label": ["Cali"] }]
+              }
+            }
+            """;
+        _kobo.WithForm(grouped);
+        var (factory, _) = await FactoryAsync();
+        await using var owner = factory;
+        using var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
+        var id = (await CreateProjectAsync(admin)).GetProperty("project").GetProperty("id").GetGuid();
+        var frame = new
+        {
+            dimensions = new[] { new { name = "Municipality", field = "respondent/municipality" } },
+            targets = new[] { new { values = new[] { "Cali" }, target = 120 } },
+        };
+
+        var enumerator = await admin.PatchAsJsonAsync($"/api/v1/projects/{id}", new { enumeratorField = "respondent/enumerator" });
+        var saved = await admin.PutAsJsonAsync($"/api/v1/projects/{id}/sampling-frame", frame);
+        var recheck = await admin.PostAsync($"/api/v1/projects/{id}/kobo-check", null);
+        var savedAgain = await admin.PutAsJsonAsync($"/api/v1/projects/{id}/sampling-frame", frame);
+        var details = await recheck.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.OK, enumerator.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, recheck.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, savedAgain.StatusCode);
+        Assert.Equal("respondent/enumerator", details.GetProperty("enumeratorField").GetString());
+        Assert.True(details.GetProperty("fieldCheck").EnumerateArray()
+            .Single(m => m.GetProperty("metric").GetString() == "perEnumerator").GetProperty("available").GetBoolean());
+    }
+
     // 3.5 — form fields and webhook
 
     [Fact]

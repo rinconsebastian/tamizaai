@@ -37,6 +37,8 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
 
     public DbSet<ReferenceTableContent> ReferenceTableContents => Set<ReferenceTableContent>();
 
+    public DbSet<FormVersion> FormVersions => Set<FormVersion>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(Schema);
@@ -72,6 +74,7 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             project.Property(p => p.NextReconcileAt).HasDefaultValueSql("(now() + interval '1 day')");
             project.Property(p => p.RunAfterSync).HasDefaultValue(true);
             project.Property(p => p.FormChoices).HasJsonColumn().HasDefaultValueSql("'[]'::jsonb");
+            project.Property(p => p.FormVersion).HasMaxLength(128);
             project.ToTable(table =>
             {
                 table.HasCheckConstraint("ck_projects_sync_interval_hours", "sync_interval_hours BETWEEN 1 AND 168");
@@ -127,6 +130,8 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             submission.Property(s => s.Deleted).HasDefaultValue(false);
             submission.HasIndex(s => new { s.ProjectId, s.KoboId }).IsUnique();
             submission.HasIndex(s => new { s.ProjectId, s.KoboUuid });
+            // Per-version counts and the re-recording of versions at each synchronization read only live submissions.
+            submission.HasIndex(s => new { s.ProjectId, s.FormVersion }).HasFilter("NOT deleted");
             submission.HasOne<Project>().WithMany().HasForeignKey(s => s.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -254,7 +259,26 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             content.Property(c => c.Rows).HasColumnType("jsonb");
             content.HasOne<ReferenceTable>().WithOne().HasForeignKey<ReferenceTableContent>(c => c.ReferenceTableId).OnDelete(DeleteBehavior.Cascade);
         });
+
+        modelBuilder.Entity<FormVersion>(version =>
+        {
+            version.ToTable("form_versions", table => table.HasCheckConstraint("ck_form_versions_status", "status IN ('pending', 'available', 'failed', 'not_found')"));
+            version.HasKey(v => new { v.ProjectId, v.Uid });
+            version.Property(v => v.Uid).HasMaxLength(128);
+            version.Property(v => v.Status).HasConversion(FormVersionStatusConverter()).HasMaxLength(16);
+            version.Property(v => v.Fields).HasJsonColumn().HasDefaultValueSql("'[]'::jsonb");
+            version.Property(v => v.Choices).HasJsonColumn().HasDefaultValueSql("'[]'::jsonb");
+            version.Property(v => v.Attempts).HasDefaultValue(0);
+            version.Property(v => v.ErrorCode).HasMaxLength(64);
+            // The background pass looks for versions that are due.
+            version.HasIndex(v => v.NextAttemptAt).HasFilter("status IN ('pending', 'failed')");
+            version.HasOne<Project>().WithMany().HasForeignKey(v => v.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
     }
+
+    /// <summary>Stores <see cref="FormVersionStatus"/> as the snake_case text of its name (<c>NotFound</c> → <c>not_found</c>).</summary>
+    private static ValueConverter<FormVersionStatus, string> FormVersionStatusConverter() =>
+        new(status => FormVersionStatusText.ToText(status), text => FormVersionStatusText.Parse(text));
 
     /// <summary>Stores an enum as lowercase text (<c>Admin</c> → <c>admin</c>).</summary>
     private static ValueConverter<TEnum, string> LowercaseEnum<TEnum>()

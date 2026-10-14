@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Tamiza.Api.Ingestion;
 
 namespace Tamiza.Api.Kobo;
@@ -13,7 +14,7 @@ public sealed record SubmissionRead(DateTimeOffset? SubmittedSince, bool IdsOnly
 public sealed record SubmissionPage(IReadOnlyList<SubmissionRow> Rows, IReadOnlyList<long> Ids);
 
 /// <summary>Calls the KoboToolbox API v2. The token is sent in the Authorization header and never logged.</summary>
-public sealed class KoboClient(IHttpClientFactory httpClientFactory, ILogger<KoboClient> logger)
+public sealed class KoboClient(IHttpClientFactory httpClientFactory, IOptions<KoboHttpOptions> httpOptions, ILogger<KoboClient> logger)
 {
     /// <summary>Checks that the token can read the form definition and its submissions; returns the form.</summary>
     public async Task<(KoboAsset? Asset, KoboError? Error)> VerifyAccessAsync(string serverUrl, string assetUid, string token, CancellationToken cancellationToken)
@@ -28,9 +29,26 @@ public sealed class KoboClient(IHttpClientFactory httpClientFactory, ILogger<Kob
         return dataError is null ? (asset, null) : (null, dataError);
     }
 
-    public async Task<(KoboAsset? Asset, KoboError? Error)> GetAssetAsync(string serverUrl, string assetUid, string token, CancellationToken cancellationToken)
+    public Task<(KoboAsset? Asset, KoboError? Error)> GetAssetAsync(string serverUrl, string assetUid, string token, CancellationToken cancellationToken) =>
+        GetFormDocumentAsync($"{serverUrl}/api/v2/assets/{Uri.EscapeDataString(assetUid)}/?format=json", serverUrl, assetUid, token, null, KoboForm.Parse, cancellationToken);
+
+    /// <summary>
+    /// Reads one version of the form. A 404 is <see cref="KoboErrorCodes.VersionNotFound"/>: the caller decides whether the
+    /// form itself is still readable before treating the version as unknown.
+    /// </summary>
+    public Task<(KoboFormVersion? Version, KoboError? Error)> GetVersionAsync(
+        string serverUrl, string assetUid, string versionUid, string token, CancellationToken cancellationToken) =>
+        GetFormDocumentAsync(
+            $"{serverUrl}/api/v2/assets/{Uri.EscapeDataString(assetUid)}/versions/{Uri.EscapeDataString(versionUid)}/?format=json",
+            serverUrl, assetUid, token,
+            new KoboError(KoboErrorCodes.VersionNotFound, $"Kobo has no version '{versionUid}' of the form with asset UID '{assetUid}'."),
+            KoboForm.ParseVersion, cancellationToken);
+
+    private async Task<(T? Document, KoboError? Error)> GetFormDocumentAsync<T>(
+        string url, string serverUrl, string assetUid, string token, KoboError? notFound, Func<JsonElement, T> parse, CancellationToken cancellationToken)
+        where T : class
     {
-        var (response, error) = await SendAsync($"{serverUrl}/api/v2/assets/{Uri.EscapeDataString(assetUid)}/?format=json", serverUrl, assetUid, token, cancellationToken);
+        var (response, error) = await SendAsync(url, serverUrl, assetUid, token, cancellationToken, notFound: notFound);
         if (error is not null)
         {
             return (null, error);
@@ -42,7 +60,7 @@ public sealed class KoboClient(IHttpClientFactory httpClientFactory, ILogger<Kob
             {
                 await using var body = await response!.Content.ReadAsStreamAsync(cancellationToken);
                 using var document = await JsonDocument.ParseAsync(body, cancellationToken: cancellationToken);
-                return (KoboForm.Parse(document.RootElement), null);
+                return (parse(document.RootElement), null);
             }
             catch (Exception exception) when (exception is JsonException or HttpRequestException)
             {
@@ -166,9 +184,11 @@ public sealed class KoboClient(IHttpClientFactory httpClientFactory, ILogger<Kob
         return new SubmissionPage(rows, ids);
     }
 
+    private static string Size(long bytes) => bytes >= 1024 * 1024 ? $"{bytes / (1024 * 1024)} MB" : $"{bytes / 1024} KB";
+
     private async Task<(HttpResponseMessage? Response, KoboError? Error)> SendAsync(
         string url, string serverUrl, string assetUid, string token, CancellationToken cancellationToken,
-        string clientName = KoboHttp.ClientName, HttpCompletionOption completion = HttpCompletionOption.ResponseContentRead)
+        string clientName = KoboHttp.ClientName, HttpCompletionOption completion = HttpCompletionOption.ResponseContentRead, KoboError? notFound = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Token", token);
@@ -182,6 +202,13 @@ public sealed class KoboClient(IHttpClientFactory httpClientFactory, ILogger<Kob
         catch (HttpRequestException exception) when (exception.InnerException is KoboAddressNotAllowedException)
         {
             return (null, new KoboError(KoboErrorCodes.AddressNotAllowed, "The Kobo server's address is not allowed: it points to a private or local network."));
+        }
+        catch (HttpRequestException exception) when (exception.HttpRequestError == HttpRequestError.ConfigurationLimitExceeded)
+        {
+            // The body is buffered up to the client's limit; a larger one is a bad answer, not a connection problem.
+            var limit = Size(httpOptions.Value.MaxResponseBytes);
+            logger.LogWarning("Kobo server {Server} sent a response larger than {Limit}.", serverUrl, limit);
+            return (null, new KoboError(KoboErrorCodes.UnexpectedResponse, $"The Kobo server's response was larger than {limit}, which Tamiza does not read."));
         }
         catch (Exception exception) when (exception is HttpRequestException || (exception is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
@@ -202,7 +229,9 @@ public sealed class KoboClient(IHttpClientFactory httpClientFactory, ILogger<Kob
             HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
                 new KoboError(KoboErrorCodes.Unauthorized, "Kobo rejected the API token, or the token has no access to this form."),
             HttpStatusCode.NotFound =>
-                new KoboError(KoboErrorCodes.FormNotFound, $"No form with asset UID '{assetUid}' was found on {serverUrl}."),
+                notFound ?? new KoboError(KoboErrorCodes.FormNotFound, $"No form with asset UID '{assetUid}' was found on {serverUrl}."),
+            HttpStatusCode.TooManyRequests =>
+                new KoboError(KoboErrorCodes.RateLimited, "The Kobo server is limiting Tamiza's requests (HTTP 429). Tamiza will try again later."),
             _ => new KoboError(KoboErrorCodes.UnexpectedResponse, $"The Kobo server answered unexpectedly (HTTP {status})."),
         });
     }

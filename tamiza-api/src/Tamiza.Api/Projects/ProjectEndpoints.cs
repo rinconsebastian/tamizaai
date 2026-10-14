@@ -54,7 +54,7 @@ public static partial class ProjectEndpoints
     }
 
     private static async Task<Results<Created<CreatedProject>, ValidationProblem, ProblemHttpResult>> CreateAsync(
-        CreateProjectRequest request, TamizaDbContext db, ICurrentUser user, KoboClient kobo, SecretProtector secrets,
+        CreateProjectRequest request, TamizaDbContext db, ICurrentUser user, KoboClient kobo, FormSnapshot snapshot, SecretProtector secrets,
         IOptions<TamizaOptions> options, TimeProvider time, IngestionSignal ingestion, CancellationToken ct)
     {
         var errors = new FieldErrors();
@@ -90,17 +90,20 @@ public static partial class ProjectEndpoints
 
         var now = time.GetUtcNow();
         var webhookSecret = WebhookSecret.Generate();
+        var projectId = Guid.CreateVersion7(now);
+        var content = await snapshot.ResolveAsync(projectId, serverUrl!, assetUid, token, asset!, now, ct);
         var project = new Project
         {
-            Id = Guid.CreateVersion7(now),
+            Id = projectId,
             Name = name,
             KoboServerUrl = serverUrl!,
             KoboAssetUid = assetUid,
             EncryptedApiToken = secrets.Protect(token),
             EncryptedWebhookSecret = secrets.Protect(webhookSecret),
             FormName = asset!.Name,
-            FormFields = asset.Fields.ToList(),
-            FormChoices = asset.Choices.ToList(),
+            FormFields = content.Fields.ToList(),
+            FormChoices = content.Choices.ToList(),
+            FormVersion = content.VersionUid,
             FormCheckedAt = now,
             // The first synchronization back-fills the form's existing submissions right away.
             NextSyncAt = now,
@@ -110,23 +113,31 @@ public static partial class ProjectEndpoints
             UpdatedAt = now,
         };
         db.Projects.Add(project);
+        if (content.Version is not null)
+        {
+            // Nothing else can reach a project that does not exist yet, so the version row is saved with it.
+            db.FormVersions.Add(content.Version);
+        }
+
         db.ProjectMembers.Add(new ProjectMember { ProjectId = project.Id, UserId = user.Id, Role = ProjectRole.Admin, CreatedAt = now });
         await db.SaveChangesAsync(ct);
         ingestion.Wake();
 
-        var details = ToDetails(project, ProjectRole.Admin, tokenUnreadable: false);
+        var details = ToDetails(project, ProjectRole.Admin, tokenUnreadable: false, unavailableFormVersions: 0);
         var webhook = new WebhookSettings(WebhookUrl(options.Value, project.Id), WebhookSecret.Username, webhookSecret, false);
         return TypedResults.Created($"/api/v1/projects/{project.Id}", new CreatedProject(details, webhook));
     }
 
-    private static async Task<Ok<ProjectDetails>> GetAsync(Guid projectId, HttpContext http, TamizaDbContext db, SecretProtector secrets, CancellationToken ct)
+    private static async Task<Ok<ProjectDetails>> GetAsync(
+        Guid projectId, HttpContext http, TamizaDbContext db, FormVersionStore versions, SecretProtector secrets, CancellationToken ct)
     {
         var project = await db.Projects.AsNoTracking().SingleAsync(p => p.Id == projectId, ct);
-        return TypedResults.Ok(ToDetails(project, http.GetProjectRole(), !secrets.TryUnprotect(project.EncryptedApiToken, out _)));
+        return TypedResults.Ok(await DetailsAsync(project, http, versions, secrets, ct));
     }
 
     private static async Task<Results<Ok<ProjectDetails>, ValidationProblem>> UpdateAsync(
-        Guid projectId, UpdateProjectRequest request, HttpContext http, TamizaDbContext db, SecretProtector secrets, TimeProvider time, CancellationToken ct)
+        Guid projectId, UpdateProjectRequest request, HttpContext http, TamizaDbContext db, FormVersionStore versions, SecretProtector secrets,
+        TimeProvider time, CancellationToken ct)
     {
         var project = await db.Projects.SingleAsync(p => p.Id == projectId, ct);
         var errors = new FieldErrors();
@@ -159,12 +170,12 @@ public static partial class ProjectEndpoints
 
         project.UpdatedAt = time.GetUtcNow();
         await db.SaveChangesAsync(ct);
-        return TypedResults.Ok(ToDetails(project, http.GetProjectRole(), !secrets.TryUnprotect(project.EncryptedApiToken, out _)));
+        return TypedResults.Ok(await DetailsAsync(project, http, versions, secrets, ct));
     }
 
     private static async Task<Results<Ok<ProjectDetails>, ValidationProblem, ProblemHttpResult>> ReplaceTokenAsync(
-        Guid projectId, ReplaceTokenRequest request, HttpContext http, TamizaDbContext db, KoboClient kobo, SecretProtector secrets,
-        TimeProvider time, CancellationToken ct)
+        Guid projectId, ReplaceTokenRequest request, HttpContext http, TamizaDbContext db, KoboClient kobo, FormSnapshot snapshot, FormVersionStore versions,
+        SecretProtector secrets, TimeProvider time, CancellationToken ct)
     {
         var errors = new FieldErrors();
         var token = ValidateToken(request.ApiToken, errors);
@@ -180,14 +191,20 @@ public static partial class ProjectEndpoints
             return Problems.Kobo(koboError);
         }
 
+        // A new token gives the versions that failed or were not found a fresh start: the background worker retries them
+        // within a tick. Done before the snapshot, so the outcome the snapshot records for the deployed version stands.
+        var now = time.GetUtcNow();
+        await versions.MakeUnavailableDueAsync(projectId, now, ct);
         project.EncryptedApiToken = secrets.Protect(token);
-        FormSnapshot.Apply(project, asset!, time.GetUtcNow());
+        await snapshot.ApplyAsync(project, asset!, token, now, ct);
         await db.SaveChangesAsync(ct);
-        return TypedResults.Ok(ToDetails(project, http.GetProjectRole(), tokenUnreadable: false));
+        return TypedResults.Ok(await DetailsAsync(project, http, versions, secrets, ct, tokenUnreadable: false));
     }
 
     private static async Task<Results<Ok<ProjectDetails>, ProblemHttpResult>> RecheckAsync(
-        Guid projectId, HttpContext http, TamizaDbContext db, KoboClient kobo, SecretProtector secrets, TimeProvider time, CancellationToken ct)
+        Guid projectId, HttpContext http, TamizaDbContext db, KoboClient kobo, FormSnapshot snapshot, FormVersionStore versions, FormVersionFetcher fetcher,
+        IOptions<IngestionOptions> ingestion,
+        SecretProtector secrets, TimeProvider time, CancellationToken ct)
     {
         var project = await db.Projects.SingleAsync(p => p.Id == projectId, ct);
         if (!secrets.TryUnprotect(project.EncryptedApiToken, out var token))
@@ -201,9 +218,13 @@ public static partial class ProjectEndpoints
             return Problems.Kobo(koboError);
         }
 
-        FormSnapshot.Apply(project, asset!, time.GetUtcNow());
+        await snapshot.ApplyAsync(project, asset!, token, time.GetUtcNow(), ct);
         await db.SaveChangesAsync(ct);
-        return TypedResults.Ok(ToDetails(project, http.GetProjectRole(), tokenUnreadable: false));
+
+        // Every version whose definition is failed or not found gets another try. The ones the budget leaves over stay
+        // due for the background worker, and the details report how many are still unavailable.
+        await fetcher.FetchAsync(project, token, FetchMode.All, ingestion.Value.RecheckVersionBudget, ct);
+        return TypedResults.Ok(await DetailsAsync(project, http, versions, secrets, ct, tokenUnreadable: false));
     }
 
     private static async Task<Ok<List<FormField>>> GetFormFieldsAsync(Guid projectId, TamizaDbContext db, CancellationToken ct) =>
@@ -253,7 +274,15 @@ public static partial class ProjectEndpoints
     private static string WebhookUrl(TamizaOptions options, Guid projectId) =>
         $"{options.PublicUrl.TrimEnd('/')}/api/v1/webhooks/kobo/{projectId}";
 
-    private static ProjectDetails ToDetails(Project project, ProjectRole role, bool tokenUnreadable) => new(
+    private static async Task<ProjectDetails> DetailsAsync(
+        Project project, HttpContext http, FormVersionStore versions, SecretProtector secrets, CancellationToken ct, bool? tokenUnreadable = null) =>
+        ToDetails(
+            project,
+            http.GetProjectRole(),
+            tokenUnreadable ?? !secrets.TryUnprotect(project.EncryptedApiToken, out _),
+            await versions.CountUnavailableAsync(project.Id, ct));
+
+    private static ProjectDetails ToDetails(Project project, ProjectRole role, bool tokenUnreadable, int unavailableFormVersions) => new(
         project.Id,
         project.Name,
         project.KoboServerUrl,
@@ -264,5 +293,6 @@ public static partial class ProjectEndpoints
         FieldCheck.Evaluate(project.FormFields, project.EnumeratorField),
         role,
         tokenUnreadable,
-        project.CreatedAt);
+        project.CreatedAt,
+        unavailableFormVersions);
 }

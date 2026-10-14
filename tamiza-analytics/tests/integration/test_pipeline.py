@@ -19,7 +19,7 @@ OUTPUT = """
 def prepare_output(cleaned, ctx):
     main = cleaned["main"]
     counts = main.groupby("municipality").size().rename("households").reset_index()
-    counts["municipality_label"] = [ctx.form.label("municipality", m) for m in counts["municipality"]]
+    counts["municipality_code"] = [ctx.form.name("municipality", m) for m in counts["municipality"]]
     return {"households": counts}
 """
 INDICATORS = """
@@ -28,7 +28,7 @@ import pandas as pd
 def compute_indicators(cleaned, ctx):
     main = cleaned["main"]
     total = len(main)
-    cali = int((main["municipality"] == "cali").sum())
+    cali = int((main["municipality"] == "Cali").sum())
     return pd.DataFrame([{"indicator": "share_cali", "disaggregation": "total", "value": cali / total,
                           "numerator": cali, "denominator": total}])
 """
@@ -93,9 +93,9 @@ def test_a_full_run_publishes_every_schema(database, seeded, settings):
     assert tables(database, seeded, "clean") == ["main", "members"]
     output_schema = schema_name(seeded.id, "output")
     output = database.rows(
-        f'SELECT municipality, households, municipality_label FROM "{output_schema}".households ORDER BY 1'
+        f'SELECT municipality, households, municipality_code FROM "{output_schema}".households ORDER BY 1'
     )
-    assert output == [("buga", 1, "Buga"), ("cali", 1, "Cali")]
+    assert output == [("Buga", 1, "buga"), ("Cali", 1, "cali")]
     indicator = database.rows(
         f'SELECT indicator, numerator, denominator FROM "{schema_name(seeded.id, "indicators")}".indicators'
     )
@@ -240,10 +240,12 @@ import pandas as pd
 def compute_indicators(cleaned, ctx):
     households = ctx.reference["households"]
     counts = cleaned["main"].groupby("municipality").size().rename("n").reset_index()
-    merged = counts.merge(households, left_on="municipality", right_on="code")
+    # The tables hold labels; the reference table is keyed by codes, so the join goes through ctx.form.name.
+    counts["code"] = [ctx.form.name("municipality", label) for label in counts["municipality"]]
+    merged = counts.merge(households, on="code")
     return pd.DataFrame({
         "indicator": "coverage",
-        "disaggregation": merged["municipality"],
+        "disaggregation": merged["code"],
         "value": merged["n"] / merged["total"],
         "numerator": merged["n"],
         "denominator": merged["total"],

@@ -14,6 +14,7 @@ public static class ProjectsRegistration
         services.AddScoped<ProjectAccess>();
         services.AddKoboHttpClient();
         services.AddTransient<KoboClient>();
+        services.AddScoped<FormSnapshot>();
         services.AddSingleton<SecretProtector>();
         services.AddScoped<InvitationAcceptor>();
         return services;

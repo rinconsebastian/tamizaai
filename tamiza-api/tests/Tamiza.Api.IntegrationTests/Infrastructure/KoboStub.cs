@@ -45,6 +45,8 @@ public sealed class KoboStub : IDisposable
 
     public string DataPath => $"/api/v2/assets/{AssetUid}/data/";
 
+    public string VersionsPath => $"{AssetPath}versions/";
+
     /// <summary>Serves the form and its submissions to requests carrying <paramref name="token"/>; anything else gets 401.</summary>
     public KoboStub WithForm(string formJson = FormJson, string token = Token, int submissionsStatus = 200)
     {
@@ -53,10 +55,96 @@ public sealed class KoboStub : IDisposable
             .RespondWith(Response.Create().WithStatusCode(200).WithHeader("Content-Type", "application/json").WithBody(formJson));
         Server.Given(Request.Create().WithPath(DataPath).UsingGet().WithHeader("Authorization", $"Token {token}"))
             .RespondWith(Response.Create().WithCallback(request => DataResponse(request, submissionsStatus)));
+        Server.Given(Request.Create().WithPath(VersionsPath + "*").UsingGet().WithHeader("Authorization", $"Token {token}"))
+            .RespondWith(Response.Create().WithCallback(VersionResponse));
         Server.Given(Request.Create().WithPath(AssetPath + "*").UsingGet()).AtPriority(100)
             .RespondWith(Response.Create().WithStatusCode(401).WithBody("""{"detail":"Invalid token."}"""));
         return this;
     }
+
+    /// <summary>
+    /// The asset document of a form deployed as <paramref name="deployedVersionId"/>: <paramref name="formJson"/> with
+    /// <c>version_id</c> (the latest version, a draft when it differs) and <c>deployed_version_id</c>. Without a deployed
+    /// version the form is not deployed.
+    /// </summary>
+    public static string Deployed(string formJson, string? deployedVersionId, string? versionId = null)
+    {
+        var form = JsonNode.Parse(formJson)!.AsObject();
+        form["version_id"] = versionId ?? deployedVersionId;
+        form["deployed_version_id"] = deployedVersionId;
+        return form.ToJsonString();
+    }
+
+    // Version definitions served at /versions/{uid}/; they survive WithForm, which only resets the mappings.
+    private readonly Dictionary<string, (string FormJson, string? DeployedAt)> _versions = [];
+
+    /// <summary>
+    /// Serves the definition of a version: the <c>content</c> of <paramref name="formJson"/> and its deployment date
+    /// (null for a draft). Versions not defined answer 404.
+    /// </summary>
+    public KoboStub WithVersion(string uid, string formJson = FormJson, string? deployedAt = "2026-09-01T10:00:00Z")
+    {
+        lock (_versions)
+        {
+            _versions[uid] = (formJson, deployedAt);
+        }
+
+        return this;
+    }
+
+    /// <summary>Returns a status code to fail a version request with, or null to answer it normally. Receives the version uid.</summary>
+    public Func<string, int?>? VersionFailure { get; set; }
+
+    /// <summary>Delay before each version response, to hold a fetch in flight.</summary>
+    public TimeSpan VersionDelay { get; set; }
+
+    private int _versionRequestsStarted;
+
+    /// <summary>Version requests the stub has begun to answer, counted before any delay (the log only lists answered ones).</summary>
+    public int VersionRequestsStarted => Volatile.Read(ref _versionRequestsStarted);
+
+    /// <summary>The uids requested at <c>/versions/{uid}/</c>, in order, including requests that failed.</summary>
+    public IReadOnlyList<string> VersionRequests() =>
+        Server.LogEntries
+            .Select(e => e.RequestMessage!.Path)
+            .Where(path => path.StartsWith(VersionsPath, StringComparison.Ordinal))
+            .Select(path => path[VersionsPath.Length..].TrimEnd('/'))
+            .ToList();
+
+    private ResponseMessage VersionResponse(IRequestMessage request)
+    {
+        var uid = request.Path[VersionsPath.Length..].TrimEnd('/');
+        Interlocked.Increment(ref _versionRequestsStarted);
+        if (VersionDelay > TimeSpan.Zero)
+        {
+            Thread.Sleep(VersionDelay);
+        }
+
+        if (VersionFailure?.Invoke(uid) is { } failure)
+        {
+            return Json(failure, """{"detail":"Failure injected by the test."}""");
+        }
+
+        (string FormJson, string? DeployedAt) version;
+        lock (_versions)
+        {
+            if (!_versions.TryGetValue(uid, out version))
+            {
+                return Json(404, """{"detail":"Not found."}""");
+            }
+        }
+
+        var document = new JsonObject
+        {
+            ["uid"] = uid,
+            ["content_hash"] = $"hash-{uid}",
+            ["date_modified"] = "2026-09-01T09:00:00Z",
+            ["date_deployed"] = version.DeployedAt is null ? JsonValue.Create(false) : JsonValue.Create(version.DeployedAt),
+            ["content"] = JsonNode.Parse(version.FormJson)!["content"]!.DeepClone(),
+        };
+        return Json(200, document.ToJsonString());
+    }
+
 
     public KoboStub Respond(string path, int status, TimeSpan? delay = null)
     {

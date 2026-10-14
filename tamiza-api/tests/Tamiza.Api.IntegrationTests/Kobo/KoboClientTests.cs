@@ -11,9 +11,13 @@ public sealed class KoboClientTests(PostgresFixture postgres) : IDisposable
 
     private static readonly Dictionary<string, string?> AllowPrivate = new() { ["TAMIZA_KOBO_ALLOW_PRIVATE_NETWORKS"] = "true" };
 
-    private async Task<TamizaApiFactory> FactoryAsync(Dictionary<string, string?>? settings = null) =>
+    private async Task<TamizaApiFactory> FactoryAsync(Dictionary<string, string?>? settings = null, long? maxResponseBytes = null) =>
         new(await postgres.CreateDatabaseAsync(), settings ?? AllowPrivate,
-            services => services.Configure<KoboHttpOptions>(o => o.Timeout = TimeSpan.FromSeconds(1)));
+            services => services.Configure<KoboHttpOptions>(o =>
+            {
+                o.Timeout = TimeSpan.FromSeconds(1);
+                o.MaxResponseBytes = maxResponseBytes ?? o.MaxResponseBytes;
+            }));
 
     private static KoboClient Client(TamizaApiFactory factory)
     {
@@ -64,6 +68,97 @@ public sealed class KoboClientTests(PostgresFixture postgres) : IDisposable
 
         Assert.Equal(KoboErrorCodes.Unauthorized, error?.Code);
         Assert.Contains("submissions", error!.Message);
+    }
+
+    [Fact]
+    public async Task Reads_a_form_version_sending_the_token_header()
+    {
+        _kobo.WithForm().WithVersion("vA", deployedAt: "2026-09-02T08:30:00Z");
+        await using var factory = await FactoryAsync();
+
+        var (version, error) = await Client(factory).GetVersionAsync(_kobo.Url, KoboStub.AssetUid, "vA", KoboStub.Token, default);
+
+        Assert.Null(error);
+        Assert.Equal("vA", version!.Uid);
+        Assert.Equal(new DateTimeOffset(2026, 9, 2, 8, 30, 0, TimeSpan.Zero), version.DeployedAt);
+        Assert.Equal(5, version.Fields.Count);
+        Assert.Equal(["vA"], _kobo.VersionRequests());
+        Assert.Equal($"Token {KoboStub.Token}", _kobo.Server.LogEntries.Single().RequestMessage!.Headers!["Authorization"].Single());
+        AssertTokenNotLogged(factory);
+    }
+
+    [Theory]
+    [InlineData(404, KoboErrorCodes.VersionNotFound)]
+    [InlineData(401, KoboErrorCodes.Unauthorized)]
+    [InlineData(403, KoboErrorCodes.Unauthorized)]
+    [InlineData(429, KoboErrorCodes.RateLimited)]
+    [InlineData(500, KoboErrorCodes.UnexpectedResponse)]
+    public async Task Maps_version_error_responses_to_codes(int status, string code)
+    {
+        _kobo.WithForm().WithVersion("vA");
+        _kobo.VersionFailure = _ => status;
+        await using var factory = await FactoryAsync();
+
+        var (version, error) = await Client(factory).GetVersionAsync(_kobo.Url, KoboStub.AssetUid, "vA", KoboStub.Token, default);
+
+        Assert.Null(version);
+        Assert.Equal(code, error?.Code);
+        AssertTokenNotLogged(factory);
+    }
+
+    [Fact]
+    public async Task A_version_unknown_to_kobo_is_not_found_and_the_message_names_it()
+    {
+        _kobo.WithForm();
+        await using var factory = await FactoryAsync();
+
+        var (_, error) = await Client(factory).GetVersionAsync(_kobo.Url, KoboStub.AssetUid, "vMissing", KoboStub.Token, default);
+
+        Assert.Equal(KoboErrorCodes.VersionNotFound, error?.Code);
+        Assert.Contains("vMissing", error!.Message);
+    }
+
+    [Fact]
+    public async Task A_rejected_token_is_unauthorized_for_a_version()
+    {
+        _kobo.WithForm().WithVersion("vA");
+        await using var factory = await FactoryAsync();
+
+        var (_, error) = await Client(factory).GetVersionAsync(_kobo.Url, KoboStub.AssetUid, "vA", "wrong-token", default);
+
+        Assert.Equal(KoboErrorCodes.Unauthorized, error?.Code);
+        AssertTokenNotLogged(factory);
+    }
+
+    [Fact]
+    public async Task A_rate_limited_asset_read_is_rate_limited()
+    {
+        _kobo.Respond(_kobo.AssetPath, 429);
+        await using var factory = await FactoryAsync();
+
+        var (_, error) = await Client(factory).GetAssetAsync(_kobo.Url, KoboStub.AssetUid, KoboStub.Token, default);
+
+        Assert.Equal(KoboErrorCodes.RateLimited, error?.Code);
+    }
+
+    [Fact]
+    public async Task A_body_over_the_buffer_is_an_unexpected_response_for_both_documents()
+    {
+        // A form with enough questions to exceed the 4 KB buffer.
+        var survey = string.Join(",", Enumerable.Range(0, 200).Select(i => $$"""{ "type": "text", "name": "question_{{i}}", "label": ["Question {{i}}"] }"""));
+        var large = $$"""{ "name": "Large", "content": { "survey": [{{survey}}] } }""";
+        _kobo.WithForm(large).WithVersion("vBig", large);
+        await using var factory = await FactoryAsync(maxResponseBytes: 4096);
+        var client = Client(factory);
+
+        var (asset, assetError) = await client.GetAssetAsync(_kobo.Url, KoboStub.AssetUid, KoboStub.Token, default);
+        var (version, versionError) = await client.GetVersionAsync(_kobo.Url, KoboStub.AssetUid, "vBig", KoboStub.Token, default);
+
+        Assert.Null(asset);
+        Assert.Null(version);
+        Assert.Equal(KoboErrorCodes.UnexpectedResponse, assetError?.Code);
+        Assert.Equal(KoboErrorCodes.UnexpectedResponse, versionError?.Code);
+        Assert.Contains("larger than 4 KB", versionError!.Message);
     }
 
     [Fact]

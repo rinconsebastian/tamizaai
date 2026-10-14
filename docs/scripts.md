@@ -42,7 +42,57 @@ Scripts receive a dictionary of pandas DataFrames.
 
 In pandas, integer columns use the nullable `Int64` type (a missing value is `<NA>`, not a float), text columns the `str` type, and timestamps are timezone-aware in UTC.
 
-**Types** come from the form: `integer` → integer, `decimal` and `range` → float, `date` → date, `start`, `end` and `dateTime` → timestamp in UTC. Everything else is text, including `select_one`, `select_multiple` (choice names separated by spaces, as Kobo sends them), `time` and `geopoint`. An answer that cannot be read as its question's type (for example `n/a` in an integer question) becomes empty, and the flatten step's log counts them per column. Answers to questions no longer in the form are kept as text columns.
+**Types** come from the form: `integer` → integer, `decimal` and `range` → float, `date` → date, `start`, `end` and `dateTime` → timestamp in UTC. Everything else is text, including `select_one` and `select_multiple` (which hold [choice labels](#choice-labels)), `time` and `geopoint`. An answer that cannot be read as its question's type (for example `n/a` in an integer question) becomes empty, and the flatten step's log counts them per column. Answers to questions no longer in the form are kept as text columns.
+
+### Choice labels
+
+Kobo stores and sends the answers to select questions as the choices' **names**, the codes defined in the form (`1`, `piped`), not as their labels (`Yes`, `Piped`). The flattened tables hold the **labels**, so the data is readable as it is:
+
+- A `select_one` answer is the label of its choice: `No`.
+- A `select_multiple` answer is the labels of its choices, in the order of the answer, joined by `; `: `Water; Electric power`. Kobo's own exports join labels with a space, but labels contain spaces too, so a space cannot be split back reliably; `main["services"].str.split("; ")` can.
+- Labels are always in the form's **default language**, its first language.
+- **Each answer uses the labels of the form version its submission was made with.** A form is often redeployed during fieldwork, and a choice can be added, removed or relabeled between versions. If version `vA` called a choice `Si` and a later version `vB` calls it `Sí`, the submissions made with `vA` hold `Si` and those made with `vB` hold `Sí`. Answers in repeat groups use their submission's version, and a question that the current form no longer has is still translated by the version that had it. The project's **Data** section lists the versions in use and whether their labels are available (see [kobo.md](kobo.md#7-form-versions-and-choice-labels)).
+- The "or other" option of a select question is labeled `Other`, as Kobo shows it. What the respondent typed stays in its own column.
+- The raw submissions are never changed; only the tables the scripts receive and the dashboards read show labels.
+
+When a label cannot come from the submission's own version, the step falls back and counts it in the flatten step's log, so nothing changes silently:
+
+| Situation | What the table holds | Log line |
+|---|---|---|
+| The submission has no form version, or its version's labels are not available yet (pending, failed or not found). | The label from the project's current form, which is what Kobo's own exports do. | `Form version vB: 15 submissions used the current form (definition pending).` and `3 submissions without a form version used the current form.` |
+| The code is not in its version's list, for example a submission edited in Kobo with a later version that added the choice. | The label from the current form. | `main.water_source: 1 value not in its form version; labeled from the current form.` |
+| The code has no label anywhere, for example because the choice has no label in the default language. | The code. | `main.has_water: 2 values without a label; kept as codes.` |
+
+Some questions are never translated and keep what Kobo sent, without a log line: questions whose choices come from a file (`select_one_from_file`, `select_multiple_from_file`) or from earlier answers, and Kobo's ranking, scoring and matrix questions.
+
+**When a relabeled choice splits a category.** In the example above, a column now holds both `Si` and `Sí`. To count them together, map every label to the current one in script 1:
+
+```python
+def current_label(value):
+    code = ctx.form.name("municipality", value)  # the code that label stands for, in any version
+    return ctx.form.label("municipality", code) or value  # its label in the current form
+
+main["municipality"] = main["municipality"].map(current_label)
+```
+
+**Joining with data keyed by codes.** Reference tables and other outside data often use the codes. `ctx.form.name(question, label)` gives the code a label stands for, in the current form or in an earlier version; see [`ctx`](#ctx).
+
+#### Upgrading from scripts that compare with codes
+
+Before choice labels, select columns held codes. A script that compares them with codes stops matching after the first run with labels, and its tables come out empty or wrong rather than failing. Tables already published keep their codes until the project's next run, so use **Run now** only after updating the scripts.
+
+```python
+# Before: the column held the choice name.
+piped = main["water_source"] == "piped"
+
+# Now: compare with the label...
+piped = main["water_source"] == "Piped"
+
+# ...or with the code, whichever version the answer was given in.
+piped = main["water_source"].map(lambda label: ctx.form.name("water_source", label)) == "piped"
+```
+
+For a `select_multiple` column, split it first with `main["services"].str.split("; ")` and compare each label.
 
 ## The scripts
 
@@ -74,12 +124,13 @@ Receives the cleaned tables; returns a dictionary of the tables the clean-data d
 ```python
 def prepare_output(cleaned, ctx):
     main = cleaned["main"].copy()
-    main["municipality_label"] = [ctx.form.label("municipality", value) for value in main["municipality"]]
+    # The column holds labels; the code each label stands for is one call away.
+    main["municipality_code"] = [ctx.form.name("municipality", label) for label in main["municipality"]]
 
     size = cleaned["members"].groupby("_parent_id").size().rename("household_size")
     households = main.merge(size, left_on="_id", right_index=True, how="left").fillna({"household_size": 0})
 
-    return {"households": households[["_id", "municipality", "municipality_label", "household_size"]]}
+    return {"households": households[["_id", "municipality", "municipality_code", "household_size"]]}
 ```
 
 ### 3. `compute_indicators(cleaned, ctx)`
@@ -94,7 +145,7 @@ def compute_indicators(cleaned, ctx):
     main = cleaned["main"]
     rows = []
     for label, group in [("total", main), *[(f"municipality={m}", g) for m, g in main.groupby("municipality")]]:
-        with_water = int((group["water_source"] == "piped").sum())
+        with_water = int((group["water_source"] == "Piped").sum())  # select answers are labels
         rows.append({
             "indicator": "households_with_piped_water",
             "disaggregation": label,
@@ -111,14 +162,15 @@ def compute_indicators(cleaned, ctx):
 
 | Attribute | What it is |
 |---|---|
-| `ctx.form.questions` | DataFrame of the form's questions: `name`, `path`, `type`, `label`, `list_name`. |
-| `ctx.form.choices` | DataFrame of the choice lists: `list_name`, `name`, `label`. |
-| `ctx.form.label(question, value)` | The label of a choice, by question name or path; `None` if unknown. |
+| `ctx.form.questions` | DataFrame of the form's questions: `name`, `path`, `type`, `label`, `list_name`. It describes the project's current form, the deployed version. |
+| `ctx.form.choices` | DataFrame of the choice lists of the current form: `list_name`, `name`, `label`. |
+| `ctx.form.label(question, value)` | The label of a choice code in the current form, by question name or path; `None` if unknown. Use it for codes that come from outside the tables, such as a reference table. |
+| `ctx.form.name(question, label)` | The code (choice name) a label stands for, by question name or path; `None` if there is none. It searches the current form first, then earlier versions from the newest to the oldest, so a label an older version used still resolves after a later one relabeled the choice. `None` also for a label that two choices of a version share, since it does not identify one. `Other` gives `other` for questions with the "or other" option. |
 | `ctx.reference` | The project's [reference tables](#reference-data) by name: `ctx.reference["population"]` is a DataFrame. `list(ctx.reference)` gives the names and `"population" in ctx.reference` checks one. |
 | `ctx.log` | A Python logger: `ctx.log.info(...)`, `ctx.log.warning(...)`. Messages appear in the run log. |
 | `ctx.project_name` | The project's name. |
 
-`print()` also writes to the run log. Labels come from the form's first language.
+`print()` also writes to the run log. Labels are in the form's default language, its first language.
 
 Asking for a reference table the project does not have, such as `ctx.reference["populaton"]`, fails the step with a message that lists the tables it has.
 
@@ -128,7 +180,7 @@ Asking for a reference table the project does not have, such as `ctx.reference["
 
 - **What runs.** The test flattens the sample, then runs the script you are editing. When that is script 2 or 3, the current saved version of script 1 runs first, as in a run (or the flattened tables are used when there is no script 1). To test a change to script 1 together with script 2, save script 1 first.
 - **The sample.** 500 submissions by default; choose from 1 to 5,000. They are spread across the whole project, not only the newest, and consecutive tests use the same submissions as long as the data does not change, so you can compare one attempt with the next. Submissions deleted in Kobo are left out. A project with fewer submissions than the sample size uses all of them.
-- **The same rules as a run.** The test uses the same contract, `ctx` (reference tables included), validation and time and memory limits. A test that passes predicts a run that passes, apart from problems that only appear with more data.
+- **The same rules as a run.** The test uses the same contract, `ctx` (reference tables included), validation and time and memory limits, and the tables the draft receives hold choice labels, as in a run. A test that passes predicts a run that passes, apart from problems that only appear with more data.
 - **Waiting.** Tests run in the same worker as runs, one job at a time. A test goes ahead of runs that are waiting, but waits for a run that has already started, which can take a few minutes on a large project; the panel says what it is waiting for. Starting another test replaces your test that has not started yet.
 - **The result.** Each step shows its status, duration, rows in and out, log and, if it failed, the error with the traceback. For each table a step produced you see its columns with their types (`integer`, `decimal`, `boolean`, `date`, `timestamp`, `text`) and its first 100 rows. Text longer than 500 characters is cut, and fewer rows are shown when 100 would exceed 1 MB; only the first 20 tables of a step are previewed. If you edit the code after testing, the panel says the result no longer matches the editor.
 - **How long it is kept.** Only you can see your tests, and each is deleted 24 hours after it ended.
@@ -157,7 +209,10 @@ import pandas as pd
 
 def compute_indicators(cleaned, ctx):
     population = ctx.reference["population"]  # columns municipality_code, population_2026
-    counts = cleaned["main"].groupby("municipality_code").size().rename("households").reset_index()
+    # The table is keyed by codes and the tables hold labels, so the join goes through ctx.form.name.
+    main = cleaned["main"].copy()
+    main["municipality_code"] = [ctx.form.name("municipality", label) for label in main["municipality"]]
+    counts = main.groupby("municipality_code").size().rename("households").reset_index()
     merged = counts.merge(population, on="municipality_code")
     return pd.DataFrame({
         "indicator": "households_per_1000_people",
@@ -198,7 +253,7 @@ Saving a script does not start a run; the next run uses the latest version. A ru
 - **Failed**, with the error. For an exception, the traceback shows the lines of your script that raised it.
 - **Skipped**, when the script does not exist or an earlier step failed.
 
-The log of each step holds your `ctx.log` messages and printed output, and for flattening the reference tables the run read and the count of values that could not be read. Below the steps, **Reference data used** lists those tables with their row counts and when each was last updated.
+The log of each step holds your `ctx.log` messages and printed output, and for flattening the reference tables the run read, the count of values that could not be read, and every choice-label fallback (see [Choice labels](#choice-labels)). Below the steps, **Reference data used** lists those tables with their row counts and when each was last updated.
 
 ## Limits
 

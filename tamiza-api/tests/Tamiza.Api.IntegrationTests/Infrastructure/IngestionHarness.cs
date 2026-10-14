@@ -39,7 +39,8 @@ public sealed class IngestionHarness : IAsyncDisposable
     /// project's initial synchronization starts right after creation.
     /// </summary>
     public static async Task<IngestionHarness> CreateAsync(
-        PostgresFixture postgres, KoboStub kobo, bool scheduler = false, Dictionary<string, string?>? settings = null)
+        PostgresFixture postgres, KoboStub kobo, bool scheduler = false, Dictionary<string, string?>? settings = null,
+        Action<Microsoft.Extensions.DependencyInjection.IServiceCollection>? configureServices = null)
     {
         var db = await postgres.CreateDatabaseAsync();
         var all = new Dictionary<string, string?>
@@ -53,7 +54,7 @@ public sealed class IngestionHarness : IAsyncDisposable
             all[key] = value;
         }
 
-        var factory = new TamizaApiFactory(db, all);
+        var factory = new TamizaApiFactory(db, all, configureServices);
         var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
         var response = await admin.PostAsJsonAsync("/api/v1/projects",
             new { name = "Household survey 2026", koboServerUrl = kobo.Url, assetUid = KoboStub.AssetUid, apiToken = KoboStub.Token });
@@ -94,10 +95,13 @@ public sealed class IngestionHarness : IAsyncDisposable
         var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(20));
         while (DateTime.UtcNow < deadline)
         {
-            var active = await TestData.ScalarAsync<long>(Db,
-                "SELECT count(*) FROM tamiza.syncs WHERE project_id = @p AND status IN ('queued', 'running')", ("p", ProjectId));
-            var any = await TestData.ScalarAsync<long>(Db, "SELECT count(*) FROM tamiza.syncs WHERE project_id = @p", ("p", ProjectId));
-            if (active == 0 && any >= runs)
+            // One statement, so a run queued between two queries cannot make the project look idle.
+            var idle = await TestData.ScalarAsync<bool>(Db,
+                """
+                SELECT count(*) FILTER (WHERE status IN ('queued', 'running')) = 0 AND count(*) >= @runs
+                FROM tamiza.syncs WHERE project_id = @p
+                """, ("p", ProjectId), ("runs", (long)runs));
+            if (idle)
             {
                 var page = await Admin.GetFromJsonAsync<JsonElement>(SyncsPath);
                 return page.GetProperty("items")[0];

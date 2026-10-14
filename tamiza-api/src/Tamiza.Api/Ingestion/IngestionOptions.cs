@@ -41,6 +41,9 @@ public sealed class IngestionOptions
     /// <summary>Delay before retrying a failed scheduled run, unless the project's interval is shorter.</summary>
     public TimeSpan RetryDelay { get; set; } = TimeSpan.FromHours(1);
 
+    /// <summary>Time a re-check spends fetching form version definitions; versions left over are taken by the background worker.</summary>
+    public TimeSpan RecheckVersionBudget { get; set; } = TimeSpan.FromSeconds(20);
+
     /// <summary>Largest webhook body accepted.</summary>
     public long MaxWebhookBytes { get; set; } = 10 * 1024 * 1024;
 }

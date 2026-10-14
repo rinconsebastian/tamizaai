@@ -22,6 +22,7 @@ public static class IngestionEndpoints
         project.MapPatch("/ingestion", UpdateAsync).RequireProjectRole(ProjectRole.Admin).WithName("UpdateIngestionSettings");
         project.MapPost("/syncs", StartAsync).RequireProjectRole(ProjectRole.Analyst).WithName("StartSync");
         project.MapGet("/syncs", ListAsync).RequireProjectRole(ProjectRole.Viewer).WithName("ListSyncs");
+        project.MapGet("/form-versions", ListFormVersionsAsync).RequireProjectRole(ProjectRole.Viewer).WithName("ListFormVersions");
         return api;
     }
 
@@ -97,6 +98,56 @@ public static class IngestionEndpoints
             .Select(ToItem)
             .ToListAsync(ct);
         return TypedResults.Ok(new SyncPage(items, await syncs.CountAsync(ct)));
+    }
+
+    /// <summary>
+    /// The form versions the project's non-deleted submissions use, plus the current one even if no submission uses it yet.
+    /// A version without a record reads as pending, because the next recording pass will create one.
+    /// </summary>
+    private static async Task<Ok<FormVersionList>> ListFormVersionsAsync(Guid projectId, TamizaDbContext db, CancellationToken ct)
+    {
+        var current = await db.Projects.AsNoTracking().Where(p => p.Id == projectId).Select(p => p.FormVersion).SingleAsync(ct);
+        var live = db.RawSubmissions.AsNoTracking().Where(s => s.ProjectId == projectId && !s.Deleted);
+        var counts = await live.Where(s => s.FormVersion != null)
+            .GroupBy(s => s.FormVersion!)
+            .Select(g => new { Uid = g.Key, Count = g.LongCount() })
+            .ToDictionaryAsync(g => g.Uid, g => g.Count, StringComparer.Ordinal, ct);
+        var withoutVersion = await live.LongCountAsync(s => s.FormVersion == null, ct);
+
+        // The definitions themselves (fields and choices) can be large and are not needed here.
+        var records = await db.FormVersions.AsNoTracking()
+            .Where(v => v.ProjectId == projectId)
+            .Select(v => new { v.Uid, v.Status, v.DeployedAt, v.ErrorCode, v.Error, v.NextAttemptAt })
+            .ToDictionaryAsync(v => v.Uid, StringComparer.Ordinal, ct);
+
+        var uids = counts.Keys.ToHashSet(StringComparer.Ordinal);
+        if (current is not null)
+        {
+            uids.Add(current);
+        }
+
+        var versions = uids
+            .Select(uid =>
+            {
+                var hasRecord = records.TryGetValue(uid, out var record);
+                var status = hasRecord ? record!.Status : FormVersionStatus.Pending;
+                var waiting = status is FormVersionStatus.Pending or FormVersionStatus.Failed;
+                return new FormVersionItem(
+                    uid,
+                    uid == current,
+                    record?.DeployedAt,
+                    counts.GetValueOrDefault(uid),
+                    FormVersionStatusText.ToText(status),
+                    status is FormVersionStatus.Failed or FormVersionStatus.NotFound ? record?.ErrorCode : null,
+                    status is FormVersionStatus.Failed or FormVersionStatus.NotFound ? record?.Error : null,
+                    waiting ? record?.NextAttemptAt : null);
+            })
+            .OrderByDescending(v => v.Current)
+            .ThenBy(v => v.DeployedAt is null ? 1 : 0)
+            .ThenByDescending(v => v.DeployedAt)
+            .ThenBy(v => v.Uid, StringComparer.Ordinal)
+            .ToList();
+        return TypedResults.Ok(new FormVersionList(versions, withoutVersion));
     }
 
     private static async Task<IngestionStatus> StatusAsync(TamizaDbContext db, Guid projectId, CancellationToken ct)

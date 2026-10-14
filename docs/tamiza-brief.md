@@ -159,7 +159,7 @@ Each raw submission SHALL record its origin (`webhook` or `sync`), the form vers
 ### 5.4 Python script chain (`pipeline`)
 
 #### Requirement: Automatic flattening
-Before the user scripts, the system SHALL flatten the non-deleted raw submissions into the `p_<id>_raw` schema: one main table and one table per repeat group with a key to the parent record.
+Before the user scripts, the system SHALL flatten the non-deleted raw submissions into the `p_<id>_raw` schema: one main table and one table per repeat group with a key to the parent record. Answers to select questions are written as choice labels in the form's default language, taken from the definition of the form version each submission was made with.
 
 #### Requirement: Three scripts with a fixed contract
 Each project SHALL have up to three optional scripts, each with a fixed-signature function:
@@ -249,7 +249,7 @@ The user SHALL be able to export the indicator table to XLSX.
 ## 6. Minimal data model (metadata)
 
 - `users`: id, keycloak_sub, name, email.
-- `projects`: id, name, kobo_server_url, asset_uid, encrypted_api_token, encrypted_webhook_secret, sync_interval, settings.
+- `projects`: id, name, kobo_server_url, asset_uid, encrypted_api_token, encrypted_webhook_secret, sync_interval, settings, form_fields and form_choices (the snapshot of the form's deployed version), form_version (the uid of that version).
 - `project_members`: project_id, user_id, role.
 - `raw_submissions`: id, project_id, kobo_uuid (unique per project), kobo_id, form_version, data (JSONB), origin, received_at, deleted.
 - `syncs`: id, project_id, type, started_at, finished_at, created_count, updated_count, deleted_count, error.
@@ -258,6 +258,7 @@ The user SHALL be able to export the indicator table to XLSX.
 - `sampling_frames`: project_id, dimensions, targets.
 - `script_tests`: id, project_id, requested_by, kind, code (the tested draft), sample_size, status, clean_version_id, queued_at, started_at, finished_at, error, steps (per-step logs and table previews). Deleted 24 hours after they end.
 - `reference_tables`: id, project_id, name, file_name, columns (name, header, type), row_count, updated_by, updated_at. The rows are in `reference_table_contents` (one JSONB array per table), not in a per-project schema.
+- `form_versions`: project_id, uid (a Kobo form version, `__version__`), status (pending/available/failed/not_found), fields and choices (the version's questions and choice lists, with labels in the default language), deployed_at, recorded_at, fetched_at, attempts, next_attempt_at, error. One row per version a project's submissions use; recorded when a submission with the version is stored, fetched from Kobo once.
 
 ---
 
@@ -281,6 +282,7 @@ Implement in this order, one change per line:
 3. `add-kobo-ingestion`: webhook, periodic and manual synchronization, deletion reconciliation, synchronization log.
 4. `add-python-pipeline`: flattening, run queue, the three scripts, versioning, atomic publishing, run triggers and limits.
 4b. `add-pipeline-authoring`: sample test run with preview, reference data available from `ctx`.
+4c. `add-choice-labels`: the flattened tables show choice labels, from the form version of each submission, instead of codes (BREAKING for scripts that compare select columns with codes); `ctx.form.name`; form versions listed in the Data section.
 5. `add-performance-dashboard`
 6. `add-clean-data-dashboard`
 7. `add-indicators-dashboard`

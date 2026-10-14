@@ -304,6 +304,34 @@ The Data section gains a **Form versions** card below the ingestion status.
 - **[Two writers fetch the same version (a sync, the worker and a re-check)]** → At worst a duplicate request. Writes are guarded by `status <> 'available'`, and version content never changes.
 - **[A label cannot be updated after a version is fetched]** → Kobo versions are immutable, and a fix in Kobo creates a new version. Not a real limitation.
 
+## Verification Results
+
+Measured on the development stack (Compose; `api` limit 512 MiB, `analytics` limit 1536 MiB) in a separate Compose project, against a fake Kobo with 500,000 submissions of about 1.2 KB with a `members` repeat group, spread over three form versions: `vA` (1–150,000), `vB` (150,001–350,000) and `vC` (350,001–500,000, the deployed one). `vB` relabels the choice `cali` from `Cali` to `Santiago de Cali`, and `vC` adds the water source `rain`. The fake Kobo serves the asset, `/versions/{uid}/` and the data endpoint with the same paging, filter and `fields` parameters. The sign-in was a fake OIDC provider. No real Kobo token was available, so the `/versions/{uid}/` document follows the contract described above (from the KPI sources) and has not been tried against a real Kobo server.
+
+The comparison runs the same fake data through the images built before this change (migrations up to `0004`) on the same machine:
+
+| Measure | Before | With this change |
+|---|---|---|
+| Initial full synchronization of 500,000 submissions | 61.1 s | 62.0 s (also fetches `vA` and `vB` once, and takes `vC` from the asset) |
+| Flatten step (500,000 → 1,500,000 rows, no scripts) | 51.2 s | 55.5 s, and 53.1 s and 54.1 s in two later runs |
+| Flatten with and without labels, same 200,000 synthetic submissions in one process | 10.4 s | 10.8 s (about 4% more) |
+| Script 1 (clean) on 1,500,000 rows | not run | 4.7 s |
+| Script 2 (output) / script 3 (indicators) | not run | 1.7 s / 0.8 s |
+| `analytics` peak during the full chain with the three scripts of `docs/scripts.md` | not run | about 514 MiB |
+
+The numbers are not comparable with the earlier changes' tables, which were measured in other sessions. One baseline run showed 14 minutes between the start and end of a run whose flatten step reported 51.2 s: the Docker VM was paused, and the step's own timer excludes pauses.
+
+Migration `0005` on a copy of the 500,000-row table: building the partial index `(project_id, form_version) WHERE NOT deleted` took 0.8 s and the backfill of the `pending` rows 0.7 s. On the stack it ran at startup on an empty database. The two read queries added to the Data section and the project details, on the same table: the per-version counts of the form versions list 0.49 s, and the unavailable count of the project details 2 ms, because it steps through the index once per version (`Index Only Scan`, no heap fetches).
+
+What was checked on the stack:
+
+- **Labels per version** in `p_<id>_raw.main`: `vA` rows hold `Cali` (100,000) and `Buga` (50,000), `vB` and `vC` rows hold `Santiago de Cali` and `Buga`; `water_source` holds `Piped` and `Well`. The flatten log reports `main.water_source: 30 values not in their form version; labeled from the current form.` (the `vA` submissions that use the choice `rain`, which only `vC` has, shown as `Rainwater`) and `main.water_source: 470 values without a label; kept as codes.`
+- **Versions fetched once.** The fake Kobo saw one request for `vA` and one for `vB`, none for `vC` and a second synchronization or run made none.
+- **A fourth version and an outage.** A webhook delivery with the new version `vD` answered 200 in 94 ms and recorded it as pending. With Kobo stopped before the worker's next tick, the worker marked `vD` as failed with `kobo.unreachable` and the next attempt in an hour, the versions list showed it, and the project details counted one unavailable version. A run then succeeded and its flatten log said `Form version vD: 1 submission used the current form (definition failed).`, and that submission's answers carry the current form's labels.
+- **A synchronization during a partial outage.** With Kobo back, only its versions endpoint dropping connections, and `vD` made due, "Sync now" succeeded and `vD` stayed failed with a second attempt recorded.
+- **Sample tests.** The four Python examples of `docs/scripts.md` (the three scripts and the reference-data example) all succeeded as tests on 500 submissions. The reference example joined labels to codes through `ctx.form.name` for both labels of Cali, without losing a row.
+- **UI.** The Data section with versions in every status (`available`, `pending`, `failed`, `not_found`), with no versions, and the Overview with unavailable versions, at 360 px and 1280 px in headless Chrome: no horizontal page scroll (`scrollWidth <= clientWidth`), screenshots reviewed. This used a throwaway bootstrap with canned API answers, because Keycloak sign-in was not part of that check.
+
 ## Migration Plan
 
 - `0005_add_choice_labels.sql` creates `form_versions`, adds `projects.form_version` and the partial index on `raw_submissions`, and records the versions of stored submissions as `pending`. It runs in the API's startup migration, like earlier scripts. The index build on large tables runs in the same transaction; a 500,000-row project takes seconds (record the time during stack verification).

@@ -36,6 +36,27 @@ export interface ProjectDetails {
   myRole: ProjectRole;
   tokenUnreadable: boolean;
   createdAt: string;
+  /** Form versions used by the project's submissions whose definition (and so labels) is not available. */
+  unavailableFormVersions: number;
+}
+
+export type FormVersionStatus = 'available' | 'pending' | 'failed' | 'not_found';
+
+/** A form version the project's submissions use, and the state of its definition. */
+export interface FormVersionItem {
+  uid: string;
+  current: boolean;
+  deployedAt: string | null;
+  submissions: number;
+  status: FormVersionStatus;
+  errorCode: string | null;
+  error: string | null;
+  nextAttemptAt: string | null;
+}
+
+export interface FormVersionList {
+  versions: FormVersionItem[];
+  withoutVersion: number;
 }
 
 export interface WebhookSettings {
@@ -144,6 +165,11 @@ export class ProjectsService {
 
   formFields(id: string): Observable<FormField[]> {
     return this.http.get<FormField[]>(`${base}/${id}/form-fields`);
+  }
+
+  /** The form versions the project's submissions use, with the state of each definition. */
+  formVersions(id: string): Observable<FormVersionList> {
+    return this.http.get<FormVersionList>(`${base}/${id}/form-versions`);
   }
 
   webhook(id: string): Observable<WebhookSettings> {

@@ -98,16 +98,52 @@ def create_project(database: Database, user_id: uuid.UUID | None = None) -> Proj
     return Project(project_id, user_id)
 
 
-def add_submissions(database: Database, project: Project, submissions: list[dict], deleted: bool = False) -> None:
+def add_submissions(
+    database: Database,
+    project: Project,
+    submissions: list[dict],
+    deleted: bool = False,
+    versions: dict[int, str] | None = None,
+) -> None:
+    """Stores submissions as the API does; ``versions`` gives the form_version column of a Kobo id (null otherwise)."""
     with database.connect() as connection, connection.cursor() as cursor:
         cursor.executemany(
             """
             INSERT INTO tamiza.raw_submissions
-                (project_id, kobo_id, kobo_uuid, data, origin, received_at, updated_at, deleted)
-            VALUES (%s, %s, %s, %s, 'sync', now(), now(), %s)
+                (project_id, kobo_id, kobo_uuid, form_version, data, origin, received_at, updated_at, deleted)
+            VALUES (%s, %s, %s, %s, %s, 'sync', now(), now(), %s)
             """,
-            [(project.id, s["_id"], s["_uuid"], json.dumps(s), deleted) for s in submissions],
+            [
+                (project.id, s["_id"], s["_uuid"], (versions or {}).get(s["_id"]), json.dumps(s), deleted)
+                for s in submissions
+            ],
         )
+
+
+def add_form_version(
+    database: Database,
+    project: Project,
+    uid: str,
+    choices: list[dict] | None = None,
+    status: str = "available",
+    deployed_at: str | None = None,
+    fields: list[dict] | None = None,
+) -> None:
+    """Records a form version as the API does: its definition when available, otherwise only its state."""
+    database.execute(
+        """
+        INSERT INTO tamiza.form_versions
+            (project_id, uid, status, fields, choices, deployed_at, recorded_at, fetched_at)
+        VALUES (%s, %s, %s, %s, %s, %s, now(), CASE WHEN %s = 'available' THEN now() END)
+        """,
+        project.id,
+        uid,
+        status,
+        Jsonb(fields if fields is not None else FORM_FIELDS),
+        Jsonb(choices if choices is not None else []),
+        deployed_at,
+        status,
+    )
 
 
 def add_script(database: Database, project: Project, kind: str, code: str | None) -> uuid.UUID:
