@@ -28,3 +28,5 @@ __pycache__/
 .vs/
 .idea/
 .DS_Store
+
+openspec/changes/add-indicators-dashboard

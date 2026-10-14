@@ -231,10 +231,15 @@ The dashboard SHALL be computed on Tamiza's stored copy of the non-deleted raw s
 ### 5.6 Dashboard 2: clean data (`dashboard-data`)
 
 #### Requirement: Queryable table
-The dashboard SHALL show the tables in `p_<id>_output` (or `p_<id>_clean` if there is no script 2) with a table selector, pagination, per-column filters and sorting, all resolved on the server.
+Every project member, viewers included, SHALL be able to browse the tables that the last successful runs published: the output tables (script 2) when published, otherwise the clean tables, with a switch to the other when both exist (the flattened raw tables are not offered). The dashboard SHALL offer a table selector with row counts, pages of 25, 50 or 100 rows, sorting by one column (empty values last) and one filter per column combined with AND, all resolved on the server:
+- text: contains (ignoring case), is exactly, is one of (picked from the column's most frequent values);
+- integers, decimals, dates and timestamps: a range with an optional minimum and maximum, both included, where a timestamp range is whole days in the project's time zone;
+- true/false: is one of; any column: is empty, is not empty.
+
+Column headers show the type and the question label when the column has one. The source, table, filters, sort and page are kept in the page address, and a part that no longer applies (a removed column or table) is dropped with a message. When a run republishes, the next request reads the new tables and the page says so.
 
 #### Requirement: Export
-The user SHALL be able to export the full table, with the applied filters, to CSV and XLSX. The export is generated in the backend.
+Every member SHALL be able to export the full table, with the applied filters and sort, to CSV (UTF-8 with a byte order mark) and XLSX (typed cells, text never as a formula, at most 1,048,575 rows, cells cut at 32,767 characters and reported). The file is generated in the backend and downloaded through a single-use link that expires after a few minutes and needs no access token. A deployment limits the size of an export file and how many are prepared at once. Publishing a run's tables does not wait for a download, only for the file to be written.
 
 ### 5.7 Dashboard 3: indicators (`dashboard-indicators`)
 
@@ -285,7 +290,7 @@ Implement in this order, one change per line:
 4c. `add-choice-labels`: the flattened tables show choice labels, from the form version of each submission, instead of codes (BREAKING for scripts that compare select columns with codes); `ctx.form.name`; form versions listed in the Data section.
 4d. `add-question-labels`: the flattened columns carry their question's label, from the latest deployed form version only, as column comments, in `ctx.form.columns` and in the sample-test preview. Not breaking.
 5. `add-performance-dashboard`: the first dashboard (submissions per day, completion time, enumerators, sampling frame coverage) computed in SQL on the stored submissions, with a per-project time zone and a date range; the field check reports coverage unavailable without a usable frame.
-6. `add-clean-data-dashboard`
+6. `add-clean-data-dashboard`: the second dashboard: the tables the last runs published (output, else clean) in a paged table with typed server-side filters, sorting and a view kept in the page address, and CSV and XLSX exports downloaded through single-use links; publishing waits in short attempts for readers of the tables, so a long export never blocks the dashboard.
 7. `add-indicators-dashboard`
 
 ### Deferred from `setup-foundation`

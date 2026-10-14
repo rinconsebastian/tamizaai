@@ -145,6 +145,8 @@ def clean(raw, ctx):
 
 Receives the cleaned tables; returns a dictionary of the tables the clean-data dashboard will show.
 
+The [clean data dashboard](clean-data-dashboard.md) shows exactly these tables, one at a time, to every member of the project. Without script 2 it shows the clean tables instead (script 1's, or the flattened ones), and when both exist members can switch between them. The flattened raw tables are not shown.
+
 ```python
 def prepare_output(cleaned, ctx):
     main = cleaned["main"].copy()
@@ -257,7 +259,9 @@ def compute_indicators(cleaned, ctx):
 - **Column names** are adjusted for you the same way question names are (`Household size` → `household_size`); the run log lists every renamed column. If two columns of a table end up with the same name (`Age` and `age`), the step fails.
 - A **named index** (for example after `groupby`) is published as columns; an unnamed index is dropped.
 - **Geometry columns** (geopandas) are published as text in WKT format.
+- **Row order** is kept: the clean data dashboard lists a table's rows in the order your script returned them until a member sorts by a column, so sort the DataFrame (`sort_values`) if the order matters to your readers.
 - Script 3's table is published as `indicators`.
+- **Column labels.** Only the flattened columns carry a [question label](#question-labels). The dashboard shows it under the column name when there is one, so a table you build in script 2 shows names only; use descriptive column names (`household_size`) for those.
 
 A step that fails publishes nothing: the dashboards keep showing the last successful results.
 

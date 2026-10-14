@@ -113,6 +113,24 @@ Projects' synchronization intervals are set per project by their admins, in the 
 
 **Script limits.** Each analyst script runs with a time limit and a memory limit, set by `TAMIZA_RUN_TIMEOUT_SECONDS` (default `600`) and `TAMIZA_RUN_MEMORY_MB` (default `1024`) in `.env`. Apply changes with `docker compose up -d analytics`. The script runs next to the analytics worker, which needs a few hundred MB of its own while it flattens and publishes, so raise `ANALYTICS_MEMORY_LIMIT` together with `TAMIZA_RUN_MEMORY_MB` and keep at least 512 MB between them.
 
+**Publishing while tables are read.** A run replaces a project's published tables in one short swap that needs the tables to be free. If a dashboard export is still reading them, the swap tries again every few seconds, holding other readers for no more than 5 seconds at a time, and the step's log says how long it waited. After `TAMIZA_PUBLISH_WAIT_SECONDS` (default `900`, 15 minutes) the step fails with "The published tables were in use" and the previous tables stay published. Keep it above the export time limit (see [clean-data-dashboard.md](clean-data-dashboard.md)). Apply changes with `docker compose up -d analytics`.
+
+**Clean data dashboard and exports.** Reading the published tables and exporting them to CSV or XLSX is limited by environment variables on the `api` service, for example in a `compose.override.yaml` (see [clean-data-dashboard.md](clean-data-dashboard.md)). The defaults suit tables of up to 500,000 rows:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DataDashboard__StatementTimeout` | `00:00:25` | Time a page or a list of values may take in PostgreSQL before it is stopped. |
+| `DataDashboard__QueueTimeout` | `00:00:25` | Time a request waits for a free slot (pages and values, or exports) before it fails. |
+| `DataDashboard__MaxConcurrentQueries` | `4` | Pages and value lists computed at the same time, across all projects. |
+| `DataDashboard__LockTimeout` | `00:00:05` | Time a request waits for a published table that a run is replacing. |
+| `DataDashboard__ExportStatementTimeout` | `00:05:00` | Time preparing an export may take. Keep `TAMIZA_PUBLISH_WAIT_SECONDS` above it. nginx waits up to 6 minutes for the request. |
+| `DataDashboard__MaxConcurrentExports` | `2` | Exports prepared at the same time, across all projects. |
+| `DataDashboard__MaxExportFileSize` | `1073741824` | Largest export file in bytes (1 GiB). An export that grows past it fails and leaves no file. |
+| `DataDashboard__ExportLinkLifetime` | `00:05:00` | How long a prepared file can be downloaded. |
+| `DataDashboard__ExportDirectory` | `/tmp/tamiza-exports` | Where prepared files wait for their download, inside the `api` container. |
+
+Exports are written to `ExportDirectory` before the browser downloads them, so they use the `api` container's disk (its writable layer), not memory. A file is deleted as soon as it is downloaded or its link expires, and the directory is emptied whenever `api` starts. In the worst case the disk holds `MaxExportFileSize` for each export prepared in the last `ExportLinkLifetime` that nobody has downloaded yet; lower `MaxExportFileSize` on a small disk. Download links live in the memory of the `api` process, so a restart invalidates links that were not used yet, which is another reason to run a single `api` replica.
+
 **Per-project tables.** The pipeline publishes each project's results in PostgreSQL schemas named `p_<project id without dashes>_raw`, `_clean`, `_output` and `_indicators` (see [scripts.md](scripts.md)). They are rebuilt by every run. To remove a project's tables by hand, drop its four schemas, for example `DROP SCHEMA p_01a0ffdc120470188195fe685d20c5c9_raw CASCADE;`; the next run creates them again.
 
 **One `api` replica.** Run a single `api` container. On startup it marks any synchronization left running as interrupted, which assumes no other `api` is running one.

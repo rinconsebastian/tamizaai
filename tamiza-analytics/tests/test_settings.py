@@ -62,8 +62,17 @@ def test_run_limit_overrides():
         ("TAMIZA_RUN_MEMORY_MB", "-1"),
         ("TAMIZA_RUN_MEMORY_MB", "1.5"),
         ("TAMIZA_RUN_TIMEOUT_SECONDS", "ten"),
+        ("TAMIZA_PUBLISH_WAIT_SECONDS", "0"),
+        ("TAMIZA_PUBLISH_WAIT_SECONDS", "soon"),
     ],
 )
 def test_invalid_run_limits_are_rejected(name, value):
     with pytest.raises(ValueError, match=name):
         settings.load({"TAMIZA_ANALYTICS_DATABASE_URL": "postgresql://db/tamiza", name: value})
+
+
+def test_publish_wait_defaults_to_fifteen_minutes_and_can_be_set():
+    base = {"TAMIZA_ANALYTICS_DATABASE_URL": "postgresql://db/tamiza"}
+
+    assert settings.load(base).publish_wait_seconds == 900.0
+    assert settings.load({**base, "TAMIZA_PUBLISH_WAIT_SECONDS": "30"}).publish_wait_seconds == 30.0

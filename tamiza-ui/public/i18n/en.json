@@ -83,6 +83,14 @@
       },
       "dashboard": {
         "timeout": "Computing the dashboard took too long and was stopped. Try a shorter date range, or try again in a few minutes."
+      },
+      "data": {
+        "timeout": "Reading the table took too long and was stopped. Add a filter to read fewer rows, or try again in a moment.",
+        "tableNotFound": "That table is no longer published. A run may have replaced the tables.",
+        "columnNotFound": "The table no longer has that column. A run may have replaced the table.",
+        "exportBusy": "Other exports are being prepared. Try again in a moment.",
+        "xlsxTooManyRows": "More rows match than fit an XLSX sheet (1,048,575). Export to CSV, or add a filter.",
+        "exportTooLarge": "The export is larger than this installation allows. Add a filter to export fewer rows."
       }
     }
   },
@@ -129,6 +137,7 @@
     "notFoundBody": "It does not exist, or you are not a member of it.",
     "tabs": {
       "performance": "Performance",
+      "cleanData": "Clean data",
       "overview": "Overview",
       "data": "Data",
       "scripts": "Scripts",
@@ -606,5 +615,106 @@
     "deleteTitle": "Delete {{ name }}?",
     "deleteMessage": "Scripts that read ctx.reference[\"{{ name }}\"] fail from the next run.",
     "previewNote": "First {{ shown }} of {{ rows }} rows, from {{ file }}."
+  },
+  "cleanData": {
+    "sourceLabel": "Source",
+    "source": {
+      "output": "Output tables",
+      "clean": "Clean tables"
+    },
+    "tableLabel": "Table",
+    "tableOption": "{{ name }} ({{ count }} rows)",
+    "published": "Published {{ time }}",
+    "publishedRun": "by run {{ run }}",
+    "runsLink": "See the runs",
+    "zone": "Times are shown in {{ zone }}.",
+    "republished": "The tables were republished at {{ time }}. You are seeing the new rows.",
+    "dropped": {
+      "title": "Part of this view no longer applies",
+      "filter": "The filter on {{ name }} was removed.",
+      "sort": "The sort on {{ name }} was removed."
+    },
+    "tableGone": "The table {{ name }} is no longer published. Showing {{ next }} instead.",
+    "tableGoneNone": "The table {{ name }} is no longer published.",
+    "empty": {
+      "title": "No published tables yet",
+      "body": "Tables appear here after a run publishes them.",
+      "editor": "Write the scripts and run them to publish the tables.",
+      "editorLink": "Open the scripts",
+      "viewer": "An analyst or admin has to run the project’s scripts first."
+    },
+    "emptyTable": "This table has no rows.",
+    "noMatch": "No rows match the filters.",
+    "clearFilters": "Clear filters",
+    "matching": "{{ count }} matching rows",
+    "total": "{{ count }} rows",
+    "emptyCell": "empty",
+    "true": "true",
+    "false": "false",
+    "sort": {
+      "by": "Sort by {{ name }}",
+      "none": "not sorted",
+      "ascending": "sorted ascending",
+      "descending": "sorted descending"
+    },
+    "filter": {
+      "open": "Filter {{ name }}",
+      "active": "Filter on {{ name }}, active",
+      "title": "Filter {{ name }}",
+      "operation": "Condition",
+      "ops": {
+        "contains": "contains",
+        "equals": "is exactly",
+        "in": "is one of",
+        "range": "is between",
+        "empty": "is empty",
+        "notEmpty": "is not empty"
+      },
+      "value": "Text",
+      "min": "From",
+      "max": "To",
+      "days": "Days in {{ zone }}; the last day is included.",
+      "search": "Search values",
+      "values": "Values",
+      "selected": "{{ count }} selected",
+      "loadingValues": "Loading values…",
+      "noValues": "No values to list.",
+      "valuesHelp": "The {{ count }} most frequent values are listed; search to find others.",
+      "emptyText": "(empty text)",
+      "apply": "Apply",
+      "checking": "Checking…",
+      "remove": "Remove filter",
+      "needValue": "Enter a value.",
+      "needValues": "Choose at least one value.",
+      "needRange": "Enter a minimum, a maximum or both."
+    },
+    "chip": {
+      "contains": "{{ name }} contains “{{ value }}”",
+      "equals": "{{ name }} is “{{ value }}”",
+      "in": "{{ name }} is one of {{ count }} values",
+      "rangeBoth": "{{ name }} from {{ min }} to {{ max }}",
+      "rangeMin": "{{ name }} from {{ min }}",
+      "rangeMax": "{{ name }} up to {{ max }}",
+      "empty": "{{ name }} is empty",
+      "notEmpty": "{{ name }} is not empty",
+      "edit": "Edit the filter on {{ name }}",
+      "remove": "Remove the filter on {{ name }}"
+    },
+    "paging": {
+      "label": "Pages",
+      "previous": "Previous",
+      "next": "Next",
+      "info": "{{ from }}–{{ to }} of {{ total }}",
+      "size": "Rows per page"
+    },
+    "export": {
+      "button": "Export",
+      "help": "Exports every row that matches the filters, in the current order.",
+      "csv": "CSV file",
+      "xlsx": "Excel file (XLSX)",
+      "preparing": "Preparing the export…",
+      "ready": "Export ready: {{ rows }} rows. The download starts now.",
+      "readyCut": "{{ cut }} cells were longer than Excel allows and were cut."
+    }
   }
 }

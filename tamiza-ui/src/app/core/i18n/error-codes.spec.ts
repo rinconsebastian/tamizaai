@@ -34,6 +34,12 @@ const apiErrorCodes = [
   'reference.exists',
   'reference.limit',
   'dashboard.timeout',
+  'data.timeout',
+  'data.tableNotFound',
+  'data.columnNotFound',
+  'data.exportBusy',
+  'data.xlsxTooManyRows',
+  'data.exportTooLarge',
 ];
 
 function lookup(root: unknown, path: string): unknown {

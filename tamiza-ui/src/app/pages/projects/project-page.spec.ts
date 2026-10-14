@@ -9,9 +9,9 @@ const performanceUrl = `/api/v1/projects/${projectId}/performance`;
 
 describe('ProjectPage tabs', () => {
   it.each<[ProjectRole, string[]]>([
-    ['viewer', ['Performance', 'Overview', 'Data', 'Scripts', 'Reference data', 'Members', 'Sampling frame']],
-    ['analyst', ['Performance', 'Overview', 'Data', 'Scripts', 'Reference data', 'Members', 'Sampling frame']],
-    ['admin', ['Performance', 'Overview', 'Data', 'Scripts', 'Reference data', 'Members', 'Sampling frame', 'Webhook']],
+    ['viewer', ['Performance', 'Clean data', 'Overview', 'Data', 'Scripts', 'Reference data', 'Members', 'Sampling frame']],
+    ['analyst', ['Performance', 'Clean data', 'Overview', 'Data', 'Scripts', 'Reference data', 'Members', 'Sampling frame']],
+    ['admin', ['Performance', 'Clean data', 'Overview', 'Data', 'Scripts', 'Reference data', 'Members', 'Sampling frame', 'Webhook']],
   ])('puts Performance first for a %s, and the Webhook tab only for admins', async (role, expected) => {
     const { root } = await openProjectSection('overview', role);
     expect(tabs(root)).toEqual(expected);

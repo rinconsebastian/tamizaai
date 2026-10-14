@@ -216,6 +216,19 @@ def load_reference(settings: Settings, project_id: UUID, work_dir: Path) -> tupl
     return tables, f"Reference tables: {listed}."
 
 
+_NOTEWORTHY_PUBLISH_WAIT_SECONDS = 5.0
+
+
+def _publish(
+    connection, run: ClaimedRun, settings: Settings, record: StepRecord, step: str, tables: list[publish.Table]
+) -> None:
+    """Publishes a step's tables; when the swap had to wait for readers (an export), the step's log says so."""
+    waited = publish.publish(connection, run.project_id, step, tables, max_wait_seconds=settings.publish_wait_seconds)
+    if waited > _NOTEWORTHY_PUBLISH_WAIT_SECONDS:
+        line = f"Publishing waited {waited:.0f} s for readers of the published tables."
+        record.log = f"{record.log}\n{line}".strip()
+
+
 def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Path, records: dict[str, StepRecord]):
     project = project_context(connection, run.project_id)
     form_fields, context = project.form_fields, project.context
@@ -246,11 +259,11 @@ def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Pa
         )
         context["columns"] = column_context(result.tables)
         raw = [OutputTable(t.name, t.rows, t.path, t.column_labels) for t in result.tables]
-        publish.publish(
-            connection, run.project_id, "raw", [publish.Table(t.name, t.path, t.column_labels) for t in raw]
+        record.log = "\n".join([reference_log, *result.log])
+        _publish(
+            connection, run, settings, record, "raw", [publish.Table(t.name, t.path, t.column_labels) for t in raw]
         )
         record.input_rows = result.input_rows
-        record.log = "\n".join([reference_log, *result.log])
         _set_outputs(record, raw)
 
     _run_step(connection, run, records["flatten"], do_flatten)
@@ -272,8 +285,13 @@ def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Pa
                 return
         # Without script 1 the clean tables are the flattened ones, so they keep their column labels; a script's
         # tables carry none.
-        publish.publish(
-            connection, run.project_id, "clean", [publish.Table(t.name, t.path, t.column_labels) for t in cleaned]
+        _publish(
+            connection,
+            run,
+            settings,
+            record,
+            "clean",
+            [publish.Table(t.name, t.path, t.column_labels) for t in cleaned],
         )
         record.input_rows = sum(t.rows for t in raw)
         _set_outputs(record, cleaned)
@@ -295,7 +313,7 @@ def _execute_steps(connection, run: ClaimedRun, settings: Settings, work_dir: Pa
             outputs = _script(record, work_dir, kind, codes[kind], cleaned, context, limits, references)
             if outputs is None:
                 return
-            publish.publish(connection, run.project_id, kind, [publish.Table(t.name, t.path) for t in outputs])
+            _publish(connection, run, settings, record, kind, [publish.Table(t.name, t.path) for t in outputs])
             record.input_rows = sum(t.rows for t in cleaned)
             _set_outputs(record, outputs)
 

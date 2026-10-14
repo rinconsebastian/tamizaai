@@ -9,6 +9,7 @@ DEFAULT_HEARTBEAT_FILE = Path("/tmp/tamiza-heartbeat")
 DEFAULT_RUN_TIMEOUT_SECONDS = 600.0
 DEFAULT_RUN_MEMORY_MB = 1024
 DEFAULT_RUN_WORK_DIR = Path("/tmp/tamiza-runs")
+DEFAULT_PUBLISH_WAIT_SECONDS = 900.0
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,8 @@ class Settings:
     run_timeout_seconds: float = DEFAULT_RUN_TIMEOUT_SECONDS
     run_memory_mb: int = DEFAULT_RUN_MEMORY_MB
     run_work_dir: Path = DEFAULT_RUN_WORK_DIR
+    # How long publishing waits for readers of the published tables (a dashboard export) before the step fails.
+    publish_wait_seconds: float = DEFAULT_PUBLISH_WAIT_SECONDS
 
 
 def poll_seconds_from_env(environ: dict[str, str] | None = None) -> float:
@@ -63,4 +66,5 @@ def load(environ: dict[str, str] | None = None) -> Settings:
         run_timeout_seconds=_positive(environ, "TAMIZA_RUN_TIMEOUT_SECONDS", DEFAULT_RUN_TIMEOUT_SECONDS, float),
         run_memory_mb=int(_positive(environ, "TAMIZA_RUN_MEMORY_MB", DEFAULT_RUN_MEMORY_MB, int)),
         run_work_dir=Path(environ.get("TAMIZA_RUN_WORK_DIR") or DEFAULT_RUN_WORK_DIR),
+        publish_wait_seconds=_positive(environ, "TAMIZA_PUBLISH_WAIT_SECONDS", DEFAULT_PUBLISH_WAIT_SECONDS, float),
     )

@@ -1,4 +1,5 @@
 using Tamiza.Api.Auth;
+using Tamiza.Api.CleanData;
 using Tamiza.Api.Configuration;
 using Tamiza.Api.Data;
 using Tamiza.Api.Health;
@@ -21,6 +22,7 @@ builder.Services.AddTamizaHealthChecks();
 builder.Services.AddTamizaProjects();
 builder.Services.AddTamizaIngestion();
 builder.Services.AddTamizaPerformance();
+builder.Services.AddTamizaCleanData();
 builder.Services.AddTamizaPipeline();
 
 var app = builder.Build();
@@ -43,6 +45,7 @@ api.MapSamplingFrameEndpoints();
 api.MapWebhookEndpoints();
 api.MapIngestionEndpoints();
 api.MapPerformanceEndpoints();
+api.MapDataEndpoints();
 api.MapScriptEndpoints();
 api.MapRunEndpoints();
 api.MapReferenceTableEndpoints();

@@ -1,5 +1,6 @@
 import datetime as dt
 import threading
+import time
 import uuid
 
 import pandas as pd
@@ -226,4 +227,99 @@ def test_a_failed_load_leaves_the_published_tables_and_their_comments_untouched(
             publish(connection, project_id, "raw", [bad])
 
     assert comments(database, project_id, "raw", "main") == {"a": "Original"}
+    assert database.scalar("SELECT count(*) FROM pg_namespace WHERE nspname LIKE '%%__next'") == 0
+
+
+# Publishing while the published tables are being read (a dashboard export)
+
+
+class Reader:
+    """Holds a read lock on a published table, as a long export does, until ``release`` is called."""
+
+    def __init__(self, database, schema, table="main"):
+        self.release_event = threading.Event()
+        self._holding = threading.Event()
+
+        def hold():
+            with database.connect() as connection, connection.transaction():
+                connection.execute(f'SELECT count(*) FROM "{schema}"."{table}"').fetchone()
+                self._holding.set()
+                self.release_event.wait(60)
+
+        self._thread = threading.Thread(target=hold)
+        self._thread.start()
+        assert self._holding.wait(10)
+
+    def release(self):
+        self.release_event.set()
+        self._thread.join(10)
+
+
+def publish_two_versions(database, tmp_path, project_id, step="output"):
+    first = table(tmp_path, "main", pd.DataFrame({"v": [1, 1]}))
+    second = table(tmp_path, "main", pd.DataFrame({"v": [2, 2, 2]}))
+    with database.connect() as connection:
+        publish(connection, project_id, step, [first])
+    return second, schema_name(project_id, step)
+
+
+def test_the_swap_waits_for_a_reader_in_short_attempts_and_then_succeeds(database, tmp_path, project_id):
+    second, schema = publish_two_versions(database, tmp_path, project_id)
+    reader = Reader(database, schema)
+    pauses = []
+
+    def pause(seconds):
+        pauses.append(seconds)
+        reader.release()  # the export finished while the step was waiting
+
+    with database.connect() as connection:
+        waited = publish(connection, project_id, "output", [second], lock_timeout_seconds=0.3, sleep=pause)
+
+    assert pauses[0] == 1.0
+    assert waited >= 0.3
+    assert database.scalar(f'SELECT count(*) FROM "{schema}".main') == 3
+    assert database.scalar("SELECT count(*) FROM pg_namespace WHERE nspname LIKE '%%__next'") == 0
+
+
+def test_a_reader_that_starts_while_the_swap_waits_is_held_for_one_attempt_at_most(database, tmp_path, project_id):
+    second, schema = publish_two_versions(database, tmp_path, project_id)
+    reader = Reader(database, schema)
+    outcome = {}
+
+    def swap():
+        with database.connect() as connection:
+            outcome["waited"] = publish(
+                connection, project_id, "output", [second], lock_timeout_seconds=1.0, sleep=lambda s: time.sleep(0.05)
+            )
+
+    thread = threading.Thread(target=swap)
+    thread.start()
+    time.sleep(0.4)  # the first attempt is queued for its exclusive lock behind the first reader
+
+    started = time.monotonic()
+    count = database.scalar(f'SELECT count(*) FROM "{schema}".main')
+    held = time.monotonic() - started
+
+    reader.release()
+    thread.join(30)
+    assert count == 2  # still the previous tables
+    assert held < 4.0
+    assert database.scalar(f'SELECT count(*) FROM "{schema}".main') == 3
+
+
+def test_a_step_gives_up_when_the_tables_stay_in_use_and_keeps_the_previous_ones(database, tmp_path, project_id):
+    second, schema = publish_two_versions(database, tmp_path, project_id)
+    reader = Reader(database, schema)
+    try:
+        with (
+            database.connect() as connection,
+            pytest.raises(PublishError, match="in use for more than 3 seconds") as error,
+        ):
+            publish(connection, project_id, "output", [second], max_wait_seconds=3, lock_timeout_seconds=0.5)
+    finally:
+        reader.release()
+
+    assert "previous tables stay published" in str(error.value)
+    assert database.scalar(f'SELECT count(*) FROM "{schema}".main') == 2
+    assert database.scalar(f'SELECT max(v) FROM "{schema}".main') == 1
     assert database.scalar("SELECT count(*) FROM pg_namespace WHERE nspname LIKE '%%__next'") == 0
