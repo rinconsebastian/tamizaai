@@ -2,6 +2,8 @@ import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { Router } from '@angular/router';
 import { EditorView } from '@codemirror/view';
+import { vi } from 'vitest';
+import { Downloader } from '../../core/download.service';
 import {
   PIPELINE_POLL_MS,
   IndicatorScript,
@@ -10,6 +12,8 @@ import {
   RunPage,
   RunSummary,
   SCRIPT_TEST_POLL_MS,
+  SampleDownload,
+  SampleDownloadContents,
   ScriptInputs,
   ScriptList,
   ScriptTest,
@@ -138,10 +142,13 @@ interface Seed {
   testPollMs?: number;
 }
 
+const downloader = { start: vi.fn() };
+
 async function open(role: ProjectRole, seed: Seed = {}) {
   const current = version(2);
   const providers = [
     provideVisibleElements(),
+    { provide: Downloader, useValue: downloader },
     ...(seed.pollMs ? [{ provide: PIPELINE_POLL_MS, useValue: seed.pollMs }] : []),
     ...(seed.testPollMs ? [{ provide: SCRIPT_TEST_POLL_MS, useValue: seed.testPollMs }] : []),
   ];
@@ -259,7 +266,63 @@ function confirmDialog(): HTMLButtonElement | null {
   return document.querySelector('[data-testid="confirm"]');
 }
 
+const downloadsUrl = `/api/v1/projects/${projectId}/sample-downloads`;
+
+function sampleDownload(overrides: Partial<SampleDownload> = {}): SampleDownload {
+  return {
+    id: 'd1',
+    status: 'queued',
+    sampleSize: 500,
+    waitingFor: null,
+    queuedAt: '2026-10-03T10:00:00Z',
+    startedAt: null,
+    finishedAt: null,
+    expiresAt: null,
+    sizeBytes: null,
+    contents: null,
+    errorCode: null,
+    error: null,
+    ...overrides,
+  };
+}
+
+const downloadContents: SampleDownloadContents = {
+  sample: { requested: 500, submissions: 320 },
+  raw: {
+    tables: [
+      { name: 'main', rows: 320 },
+      { name: 'members', rows: 871 },
+    ],
+  },
+  clean: { status: 'succeeded', version: 2, error: null, tables: [{ name: 'main', rows: 318 }] },
+  reference: [{ name: 'population', rows: 42, updatedAt: '2026-10-02T10:00:00Z' }],
+};
+
+/** A download the worker finished: the zip is 12.3 MB and available for an hour. */
+function readyDownload(overrides: Partial<SampleDownload> = {}, contents: Partial<SampleDownloadContents> = {}): SampleDownload {
+  return sampleDownload({
+    status: 'succeeded',
+    startedAt: '2026-10-03T10:00:01Z',
+    finishedAt: '2026-10-03T10:00:09Z',
+    expiresAt: '2026-10-03T11:00:09Z',
+    sizeBytes: 12_900_000,
+    contents: { ...downloadContents, ...contents },
+    ...overrides,
+  });
+}
+
+/** Types the sample size and clicks "Download sample". */
+async function requestDownload(opened: Awaited<ReturnType<typeof open>>, size = '300') {
+  const input = byTestId<HTMLInputElement>(opened.root, 'sample-size')!;
+  input.value = size;
+  input.dispatchEvent(new Event('input'));
+  await settle(opened.harness);
+  byTestId<HTMLButtonElement>(opened.root, 'download-sample')!.click();
+  await settle(opened.harness);
+}
+
 describe('ProjectScripts', () => {
+  beforeEach(() => downloader.start.mockClear());
   afterEach(() => document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = '')));
 
   it('shows the current script read-only to viewers, without editing actions', async () => {
@@ -1597,4 +1660,236 @@ describe('ProjectScripts', () => {
     expect(byTestId(opened.root, 'indicator-view')).toBeNull();
   });
 
+  // 7.1 — sample downloads
+
+  it('prepares a sample of the chosen size, follows it and downloads the zip through a new link', async () => {
+    const opened = await open('analyst', { testPollMs: 20 });
+    const { root, http, harness } = opened;
+
+    await requestDownload(opened, '300');
+    const request = http.expectOne((r) => r.url === downloadsUrl && r.method === 'POST');
+    expect(request.request.body).toEqual({ sampleSize: 300 });
+    request.flush(sampleDownload({ sampleSize: 300, waitingFor: 'run' }));
+    await settle(harness);
+    expect(byTestId(root, 'download-progress')?.textContent).toContain('Waiting for a run to finish');
+    expect(byTestId(root, 'unsaved')).toBeNull(); // nothing was saved, tested or run
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    http.expectOne(`${downloadsUrl}/d1`).flush(sampleDownload({ status: 'running', startedAt: '2026-10-03T10:00:01Z' }));
+    await settle(harness);
+    expect(byTestId(root, 'download-progress')?.textContent).toContain('Preparing the sample');
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    http.expectOne(`${downloadsUrl}/d1`).flush(readyDownload({ sampleSize: 300 }, { sample: { requested: 300, submissions: 300 } }));
+    await settle(harness);
+
+    expect(byTestId(root, 'download-progress')).toBeNull();
+    const ready = byTestId(root, 'download-ready')!;
+    expect(ready.textContent).toContain('The sample holds 300 submissions (you asked for 300)');
+    const tables = byTestId(ready, 'download-tables')!.textContent!.replace(/\s+/g, ' ');
+    expect(tables).toContain('main (320 rows), members (871 rows)');
+    expect(tables).toContain('Clean tables, what script 1 (version 2) returns: main (318 rows)');
+    expect(tables).toContain('population (42 rows)');
+    expect(byTestId(ready, 'download-size')?.textContent).toContain('Size: 12.3 MB');
+    expect(byTestId(ready, 'download-notice')?.textContent).toContain("contains the project's submissions");
+
+    byTestId<HTMLButtonElement>(ready, 'download-button')!.click();
+    await settle(harness);
+    const link = http.expectOne(`${downloadsUrl}/d1/link`);
+    expect(link.request.method).toBe('POST');
+    link.flush({ downloadUrl: '/api/v1/data-exports/token1', fileName: 'survey_sample_2026-10-03.zip', sizeBytes: 12_900_000, expiresAt: '2026-10-03T10:05:00Z' });
+    await settle(harness);
+    expect(downloader.start).toHaveBeenCalledExactlyOnceWith('/api/v1/data-exports/token1');
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    http.expectNone(`${downloadsUrl}/d1`); // a ready download is not polled
+  });
+
+  it('asks for a new link each time the zip is downloaded', async () => {
+    const opened = await open('analyst');
+    const { root, http, harness } = opened;
+    await requestDownload(opened);
+    http.expectOne((r) => r.url === downloadsUrl && r.method === 'POST').flush(readyDownload());
+    await settle(harness);
+
+    for (const token of ['one', 'two']) {
+      byTestId<HTMLButtonElement>(root, 'download-button')!.click();
+      await settle(harness);
+      http
+        .expectOne(`${downloadsUrl}/d1/link`)
+        .flush({ downloadUrl: `/api/v1/data-exports/${token}`, fileName: 'x.zip', sizeBytes: 1, expiresAt: '2026-10-03T10:05:00Z' });
+      await settle(harness);
+    }
+
+    expect(downloader.start.mock.calls.map((call) => call[0])).toEqual(['/api/v1/data-exports/one', '/api/v1/data-exports/two']);
+  });
+
+  it('does not offer sample downloads to a viewer', async () => {
+    const { root } = await open('viewer');
+
+    expect(byTestId(root, 'download-sample')).toBeNull();
+    expect(byTestId(root, 'sample-download')).toBeNull();
+  });
+
+  it('checks the sample size before asking, as a test does', async () => {
+    const opened = await open('analyst');
+
+    await requestDownload(opened, '0');
+
+    opened.http.expectNone((r) => r.url === downloadsUrl);
+    expect(opened.root.textContent).toContain('Enter a whole number of submissions from 1 to 5,000');
+  });
+
+  it('shows the API reason when the request is rejected', async () => {
+    const opened = await open('analyst');
+    await requestDownload(opened);
+
+    opened.http
+      .expectOne((r) => r.url === downloadsUrl && r.method === 'POST')
+      .flush({ title: 'One or more validation errors occurred.', errors: { sampleSize: ['Enter a sample of 1 to 5,000 submissions.'] } }, { status: 400, statusText: 'Bad Request' });
+    await settle(opened.harness);
+
+    expect(opened.root.textContent).toContain('Enter a sample of 1 to 5,000 submissions.');
+    expect(byTestId(opened.root, 'sample-download')).toBeNull();
+  });
+
+  it('warns when script 1 failed on the sample and says the zip holds only the flattened tables', async () => {
+    const opened = await open('analyst');
+    const { root, http, harness } = opened;
+    await requestDownload(opened);
+
+    http
+      .expectOne((r) => r.url === downloadsUrl && r.method === 'POST')
+      .flush(readyDownload({}, { clean: { status: 'failed', version: 4, error: "KeyError: 'age'", tables: [] } }));
+    await settle(harness);
+
+    const warning = byTestId(root, 'download-script1-warning')!;
+    expect(warning.textContent).toContain('Script 1 (version 4) failed on this sample');
+    expect(warning.textContent).toContain("KeyError: 'age'");
+    expect(warning.textContent).toContain('only the flattened tables');
+    expect(byTestId(root, 'download-tables')?.textContent).not.toContain('Clean tables');
+    expect(byTestId(root, 'download-button')).not.toBeNull(); // the flattened tables can still be downloaded
+  });
+
+  it('says the project has no script 1 when the clean tables are the flattened ones', async () => {
+    const opened = await open('analyst');
+    await requestDownload(opened);
+
+    opened.http
+      .expectOne((r) => r.url === downloadsUrl && r.method === 'POST')
+      .flush(readyDownload({}, { clean: { status: 'none', version: null, error: null, tables: [] } }));
+    await settle(opened.harness);
+
+    expect(byTestId(opened.root, 'download-tables')?.textContent).toContain('no script 1');
+    expect(byTestId(opened.root, 'download-script1-warning')).toBeNull();
+  });
+
+  it('says a download expired when its link is gone and prepares it again with the same size', async () => {
+    const opened = await open('analyst');
+    const { root, http, harness } = opened;
+    await requestDownload(opened, '250');
+    http.expectOne((r) => r.url === downloadsUrl && r.method === 'POST').flush(readyDownload({ sampleSize: 250 }));
+    await settle(harness);
+
+    byTestId<HTMLButtonElement>(root, 'download-button')!.click();
+    await settle(harness);
+    http.expectOne(`${downloadsUrl}/d1/link`).flush({ title: 'Not Found' }, { status: 404, statusText: 'Not Found' });
+    await settle(harness);
+
+    expect(byTestId(root, 'download-expired')?.textContent).toContain('no longer available');
+    expect(byTestId(root, 'download-ready')).toBeNull();
+    expect(downloader.start).not.toHaveBeenCalled();
+
+    byTestId<HTMLButtonElement>(root, 'download-again')!.click();
+    await settle(harness);
+    const again = http.expectOne((r) => r.url === downloadsUrl && r.method === 'POST');
+    expect(again.request.body).toEqual({ sampleSize: 250 });
+    again.flush(sampleDownload({ id: 'd2', sampleSize: 250 }));
+    await settle(harness);
+    expect(byTestId(root, 'download-expired')).toBeNull();
+    expect(byTestId(root, 'download-progress')).not.toBeNull();
+  });
+
+  it('says a download is gone when following it finds it replaced or expired', async () => {
+    const opened = await open('analyst', { testPollMs: 20 });
+    const { root, http, harness } = opened;
+    await requestDownload(opened);
+    http.expectOne((r) => r.url === downloadsUrl && r.method === 'POST').flush(sampleDownload());
+    await settle(harness);
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    http.expectOne(`${downloadsUrl}/d1`).flush({ title: 'Not Found' }, { status: 404, statusText: 'Not Found' });
+    await settle(harness);
+
+    expect(byTestId(root, 'download-expired')).not.toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    http.expectNone(`${downloadsUrl}/d1`);
+  });
+
+  it('shows why a link could not be issued without losing the download', async () => {
+    const opened = await open('analyst');
+    const { root, http, harness } = opened;
+    await requestDownload(opened);
+    http.expectOne((r) => r.url === downloadsUrl && r.method === 'POST').flush(readyDownload());
+    await settle(harness);
+
+    byTestId<HTMLButtonElement>(root, 'download-button')!.click();
+    await settle(harness);
+    http
+      .expectOne(`${downloadsUrl}/d1/link`)
+      .flush({ title: 'Busy', code: 'sampleDownload.busy', detail: 'Other files are being prepared.' }, { status: 503, statusText: 'Service Unavailable' });
+    await settle(harness);
+
+    expect(byTestId(root, 'download-link-error')?.textContent).toContain('Other files are being prepared. Try again in a moment.');
+    expect(byTestId(root, 'download-ready')).not.toBeNull();
+    expect(byTestId(root, 'download-expired')).toBeNull();
+  });
+
+  it('shows why a download failed and prepares it again', async () => {
+    const opened = await open('analyst');
+    const { root, http, harness } = opened;
+    await requestDownload(opened, '1000');
+
+    http
+      .expectOne((r) => r.url === downloadsUrl && r.method === 'POST')
+      .flush(
+        sampleDownload({
+          status: 'failed',
+          sampleSize: 1000,
+          finishedAt: '2026-10-03T10:00:09Z',
+          errorCode: 'download.tooLarge',
+          error: 'The sample is 130 MB, more than the 100 MB this server allows. Choose a smaller sample.',
+        }),
+      );
+    await settle(harness);
+
+    expect(byTestId(root, 'download-error')?.textContent).toContain('The sample is 130 MB, more than the 100 MB this server allows');
+    byTestId<HTMLButtonElement>(root, 'download-again')!.click();
+    await settle(harness);
+    expect(http.expectOne((r) => r.url === downloadsUrl && r.method === 'POST').request.body).toEqual({ sampleSize: 1000 });
+  });
+
+  it('tells a test that it waits for a sample download', async () => {
+    const opened = await open('analyst');
+    await startTest(opened);
+
+    opened.http.expectOne((r) => r.url === testsUrl && r.method === 'POST').flush(scriptTest({ waitingFor: 'download' }));
+    await settle(opened.harness);
+
+    expect(byTestId(opened.root, 'test-progress')?.textContent).toContain('Waiting for a sample download to be prepared');
+  });
+
+  it('keeps the download action in the form that stacks on a phone, with its panel after the editor', async () => {
+    const opened = await open('analyst');
+    const { root, http, harness } = opened;
+    await requestDownload(opened);
+    http.expectOne((r) => r.url === downloadsUrl && r.method === 'POST').flush(readyDownload());
+    await settle(harness);
+
+    const form = byTestId(root, 'download-sample')!.closest('form')!;
+    expect(form.className).toContain('flex-col');
+    expect(form.className).toContain('sm:flex-row');
+    expect(form.contains(byTestId(root, 'sample-size'))).toBe(true);
+    expect(root.querySelector('tmz-code-editor')!.compareDocumentPosition(byTestId(root, 'sample-download')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

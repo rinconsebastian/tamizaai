@@ -215,7 +215,7 @@ def compute(cleaned, ctx):
 
 Saved as `households_surveyed` with the format `count`, a line chart groups by `month`. A named index (here `month`) is published as a column.
 
-**Templates** in the editor offers starting points for the selected script (see [The editor](#the-editor)), and **Upload .py** loads a file you wrote elsewhere (for example in Jupyter). Common preparation that several indicators need belongs in script 1 or script 2, whose tables every indicator receives; indicator scripts cannot import from each other.
+**Templates** in the editor offers starting points for the selected script (see [The editor](#the-editor)), and **Upload .py** loads a file you wrote elsewhere (for example in Jupyter; see [Writing scripts on your computer](#writing-scripts-on-your-computer)). Common preparation that several indicators need belongs in script 1 or script 2, whose tables every indicator receives; indicator scripts cannot import from each other.
 
 ## `ctx`
 
@@ -336,6 +336,114 @@ When a test of an indicator succeeds, under its table the result shows **As the 
 - **Warnings.** The view warns about what usually surprises people on the dashboard: a table with no rows; no `value` column (it names the column widgets will plot instead); `numerator` without `denominator` or the reverse; empty values in the default measure; the format `percent` with a value above 1, showing what it would read as (a percent is a fraction: 0.42 reads `42%`); a numeric column named like a dimension (`year`, `month`, `code`, `id`, or ending in `_id` or `_code`), which widgets would offer as a measure, so return it as text; and rows that share the values of every dimension, which widgets add up.
 
 A warning is a hint about the table, not an error: the test still succeeded.
+
+## Writing scripts on your computer
+
+A test runs your script from the start every time. To explore the data the way you do in Jupyter, with variables that stay in memory from one cell to the next, work on your own computer and upload the script when it is ready. Tamiza gives you a sample of the project's data and a small package, `tamiza_sdk`, that builds the same `ctx` a script receives and checks a script the way the server runs it. Nothing in it contacts Tamiza.
+
+### Download a sample
+
+In the Scripts section, set the **Sample size** (the same field as a test) and click **Download sample**. Analysts and admins can; viewers cannot. The worker prepares the sample like a test, after the tests that are waiting and before the runs, reusing the flattened sample a recent test kept, and the panel shows when it is ready. **Download .zip** then saves a file named after the project and the date.
+
+| In the zip | What it is |
+|---|---|
+| `raw/` | The flattened tables of the sample, the input of script 1. |
+| `clean/` | What the saved script 1 returns on them, the input of script 2 and of every indicator. Without a script 1 the clean tables are the flattened ones and there is no `clean/` folder. |
+| `reference/` | The project's reference tables, as `ctx.reference` gives them. |
+| `context.json` | The form dictionary, choice labels and column labels that `ctx` is built from. |
+| `tamiza_sdk/`, `requirements.txt` | The SDK, and the libraries scripts can use at the server's versions. |
+| `README.md`, `getting-started.ipynb` | How to set up, and a notebook that loads the sample, writes an indicator and checks it. |
+| `manifest.json`, `logs/` | What the download holds and the Python and library versions of the server; the log of the flatten step and of script 1 on this sample. |
+
+- The sample is the one a test of the same size would use: the same submissions, with choice labels and question labels, as long as nothing changed.
+- If the saved script 1 fails on the sample, the download still succeeds with the flattened tables only. The panel warns, with the version and the error, and `logs/clean.txt` has the traceback; load `raw` to debug script 1.
+- The file is kept **for one hour** after it is ready; the button works as many times as you need within that hour, and each click uses a new single-use link. Asking for another sample replaces the earlier one. A request over the server's size limit (100 MB unless the operator changed `TAMIZA_SAMPLE_DOWNLOAD_MB`) fails with a message that gives its size and suggests a smaller sample.
+- **The zip contains the project's submissions.** Keep it as safely as the survey data, do not share it or commit it, and delete it when you no longer need it. It contains no credentials or server addresses.
+
+### Set up
+
+You need Python 3.12, the version the server runs. Unzip the file, open a terminal in its folder and run:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # on Windows: .venv\Scripts\activate
+pip install -r requirements.txt jupyterlab
+jupyter lab
+```
+
+Starting Jupyter in that folder is what lets `import tamiza_sdk` find the package in `tamiza_sdk/` and the functions find the data without being told where it is. The SDK needs no network, runs on Windows, macOS and Linux, and warns once if your Python or a library differs from the server's.
+
+### Load the data and look at it
+
+```python
+import tamiza_sdk as tz
+
+ctx = tz.load_context()            # the ctx your script receives
+raw = tz.load_tables("raw")        # script 1's input: a dictionary of DataFrames
+cleaned = tz.load_tables("clean")  # the input of script 2 and of the indicators
+
+ctx.show(cleaned["main"].head(), "main")
+print(ctx.form.label("municipality", "cali"))
+```
+
+- `load_tables` gives the tables with the column types a script gets on the server (nullable integers, text, timestamps in UTC) and new objects on every call, so a table you change in place does not change the next load.
+- `ctx` has the same members and gives the same answers as on the server: `ctx.form`, `ctx.reference`, `ctx.log` (printed as `LEVEL message`) and `ctx.project_name`. `ctx.show(value, name)` displays the value in Jupyter, or prints it, under its name, and returns it.
+- If script 1 failed on the sample, `load_tables("clean")` says so and points to `"raw"`.
+
+### Check a script
+
+`check(script, kind, name=None)` runs a script on the sample with a run's contract, `ctx`, validation and messages, and returns the tables it would publish. `script` is the contract function itself or the path of a `.py` file. The file is run in a **fresh namespace, as the server does**, so a helper you defined only in your notebook is not visible to it: that is the usual difference between "works in Jupyter" and "fails in a test". `kind` is `"clean"`, `"output"` or `"indicator"`, and an indicator needs its `name`.
+
+```python
+import tamiza_sdk as tz
+from pathlib import Path
+
+Path("piped_water_rate.py").write_text('''
+def compute(cleaned, ctx):
+    main = cleaned["main"]
+    rows = main.groupby("municipality").agg(
+        numerator=("water_source", lambda answers: int((answers == "Piped").sum())),
+        denominator=("water_source", "size"),
+    ).reset_index()
+    rows["value"] = rows["numerator"] / rows["denominator"]
+    return rows[["municipality", "value", "numerator", "denominator"]]
+'''.lstrip(), encoding="utf-8")
+
+result = tz.check("piped_water_rate.py", "indicator", name="piped_water_rate")
+result                          # a summary; result.tables has the DataFrames
+```
+
+- A contract violation raises `ScriptError` with the message a run shows (`compute must return a DataFrame…`, `The indicator table has no numeric column…`). An exception in your script is raised as it is, with the traceback pointing at the line of your file, so `%debug` works.
+- Column names are reduced as in a run (`Household size` → `household_size`); `result.renamed` lists the changes and they are printed as in a run's log.
+- For an indicator, `result.dashboard` has the measures, the default measure, whether the rate can be plotted, the dimensions and the geometry columns, as in [Your indicator as the dashboard will see it](#your-indicator-as-the-dashboard-will-see-it). The warnings of that view are in the test on the server.
+- `check` gives the script copies of the tables, so it never changes what you loaded. Pass `tables=` to give it other inputs, for example the result of checking your script 1:
+
+```python
+import tamiza_sdk as tz
+from pathlib import Path
+
+Path("clean.py").write_text('''
+def clean(raw, ctx):
+    main = raw["main"]
+    tests = main["enumerator"].str.startswith("test", na=False)
+    return {"main": main[~tests], "members": raw["members"]}
+'''.lstrip(), encoding="utf-8")
+
+first = tz.check("clean.py", "clean")
+second = tz.check("piped_water_rate.py", "indicator", name="piped_water_rate", tables=first.tables)
+second.tables["piped_water_rate"]
+```
+
+### Upload it
+
+In the Scripts section, select the script (or add the indicator with the same name), click **Upload .py**, choose the file, run **Test on sample** and **Save**. For the same sample and script, a successful `check` returns the same tables as the test: the same names, columns, types and values.
+
+### What is different from the server
+
+- No time or memory limit and no process isolation: your script runs in your Python, which can read your files and use the network. Do not rely on either: on the server a script has only the tables it is given, and a future release removes its network access.
+- One sample, the one in the zip, not the whole project; a rare category can be missing from it.
+- Your Python and libraries may differ from the server's. Install `requirements.txt` to get the same versions.
+- `ctx.show` has no limit of 20 calls and keeps nothing: what you displayed stays in the notebook.
 
 ## Reference data
 

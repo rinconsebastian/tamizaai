@@ -11,6 +11,7 @@ DEFAULT_RUN_MEMORY_MB = 1024
 DEFAULT_RUN_WORK_DIR = Path("/tmp/tamiza-runs")
 DEFAULT_PUBLISH_WAIT_SECONDS = 900.0
 DEFAULT_TEST_CACHE_MB = 512
+DEFAULT_SAMPLE_DOWNLOAD_MB = 100
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,8 @@ class Settings:
     publish_wait_seconds: float = DEFAULT_PUBLISH_WAIT_SECONDS
     # Disk that the flattened samples and script 1 results kept for reuse by script tests may use; 0 turns reuse off.
     test_cache_mb: int = DEFAULT_TEST_CACHE_MB
+    # The largest zip a sample download may be; a sample that would exceed it fails and nothing is kept.
+    sample_download_mb: int = DEFAULT_SAMPLE_DOWNLOAD_MB
 
 
 def poll_seconds_from_env(environ: dict[str, str] | None = None) -> float:
@@ -84,4 +87,5 @@ def load(environ: dict[str, str] | None = None) -> Settings:
         run_work_dir=Path(environ.get("TAMIZA_RUN_WORK_DIR") or DEFAULT_RUN_WORK_DIR),
         publish_wait_seconds=_positive(environ, "TAMIZA_PUBLISH_WAIT_SECONDS", DEFAULT_PUBLISH_WAIT_SECONDS, float),
         test_cache_mb=_cache_mb(environ),
+        sample_download_mb=int(_positive(environ, "TAMIZA_SAMPLE_DOWNLOAD_MB", DEFAULT_SAMPLE_DOWNLOAD_MB, int)),
     )

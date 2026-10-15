@@ -33,6 +33,10 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
 
     public DbSet<ScriptTest> ScriptTests => Set<ScriptTest>();
 
+    public DbSet<SampleDownload> SampleDownloads => Set<SampleDownload>();
+
+    public DbSet<SampleDownloadPart> SampleDownloadParts => Set<SampleDownloadPart>();
+
     public DbSet<ReferenceTable> ReferenceTables => Set<ReferenceTable>();
 
     public DbSet<ReferenceTableContent> ReferenceTableContents => Set<ReferenceTableContent>();
@@ -258,6 +262,38 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             test.HasOne<User>().WithMany().HasForeignKey(t => t.RequestedBy).OnDelete(DeleteBehavior.Restrict);
             // NO ACTION: a project's deletion cascades to tests and script versions in the same statement.
             test.HasOne<ScriptVersion>().WithMany().HasForeignKey(t => t.CleanVersionId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<SampleDownload>(download =>
+        {
+            download.ToTable("sample_downloads", table =>
+            {
+                table.HasCheckConstraint("ck_sample_downloads_status", "status IN ('queued', 'running', 'succeeded', 'failed')");
+                table.HasCheckConstraint("ck_sample_downloads_sample_size", "sample_size BETWEEN 1 AND 5000");
+            });
+            download.HasKey(d => d.Id);
+            download.Property(d => d.Id).ValueGeneratedNever();
+            download.Property(d => d.Status).HasConversion(LowercaseEnum<RunStatus>()).HasMaxLength(16);
+            download.Property(d => d.FileSha256).HasMaxLength(64);
+            download.Property(d => d.Contents).HasJsonObjectColumn();
+            download.Property(d => d.ErrorCode).HasMaxLength(64);
+            // At most one queued download per user and project; a new request replaces the queued one.
+            download.HasIndex(d => new { d.ProjectId, d.RequestedBy }).IsUnique().HasFilter("status = 'queued'")
+                .HasDatabaseName("ix_sample_downloads_project_id_requested_by_queued");
+            download.HasIndex(d => new { d.Status, d.QueuedAt });
+            download.HasIndex(d => d.FinishedAt);
+            download.HasOne<Project>().WithMany().HasForeignKey(d => d.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            download.HasOne<User>().WithMany().HasForeignKey(d => d.RequestedBy).OnDelete(DeleteBehavior.Restrict);
+            // NO ACTION: a project's deletion cascades to downloads and script versions in the same statement.
+            download.HasOne<ScriptVersion>().WithMany().HasForeignKey(d => d.CleanVersionId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<SampleDownloadPart>(part =>
+        {
+            part.ToTable("sample_download_parts");
+            part.HasKey(p => new { p.DownloadId, p.Part });
+            part.Property(p => p.Data).HasColumnType("bytea");
+            part.HasOne<SampleDownload>().WithMany().HasForeignKey(p => p.DownloadId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<ReferenceTable>(reference =>

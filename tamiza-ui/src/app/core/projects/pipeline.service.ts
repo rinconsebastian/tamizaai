@@ -202,7 +202,7 @@ export interface ScriptTest {
   /** The line of the `# %%` marker the draft was run through; null for a whole test. */
   stopAtLine: number | null;
   code: string;
-  waitingFor: 'run' | 'test' | null;
+  waitingFor: 'run' | 'test' | 'download' | null;
   cleanVersion: number | null;
   queuedAt: string;
   startedAt: string | null;
@@ -215,6 +215,45 @@ export interface ScriptTest {
 export const minSampleSize = 1;
 export const maxSampleSize = 5000;
 export const defaultSampleSize = 500;
+
+export interface SampleDownloadTable {
+  name: string;
+  rows: number;
+}
+
+/** What a ready download's zip holds, as the worker recorded it (the manifest without the library versions). */
+export interface SampleDownloadContents {
+  sample: { requested: number; submissions: number };
+  raw: { tables: SampleDownloadTable[] };
+  /** `none`: the project has no script 1; `failed`: it raised on the sample, so there are no clean tables. */
+  clean: { status: 'succeeded' | 'failed' | 'none'; version: number | null; error: string | null; tables: SampleDownloadTable[] };
+  reference: { name: string; rows: number; updatedAt: string }[];
+}
+
+/** A sample of the project's data to work on a computer; `waitingFor` says what a queued download waits for. */
+export interface SampleDownload {
+  id: string;
+  status: RunStatus;
+  sampleSize: number;
+  waitingFor: 'run' | 'test' | 'download' | null;
+  queuedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  /** When a ready download stops being available. */
+  expiresAt: string | null;
+  sizeBytes: number | null;
+  contents: SampleDownloadContents | null;
+  errorCode: string | null;
+  error: string | null;
+}
+
+/** A single-use link to a ready download's zip. */
+export interface SampleDownloadLink {
+  downloadUrl: string;
+  fileName: string;
+  sizeBytes: number;
+  expiresAt: string;
+}
 
 export interface RunPage {
   items: RunSummary[];
@@ -339,6 +378,20 @@ export class PipelineService {
 
   test(projectId: string, testId: string): Observable<ScriptTest> {
     return this.http.get<ScriptTest>(`${base}/${projectId}/script-tests/${testId}`);
+  }
+
+  /** Asks for a sample of the project's data to work on a computer; the worker prepares it as a zip. */
+  startSampleDownload(projectId: string, sampleSize: number): Observable<SampleDownload> {
+    return this.http.post<SampleDownload>(`${base}/${projectId}/sample-downloads`, { sampleSize });
+  }
+
+  sampleDownload(projectId: string, downloadId: string): Observable<SampleDownload> {
+    return this.http.get<SampleDownload>(`${base}/${projectId}/sample-downloads/${downloadId}`);
+  }
+
+  /** A single-use link to the zip of a ready download; ask again for another after one was used. */
+  sampleDownloadLink(projectId: string, downloadId: string): Observable<SampleDownloadLink> {
+    return this.http.post<SampleDownloadLink>(`${base}/${projectId}/sample-downloads/${downloadId}/link`, null);
   }
 
   settings(projectId: string): Observable<PipelineSettings> {

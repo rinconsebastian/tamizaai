@@ -94,6 +94,12 @@
       },
       "indicators": {
         "notPublished": "This indicator has not published a table yet. Run the scripts first."
+      },
+      "sampleDownload": {
+        "notReady": "The sample is not ready yet.",
+        "failed": "The sample could not be prepared. Prepare it again.",
+        "incomplete": "The stored sample is incomplete. Prepare it again.",
+        "busy": "Other files are being prepared. Try again in a moment."
       }
     }
   },
@@ -794,6 +800,30 @@
     "chooseFile": "Choose a file",
     "noFile": "No file chosen"
   },
+  "sampleDownloads": {
+    "start": "Download sample",
+    "hint": "Download sample prepares a zip with a sample of the project's data, in the size above, and a small package to check scripts on your own computer, in Jupyter or any Python editor.",
+    "title": "Sample for your computer",
+    "starting": "Starting…",
+    "running": "Preparing the sample…",
+    "waitingForRun": "Waiting for a run to finish. The sample is prepared right after it.",
+    "waitingForTest": "Waiting for a test to finish. The sample is prepared right after it.",
+    "waitingForDownload": "Waiting for another sample to be prepared.",
+    "ready": "The sample holds {{ submissions }} submissions (you asked for {{ requested }}).",
+    "rawTables": "Flattened tables, the input of script 1:",
+    "cleanTables": "Clean tables, what script 1 (version {{ version }}) returns:",
+    "noScript1": "The project has no script 1, so the clean tables are the flattened ones.",
+    "referenceTables": "Reference tables:",
+    "noReference": "none",
+    "tableRows": "{{ name }} ({{ rows }} rows)",
+    "script1Failed": "Script 1 (version {{ version }}) failed on this sample: {{ error }}. The zip holds only the flattened tables. Fix script 1 and download again to get its clean tables.",
+    "size": "Size: {{ size }}.",
+    "until": "Available until {{ time }}.",
+    "download": "Download .zip",
+    "notice": "This file contains the project's submissions. Keep it as safely as the survey data, and delete it when you no longer need it.",
+    "expired": "This download is no longer available. Prepare a new one.",
+    "again": "Prepare again"
+  },
   "scriptTests": {
     "sampleSize": "Sample size",
     "start": "Test on sample",
@@ -805,6 +835,7 @@
     "running": "Running…",
     "waitingForRun": "Waiting for a run to finish. The test starts right after it.",
     "waitingForTest": "Waiting for another test to finish.",
+    "waitingForDownload": "Waiting for a sample download to be prepared. The test starts right after it.",
     "succeeded": "The test succeeded. Save the script to use it in the next run.",
     "savedClean": "Clean (saved version {{ number }})",
     "draft": "{{ kind }} (draft)",

@@ -157,6 +157,12 @@ public static partial class ScriptTestEndpoints
             return ScriptTestWait.Run;
         }
 
+        // Queued downloads never hold a test back: the worker takes tests first. Only one being prepared does.
+        if (await db.SampleDownloads.AnyAsync(d => d.Status == RunStatus.Running, ct))
+        {
+            return ScriptTestWait.Download;
+        }
+
         var testAhead = await db.ScriptTests.AnyAsync(t => t.Id != test.Id
             && (t.Status == RunStatus.Running || (t.Status == RunStatus.Queued && t.QueuedAt < test.QueuedAt)), ct);
         return testAhead ? ScriptTestWait.Test : null;

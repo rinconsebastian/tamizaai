@@ -8,6 +8,7 @@ import pytest
 
 from tamiza import interchange
 from tamiza.runner import run_step
+from tamiza_sdk import tables as sdk_tables
 
 CONTEXT = {
     "project_name": "Household survey",
@@ -303,6 +304,23 @@ def test_column_names_are_normalized_and_the_renaming_logged(step, capsys):
     assert "age_group" not in log
 
 
+def test_renames_found_before_a_failing_table_are_still_logged(step, capsys):
+    step_dir = step("""
+        import pandas as pd
+        def clean(raw, ctx):
+            return {
+                "first": pd.DataFrame({"Household size": [3]}),
+                "second": pd.DataFrame({"Age": [1], "age": [2]}),
+            }
+    """)
+
+    result = run_step(step_dir, "clean")
+
+    assert result["status"] == "failed"
+    assert "In table second, the columns 'Age' and 'age' both become 'age'" in result["error"]
+    assert "Table first: column 'Household size' published as 'household_size'." in capsys.readouterr().out
+
+
 def test_columns_that_collide_after_normalizing_fail(step):
     result = run_step(
         step("""
@@ -498,7 +516,14 @@ def test_reference_tables_can_be_listed_and_checked_without_loading(with_referen
     )
     loaded = []
     original = interchange.read_parquet
-    monkeypatch.setattr(interchange, "read_parquet", lambda path: loaded.append(path.parent.name) or original(path))
+
+    def recording(path):
+        loaded.append(path.parent.name)
+        return original(path)
+
+    # The inputs are read through interchange, the reference tables through the SDK's tables module.
+    monkeypatch.setattr(interchange, "read_parquet", recording)
+    monkeypatch.setattr(sdk_tables, "read_parquet", recording)
 
     result = run_step(step_dir, "clean")
 

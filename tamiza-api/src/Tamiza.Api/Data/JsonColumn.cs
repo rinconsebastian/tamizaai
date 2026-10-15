@@ -22,4 +22,18 @@ internal static class JsonColumn
             value => JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(value, Options), Options)!);
         return property.HasConversion(converter, comparer).HasColumnType("jsonb");
     }
+
+    /// <summary>Maps an object property to a <c>jsonb</c> column, compared by content for change tracking.</summary>
+    public static PropertyBuilder<T> HasJsonObjectColumn<T>(this PropertyBuilder<T> property)
+        where T : class?
+    {
+        var converter = new ValueConverter<T, string>(
+            value => JsonSerializer.Serialize(value, Options),
+            json => JsonSerializer.Deserialize<T>(json, Options)!);
+        var comparer = new ValueComparer<T>(
+            (a, b) => JsonSerializer.Serialize(a, Options) == JsonSerializer.Serialize(b, Options),
+            value => JsonSerializer.Serialize(value, Options).GetHashCode(),
+            value => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value, Options), Options)!);
+        return property.HasConversion(converter, comparer).HasColumnType("jsonb");
+    }
 }

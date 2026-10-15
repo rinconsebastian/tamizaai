@@ -127,8 +127,9 @@ def claim(connection: psycopg.Connection) -> ClaimedRun | None:
 
 class Processor:
     """
-    Called once per worker cycle with the worker's connection; returns True when it executed a test or a run. Queued
-    script tests go before queued runs: they are short and an analyst is waiting for them.
+    Called once per worker cycle with the worker's connection; returns True when it executed a test, a sample download
+    or a run, in that order of priority: tests and downloads are short and an analyst is waiting for them, and a test
+    goes before a download because it is the quicker of the two.
     """
 
     def __init__(self, settings: Settings):
@@ -136,7 +137,7 @@ class Processor:
         self._started = False
 
     def __call__(self, connection: psycopg.Connection) -> bool:
-        from tamiza import sample_runs  # imports this module
+        from tamiza import sample_downloads, sample_runs  # import this module
 
         if not self._started:
             interrupted = fail_interrupted(connection)
@@ -145,13 +146,24 @@ class Processor:
             interrupted = sample_runs.fail_interrupted(connection)
             if interrupted:
                 logger.warning("Marked %d tests interrupted by the last shutdown as failed.", interrupted)
+            interrupted = sample_downloads.fail_interrupted(connection)
+            if interrupted:
+                logger.warning("Marked %d downloads interrupted by the last shutdown as failed.", interrupted)
             sample_runs.cache_for(self.settings).clean_leftovers()
+            leftovers = sample_runs.clean_work_dirs(self.settings)
+            if leftovers:
+                logger.warning("Removed %d work directories left by the last shutdown.", leftovers)
             self._started = True
         sample_runs.delete_expired(connection)
+        sample_downloads.delete_expired(connection)
         sample_runs.cache_for(self.settings).sweep()
         test = sample_runs.claim(connection)
         if test is not None:
             sample_runs.execute(connection, test, self.settings)
+            return True
+        download = sample_downloads.claim(connection)
+        if download is not None:
+            sample_downloads.execute(connection, download, self.settings)
             return True
         claimed = claim(connection)
         if claimed is None:

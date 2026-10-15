@@ -86,6 +86,20 @@ def test_test_cache_defaults_to_512_mb_can_be_set_and_zero_turns_it_off():
     assert settings.load({**base, "TAMIZA_TEST_CACHE_MB": "0"}).test_cache_mb == 0
 
 
+def test_the_sample_download_limit_defaults_to_100_mb_and_can_be_changed():
+    base = {"TAMIZA_ANALYTICS_DATABASE_URL": "postgresql://db/tamiza"}
+
+    assert settings.load(base).sample_download_mb == 100
+    assert settings.load({**base, "TAMIZA_SAMPLE_DOWNLOAD_MB": "25"}).sample_download_mb == 25
+    assert settings.load({**base, "TAMIZA_SAMPLE_DOWNLOAD_MB": "1"}).sample_download_mb == 1
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "1.5", "lots"])
+def test_invalid_sample_download_limits_are_rejected(value):
+    with pytest.raises(ValueError, match="TAMIZA_SAMPLE_DOWNLOAD_MB"):
+        settings.load({"TAMIZA_ANALYTICS_DATABASE_URL": "postgresql://db/tamiza", "TAMIZA_SAMPLE_DOWNLOAD_MB": value})
+
+
 @pytest.mark.parametrize("value", ["-1", "1.5", "lots"])
 def test_invalid_test_cache_sizes_are_rejected(value):
     with pytest.raises(ValueError, match="TAMIZA_TEST_CACHE_MB"):

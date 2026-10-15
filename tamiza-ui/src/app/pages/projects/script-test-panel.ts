@@ -201,7 +201,16 @@ export class ScriptTestPanel {
     if (test.status === 'running') {
       return t('scriptTests.running');
     }
-    return test.waitingFor === 'run' ? t('scriptTests.waitingForRun') : test.waitingFor === 'test' ? t('scriptTests.waitingForTest') : t('scriptTests.starting');
+    switch (test.waitingFor) {
+      case 'run':
+        return t('scriptTests.waitingForRun');
+      case 'test':
+        return t('scriptTests.waitingForTest');
+      case 'download':
+        return t('scriptTests.waitingForDownload');
+      default:
+        return t('scriptTests.starting');
+    }
   }
 
   protected stepName(test: ScriptTest, step: TestStep): string {

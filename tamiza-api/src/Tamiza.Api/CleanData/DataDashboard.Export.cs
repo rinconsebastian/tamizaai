@@ -136,6 +136,27 @@ public sealed partial class DataDashboard
         }
     }
 
+    /// <summary>
+    /// Runs <paramref name="action"/> in one of the export slots, which also bound other files prepared for download (a sample
+    /// download's zip). Throws <see cref="DataExportBusyException"/> when none frees up within the queue timeout.
+    /// </summary>
+    internal async Task<T> WithExportSlotAsync<T>(Func<Task<T>> action, CancellationToken ct)
+    {
+        if (!await _exportSlots.WaitAsync(_options.QueueTimeout, ct))
+        {
+            throw new DataExportBusyException();
+        }
+
+        try
+        {
+            return await action();
+        }
+        finally
+        {
+            _exportSlots.Release();
+        }
+    }
+
     public const string XlsxContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
     private sealed record Written(string? FileName, long Rows, long CutCells, IDictionary<string, string[]>? Errors);

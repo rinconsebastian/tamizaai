@@ -97,12 +97,40 @@ public sealed record ReferenceTablePreview(ReferenceTableSummary Table, IReadOnl
 /// <param name="StopAtLine">The 1-based line of a <c># %%</c> marker of <paramref name="Code"/> to run through; omit for a whole test.</param>
 public sealed record ScriptTestRequest(string? Kind, string? Name, string? Code, int? SampleSize, int? StopAtLine = null);
 
-/// <summary>What a queued test waits for: a running run, or another test that runs or is queued before it.</summary>
+/// <summary>
+/// What a queued test or sample download waits for: a running run, a test that runs or is queued before it, or a sample download.
+/// A test only waits for a download that is running; a download waits for another that runs or is queued before it.
+/// </summary>
 public enum ScriptTestWait
 {
     Run,
     Test,
+    Download,
 }
+
+/// <param name="SampleSize">The submissions to sample, 1 to 5,000; 500 when omitted.</param>
+public sealed record SampleDownloadRequest(int? SampleSize);
+
+/// <summary>
+/// A sample download and, once it is ready, what its zip holds. <see cref="ExpiresAt"/> is when a ready download stops being
+/// available; <see cref="Contents"/> and <see cref="SizeBytes"/> are set only then.
+/// </summary>
+public sealed record SampleDownloadDetails(
+    Guid Id,
+    RunStatus Status,
+    int SampleSize,
+    ScriptTestWait? WaitingFor,
+    DateTimeOffset QueuedAt,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? FinishedAt,
+    DateTimeOffset? ExpiresAt,
+    long? SizeBytes,
+    SampleDownloadContents? Contents,
+    string? ErrorCode,
+    string? Error);
+
+/// <summary>A single-use link to a ready download's zip (the same links as a data export). The browser follows it once.</summary>
+public sealed record SampleDownloadLink(string DownloadUrl, string FileName, long SizeBytes, DateTimeOffset ExpiresAt);
 
 /// <summary>
 /// A test and, as its steps end, their logs and table previews. <see cref="CleanVersion"/> is the saved script 1 it ran

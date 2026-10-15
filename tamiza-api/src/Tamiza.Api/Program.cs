@@ -53,6 +53,7 @@ api.MapScriptEndpoints();
 api.MapRunEndpoints();
 api.MapReferenceTableEndpoints();
 api.MapScriptTestEndpoints();
+api.MapSampleDownloadEndpoints();
 api.MapScriptInputEndpoints();
 
 if (!await app.MigrateDatabaseAsync())

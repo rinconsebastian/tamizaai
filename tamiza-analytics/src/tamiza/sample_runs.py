@@ -24,6 +24,7 @@ from tamiza import pipeline, preview, sample_cache
 from tamiza.flatten import Submission, flatten
 from tamiza.labels import load as load_labels
 from tamiza.launcher import Limits, OutputTable, ScriptOutcome, ShownValue, run_script
+from tamiza.reference import ReferenceTable
 from tamiza.sample_cache import SampleCache
 from tamiza.settings import Settings
 
@@ -59,6 +60,8 @@ class TestStep:
     error: str | None = None
     reused: bool = False
     stopped_at_line: int | None = None
+    # The worker itself failed (database, disk, an unreadable cache entry), not the script; never sent to the API.
+    internal: bool = False
     shown: list[dict] | None = None  # what the draft passed to ctx.show; None for the other steps
     dashboard: dict | None = None  # an indicator draft's table as the indicators dashboard will offer it
 
@@ -102,6 +105,22 @@ def delete_expired(connection: psycopg.Connection) -> int:
 
 def cache_for(settings: Settings) -> SampleCache:
     return SampleCache(settings.run_work_dir / sample_cache.CACHE_DIR, settings.test_cache_mb * 1024 * 1024)
+
+
+def clean_work_dirs(settings: Settings) -> int:
+    """
+    Removes the work directories of runs, tests and downloads that a stopped worker left behind (a kill skips their
+    cleanup); the sample cache has its own. Assumes a single worker, like the interrupted-job handling; runs at start.
+    """
+    root = settings.run_work_dir
+    if not root.is_dir():
+        return 0
+    removed = 0
+    for entry in root.iterdir():
+        if entry.name != sample_cache.CACHE_DIR and entry.is_dir():
+            shutil.rmtree(entry, ignore_errors=True)
+            removed += 1
+    return removed
 
 
 def claim(connection: psycopg.Connection) -> ClaimedTest | None:
@@ -148,11 +167,49 @@ def execute(connection: psycopg.Connection, test: ClaimedTest, settings: Setting
     logger.info("Test %s of project %s %s.", test.id, test.project_id, "failed" if failed else "succeeded")
 
 
-def _execute_steps(connection, test: ClaimedTest, settings: Settings, work_dir: Path, steps: list[TestStep]) -> None:
-    project = pipeline.project_context(connection, test.project_id)
+@dataclass
+class Prepared:
+    """What the first steps of a test or a download leave: the project's ``ctx`` data and the next step's tables."""
+
+    project: pipeline.ProjectContext
+    limits: Limits
+    references: dict[str, Path]  # the project's reference tables as Parquet files, by name
+    reference_tables: list[ReferenceTable]
+    flatten_key: str
+    raw: list[OutputTable] | None  # the flattened sample; None when flattening failed
+    clean_ran: bool  # the saved script 1 was run on it (or its result reused)
+    cleaned: list[OutputTable] | None  # what script 1 returned; None when it did not run or failed
+
+    @property
+    def inputs(self) -> list[OutputTable] | None:
+        """What the next script receives: script 1's tables, else the flattened ones; None when a step failed."""
+        if self.raw is None or (self.clean_ran and self.cleaned is None):
+            return None
+        return self.cleaned if self.clean_ran else self.raw
+
+
+def prepare_inputs(
+    connection: psycopg.Connection,
+    project_id: UUID,
+    sample_size: int,
+    clean_version_id: UUID | None,
+    with_clean: bool,
+    settings: Settings,
+    work_dir: Path,
+    steps: list[TestStep],
+    on_step: Callable[[], None],
+    label: str,
+) -> Prepared:
+    """
+    Runs the flatten step and, with ``with_clean``, the saved script 1 (``clean_version_id``) on the sample, reusing
+    what the cache holds. Each step is appended to ``steps`` and ``on_step`` is called as it ends; the work stops at
+    the first step that fails. ``label`` names the caller in the log ("test 3f2…", "download 9a1…").
+    """
+    project = pipeline.project_context(connection, project_id)
     limits = Limits(settings.run_timeout_seconds, settings.run_memory_mb)
     cache = cache_for(settings)
     references: dict[str, Path] = {}
+    reference_tables: list[ReferenceTable] = []
     reference_state: list[tuple[str, str]] = []  # (name, last update) of each reference table, for the clean key
 
     raw: list[OutputTable] | None = None
@@ -160,14 +217,15 @@ def _execute_steps(connection, test: ClaimedTest, settings: Settings, work_dir: 
 
     def do_flatten(step: TestStep) -> None:
         nonlocal raw, flatten_key
-        tables, reference_log = pipeline.load_reference(settings, test.project_id, work_dir)
+        tables, reference_log = pipeline.load_reference(settings, project_id, work_dir)
+        reference_tables.extend(tables)
         references.update({t.name: t.path for t in tables})
         reference_state.extend((t.name, t.updated_at.isoformat()) for t in tables)
-        rows = _sample_rows(settings.database_url, test.project_id, test.sample_size)
-        labels = load_labels(connection, test.project_id, project.form_fields, project.form_choices)
+        rows = _sample_rows(settings.database_url, project_id, sample_size)
+        labels = load_labels(connection, project_id, project.form_fields, project.form_choices)
         project.context["label_codes"] = labels.label_codes()
         flatten_key = sample_cache.flatten_key(
-            test.project_id, rows, project.form_fields, project.form_choices, labels, project.question_labels
+            project_id, rows, project.form_fields, project.form_choices, labels, project.question_labels
         )
         if (entry := cache.get(flatten_key)) is not None:
             raw = _reuse(step, entry)
@@ -188,18 +246,17 @@ def _execute_steps(connection, test: ClaimedTest, settings: Settings, work_dir: 
         _set_outputs(step, raw)
         cache.put(flatten_key, _record(step, raw, columns=project.context["columns"]), {t.name: t.path for t in raw})
 
-    _run_step(connection, test, steps, "flatten", do_flatten)
+    _run_step(steps, "flatten", do_flatten, on_step, label)
     if raw is None:
-        return
+        return Prepared(project, limits, references, reference_tables, flatten_key, None, False, None)
 
-    inputs = raw
-    clean_code = _clean_code(connection, test) if test.kind != "clean" else None
+    clean_code = _clean_code(connection, clean_version_id) if with_clean else None
+    cleaned: list[OutputTable] | None = None
     if clean_code is not None:
-        cleaned: list[OutputTable] | None = None
 
         def do_saved_clean(step: TestStep) -> None:
             nonlocal cleaned
-            key = sample_cache.clean_key(flatten_key, test.clean_version_id, reference_state)
+            key = sample_cache.clean_key(flatten_key, clean_version_id, reference_state)
             if (entry := cache.get(key)) is not None:
                 cleaned = _reuse(step, entry)
                 return
@@ -207,10 +264,32 @@ def _execute_steps(connection, test: ClaimedTest, settings: Settings, work_dir: 
             if cleaned is not None:
                 cache.put(key, _record(step, cleaned), {t.name: t.path for t in cleaned}, protect=[flatten_key])
 
-        _run_step(connection, test, steps, "clean", do_saved_clean)
-        if cleaned is None:
-            return
-        inputs = cleaned
+        _run_step(steps, "clean", do_saved_clean, on_step, label)
+    return Prepared(project, limits, references, reference_tables, flatten_key, raw, clean_code is not None, cleaned)
+
+
+def _execute_steps(connection, test: ClaimedTest, settings: Settings, work_dir: Path, steps: list[TestStep]) -> None:
+    def save() -> None:
+        connection.execute(
+            "UPDATE tamiza.script_tests SET steps = %s WHERE id = %s", (Jsonb([s.as_json() for s in steps]), test.id)
+        )
+
+    label = f"test {test.id}"
+    prepared = prepare_inputs(
+        connection,
+        test.project_id,
+        test.sample_size,
+        test.clean_version_id,
+        test.kind != "clean",
+        settings,
+        work_dir,
+        steps,
+        save,
+        label,
+    )
+    inputs = prepared.inputs
+    if inputs is None:
+        return
 
     def do_draft(step: TestStep) -> None:
         _script(
@@ -219,33 +298,34 @@ def _execute_steps(connection, test: ClaimedTest, settings: Settings, work_dir: 
             test.kind,
             test.code,
             inputs,
-            project.context,
-            limits,
-            references,
+            prepared.project.context,
+            prepared.limits,
+            prepared.references,
             test.name,
             draft=True,
             draft_stop_line=test.stop_line,
         )
 
-    _run_step(connection, test, steps, test.kind, do_draft)
+    _run_step(steps, test.kind, do_draft, save, label)
 
 
-def _run_step(connection, test: ClaimedTest, steps: list[TestStep], name: str, action: Callable[[TestStep], None]):
+def _run_step(
+    steps: list[TestStep], name: str, action: Callable[[TestStep], None], on_step: Callable[[], None], label: str
+) -> None:
     step = TestStep(name, started_at=datetime.now(UTC))
     started = time.monotonic()
     try:
         action(step)
     except Exception as error:  # the worker's own failure (database, files): recorded, never fatal to the loop
-        logger.exception("Step %s of test %s failed.", name, test.id)
+        logger.exception("Step %s of %s failed.", name, label)
         step.status = "failed"
+        step.internal = True
         step.error = f"{type(error).__name__}: {error}"
         step.log = (step.log + "\n" + traceback.format_exc()).strip()
     step.finished_at = datetime.now(UTC)
     step.log = (step.log.rstrip() + f"\nDuration: {time.monotonic() - started:.1f} s").strip()
     steps.append(step)
-    connection.execute(
-        "UPDATE tamiza.script_tests SET steps = %s WHERE id = %s", (Jsonb([s.as_json() for s in steps]), test.id)
-    )
+    on_step()
 
 
 def _script(
@@ -334,13 +414,11 @@ def _reuse(step: TestStep, entry: sample_cache.Entry) -> list[OutputTable]:
     ]
 
 
-def _clean_code(connection, test: ClaimedTest) -> str | None:
+def _clean_code(connection, clean_version_id: UUID | None) -> str | None:
     """The saved script 1 to run first; None when there is none or it was removed."""
-    if test.clean_version_id is None:
+    if clean_version_id is None:
         return None
-    row = connection.execute(
-        "SELECT code FROM tamiza.script_versions WHERE id = %s", (test.clean_version_id,)
-    ).fetchone()
+    row = connection.execute("SELECT code FROM tamiza.script_versions WHERE id = %s", (clean_version_id,)).fetchone()
     return row[0] if row else None
 
 

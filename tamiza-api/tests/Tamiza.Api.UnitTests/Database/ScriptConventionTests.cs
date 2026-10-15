@@ -80,4 +80,30 @@ public sealed class ScriptConventionTests
         Assert.Equal(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count,
             System.Text.RegularExpressions.Regex.Matches(sql, @"ADD CONSTRAINT (?:pk|fk|ck)_\w+ (?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count);
     }
+
+    [Fact]
+    public void The_local_dev_kit_script_names_every_constraint_and_index()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0010_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0010_add_local_dev_kit.sql", resource);
+        foreach (var constraint in new[]
+                 {
+                     "pk_sample_downloads PRIMARY KEY", "ck_sample_downloads_status CHECK", "ck_sample_downloads_sample_size CHECK",
+                     "fk_sample_downloads_projects_project_id FOREIGN KEY", "fk_sample_downloads_users_requested_by FOREIGN KEY",
+                     "fk_sample_downloads_script_versions_clean_version_id FOREIGN KEY", "pk_sample_download_parts PRIMARY KEY",
+                     "fk_sample_download_parts_sample_downloads_download_id FOREIGN KEY",
+                 })
+        {
+            Assert.Contains($"CONSTRAINT {constraint}", sql);
+        }
+
+        // Every key, check and foreign key is introduced by a CONSTRAINT name; every index has an ix_ name.
+        Assert.Equal(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count,
+            System.Text.RegularExpressions.Regex.Matches(sql, @"CONSTRAINT (?:pk|fk|ck)_\w+ (?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count);
+        Assert.All(System.Text.RegularExpressions.Regex.Matches(sql, @"CREATE (?:UNIQUE )?INDEX (\w+)").Select(m => m.Groups[1].Value),
+            name => Assert.StartsWith("ix_sample_downloads_", name));
+    }
 }

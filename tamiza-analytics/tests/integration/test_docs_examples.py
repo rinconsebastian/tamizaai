@@ -58,6 +58,8 @@ def examples() -> dict[str, str]:
     blocks = re.findall(r"```python\n(.*?)```", DOCUMENT.read_text(encoding="utf-8"), flags=re.DOTALL)
     found = {}
     for block in blocks:
+        if "tamiza_sdk" in block:  # the examples of "Writing scripts on your computer" run in a download, below
+            continue
         if "def clean(raw, ctx)" in block:
             found["clean"] = block
         elif "def prepare_output(" in block and "ctx.form.columns" in block:
@@ -71,6 +73,12 @@ def examples() -> dict[str, str]:
                 "reference" if "ctx.reference" in block else "series" if "_submission_time" in block else "indicators"
             ] = block
     return found
+
+
+def local_examples() -> list[str]:
+    """The Python blocks of docs/scripts.md that use the SDK on a downloaded sample, in the order of the document."""
+    blocks = re.findall(r"```python\n(.*?)```", DOCUMENT.read_text(encoding="utf-8"), flags=re.DOTALL)
+    return [block for block in blocks if "tamiza_sdk" in block]
 
 
 def answers(kobo_id, enumerator, municipality, water_source, ages):
@@ -231,3 +239,73 @@ def test_the_cells_example_runs_whole_and_through_each_of_its_cells(database, su
     assert [shown["name"] for shown in whole["shown"]] == ["main", "counts"]
     assert whole["tables"][0]["name"] == "piped_water_rate" and whole["tables"][0]["rows"] == 3
     assert whole["dashboard"]["ratio"] is True and whole["dashboard"]["defaultMeasure"] == "value"
+
+
+KIT_README = Path(__file__).resolve().parents[2] / "src" / "tamiza" / "kit_files" / "README.md"
+LOCAL_DRIVER = """
+import importlib.abc
+import json
+import os
+import sys
+
+
+class Block(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path, target=None):
+        if name.split(".")[0] in {"tamiza", "psycopg", "duckdb"}:
+            raise ImportError(f"{name} is not available on an analyst's computer")
+        return None
+
+
+sys.meta_path.insert(0, Block())
+sys.path.insert(0, os.getcwd())  # the unzipped folder: the SDK in the download is the one that runs
+namespace = {"__name__": "__main__"}
+for index, source in enumerate(json.load(open(sys.argv[1], encoding="utf-8")), 1):
+    exec(compile(source, f"<docs example {index}>", "exec"), namespace)
+print("CHECK", repr(namespace["result"]).splitlines()[0])
+chained = namespace["second"].tables["piped_water_rate"]
+downloaded = namespace["result"].tables["piped_water_rate"]
+print("CHAINED", len(chained), len(downloaded))
+print("SAME", chained.equals(downloaded))
+"""
+
+
+def test_the_sdk_examples_run_in_order_in_a_downloaded_sample(database, surveyed, settings, tmp_path):
+    import json
+    import subprocess
+    import sys
+
+    from test_sample_downloads import prepare
+
+    add_script(database, surveyed, "clean", examples()["clean"])
+    blocks = local_examples()
+    assert len(blocks) == 3  # load and look, check an indicator, chain script 1 into the indicator
+    _, folder = prepare(database, surveyed, settings, tmp_path)
+    (tmp_path / "blocks.json").write_text(json.dumps(blocks), encoding="utf-8")
+    (tmp_path / "driver.py").write_text(LOCAL_DRIVER, encoding="utf-8")
+
+    finished = subprocess.run(
+        [sys.executable, "-I", str(tmp_path / "driver.py"), str(tmp_path / "blocks.json")],
+        cwd=folder,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert finished.returncode == 0, finished.stdout + finished.stderr
+    assert "Cali" in finished.stdout  # ctx.form.label("municipality", "cali")
+    assert "CHECK Check passed for indicator 'piped_water_rate'" in finished.stdout
+    # The download's clean tables and the local script 1 drop the same test submission: three households either way.
+    assert "CHAINED 3 3" in finished.stdout and "SAME True" in finished.stdout
+
+
+def test_the_setup_commands_of_the_document_are_the_ones_in_the_downloaded_readme():
+    def commands(text: str) -> list[str]:
+        block = re.search(r"```(?:bash)?\n(python -m venv.*?)```", text, flags=re.DOTALL)
+        assert block, "no setup block found"
+        return [line.strip() for line in block.group(1).splitlines() if line.strip()]
+
+    document = commands(DOCUMENT.read_text(encoding="utf-8"))
+    readme = commands(KIT_README.read_text(encoding="utf-8"))
+
+    assert document == readme
+    assert "pip install -r requirements.txt jupyterlab" in document

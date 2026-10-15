@@ -8,6 +8,7 @@ import {
   IndicatorMetadata,
   IndicatorScript,
   PipelineService,
+  SampleDownload,
   ScriptInputs,
   ScriptList,
   ScriptRef,
@@ -27,6 +28,7 @@ import { IndicatorMetadataFields } from './indicator-metadata-fields';
 import { PipelineRuns } from './pipeline-runs';
 import { PipelineSettingsCard } from './pipeline-settings';
 import { ProjectContext } from './project-context';
+import { SampleDownloadPanel } from './sample-download-panel';
 import { ScriptTestPanel } from './script-test-panel';
 import { ResolvedProblem, scriptAssist } from './script-editor/script-assist';
 import { ScriptInputsInfo } from './script-editor/script-analysis';
@@ -67,6 +69,7 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
     IndicatorMetadataFields,
     PipelineRuns,
     PipelineSettingsCard,
+    SampleDownloadPanel,
     ScriptSidePanel,
     ScriptTestPanel,
     TemplateMenu,
@@ -252,8 +255,12 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
                 <button tmzButton variant="secondary" type="submit" [disabled]="testing() || !draft().trim()" data-testid="test-on-sample">
                   {{ t('scriptTests.start') }}
                 </button>
+                <button tmzButton variant="secondary" type="button" [disabled]="downloading()" (click)="startDownload()" data-testid="download-sample">
+                  {{ t('sampleDownloads.start') }}
+                </button>
               </form>
               <p class="mt-2 text-sm text-body">{{ t('scriptTests.hint') }}</p>
+              <p class="mt-1 text-sm text-body">{{ t('sampleDownloads.hint') }}</p>
             }
           }
         </tmz-card>
@@ -294,6 +301,10 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
         </tmz-card>
         </div>
       </div>
+
+      @if (sampleDownload(); as sample) {
+        <app-sample-download-panel [started]="sample" [projectId]="projectId()" (again)="requestDownload($event)" />
+      }
 
       @if (test(); as test) {
         <app-script-test-panel [started]="test" [projectId]="projectId()" [draft]="draft()" [metadata]="indicatorName() ? shownMetadata() : null" />
@@ -336,6 +347,9 @@ export class ProjectScripts {
   protected readonly testError = signal<string | null>(null);
   /** The latest test started from this page; the panel follows it until it ends. */
   protected readonly test = signal<ScriptTest | null>(null);
+  protected readonly downloading = signal(false);
+  /** The latest sample download requested from this page; the panel follows it until it is ready. */
+  protected readonly sampleDownload = signal<SampleDownload | null>(null);
 
   /** What the side panel shows, by source: the raw tables for script 1, the clean tables for the others. */
   protected readonly inputsBySource = signal<Partial<Record<'raw' | 'clean', ScriptInputs>>>({});
@@ -546,10 +560,8 @@ export class ProjectScripts {
     if (this.testing()) {
       return;
     }
-    const size = Number(this.sampleSize());
-    this.testError.set(null);
-    if (!Number.isInteger(size) || size < minSampleSize || size > maxSampleSize) {
-      this.testError.set(this.transloco.translate('scriptTests.sampleSizeRange', { min: minSampleSize, max: maxSampleSize.toLocaleString('en') }));
+    const size = this.readSampleSize();
+    if (size === null) {
       return;
     }
     const code = this.draft();
@@ -567,6 +579,44 @@ export class ProjectScripts {
         this.testing.set(false);
         const parsed = this.errors.parse(error);
         this.testError.set(parsed.fieldErrors['sampleSize'] ?? parsed.fieldErrors['code'] ?? parsed.fieldErrors['name'] ?? parsed.message);
+      },
+    });
+  }
+
+  /** The sample size in the field, or null after saying why it cannot be used. */
+  private readSampleSize(): number | null {
+    const size = Number(this.sampleSize());
+    this.testError.set(null);
+    if (!Number.isInteger(size) || size < minSampleSize || size > maxSampleSize) {
+      this.testError.set(this.transloco.translate('scriptTests.sampleSizeRange', { min: minSampleSize, max: maxSampleSize.toLocaleString('en') }));
+      return null;
+    }
+    return size;
+  }
+
+  /** Asks for a sample of the project's data to work on a computer, of the size in the field. */
+  protected startDownload(): void {
+    const size = this.readSampleSize();
+    if (size !== null) {
+      this.requestDownload(size);
+    }
+  }
+
+  /** Queues a sample download; a new request replaces the user's earlier one, ready or not. */
+  protected requestDownload(size: number): void {
+    if (this.downloading()) {
+      return;
+    }
+    this.downloading.set(true);
+    this.service.startSampleDownload(this.projectId(), size).subscribe({
+      next: (download) => {
+        this.downloading.set(false);
+        this.sampleDownload.set(download);
+      },
+      error: (error) => {
+        this.downloading.set(false);
+        const parsed = this.errors.parse(error);
+        this.testError.set(parsed.fieldErrors['sampleSize'] ?? parsed.message);
       },
     });
   }

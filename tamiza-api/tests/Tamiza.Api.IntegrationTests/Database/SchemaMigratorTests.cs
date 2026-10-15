@@ -409,6 +409,61 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
             """));
     }
 
+    [Fact]
+    public async Task Local_dev_kit_script_keeps_existing_data_and_adds_sample_downloads_that_go_with_their_project()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(
+            connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql", "0004_add_pipeline_authoring.sql",
+            "0005_add_choice_labels.sql", "0006_add_performance_dashboard.sql", "0007_add_indicators_dashboard.sql", "0008_split_indicator_scripts.sql",
+            "0009_add_script_workbench.sql");
+        const string project = "00000000-0000-0000-0000-0000000000aa";
+        const string user = "00000000-0000-0000-0000-000000000001";
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('{{user}}', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('{{project}}', 'Existing', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(), '{{user}}', now(), now());
+            INSERT INTO tamiza.script_tests (id, project_id, requested_by, kind, code, sample_size, status, queued_at)
+            VALUES ('00000000-0000-0000-0000-0000000000e1', '{{project}}', '{{user}}', 'clean', 'def clean(raw, ctx): return raw', 500, 'succeeded', now());
+            """);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        Assert.Contains("0010_add_local_dev_kit.sql", Scripts);
+        Assert.Equal(1L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.script_tests"));
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.sample_downloads"));
+
+        // One queued download per user and project; a ready one does not count.
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.sample_downloads (id, project_id, requested_by, sample_size, status, queued_at)
+            VALUES ('00000000-0000-0000-0000-0000000000f1', '{{project}}', '{{user}}', 500, 'queued', now()),
+                   ('00000000-0000-0000-0000-0000000000f2', '{{project}}', '{{user}}', 500, 'succeeded', now());
+            INSERT INTO tamiza.sample_download_parts (download_id, part, data)
+            VALUES ('00000000-0000-0000-0000-0000000000f2', 0, '\x504b0304'), ('00000000-0000-0000-0000-0000000000f2', 1, '\x00');
+            """);
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.sample_downloads (id, project_id, requested_by, sample_size, status, queued_at)
+            VALUES (gen_random_uuid(), '{{project}}', '{{user}}', 100, 'queued', now())
+            """));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.sample_downloads (id, project_id, requested_by, sample_size, status, queued_at)
+            VALUES (gen_random_uuid(), '{{project}}', '{{user}}', 5001, 'succeeded', now())
+            """));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.sample_downloads (id, project_id, requested_by, sample_size, status, queued_at)
+            VALUES (gen_random_uuid(), '{{project}}', '{{user}}', 100, 'ready', now())
+            """));
+
+        // Deleting a download deletes its parts; deleting a project deletes its downloads and their parts.
+        await ExecuteAsync(connectionString, "DELETE FROM tamiza.sample_downloads WHERE id = '00000000-0000-0000-0000-0000000000f1'");
+        Assert.Equal(2L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.sample_download_parts"));
+        await ExecuteAsync(connectionString, $"DELETE FROM tamiza.projects WHERE id = '{project}'");
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.sample_downloads"));
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.sample_download_parts"));
+    }
+
     /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>
     private static void ApplyScripts(string connectionString, params string[] names)
     {
