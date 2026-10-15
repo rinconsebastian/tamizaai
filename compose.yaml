@@ -98,6 +98,11 @@ services:
     # The only published port. The API is reached through it under /api/.
     ports:
       - "${TAMIZA_HTTP_PORT:-8088}:8080"
+    # Also joins the reverse proxy's network, so the proxy reaches it as tamiza-ui:8080. Only ui joins it.
+    networks:
+      default:
+      proxy:
+        aliases: [tamiza-ui]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 10s
@@ -108,6 +113,12 @@ services:
       resources:
         limits:
           memory: ${UI_MEMORY_LIMIT:-128m}
+
+networks:
+  # Network shared with the reverse proxy; it must exist before the stack starts (docker network create bridgemysql).
+  proxy:
+    external: true
+    name: bridgemysql
 
 volumes:
   db-data:
