@@ -372,6 +372,43 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
         Assert.Equal(3L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.run_steps"));
     }
 
+    [Fact]
+    public async Task Script_workbench_script_keeps_existing_tests_and_adds_an_optional_stop_line()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(
+            connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql", "0004_add_pipeline_authoring.sql",
+            "0005_add_choice_labels.sql", "0006_add_performance_dashboard.sql", "0007_add_indicators_dashboard.sql", "0008_split_indicator_scripts.sql");
+        const string project = "00000000-0000-0000-0000-0000000000aa";
+        const string user = "00000000-0000-0000-0000-000000000001";
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('{{user}}', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('{{project}}', 'Existing', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(), '{{user}}', now(), now());
+            INSERT INTO tamiza.script_tests (id, project_id, requested_by, kind, code, sample_size, status, queued_at, steps)
+            VALUES ('00000000-0000-0000-0000-0000000000e1', '{{project}}', '{{user}}', 'clean', 'def clean(raw, ctx): return raw', 500, 'succeeded', now(),
+                    '[{"step":"flatten","status":"succeeded","tables":[],"log":""}]');
+            """);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        Assert.Contains("0009_add_script_workbench.sql", Scripts);
+        // An existing test keeps its code and steps, and has no stop line: it was a whole test.
+        Assert.Equal(1L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.script_tests WHERE stop_line IS NULL AND sample_size = 500"));
+        Assert.Equal("flatten", await ScalarAsync<string>(connectionString, "SELECT steps -> 0 ->> 'step' FROM tamiza.script_tests"));
+
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.script_tests (id, project_id, requested_by, kind, code, sample_size, status, queued_at, stop_line)
+            VALUES (gen_random_uuid(), '{{project}}', '{{user}}', 'clean', 'x', 500, 'succeeded', now(), 4)
+            """);
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.script_tests (id, project_id, requested_by, kind, code, sample_size, status, queued_at, stop_line)
+            VALUES (gen_random_uuid(), '{{project}}', '{{user}}', 'clean', 'x', 500, 'succeeded', now(), 0)
+            """));
+    }
+
     /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>
     private static void ApplyScripts(string connectionString, params string[] names)
     {

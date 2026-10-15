@@ -215,7 +215,7 @@ def compute(cleaned, ctx):
 
 Saved as `households_surveyed` with the format `count`, a line chart groups by `month`. A named index (here `month`) is published as a column.
 
-**Insert template** in the editor writes a starting point for the selected script, and **Upload .py** loads a file you wrote elsewhere (for example in Jupyter). Common preparation that several indicators need belongs in script 1 or script 2, whose tables every indicator receives; indicator scripts cannot import from each other.
+**Templates** in the editor offers starting points for the selected script (see [The editor](#the-editor)), and **Upload .py** loads a file you wrote elsewhere (for example in Jupyter). Common preparation that several indicators need belongs in script 1 or script 2, whose tables every indicator receives; indicator scripts cannot import from each other.
 
 ## `ctx`
 
@@ -230,10 +230,53 @@ Saved as `households_surveyed` with the format `count`, a line chart groups by `
 | `ctx.reference` | The project's [reference tables](#reference-data) by name: `ctx.reference["population"]` is a DataFrame. `list(ctx.reference)` gives the names and `"population" in ctx.reference` checks one. |
 | `ctx.log` | A Python logger: `ctx.log.info(...)`, `ctx.log.warning(...)`. Messages appear in the run log. |
 | `ctx.project_name` | The project's name. |
+| `ctx.show(data, name=None)` | Shows a DataFrame, a Series or any other value in the result of a [sample test](#cells-and-ctxshow) and returns it unchanged. In a run it does nothing, so you can leave the calls in the script. |
 
 `print()` also writes to the run log. Labels are in the form's default language, its first language.
 
 Asking for a reference table the project does not have, such as `ctx.reference["populaton"]`, fails the step with a message that lists the tables it has.
+
+## The editor
+
+The editor is for writing a script without leaving the page. It knows the tables your script receives, what `ctx` offers and what the contract asks for, and it tells you what it can before you run anything. None of this blocks saving or testing: a test and a run decide whether a script works.
+
+**The side panel.** Beside the editor (below it on a phone) there are two tabs.
+
+- **Tables** lists what the selected script receives *as the last run published it*: the flattened tables for script 1, the clean tables for script 2 and the indicators, with each table's row count and each column's type and [question label](#question-labels), and when they were published. It also lists the project's [reference tables](#reference-data) with their columns, and the form's questions. A script you saved after the last run does not change the list until the next run (a test shows the tables its draft really received). Before the first run the panel says so, and the editor works without it. **Filter** matches names and labels; **Refresh** reads the tables again, which also happens when a run ends. Click a name to put it in the editor at the cursor as a quoted string (`"has_water"`); when you cannot edit (a viewer, or an old version on view) the click copies the name instead.
+- **Reference** lists the contract of the selected script, what it must return, cells and `ctx.show`, and every member of `ctx`, `ctx.form`, `ctx.log` and `ctx.reference` with a description and an example.
+
+**Completion.** While you type, the editor offers the members of `ctx`, `ctx.form` and `ctx.log` after a dot (with their signatures), the questions of the form as the first argument of `ctx.form.label(` and `ctx.form.name(`, the input tables inside `cleaned["`, the reference tables inside `ctx.reference["`, and columns with their type and table inside the brackets after a table: `cleaned["main"]["`, `ctx.reference["population"]["` or a variable you assigned from a table (`main = cleaned["main"]` and then `main["`). Anywhere else in a subscript string it offers the columns of every input table. **Ctrl+Space** opens the list on demand. Hovering a member of `ctx` shows its signature and description.
+
+**Keys.**
+
+| Key | What it does |
+|---|---|
+| Tab | Indents the selected lines by four spaces; with nothing selected, inserts spaces up to the next multiple of four. Never a tab character. |
+| Shift+Tab | Removes up to four spaces from the start of the selected lines, or of the cursor's line. |
+| Esc, then Tab | Moves the focus out of the editor, to the next control. This is how keyboard users leave it, since Tab indents. |
+| Ctrl+Space | Opens the completion list. |
+| Ctrl+Enter (Cmd+Enter on macOS) | Runs the [cell](#cells-and-ctxshow) the cursor is in. |
+
+**Checks.** About half a second after you stop typing, the editor marks, on the line and in the list under the editor, what it can find without running the script:
+
+- a syntax error (when there is one, it is the only thing reported, since the rest of the file cannot be read reliably);
+- no top-level function with the contract's name (`clean`, `prepare_output` or `compute`), or a contract function that does not take two parameters;
+- a member of `ctx`, `ctx.form` or `ctx.log` that does not exist (`ctx.refrence`);
+- a reference table the project does not have (`ctx.reference["populaton"]`), naming the ones it has;
+- an input table the published tables do not have (`cleaned["member"]`), unless the script adds that table itself (`raw["summary"] = ...`); nothing is marked while no tables are published;
+- indentation that mixes tabs and spaces.
+
+Column names are not checked, because scripts add and rename columns. Marks are hints.
+
+**Templates.** **Templates** opens a menu of starting points for the selected kind of script, each with a name and a one-line description:
+
+| Script | Templates |
+|---|---|
+| Script 1 | *Drop test submissions*; *Fix types and recode* |
+| Script 2 | *Columns for the dashboard*; *Join a repeat group to main* |
+| Indicator | *Count by group*; *Rate by group*; *Monthly series* |
+
+A template replaces the text of the editor as one edit, so Ctrl+Z brings the previous text back; if the editor has unsaved changes it asks first. Each is written in [cells](#cells-and-ctxshow) with `ctx.show`, names the columns to adapt in constants at the top, and uses only columns every form has, so it runs unchanged on any project. A new indicator starts from *Count by group*.
 
 ## Testing on a sample
 
@@ -241,10 +284,58 @@ Asking for a reference table the project does not have, such as `ctx.reference["
 
 - **What runs.** The test flattens the sample, then runs the script you are editing. When that is script 2 or an indicator, the current saved version of script 1 runs first, as in a run (or the flattened tables are used when there is no script 1). To test a change to script 1 together with script 2 or an indicator, save script 1 first. A test runs **one** indicator, the one selected, and its preview shows the table named after that indicator.
 - **The sample.** 500 submissions by default; choose from 1 to 5,000. They are spread across the whole project, not only the newest, and consecutive tests use the same submissions as long as the data does not change, so you can compare one attempt with the next. Submissions deleted in Kobo are left out. A project with fewer submissions than the sample size uses all of them.
+- **Reuse.** The flattened sample, and the result of the saved script 1, are kept for the next test, so testing the same thing again skips those steps and the step says "Reused from an earlier test". A step is recomputed whenever something it read changed: a submission in the sample was updated, added to it or deleted, the form or its labels changed, a new version of script 1 was saved or a reference table was replaced. Reuse never changes a result; it only saves time, and your server's administrator can turn it off or limit its disk use (see [operations.md](operations.md)).
 - **The same rules as a run.** The test uses the same contract, `ctx` (reference tables included), validation and time and memory limits, and the tables the draft receives hold choice labels, as in a run. A test that passes predicts a run that passes, apart from problems that only appear with more data.
 - **Waiting.** Tests run in the same worker as runs, one job at a time. A test goes ahead of runs that are waiting, but waits for a run that has already started, which can take a few minutes on a large project; the panel says what it is waiting for. Starting another test replaces your test that has not started yet.
 - **The result.** Each step shows its status, duration, rows in and out, log and, if it failed, the error with the traceback. For each table a step produced you see its columns with their types (`integer`, `decimal`, `boolean`, `date`, `timestamp`, `text`) and its first 100 rows. In the flattened tables, a column whose question has a [label](#question-labels) shows it under the column's name, cut when it is long, with the whole text on hover; the tables a script returns show none. Text longer than 500 characters is cut, and fewer rows are shown when 100 would exceed 1 MB; only the first 20 tables of a step are previewed. If you edit the code after testing, the panel says the result no longer matches the editor.
 - **How long it is kept.** Only you can see your tests, and each is deleted 24 hours after it ended.
+
+### Cells and `ctx.show`
+
+A script is easier to write when you can look at the data between steps, as in a notebook. There is no notebook kernel: every test starts the script from the beginning, in a new process, and nothing stays in memory from one test to the next. What you get instead is a way to look and a way to stop.
+
+**Look: `ctx.show(data, name)`.** In a test, each call adds a preview to the result: the name you gave it (`shown 1`, `shown 2`… without one), the line of the script that called it, how many rows the value had and its first 100 rows, taken **at the call**, so changing the DataFrame afterwards does not change what you see. A Series is shown as a one-column table, and anything else (a number, a dictionary, a string) as text cut at 2,000 characters. A test keeps the first 20 calls; the log says how many were left out. The previews are kept when the script goes on to fail or runs out of time, which is the moment you most want them. Only the script you are testing shows previews, not the saved script 1 that runs before it. In a run, `ctx.show` does nothing.
+
+**Stop: cells.** A line that starts with `# %%` begins a *cell*, and the rest of the line names it. Cells are ordinary comments, so they change nothing in a run. In the editor, **Run cell** (or Ctrl+Enter, Cmd+Enter on macOS, for the cell the cursor is in) starts a test that runs the script from the start and **stops the first time execution reaches the end of that cell**, where the next `# %%` marker is. The result shows the previews and the log up to that point and the step is marked *stopped* at that line. Nothing after the cell runs, and the output is **not validated**, so a script you have not finished writing still gives you its previews. Running the last cell runs the whole script, as **Test on sample** does.
+
+```python
+import pandas as pd
+
+
+def compute(cleaned, ctx):
+    # %% Load the cleaned households
+    main = cleaned["main"]
+    ctx.show(main, "main")
+
+    # %% Piped water by municipality
+    rows = main.groupby("municipality").agg(
+        numerator=("water_source", lambda answers: int((answers == "Piped").sum())),
+        denominator=("water_source", "size"),
+    ).reset_index()
+    ctx.show(rows, "counts")
+
+    # %% The indicator
+    rows["value"] = rows["numerator"] / rows["denominator"]
+    return rows[["municipality", "value", "numerator", "denominator"]]
+```
+
+Running the first cell shows `main`; running the second shows `counts` too. The third is where the indicator is built and validated.
+
+Good to know:
+
+- A marker must be on its own line, between two statements, at the indentation of the block it sits in: inside a function, a loop or an `if`. A marker inside a call or a list that continues over several lines fails the step with a message. A marker inside a loop stops in the first iteration; inside a branch that is never taken, the script runs to its end and the test is a whole test.
+- The stop is an exception that your own `try`/`except Exception` does not catch, but a bare `except:` or `except BaseException:` would swallow it and the script would carry on past the cell.
+- Variables are not kept between tests. A cell can use what the cells above it defined, because they run again each time; it cannot use something you ran in an earlier test. Code that is slow to run will be slow in every cell, which is why the flattened sample and script 1 are [reused](#testing-on-a-sample).
+
+### Your indicator as the dashboard will see it
+
+When a test of an indicator succeeds, under its table the result shows **As the dashboard will see it**: the indicator's table read the way the [indicators dashboard](indicators-dashboard.md) reads a published one.
+
+- **Measures, rate and dimensions.** The numeric columns are the measures a widget can plot (booleans are not), with the one it plots by default: `value`, or else the first numeric column. If the table has `numerator` and `denominator` the view says that a rate can be plotted as a ratio of sums. Every other column is a dimension, and text columns that hold WKT geometries are listed as columns a map can use.
+- **Figures.** A stat tile shows the default measure summed over the whole table and, when there is a rate, the ratio of the two sums, written with the **format and unit** in the fields above the editor. Change them and the view redraws without a new test. A bar chart shows the same by a dimension you choose (and, with a rate, you can choose to plot the ratio). The figures come from the whole table, not only the 100 rows of the preview. A dimension with more than 50 values is listed but not charted. Groups are ordered by their text, which can differ slightly from the dashboard's order for accented text.
+- **Warnings.** The view warns about what usually surprises people on the dashboard: a table with no rows; no `value` column (it names the column widgets will plot instead); `numerator` without `denominator` or the reverse; empty values in the default measure; the format `percent` with a value above 1, showing what it would read as (a percent is a fraction: 0.42 reads `42%`); a numeric column named like a dimension (`year`, `month`, `code`, `id`, or ending in `_id` or `_code`), which widgets would offer as a measure, so return it as text; and rows that share the values of every dimension, which widgets add up.
+
+A warning is a hint about the table, not an error: the test still succeeded.
 
 ## Reference data
 

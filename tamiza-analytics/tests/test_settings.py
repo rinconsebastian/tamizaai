@@ -76,3 +76,17 @@ def test_publish_wait_defaults_to_fifteen_minutes_and_can_be_set():
 
     assert settings.load(base).publish_wait_seconds == 900.0
     assert settings.load({**base, "TAMIZA_PUBLISH_WAIT_SECONDS": "30"}).publish_wait_seconds == 30.0
+
+
+def test_test_cache_defaults_to_512_mb_can_be_set_and_zero_turns_it_off():
+    base = {"TAMIZA_ANALYTICS_DATABASE_URL": "postgresql://db/tamiza"}
+
+    assert settings.load(base).test_cache_mb == 512
+    assert settings.load({**base, "TAMIZA_TEST_CACHE_MB": "128"}).test_cache_mb == 128
+    assert settings.load({**base, "TAMIZA_TEST_CACHE_MB": "0"}).test_cache_mb == 0
+
+
+@pytest.mark.parametrize("value", ["-1", "1.5", "lots"])
+def test_invalid_test_cache_sizes_are_rejected(value):
+    with pytest.raises(ValueError, match="TAMIZA_TEST_CACHE_MB"):
+        settings.load({"TAMIZA_ANALYTICS_DATABASE_URL": "postgresql://db/tamiza", "TAMIZA_TEST_CACHE_MB": value})

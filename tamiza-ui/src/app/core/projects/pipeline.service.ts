@@ -140,9 +140,43 @@ export interface TestTable {
   cutCells: number[][] | null;
 }
 
+/** What a draft passed to `ctx.show`: a preview of a table as it was at the call, or text for any other value. */
+export interface ShownPreview {
+  name: string;
+  /** The line of the script that called `ctx.show`; 0 when it is not known. */
+  line: number;
+  rows: number;
+  table: TestTable | null;
+  text: string | null;
+}
+
+/** The sums of an indicator table per value of one dimension, for the dashboard view's bar chart. */
+export interface DimensionChart {
+  values: number;
+  /** Null when the dimension has more than 50 values. */
+  groups: { group: string | null; value: number | null; numerator: number | null; denominator: number | null }[] | null;
+}
+
+/** Facts about an indicator draft's table, from which the dashboard view and its warnings are built. */
+export interface IndicatorTestView {
+  measures: string[];
+  defaultMeasure: string | null;
+  ratio: boolean;
+  dimensions: string[];
+  defaultDimension: string | null;
+  geometry: string[];
+  rows: number;
+  defaultMeasureNulls: number;
+  defaultMeasureMax: number | null;
+  totals: Record<string, number>;
+  duplicateRows: number;
+  charts: Record<string, DimensionChart>;
+}
+
 export interface TestStep {
   step: RunStepName;
-  status: 'succeeded' | 'failed';
+  /** `stopped`: a draft run through a cell reached the end of it. */
+  status: 'succeeded' | 'failed' | 'stopped';
   startedAt: string | null;
   finishedAt: string | null;
   inputRows: number | null;
@@ -150,6 +184,11 @@ export interface TestStep {
   tables: TestTable[];
   log: string;
   error: string | null;
+  /** The result came from an earlier test with the same inputs. */
+  reused: boolean;
+  stoppedAtLine: number | null;
+  shown: ShownPreview[] | null;
+  dashboard: IndicatorTestView | null;
 }
 
 /** A test of a draft script on a sample of submissions; `waitingFor` says what a queued test waits for. */
@@ -160,6 +199,8 @@ export interface ScriptTest {
   name: string | null;
   status: RunStatus;
   sampleSize: number;
+  /** The line of the `# %%` marker the draft was run through; null for a whole test. */
+  stopAtLine: number | null;
   code: string;
   waitingFor: 'run' | 'test' | null;
   cleanVersion: number | null;
@@ -184,6 +225,42 @@ export interface PipelineSettings {
   runAfterSync: boolean;
   runIntervalHours: number | null;
   nextRunAt: string | null;
+}
+
+export interface InputColumn {
+  name: string;
+  /** `integer`, `decimal`, `boolean`, `date`, `timestamp` or `text` for a published table; `integer`, `decimal`, `date` or `text` for a reference table. */
+  type: ColumnType;
+  /** The question's label, for a flattened column that has one. */
+  label?: string | null;
+}
+
+export interface InputTable {
+  name: string;
+  rows: number | null;
+  columns: InputColumn[];
+}
+
+export interface InputReferenceTable {
+  name: string;
+  columns: InputColumn[];
+}
+
+export interface InputQuestion {
+  name: string;
+  path: string;
+  type: string;
+  label: string | null;
+}
+
+/** What the editor shows beside a script: `raw` tables for script 1, `clean` tables for script 2 and the indicators. */
+export interface ScriptInputs {
+  source: 'raw' | 'clean';
+  publishedAt: string | null;
+  runId: string | null;
+  tables: InputTable[];
+  referenceTables: InputReferenceTable[];
+  questions: InputQuestion[];
 }
 
 /** How often the Scripts section refreshes while a run is queued or running. */
@@ -241,10 +318,23 @@ export class PipelineService {
     return this.http.get<RunDetails>(`${base}/${projectId}/runs/${runId}`);
   }
 
-  /** Tests unsaved code as script 1, script 2 or, with its name, an indicator. */
-  startTest(projectId: string, script: ScriptRef, code: string, sampleSize: number): Observable<ScriptTest> {
+  /**
+   * Tests unsaved code as script 1, script 2 or, with its name, an indicator; with `stopAtLine`, only up to the
+   * `# %%` marker on that line.
+   */
+  startTest(projectId: string, script: ScriptRef, code: string, sampleSize: number, stopAtLine?: number): Observable<ScriptTest> {
     const target = script.kind === 'indicator' ? { kind: script.kind, name: script.name } : { kind: script.kind };
-    return this.http.post<ScriptTest>(`${base}/${projectId}/script-tests`, { ...target, code, sampleSize });
+    return this.http.post<ScriptTest>(`${base}/${projectId}/script-tests`, {
+      ...target,
+      code,
+      sampleSize,
+      ...(stopAtLine === undefined ? {} : { stopAtLine }),
+    });
+  }
+
+  /** The tables a script receives as the last run published them, with the reference tables and the form's questions. */
+  scriptInputs(projectId: string, kind: ScriptKind): Observable<ScriptInputs> {
+    return this.http.get<ScriptInputs>(`${base}/${projectId}/script-inputs`, { params: new HttpParams().set('kind', kind) });
   }
 
   test(projectId: string, testId: string): Observable<ScriptTest> {
@@ -259,46 +349,3 @@ export class PipelineService {
     return this.http.put<PipelineSettings>(`${base}/${projectId}/pipeline`, settings);
   }
 }
-
-/** A starting point for each script, with the contract in its docstring. */
-export const scriptTemplates: Record<ScriptKind, string> = {
-  clean: `def clean(raw, ctx):
-    """Script 1: clean the flattened submissions.
-
-    raw is a dictionary of pandas DataFrames: "main" (one row per submission) and one
-    table per repeat group. Answers to select questions are choice labels, not codes
-    (select_multiple answers are labels joined by "; "); ctx.form.name(question, label)
-    gives the code of a label. ctx.form.questions, ctx.form.choices and
-    ctx.form.label(question, code) describe the form; ctx.form.columns and
-    ctx.form.column_label(table, column) give the question label of each column;
-    ctx.log.info(...) writes to the run log. Return a dictionary of table names to DataFrames.
-    """
-    main = raw["main"]
-    ctx.log.info("%d submissions", len(main))
-    return {**raw, "main": main}
-`,
-  output: `def prepare_output(cleaned, ctx):
-    """Script 2: shape the cleaned tables for the clean-data dashboard.
-
-    cleaned is the dictionary of DataFrames that script 1 returned. Return a dictionary
-    of table names (lowercase letters, digits and underscores) to DataFrames.
-    """
-    return {"main": cleaned["main"]}
-`,
-  indicator: `import pandas as pd
-
-
-def compute(cleaned, ctx):
-    """Compute one indicator.
-
-    Return one DataFrame: a column for each dimension to break the figure down by (a
-    municipality, a round) and at least one numeric column. By convention the dashboard
-    plots value, and plots a ratio of sums, such as a rate, from numerator and denominator.
-    """
-    main = cleaned["main"]
-    total = len(main)
-    return pd.DataFrame(
-        [{"group": "total", "value": 1.0, "numerator": total, "denominator": total}]
-    )
-`,
-};

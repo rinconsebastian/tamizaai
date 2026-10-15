@@ -94,7 +94,8 @@ public sealed record ReferenceTableUpload(ReferenceTableSummary Table, IReadOnly
 public sealed record ReferenceTablePreview(ReferenceTableSummary Table, IReadOnlyList<List<JsonElement>> Rows);
 
 /// <summary><c>Name</c> is the indicator to test as, required when <c>Kind</c> is <c>indicator</c>.</summary>
-public sealed record ScriptTestRequest(string? Kind, string? Name, string? Code, int? SampleSize);
+/// <param name="StopAtLine">The 1-based line of a <c># %%</c> marker of <paramref name="Code"/> to run through; omit for a whole test.</param>
+public sealed record ScriptTestRequest(string? Kind, string? Name, string? Code, int? SampleSize, int? StopAtLine = null);
 
 /// <summary>What a queued test waits for: a running run, or another test that runs or is queued before it.</summary>
 public enum ScriptTestWait
@@ -113,6 +114,7 @@ public sealed record ScriptTestDetails(
     string? Name,
     RunStatus Status,
     int SampleSize,
+    int? StopAtLine,
     string Code,
     ScriptTestWait? WaitingFor,
     int? CleanVersion,

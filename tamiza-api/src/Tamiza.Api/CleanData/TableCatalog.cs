@@ -18,6 +18,42 @@ public static class TableCatalog
         ORDER BY a.attnum
         """;
 
+    private const string AllSql = """
+        SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod), col_description(a.attrelid, a.attnum)
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        LEFT JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+        WHERE n.nspname = @schema AND c.relkind = 'r'
+        ORDER BY c.relname, a.attnum
+        """;
+
+    /// <summary>
+    /// Every ordinary table of <paramref name="schema"/> with its columns in table order, by table name; empty when the schema does not
+    /// exist. One catalog read that takes no lock on the tables, so a publish never waits for it.
+    /// </summary>
+    public static async Task<IReadOnlyDictionary<string, IReadOnlyList<TableColumn>>> FindAllAsync(
+        NpgsqlConnection connection, NpgsqlTransaction? transaction, string schema, CancellationToken ct)
+    {
+        await using var command = new NpgsqlCommand(AllSql, connection, transaction);
+        command.Parameters.Add(new NpgsqlParameter("schema", NpgsqlDbType.Text) { Value = schema });
+        await using var reader = await command.ExecuteReaderAsync(ct);
+
+        var tables = new SortedDictionary<string, List<TableColumn>>(StringComparer.Ordinal);
+        while (await reader.ReadAsync(ct))
+        {
+            var columns = tables.TryGetValue(reader.GetString(0), out var existing) ? existing : tables[reader.GetString(0)] = [];
+            if (!reader.IsDBNull(1))
+            {
+                columns.Add(new TableColumn(
+                    reader.GetString(1),
+                    ColumnTypes.FromPostgres(reader.GetString(2)),
+                    reader.IsDBNull(3) ? null : reader.GetString(3)));
+            }
+        }
+
+        return tables.ToDictionary(t => t.Key, t => (IReadOnlyList<TableColumn>)t.Value, StringComparer.Ordinal);
+    }
+
     /// <summary>
     /// The columns of the ordinary table <paramref name="table"/> in <paramref name="schema"/>, in table order, or null when
     /// the schema has no such table. A view, an index or a table in any other schema is not found. A table without columns

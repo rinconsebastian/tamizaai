@@ -64,6 +64,8 @@ def examples() -> dict[str, str]:
             found["dictionary"] = block
         elif "def prepare_output(" in block:
             found["output"] = block
+        elif "def compute(" in block and "# %%" in block:
+            found["cells"] = block
         elif "def compute(" in block:
             found[
                 "reference" if "ctx.reference" in block else "series" if "_submission_time" in block else "indicators"
@@ -123,7 +125,7 @@ def run(database, settings, project) -> str:
 
 
 def test_the_document_has_every_example():
-    assert set(examples()) == {"clean", "output", "indicators", "series", "reference", "dictionary"}
+    assert set(examples()) == {"clean", "output", "indicators", "series", "reference", "dictionary", "cells"}
 
 
 def test_the_examples_run_on_submissions_of_two_versions_that_relabel_a_choice(database, surveyed, settings):
@@ -198,3 +200,34 @@ def test_the_data_dictionary_example_lists_every_column_with_its_question_label(
     assert not [row for row in dictionary if row[1].startswith("_")]  # no system columns
     # The flattened tables of the same run carry the labels as column comments.
     assert column_comments(database, schema_name(surveyed.id, "raw"), "main")["municipality"] == "Municipality"
+
+
+def test_the_cells_example_runs_whole_and_through_each_of_its_cells(database, surveyed, settings):
+    from test_sample_runs import queue_test, result, run_next
+
+    cells = examples()["cells"]
+    add_script(database, surveyed, "clean", examples()["clean"])
+    add_script(database, surveyed, "indicator", cells, name="piped_water_rate", format="percent")
+    run(database, settings, surveyed)  # the markers and ctx.show change nothing in a run
+    markers = [number for number, line in enumerate(cells.splitlines(), start=1) if line.lstrip().startswith("# %%")]
+    assert len(markers) == 3
+
+    def test(stop_line=None):
+        test_id = queue_test(database, surveyed, "indicator", cells, name="piped_water_rate")
+        if stop_line is not None:
+            database.execute("UPDATE tamiza.script_tests SET stop_line = %s WHERE id = %s", stop_line, test_id)
+        run_next(database, settings)
+        outcome = result(database, test_id)
+        assert outcome["status"] == "succeeded", outcome
+        return outcome["steps"]["indicator"]
+
+    first, second, whole = test(markers[1]), test(markers[2]), test()
+
+    assert (first["status"], first["stoppedAtLine"]) == ("stopped", markers[1])
+    assert [shown["name"] for shown in first["shown"]] == ["main"]
+    assert (second["status"], second["stoppedAtLine"]) == ("stopped", markers[2])
+    assert [shown["name"] for shown in second["shown"]] == ["main", "counts"]
+    assert whole["status"] == "succeeded" and whole["stoppedAtLine"] is None
+    assert [shown["name"] for shown in whole["shown"]] == ["main", "counts"]
+    assert whole["tables"][0]["name"] == "piped_water_rate" and whole["tables"][0]["rows"] == 3
+    assert whole["dashboard"]["ratio"] is True and whole["dashboard"]["defaultMeasure"] == "value"

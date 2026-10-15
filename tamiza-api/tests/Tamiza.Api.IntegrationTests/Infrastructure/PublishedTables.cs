@@ -76,7 +76,7 @@ public static class PublishedTables
         var steps = step == "indicators"
             ? (tables.Length > 0 ? tables.Select(t => (Name: t.Name, Tables: new[] { t })) : [(Name: indicator ?? throw new ArgumentException("Name the indicator.", nameof(indicator)), Tables: tables)])
                 .Select(s => ("indicator", s.Name, s.Tables)).ToArray()
-            : [(step, "", tables)];
+            : [(step == "raw" ? "flatten" : step, "", tables)]; // the raw schema is the flatten step's
         foreach (var (stepName, name, stepTables) in steps)
         {
             var json = "[" + string.Join(",", stepTables.Select(t => $"{{\"name\":\"{t.Name}\",\"rows\":{t.Rows}}}")) + "]";

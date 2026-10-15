@@ -240,6 +240,7 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
                 table.HasCheckConstraint("ck_script_tests_name", "(kind = 'indicator') = (name IS NOT NULL)");
                 table.HasCheckConstraint("ck_script_tests_status", "status IN ('queued', 'running', 'succeeded', 'failed')");
                 table.HasCheckConstraint("ck_script_tests_sample_size", "sample_size BETWEEN 1 AND 5000");
+                table.HasCheckConstraint("ck_script_tests_stop_line", "stop_line > 0");
             });
             test.HasKey(t => t.Id);
             test.Property(t => t.Id).ValueGeneratedNever();

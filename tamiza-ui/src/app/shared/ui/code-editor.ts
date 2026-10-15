@@ -1,7 +1,39 @@
 import { Component, ElementRef, OnDestroy, afterNextRender, effect, inject, input, output } from '@angular/core';
+import { indentLess, indentMore } from '@codemirror/commands';
 import { python } from '@codemirror/lang-python';
-import { Compartment, EditorState } from '@codemirror/state';
+import { indentUnit } from '@codemirror/language';
+import { Compartment, EditorSelection, EditorState, Extension, Prec, countColumn } from '@codemirror/state';
+import { KeyBinding, keymap } from '@codemirror/view';
 import { EditorView, basicSetup } from 'codemirror';
+
+const tabSize = 4;
+
+/**
+ * Tab indents the lines of a selection by four spaces, or with nothing selected inserts spaces up to the next multiple of
+ * four columns; Shift+Tab outdents. A tab character is never inserted. When the editor is read-only the key is not used, and
+ * the browser moves the focus. Escape followed by Tab also moves it (CodeMirror's own handling of that pair).
+ */
+const indentation: KeyBinding = {
+  key: 'Tab',
+  run: (view) => {
+    if (view.state.readOnly) {
+      return false;
+    }
+    if (view.state.selection.ranges.some((range) => !range.empty)) {
+      return indentMore(view);
+    }
+    view.dispatch(
+      view.state.changeByRange((range) => {
+        const line = view.state.doc.lineAt(range.head);
+        const insert = ' '.repeat(tabSize - (countColumn(line.text, tabSize, range.head - line.from) % tabSize));
+        return { changes: { from: range.head, insert }, range: EditorSelection.cursor(range.head + insert.length) };
+      }),
+      { userEvent: 'input.indent', scrollIntoView: true },
+    );
+    return true;
+  },
+  shift: indentLess,
+};
 
 // Colors come from the Tailwind/Flowbite theme variables, so the editor follows the rest of the UI.
 const theme = EditorView.theme({
@@ -24,11 +56,14 @@ const theme = EditorView.theme({
 export class CodeEditor implements OnDestroy {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly editable = new Compartment();
+  private readonly extra = new Compartment();
   private view: EditorView | null = null;
 
   readonly value = input('');
   readonly readonly = input(false);
   readonly label = input('Python code');
+  /** Extensions added by the screen (completion, checks, cell actions); they can change while the editor lives. */
+  readonly extensions = input<Extension[]>([]);
   readonly changed = output<string>();
 
   constructor() {
@@ -41,7 +76,10 @@ export class CodeEditor implements OnDestroy {
             basicSetup,
             python(),
             theme,
-            EditorState.tabSize.of(4),
+            EditorState.tabSize.of(tabSize),
+            indentUnit.of(' '.repeat(tabSize)),
+            Prec.high(keymap.of([indentation])),
+            this.extra.of(this.extensions()),
             this.editable.of(this.editableExtensions(this.readonly())),
             EditorView.contentAttributes.of({ 'aria-label': this.label() }),
             EditorView.updateListener.of((update) => {
@@ -63,6 +101,10 @@ export class CodeEditor implements OnDestroy {
       }
     });
     effect(() => {
+      const extensions = this.extensions();
+      this.view?.dispatch({ effects: this.extra.reconfigure(extensions) });
+    });
+    effect(() => {
       const readonly = this.readonly();
       this.view?.dispatch({ effects: this.editable.reconfigure(this.editableExtensions(readonly)) });
     });
@@ -77,6 +119,32 @@ export class CodeEditor implements OnDestroy {
   replace(text: string): void {
     const view = this.view;
     view?.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+  }
+
+  /** Inserts text at the cursor, replacing the selection, and puts the cursor after it. False when the editor is read-only. */
+  insertAtCursor(text: string): boolean {
+    const view = this.view;
+    if (!view || view.state.readOnly) {
+      return false;
+    }
+    view.dispatch(view.state.replaceSelection(text), { scrollIntoView: true, userEvent: 'input.paste' });
+    view.focus();
+    return true;
+  }
+
+  /** Moves the cursor to `position`, scrolls it into view and focuses the editor. */
+  goTo(position: number): void {
+    const view = this.view;
+    if (view) {
+      view.dispatch({ selection: { anchor: Math.min(position, view.state.doc.length) }, scrollIntoView: true });
+      view.focus();
+    }
+  }
+
+  /** The 1-based line the cursor is on. */
+  cursorLine(): number {
+    const view = this.view;
+    return view ? view.state.doc.lineAt(view.state.selection.main.head).number : 1;
   }
 
   ngOnDestroy(): void {

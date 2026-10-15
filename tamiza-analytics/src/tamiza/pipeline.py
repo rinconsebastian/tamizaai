@@ -145,8 +145,10 @@ class Processor:
             interrupted = sample_runs.fail_interrupted(connection)
             if interrupted:
                 logger.warning("Marked %d tests interrupted by the last shutdown as failed.", interrupted)
+            sample_runs.cache_for(self.settings).clean_leftovers()
             self._started = True
         sample_runs.delete_expired(connection)
+        sample_runs.cache_for(self.settings).sweep()
         test = sample_runs.claim(connection)
         if test is not None:
             sample_runs.execute(connection, test, self.settings)

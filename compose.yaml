@@ -75,6 +75,7 @@ services:
       TAMIZA_RUN_TIMEOUT_SECONDS: ${TAMIZA_RUN_TIMEOUT_SECONDS:-600}
       TAMIZA_RUN_MEMORY_MB: ${TAMIZA_RUN_MEMORY_MB:-1024}
       TAMIZA_PUBLISH_WAIT_SECONDS: ${TAMIZA_PUBLISH_WAIT_SECONDS:-900}
+      TAMIZA_TEST_CACHE_MB: ${TAMIZA_TEST_CACHE_MB:-512}
     healthcheck:
       test: ["CMD", "python", "-m", "tamiza.health"]
       interval: 10s

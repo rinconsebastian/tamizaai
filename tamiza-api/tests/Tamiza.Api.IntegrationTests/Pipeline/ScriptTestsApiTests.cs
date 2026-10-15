@@ -300,6 +300,111 @@ public sealed class ScriptTestsApiTests(PostgresFixture postgres) : IDisposable
         Assert.Equal(["municipality", "value"], step.GetProperty("tables")[0].GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
     }
 
+    // Tests through a cell
+
+    private const string Cells = "def compute(cleaned, ctx):\n    # %% Load\n    main = cleaned['main']\n    # %% Rate\n    return main\n";
+
+    [Fact]
+    public async Task A_stop_line_on_a_marker_is_stored_and_returned()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var test = await StartAsync(h.Admin, h, new { kind = "indicator", name = "coverage", code = Cells, stopAtLine = 4 });
+
+        Assert.Equal(4, test.GetProperty("stopAtLine").GetInt32());
+        Assert.Equal(4, await TestData.ScalarAsync<int>(h.Db, "SELECT stop_line FROM tamiza.script_tests WHERE id = @id", ("id", Guid.Parse(Id(test)))));
+        var read = await h.Admin.GetFromJsonAsync<JsonElement>($"{Tests(h)}/{Id(test)}");
+        Assert.Equal(4, read.GetProperty("stopAtLine").GetInt32());
+    }
+
+    [Fact]
+    public async Task A_whole_test_has_no_stop_line()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var test = await StartAsync(h.Admin, h);
+
+        Assert.Equal(JsonValueKind.Null, test.GetProperty("stopAtLine").ValueKind);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    [InlineData(0)]
+    [InlineData(6)]
+    [InlineData(-2)]
+    public async Task A_stop_line_that_is_not_a_marker_is_rejected_and_nothing_is_queued(int line)
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await h.Admin.PostAsJsonAsync(Tests(h), new { kind = "indicator", name = "coverage", code = Cells, stopAtLine = line });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(problem.GetProperty("errors").TryGetProperty("stopAtLine", out _));
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_tests"));
+    }
+
+    [Fact]
+    public async Task A_marker_may_be_indented_and_the_file_may_use_windows_line_endings()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        const string code = "def compute(cleaned, ctx):\r\n    for m in [1]:\r\n        # %% Inside\r\n        pass\r\n";
+
+        var test = await StartAsync(h.Admin, h, new { kind = "indicator", name = "coverage", code, stopAtLine = 3 });
+
+        Assert.Equal(3, test.GetProperty("stopAtLine").GetInt32());
+    }
+
+    [Fact]
+    public async Task The_workbench_fields_of_a_step_are_read_back_and_older_steps_have_them_empty()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        var test = await StartAsync(h.Admin, h, new { kind = "indicator", name = "coverage", code = Cells, stopAtLine = 4 });
+        const string steps = """
+            [{"step": "flatten", "status": "succeeded", "startedAt": null, "finishedAt": null, "inputRows": 2, "outputRows": 2, "log": "", "error": null,
+              "tables": [], "reused": true},
+             {"step": "indicator", "status": "stopped", "startedAt": null, "finishedAt": null, "inputRows": 2, "outputRows": null, "log": "", "error": null,
+              "tables": [], "stoppedAtLine": 4,
+              "shown": [{"name": "main", "line": 3, "rows": 2,
+                         "table": {"name": "main", "rows": 2, "columns": [{"name": "value", "type": "decimal", "label": null}], "previewRows": 2, "preview": [[0.5], [0.25]], "cutCells": []},
+                         "text": null},
+                        {"name": "shown 2", "line": 3, "rows": 1, "table": null, "text": "2"}],
+              "dashboard": {"measures": ["value"], "defaultMeasure": "value", "ratio": false, "dimensions": ["municipality"], "defaultDimension": "municipality",
+                            "geometry": [], "rows": 2, "defaultMeasureNulls": 0, "defaultMeasureMax": 0.5, "totals": {"value": 0.75}, "duplicateRows": 0,
+                            "charts": {"municipality": {"values": 2, "groups": [{"group": "Cali", "value": 0.5, "numerator": null, "denominator": null}]}}}}]
+            """;
+        await TestData.ExecuteAsync(h.Db, "UPDATE tamiza.script_tests SET status = 'succeeded', finished_at = now(), steps = @steps::jsonb", ("steps", steps));
+
+        var read = await h.Admin.GetFromJsonAsync<JsonElement>($"{Tests(h)}/{Id(test)}");
+
+        var flatten = read.GetProperty("steps")[0];
+        Assert.True(flatten.GetProperty("reused").GetBoolean());
+        var step = read.GetProperty("steps")[1];
+        Assert.False(step.GetProperty("reused").GetBoolean());
+        Assert.Equal("stopped", step.GetProperty("status").GetString());
+        Assert.Equal(4, step.GetProperty("stoppedAtLine").GetInt32());
+        var shown = step.GetProperty("shown");
+        Assert.Equal(["main", "shown 2"], shown.EnumerateArray().Select(s => s.GetProperty("name").GetString()));
+        Assert.Equal(0.25, shown[0].GetProperty("table").GetProperty("preview")[1][0].GetDouble());
+        Assert.Equal("2", shown[1].GetProperty("text").GetString());
+        var dashboard = step.GetProperty("dashboard");
+        Assert.Equal("municipality", dashboard.GetProperty("defaultDimension").GetString());
+        Assert.Equal(0.75, dashboard.GetProperty("totals").GetProperty("value").GetDouble());
+        Assert.Equal("Cali", dashboard.GetProperty("charts").GetProperty("municipality").GetProperty("groups")[0].GetProperty("group").GetString());
+
+        // A step written before the workbench has none of these members.
+        const string older = """
+            [{"step": "flatten", "status": "succeeded", "startedAt": null, "finishedAt": null, "inputRows": 2, "outputRows": 2, "log": "", "error": null, "tables": []}]
+            """;
+        await TestData.ExecuteAsync(h.Db, "UPDATE tamiza.script_tests SET steps = @steps::jsonb", ("steps", older));
+        var old = (await h.Admin.GetFromJsonAsync<JsonElement>($"{Tests(h)}/{Id(test)}")).GetProperty("steps")[0];
+        Assert.False(old.GetProperty("reused").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, old.GetProperty("stoppedAtLine").ValueKind);
+        Assert.Equal(JsonValueKind.Null, old.GetProperty("shown").ValueKind);
+        Assert.Equal(JsonValueKind.Null, old.GetProperty("dashboard").ValueKind);
+    }
+
     [Fact]
     public async Task The_openapi_document_describes_the_name_of_a_test()
     {
@@ -310,6 +415,8 @@ public sealed class ScriptTestsApiTests(PostgresFixture postgres) : IDisposable
 
         var schemas = document.GetProperty("components").GetProperty("schemas");
         Assert.True(schemas.GetProperty("ScriptTestRequest").GetProperty("properties").TryGetProperty("name", out _));
+        Assert.True(schemas.GetProperty("ScriptTestRequest").GetProperty("properties").TryGetProperty("stopAtLine", out _));
+        Assert.True(schemas.GetProperty("ScriptTestDetails").GetProperty("properties").TryGetProperty("stopAtLine", out _));
         Assert.True(schemas.GetProperty("ScriptTestDetails").GetProperty("properties").TryGetProperty("name", out _));
     }
 

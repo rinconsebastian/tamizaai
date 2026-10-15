@@ -1,6 +1,6 @@
 import { Dialog } from '@angular/cdk/dialog';
 import { DatePipe } from '@angular/common';
-import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, output, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { PIPELINE_POLL_MS, PipelineService, RunPage, RunStatus, RunStepStatus, RunSummary, StepSummary } from '../../core/projects/pipeline.service';
@@ -146,6 +146,9 @@ export class PipelineRuns {
   protected readonly tableCell = tableCell;
   protected readonly duration = durationText;
 
+  /** Emits when a run that was queued or running has ended, so the tables it published can be read again. */
+  readonly runEnded = output<void>();
+
   protected readonly log = signal<RunPage | null>(null);
   protected readonly page = signal(1);
   protected readonly busy = signal(false);
@@ -191,8 +194,12 @@ export class PipelineRuns {
     this.service.runs(this.projectId(), page, pageSize).subscribe({
       next: (log) => {
         if (!this.destroyed) {
+          const wasActive = this.active();
           this.page.set(page);
           this.log.set(log);
+          if (wasActive && !this.active()) {
+            this.runEnded.emit();
+          }
         }
       },
       error: (error) => this.errors.report(error),

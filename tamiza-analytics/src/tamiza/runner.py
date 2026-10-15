@@ -1,12 +1,18 @@
-"""Runs one user script in a child process: ``python -I -u -m tamiza.runner <step dir> <kind> [<name>]``.
+"""Runs one user script in a child process.
+
+``python -I -u -m tamiza.runner <step dir> <kind> [<name>] [--show] [--stop-line N]``
 
 The step directory holds ``script.py``, ``context.json``, ``input/<table>.parquet`` and ``reference/<table>.parquet``.
 The runner calls the script's contract function and writes ``output/<table>.parquet`` and ``result.json``; an
 indicator script returns one DataFrame, written as the table named after the indicator (``<name>``). Everything
 the script prints, and its ``ctx.log`` messages, go to stdout, which the worker captures as the step's log. The runner
 never touches the database.
+
+``--show`` (sample tests) records what the script passes to ``ctx.show``; ``--stop-line N`` stops the script, with no
+output and no validation, when execution first reaches the ``# %%`` marker on line N (see ``cells``).
 """
 
+import ast
 import json
 import linecache
 import logging
@@ -17,11 +23,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from tamiza import interchange, names
+from tamiza import cells, interchange, names
+from tamiza.shows import ShowRecorder
 
 FUNCTIONS = {"clean": "clean", "output": "prepare_output", "indicator": "compute"}
 SCRIPT_FILE = "script.py"
 REFERENCE_DIR = "reference"
+SHOWS_DIR = "shows"
 
 
 class ScriptError(Exception):
@@ -131,37 +139,63 @@ class ReferenceTables(Mapping):
 class Context:
     """What a script receives besides its data."""
 
-    def __init__(self, project_name: str, form: Form, log: logging.Logger, reference: ReferenceTables | None = None):
+    def __init__(
+        self,
+        project_name: str,
+        form: Form,
+        log: logging.Logger,
+        reference: ReferenceTables | None = None,
+        shows: ShowRecorder | None = None,
+    ):
         self.project_name = project_name
         self.form = form
         self.log = log
         self.reference = reference if reference is not None else ReferenceTables(Path("/nonexistent"))
+        self._shows = shows
+
+    def show(self, data: object, name: str | None = None):
+        """
+        Shows a DataFrame, a Series or any other value in the sample test's result, as it is at this call, and returns
+        it unchanged so it can be used inside an expression. In a run it does nothing.
+        """
+        if self._shows is not None:
+            self._shows.record(data, name)
+        return data
 
 
-def run_step(step_dir: Path, kind: str, name: str | None = None) -> dict:
+def run_step(
+    step_dir: Path, kind: str, name: str | None = None, show: bool = False, stop_line: int | None = None
+) -> dict:
     """
     Runs the script and returns the result written to ``result.json``. Never raises. ``name`` is the indicator's name
-    for the ``indicator`` kind: the table its DataFrame is published as.
+    for the ``indicator`` kind: the table its DataFrame is published as. With ``show``, ``ctx.show`` records its
+    previews; with ``stop_line``, the script stops at that marker and the result is ``stopped``, with no tables.
     """
+    context = None
     try:
         if kind not in FUNCTIONS:
             raise ScriptError(f"Unknown script kind {kind!r}.")
-        context = _context(step_dir)
+        context = _context(step_dir, show)
         inputs = {path.stem: interchange.read_parquet(path) for path in sorted((step_dir / "input").glob("*.parquet"))}
-        function = _load(step_dir / SCRIPT_FILE, FUNCTIONS[kind])
+        function = _load(step_dir / SCRIPT_FILE, FUNCTIONS[kind], stop_line)
         returned = function(inputs, context)
         tables = _validated(kind, returned, name)
         written = _write(step_dir / "output", tables)
         return {"status": "succeeded", "tables": written}
-    except ScriptError as error:
+    except cells.CellStop as stop:
+        return {"status": "stopped", "line": stop.line}
+    except (ScriptError, cells.MarkerError) as error:
         return {"status": "failed", "error": str(error)}
     except SystemExit as error:
         return {"status": "failed", "error": f"The script called exit({error.code})."}
     except BaseException as error:  # the script's own exception, with its traceback
         return {"status": "failed", "error": _one_line(error), "traceback": _script_traceback(error)}
+    finally:
+        if context is not None and context._shows is not None:
+            context._shows.finish()
 
 
-def _context(step_dir: Path) -> Context:
+def _context(step_dir: Path, show: bool = False) -> Context:
     data = json.loads((step_dir / "context.json").read_text(encoding="utf-8"))
     log = logging.getLogger("tamiza.script")
     log.handlers.clear()
@@ -171,15 +205,24 @@ def _context(step_dir: Path) -> Context:
     log.setLevel(logging.INFO)
     log.propagate = False
     form = Form(data.get("questions", []), data.get("choices", []), data.get("label_codes"), data.get("columns"))
-    return Context(data.get("project_name", ""), form, log, ReferenceTables(step_dir / REFERENCE_DIR))
+    recorder = ShowRecorder(step_dir / SHOWS_DIR, SCRIPT_FILE) if show else None
+    return Context(data.get("project_name", ""), form, log, ReferenceTables(step_dir / REFERENCE_DIR), recorder)
 
 
-def _load(path: Path, function_name: str):
+def _load(path: Path, function_name: str, stop_line: int | None = None):
     source = path.read_text(encoding="utf-8")
     # Lets tracebacks show the script's lines, which are compiled from a string.
     linecache.cache[SCRIPT_FILE] = (len(source), None, source.splitlines(keepends=True), SCRIPT_FILE)
     namespace: dict = {"__name__": "script", "__file__": SCRIPT_FILE}
-    exec(compile(source, SCRIPT_FILE, "exec"), namespace)  # noqa: S102 — running the analyst's script is the purpose
+    tree = ast.parse(source, SCRIPT_FILE)
+    if stop_line is not None:
+        cells.insert_stop(tree, source, stop_line)
+
+        def stop() -> None:
+            raise cells.CellStop(stop_line)
+
+        namespace[cells.STOP_NAME] = stop
+    exec(compile(tree, SCRIPT_FILE, "exec"), namespace)  # noqa: S102 — running the analyst's script is the purpose
     function = namespace.get(function_name)
     if not callable(function):
         raise ScriptError(f"The script does not define the function {function_name}(…).")
@@ -286,7 +329,11 @@ def _script_traceback(error: BaseException) -> str:
 
 def main(argv: list[str]) -> int:
     step_dir, kind = Path(argv[1]), argv[2]
-    result = run_step(step_dir, kind, argv[3] if len(argv) > 3 else None)
+    rest = argv[3:]
+    show = "--show" in rest
+    stop_line = int(rest[rest.index("--stop-line") + 1]) if "--stop-line" in rest else None
+    name = next((a for a in rest if not a.startswith("--") and a != str(stop_line)), None)
+    result = run_step(step_dir, kind, name, show, stop_line)
     sys.stdout.flush()
     (step_dir / "result.json").write_text(json.dumps(result), encoding="utf-8")
     return 0

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -13,7 +14,7 @@ namespace Tamiza.Api.Pipeline;
 /// Tests of a draft script on a sample of submissions. The analytics worker runs them ahead of queued runs; nothing is
 /// published, and a test is visible only to the person who requested it, for 24 hours after it ends.
 /// </summary>
-public static class ScriptTestEndpoints
+public static partial class ScriptTestEndpoints
 {
     public const int MinSampleSize = 1;
     public const int MaxSampleSize = 5000;
@@ -62,14 +63,29 @@ public static class ScriptTestEndpoints
             errors.Add("sampleSize", $"Enter a sample of {MinSampleSize} to {MaxSampleSize:N0} submissions.");
         }
 
+        if (request.StopAtLine is { } stopAtLine && !string.IsNullOrWhiteSpace(request.Code) && !IsMarkerLine(request.Code, stopAtLine))
+        {
+            errors.Add("stopAtLine", "Choose a line that starts a cell with # %%.");
+        }
+
         if (errors.Any)
         {
             return Problems.Validation(errors.ToDictionary());
         }
 
-        var test = await QueueAsync(db, projectId, user.Id, kind, name, request.Code!, sampleSize, time.GetUtcNow(), ct);
+        var test = await QueueAsync(db, projectId, user.Id, kind, name, request.Code!, sampleSize, request.StopAtLine, time.GetUtcNow(), ct);
         return TypedResults.Accepted($"/api/v1/projects/{projectId}/script-tests/{test.Id}", await DetailsAsync(db, test, ct));
     }
+
+    /// <summary>Whether line <paramref name="line"/> (1-based) of <paramref name="code"/> starts a cell: after leading spaces or tabs, `# %%`.</summary>
+    internal static bool IsMarkerLine(string code, int line)
+    {
+        var lines = code.Split('\n');
+        return line >= 1 && line <= lines.Length && CellMarker().IsMatch(lines[line - 1]);
+    }
+
+    [GeneratedRegex(@"^[ \t]*# %%")]
+    private static partial Regex CellMarker();
 
     private static async Task<Results<Ok<ScriptTestDetails>, NotFound>> GetAsync(
         Guid projectId, Guid testId, TamizaDbContext db, ICurrentUser user, TimeProvider time, CancellationToken ct)
@@ -83,7 +99,7 @@ public static class ScriptTestEndpoints
 
     /// <summary>Replaces the user's queued test in the project, if any, with a new one; a running test is never touched.</summary>
     private static async Task<ScriptTest> QueueAsync(
-        TamizaDbContext db, Guid projectId, Guid userId, ScriptKind kind, string? name, string code, int sampleSize, DateTimeOffset now, CancellationToken ct)
+        TamizaDbContext db, Guid projectId, Guid userId, ScriptKind kind, string? name, string code, int sampleSize, int? stopLine, DateTimeOffset now, CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
         {
@@ -96,6 +112,7 @@ public static class ScriptTestEndpoints
                 Name = name,
                 Code = code,
                 SampleSize = sampleSize,
+                StopLine = stopLine,
                 Status = RunStatus.Queued,
                 QueuedAt = now,
             };
@@ -123,7 +140,7 @@ public static class ScriptTestEndpoints
             ? await db.ScriptVersions.Where(v => v.Id == versionId).Select(v => (int?)v.Number).SingleOrDefaultAsync(ct)
             : null;
         return new ScriptTestDetails(
-            test.Id, test.Kind, test.Name, test.Status, test.SampleSize, test.Code, await WaitingForAsync(db, test, ct), cleanVersion,
+            test.Id, test.Kind, test.Name, test.Status, test.SampleSize, test.StopLine, test.Code, await WaitingForAsync(db, test, ct), cleanVersion,
             test.QueuedAt, test.StartedAt, test.FinishedAt, test.ErrorCode, test.Error, test.Steps);
     }
 

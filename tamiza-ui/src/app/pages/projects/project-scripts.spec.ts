@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { Router } from '@angular/router';
+import { EditorView } from '@codemirror/view';
 import {
   PIPELINE_POLL_MS,
   IndicatorScript,
@@ -9,8 +10,10 @@ import {
   RunPage,
   RunSummary,
   SCRIPT_TEST_POLL_MS,
+  ScriptInputs,
   ScriptList,
   ScriptTest,
+  ShownPreview,
   ScriptVersionDetails,
   ScriptVersionSummary,
   TestStep,
@@ -18,7 +21,7 @@ import {
 import { ProjectRole } from '../../core/projects/projects.service';
 import { ToastService } from '../../shared/ui';
 import { CodeEditor } from '../../shared/ui/code-editor';
-import { tick } from '../../../testing/cdk';
+import { pressKey, provideVisibleElements, tick } from '../../../testing/cdk';
 import { byTestId, openProjectSection, projectId, settle, typeInto } from '../../../testing/project-harness';
 
 // jsdom has no layout; CodeMirror measures text ranges after edits.
@@ -28,6 +31,7 @@ Range.prototype.getBoundingClientRect ??= () => new DOMRect();
 const scriptsUrl = `/api/v1/projects/${projectId}/scripts`;
 const runsUrl = `/api/v1/projects/${projectId}/runs`;
 const settingsUrl = `/api/v1/projects/${projectId}/pipeline`;
+const inputsUrl = `/api/v1/projects/${projectId}/script-inputs`;
 const ada = { id: 'u1', name: 'Ada' };
 
 function version(number: number, code: string | null = `def clean(raw, ctx):\n    return raw  # v${number}\n`): ScriptVersionDetails {
@@ -101,7 +105,31 @@ function run(overrides: Partial<RunSummary> = {}): RunSummary {
   };
 }
 
+/** The flattened tables of the last run: a main table with a labeled question, a repeat table and a reference table. */
+function scriptInputs(overrides: Partial<ScriptInputs> = {}): ScriptInputs {
+  return {
+    source: 'raw',
+    publishedAt: '2026-10-14T10:00:00Z',
+    runId: 'r1',
+    tables: [
+      {
+        name: 'main',
+        rows: 480,
+        columns: [
+          { name: 'municipality', type: 'text', label: 'Municipality' },
+          { name: 'has_water', type: 'text', label: 'Does the household have running water?' },
+        ],
+      },
+      { name: 'members', rows: 1200, columns: [{ name: 'age', type: 'integer', label: null }] },
+    ],
+    referenceTables: [{ name: 'population', columns: [{ name: 'population_2026', type: 'integer' }] }],
+    questions: [{ name: 'municipality', path: 'municipality', type: 'select_one', label: 'Municipality' }],
+    ...overrides,
+  };
+}
+
 interface Seed {
+  inputs?: ScriptInputs;
   scripts?: ScriptList;
   versions?: ScriptVersionSummary[];
   settings?: PipelineSettings;
@@ -113,6 +141,7 @@ interface Seed {
 async function open(role: ProjectRole, seed: Seed = {}) {
   const current = version(2);
   const providers = [
+    provideVisibleElements(),
     ...(seed.pollMs ? [{ provide: PIPELINE_POLL_MS, useValue: seed.pollMs }] : []),
     ...(seed.testPollMs ? [{ provide: SCRIPT_TEST_POLL_MS, useValue: seed.testPollMs }] : []),
   ];
@@ -123,6 +152,7 @@ async function open(role: ProjectRole, seed: Seed = {}) {
   http
     .expectOne(scriptsUrl)
     .flush(seed.scripts ?? { clean: { kind: 'clean', current }, output: { kind: 'output', current: null }, indicators: [] });
+  http.expectOne((r) => r.url === inputsUrl && r.params.get('kind') === 'clean').flush(seed.inputs ?? scriptInputs());
   await settle(harness);
   http.expectOne(`${scriptsUrl}/clean/versions`).flush(seed.versions ?? [summary(current), summary(version(1))]);
   await settle(harness);
@@ -160,6 +190,7 @@ function scriptTest(overrides: Partial<ScriptTest> = {}): ScriptTest {
     name: null,
     status: 'queued',
     sampleSize: 500,
+    stopAtLine: null,
     code: draftCode,
     waitingFor: null,
     cleanVersion: null,
@@ -206,6 +237,10 @@ const flattenStep: TestStep = {
   ],
   log: 'Sample: 120 submissions.',
   error: null,
+  reused: false,
+  stoppedAtLine: null,
+  shown: null,
+  dashboard: null,
 };
 
 async function startTest(opened: Awaited<ReturnType<typeof open>>, size = '500') {
@@ -261,13 +296,24 @@ describe('ProjectScripts', () => {
     expect(TestBed.inject(ToastService).toasts().at(-1)?.message).toContain('Version 3 saved');
   });
 
-  it('inserts the template of each script', async () => {
-    const coverage = indicatorVersion('coverage', 1);
-    const { root, http, harness, editor } = await open('analyst', { scripts: withIndicators(coverage) });
+  /** Opens the template menu and chooses a template. */
+  async function chooseTemplate(opened: Awaited<ReturnType<typeof open>>, id: string) {
+    byTestId<HTMLButtonElement>(opened.root, 'template')!.click();
+    await settle(opened.harness);
+    await tick();
+    (document.querySelector(`[data-testid="template-${id}"]`) as HTMLButtonElement).click();
+    await settle(opened.harness);
+    await tick();
+  }
 
-    byTestId<HTMLButtonElement>(root, 'template')!.click();
+  it('inserts a template of script 1 and of an indicator', async () => {
+    const coverage = indicatorVersion('coverage', 1);
+    const opened = await open('analyst', { scripts: withIndicators(coverage) });
+    const { root, http, harness, editor } = opened;
+
+    await chooseTemplate(opened, 'drop-test-submissions');
     expect(editor().text()).toContain('def clean(raw, ctx):');
-    editor().replace(editor().text()); // keep it unsaved
+    expect(editor().text()).toContain('# %% Drop test submissions and duplicates');
     byTestId<HTMLButtonElement>(root, 'indicator-coverage')!.click();
     await settle(harness);
     confirmDialog()!.click();
@@ -277,10 +323,82 @@ describe('ProjectScripts', () => {
     await settle(harness);
 
     expect(editor().text()).toContain('# coverage v1');
-    byTestId<HTMLButtonElement>(root, 'template')!.click();
+    await chooseTemplate(opened, 'rate-by-group');
     expect(editor().text()).toContain('def compute(cleaned, ctx):');
     expect(editor().text()).toContain('denominator');
     expect(editor().text()).not.toContain('compute_indicators');
+  });
+
+  it('lists each template of an indicator with its name and description', async () => {
+    const coverage = indicatorVersion('coverage', 1);
+    const opened = await open('analyst', { scripts: withIndicators(coverage) });
+    await selectIndicator(opened, coverage);
+
+    byTestId<HTMLButtonElement>(opened.root, 'template')!.click();
+    await settle(opened.harness);
+    await tick();
+
+    const items = [...document.querySelectorAll('[data-testid="template-menu"] [role="menuitem"]')].map((item) =>
+      [...item.querySelectorAll('span')].map((span) => span.textContent!.trim()).join(' '),
+    );
+    expect(items).toEqual([
+      'Count by group How many submissions there are in each group.',
+      'Rate by group The share that meets a condition in each group, with numerator and denominator.',
+      'Monthly series Submissions per month, for a line chart.',
+    ]);
+  });
+
+  it('offers the templates of script 2 on script 2', async () => {
+    const opened = await open('analyst');
+    byTestId<HTMLButtonElement>(opened.root, 'script-output')!.click();
+    await settle(opened.harness);
+    opened.http.expectOne(`${scriptsUrl}/output/versions`).flush([]);
+    await settle(opened.harness);
+
+    byTestId<HTMLButtonElement>(opened.root, 'template')!.click();
+    await settle(opened.harness);
+    await tick();
+
+    expect([...document.querySelectorAll('[data-testid="template-menu"] [role="menuitem"] .font-medium')].map((n) => n.textContent)).toEqual([
+      'Columns for the dashboard',
+      'Join a repeat group to main',
+    ]);
+  });
+
+  it('keeps unsaved edits when the replacement is not confirmed, and replaces them when it is', async () => {
+    const opened = await open('analyst');
+    const { harness, editor } = opened;
+    editor().replace('# unsaved');
+    await settle(harness);
+
+    await chooseTemplate(opened, 'fix-types-and-recode');
+    expect(document.body.textContent).toContain('Replace the code?');
+    (document.querySelector('.cdk-overlay-container button[tmzButton]:not([data-testid="confirm"])') as HTMLButtonElement).click();
+    await tick();
+    await settle(harness);
+    expect(editor().text()).toBe('# unsaved');
+
+    await chooseTemplate(opened, 'fix-types-and-recode');
+    confirmDialog()!.click();
+    await tick();
+    await settle(harness);
+    expect(editor().text()).toContain('# Script 1: give columns their real types');
+  });
+
+  it('replaces the saved code without asking, as one edit that can be undone', async () => {
+    const opened = await open('analyst');
+    const { harness, editor } = opened;
+    const saved = editor().text();
+
+    await chooseTemplate(opened, 'drop-test-submissions');
+    expect(document.body.textContent).not.toContain('Replace the code?');
+    expect(editor().text()).not.toBe(saved);
+
+    const content = document.querySelector('.cm-content') as HTMLElement;
+    content.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }));
+    await settle(harness);
+
+    expect(editor().text()).toBe(saved);
   });
 
   it('asks before discarding unsaved edits when switching scripts', async () => {
@@ -1060,4 +1178,423 @@ describe('ProjectScripts', () => {
     expect(coverage.textContent).toContain('v2');
     expect(byTestId(coverage, 'step-tables')?.textContent).toContain('coverage (12)');
   });
+
+  // The side panel, the editor's help and the cell actions
+
+  it('lists the published tables beside the editor with their rows, types and question labels', async () => {
+    const { root } = await open('analyst');
+    const panel = byTestId(root, 'inputs-panel')!;
+
+    expect(byTestId(panel, 'inputs-intro')?.textContent).toContain('flattened tables script 1 receives');
+    expect(byTestId(panel, 'inputs-published')?.textContent).toContain('Published');
+    const main = byTestId(panel, 'input-table-main')!;
+    expect(main.textContent).toContain('480 rows');
+    expect(main.textContent).toContain('has_water');
+    expect(main.textContent).toContain('Does the household have running water?');
+    expect(byTestId(panel, 'input-table-members')?.textContent).toContain('1,200 rows');
+    expect(byTestId(panel, 'input-reference-population')?.textContent).toContain('population_2026');
+    expect(panel.textContent).toContain('Municipality');
+  });
+
+  it('says the tables appear after the first run, and the editor still works', async () => {
+    const { root, editor } = await open('analyst', { inputs: scriptInputs({ publishedAt: null, runId: null, tables: [] }) });
+
+    expect(byTestId(root, 'inputs-none')?.textContent).toContain('appear after the first run');
+    expect(byTestId(root, 'inputs-published')).toBeNull();
+    editor().replace('# still works');
+    expect(editor().text()).toBe('# still works');
+  });
+
+  it('shows the same tables to a viewer, who copies a name instead of inserting it', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const { root, editor } = await open('viewer');
+    const before = editor().text();
+
+    expect(byTestId(root, 'input-table-main')).not.toBeNull();
+    expect(byTestId(root, 'inputs-panel')?.textContent).toContain('Click a name to copy it');
+    const name = [...byTestId(root, 'input-table-main')!.querySelectorAll<HTMLButtonElement>('[data-testid="input-name"]')].find((b) => b.textContent === 'has_water')!;
+    name.click();
+
+    expect(writeText).toHaveBeenCalledWith('has_water');
+    expect(editor().text()).toBe(before);
+    expect(TestBed.inject(ToastService).toasts().at(-1)?.message).toContain('Copied has_water');
+  });
+
+  it('inserts a column name as a quoted string at the cursor of the editor', async () => {
+    const { root, harness, editor } = await open('analyst');
+    editor().replace('main[');
+    const view = EditorView.findFromDOM(root.querySelector('.cm-editor') as HTMLElement)!;
+    view.dispatch({ selection: { anchor: 5 } });
+    await settle(harness);
+
+    const name = [...byTestId(root, 'input-table-main')!.querySelectorAll<HTMLButtonElement>('[data-testid="input-name"]')].find((b) => b.textContent === 'has_water')!;
+    name.click();
+
+    expect(editor().text()).toBe('main["has_water"');
+    expect(view.state.selection.main.head).toBe(16);
+  });
+
+  it('filters tables, columns and questions by name or label', async () => {
+    const { root, harness } = await open('analyst');
+    const filter = byTestId<HTMLInputElement>(root, 'inputs-filter')!;
+
+    typeInto(filter, 'water');
+    await settle(harness);
+
+    const main = byTestId(root, 'input-table-main')!;
+    expect(main.textContent).toContain('has_water');
+    expect(main.textContent).not.toContain('municipality');
+    expect(byTestId(root, 'input-table-members')).toBeNull();
+    expect(byTestId(root, 'input-reference-population')).toBeNull();
+
+    typeInto(filter, 'nothing like this');
+    await settle(harness);
+    expect(byTestId(root, 'inputs-no-match')).not.toBeNull();
+  });
+
+  it('reads the clean tables when an indicator is selected, and reads them again on refresh', async () => {
+    const coverage = indicatorVersion('coverage', 1);
+    const opened = await open('analyst', { scripts: withIndicators(coverage) });
+    const { root, http, harness } = opened;
+
+    byTestId<HTMLButtonElement>(root, 'indicator-coverage')!.click();
+    await settle(harness);
+    http.expectOne(`${scriptsUrl}/indicators/coverage/versions`).flush([summary(coverage)]);
+    http.expectOne((r) => r.url === inputsUrl && r.params.get('kind') === 'indicator').flush(
+      scriptInputs({ source: 'clean', tables: [{ name: 'main', rows: 2, columns: [{ name: 'municipality', type: 'text' }] }] }),
+    );
+    await settle(harness);
+
+    expect(byTestId(root, 'inputs-intro')?.textContent).toContain('clean tables this script receives');
+    expect(byTestId(root, 'input-table-main')?.textContent).toContain('2 rows');
+    expect(byTestId(root, 'input-table-members')).toBeNull();
+
+    byTestId<HTMLButtonElement>(root, 'inputs-refresh')!.click();
+    http.expectOne((r) => r.url === inputsUrl && r.params.get('kind') === 'indicator').flush(
+      scriptInputs({ source: 'clean', tables: [{ name: 'main', rows: 5, columns: [] }] }),
+    );
+    await settle(harness);
+    expect(byTestId(root, 'input-table-main')?.textContent).toContain('5 rows');
+  });
+
+  it('puts the side panel after the editor so that it sits below it on a phone', async () => {
+    const { root } = await open('analyst');
+
+    const editorCard = root.querySelector('tmz-code-editor')!;
+    const panel = byTestId(root, 'side-panel')!;
+
+    expect(editorCard.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(panel.closest('.grid')?.className).toContain('lg:grid-cols-4');
+  });
+
+  it('shows the problems found while editing, jumps to one, and still saves', async () => {
+    const { root, http, harness, editor } = await open('analyst');
+
+    editor().replace('def clean(raw, ctx):\n    x = (\n');
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await settle(harness);
+
+    const problems = byTestId(root, 'problems')!;
+    expect(problems.textContent).toContain('Syntax error');
+    expect(problems.textContent).toContain('Saving and testing are never blocked');
+    byTestId<HTMLButtonElement>(root, 'problem')!.click();
+    expect(document.activeElement).toBe(root.querySelector('.cm-content'));
+
+    byTestId<HTMLButtonElement>(root, 'save')!.click();
+    const save = http.expectOne((r) => r.url === `${scriptsUrl}/clean` && r.method === 'PUT');
+    expect(save.request.body).toEqual({ code: 'def clean(raw, ctx):\n    x = (\n' });
+  });
+
+  it('tells the keys of the editor next to it', async () => {
+    const { root } = await open('analyst');
+
+    expect(byTestId(root, 'editor-keys')?.textContent).toContain('Press Esc, then Tab, to leave the editor');
+  });
+
+  it('shows a viewer the reference of the selected indicator: its contract and what it returns', async () => {
+    const coverage = indicatorVersion('coverage', 1);
+    const opened = await open('viewer', { scripts: withIndicators(coverage) });
+    await selectIndicator(opened, coverage);
+    opened.http.expectOne((r) => r.url === inputsUrl && r.params.get('kind') === 'indicator');
+
+    byTestId<HTMLButtonElement>(opened.root, 'side-tab-reference')!.click();
+    await settle(opened.harness);
+
+    const reference = byTestId(opened.root, 'ctx-reference')!;
+    expect(byTestId(reference, 'reference-signature')?.textContent).toBe('compute(cleaned, ctx)');
+    expect(byTestId(reference, 'reference-returns')?.textContent).toContain('at least one numeric column');
+    expect(byTestId(reference, 'reference-returns')?.textContent).toContain('numerator and denominator');
+    for (const member of ['project_name', 'show', 'form.label', 'form.column_label', 'log.info', 'reference.get']) {
+      const path = `ctx.${member}`;
+      expect(byTestId(reference, `reference-${path}`), path).not.toBeNull();
+    }
+    expect(byTestId(reference, 'reference-ctx.form.label')?.textContent).toContain('ctx.form.label(question, code)');
+  });
+
+  describe('cells', () => {
+    const cellScript = 'def clean(raw, ctx):\n    # %% Load\n    main = raw["main"]\n    # %% Rate\n    rate = 1\n    # %% Return\n    return raw\n';
+
+    async function openWithCells(role: ProjectRole) {
+      const opened = await open(role);
+      opened.editor().replace(cellScript);
+      await settle(opened.harness);
+      return opened;
+    }
+
+    it('runs a test through the first cell, stopping at the next marker', async () => {
+      const { root, http, harness } = await openWithCells('analyst');
+
+      const buttons = root.querySelectorAll<HTMLButtonElement>('.cm-run-cell');
+      expect(buttons).toHaveLength(3);
+      buttons[0].click();
+
+      const request = http.expectOne((r) => r.url === testsUrl && r.method === 'POST');
+      expect(request.request.body).toEqual({ kind: 'clean', code: cellScript, sampleSize: 500, stopAtLine: 4 });
+      request.flush(scriptTest({ code: cellScript, stopAtLine: 4 }));
+      await settle(harness);
+      expect(byTestId(root, 'test-panel')).not.toBeNull();
+    });
+
+    it('runs a whole test for the last cell', async () => {
+      const { root, http } = await openWithCells('analyst');
+
+      root.querySelectorAll<HTMLButtonElement>('.cm-run-cell')[2].click();
+
+      const request = http.expectOne((r) => r.url === testsUrl && r.method === 'POST');
+      expect(request.request.body).toEqual({ kind: 'clean', code: cellScript, sampleSize: 500 });
+    });
+
+    it('runs the cell the cursor is in with Ctrl+Enter, using the sample size of the field', async () => {
+      const { root, http, harness } = await openWithCells('analyst');
+      const size = byTestId<HTMLInputElement>(root, 'sample-size')!;
+      typeInto(size, '120');
+      const view = EditorView.findFromDOM(root.querySelector('.cm-editor') as HTMLElement)!;
+      view.dispatch({ selection: { anchor: view.state.doc.line(5).from + 2 } });
+      await settle(harness);
+
+      const event = new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'keyCode', { value: 13 });
+      view.contentDOM.dispatchEvent(event);
+
+      const request = http.expectOne((r) => r.url === testsUrl && r.method === 'POST');
+      expect(request.request.body).toEqual({ kind: 'clean', code: cellScript, sampleSize: 120, stopAtLine: 6 });
+    });
+
+    it('offers no cell actions to a viewer', async () => {
+      const { root, http } = await open('viewer');
+
+      expect(root.querySelectorAll('.cm-run-cell')).toHaveLength(0);
+      http.expectNone((r) => r.url === testsUrl);
+    });
+
+    it('offers no cell actions while an older version is on view', async () => {
+      const { root, http, harness, editor } = await open('analyst');
+      editor().replace(cellScript);
+      await settle(harness);
+      expect(root.querySelectorAll('.cm-run-cell')).toHaveLength(3);
+
+      byTestId<HTMLButtonElement>(root, 'version-1')!.click();
+      await settle(harness);
+      confirmDialog()!.click();
+      await tick();
+      await settle(harness);
+      http.expectOne(`${scriptsUrl}/clean/versions/1`).flush(version(1));
+      await settle(harness);
+
+      expect(root.querySelectorAll('.cm-run-cell')).toHaveLength(0);
+    });
+  });
+
+
+  // The result of a test: what the script showed, a stop at a cell, reused steps
+
+  describe('test result', () => {
+    const markedCode = 'def clean(raw, ctx):\n    # %% Load\n    main = raw["main"]\n    # %% Rate\n    rate = 1\n    # %% Return\n    return raw\n';
+    const shownMain: ShownPreview = {
+      name: 'main',
+      line: 3,
+      rows: 120,
+      table: { name: 'main', rows: 120, columns: [{ name: '_id', type: 'integer' }], previewRows: 2, preview: [[1], [2]], cutCells: [] },
+      text: null,
+    };
+    const shownRate: ShownPreview = {
+      name: 'rate',
+      line: 5,
+      rows: 2,
+      table: {
+        name: 'rate',
+        rows: 2,
+        columns: [
+          { name: 'municipality', type: 'text' },
+          { name: 'value', type: 'decimal' },
+        ],
+        previewRows: 2,
+        preview: [
+          ['Cali', 0.5],
+          ['Buga', 0.25],
+        ],
+        cutCells: [],
+      },
+      text: null,
+    };
+    const shownCount: ShownPreview = { name: 'shown 3', line: 6, rows: 1, table: null, text: '120' };
+
+    /** Starts a test from the editor and has the API answer with `test`. */
+    async function testWith(test: ScriptTest) {
+      const opened = await open('analyst');
+      await startTest(opened);
+      opened.http.expectOne((r) => r.url === testsUrl && r.method === 'POST').flush(test);
+      await settle(opened.harness);
+      return opened;
+    }
+
+    const step = (overrides: Partial<TestStep>): TestStep => ({ ...flattenStep, step: 'clean', tables: [], ...overrides });
+
+    it('lists what the script showed in call order with each name and line, and shows the one chosen', async () => {
+      const { root, harness } = await testWith(
+        scriptTest({ status: 'succeeded', steps: [flattenStep, step({ shown: [shownMain, shownRate, shownCount] })] }),
+      );
+      const shown = byTestId(root, 'test-shown')!;
+
+      expect([...shown.querySelectorAll('button')].map((b) => [...b.querySelectorAll('span')].map((s) => s.textContent).join(' '))).toEqual([
+        'main line 3',
+        'rate line 5',
+        'shown 3 line 6',
+      ]);
+      // The last one shown is chosen at first.
+      expect(byTestId(shown, 'test-shown-text')?.textContent).toBe('120');
+      expect(byTestId(shown, 'test-shown-note')?.textContent).toContain('shown 3, line 6');
+
+      byTestId<HTMLButtonElement>(shown, 'test-shown-1')!.click();
+      await settle(harness);
+      expect(byTestId(root, 'test-shown-note')?.textContent).toContain('rate, line 5: first 2 of 2 rows.');
+      expect(byTestId(root, 'test-shown')?.textContent).toContain('Cali');
+      expect(byTestId(root, 'test-shown')?.textContent).toContain('0.25');
+      expect(byTestId(root, 'test-shown-1')?.getAttribute('aria-pressed')).toBe('true');
+
+      byTestId<HTMLButtonElement>(root, 'test-shown-0')!.click();
+      await settle(harness);
+      expect(byTestId(root, 'test-shown-note')?.textContent).toContain('main, line 3: first 2 of 120 rows.');
+    });
+
+    it('names the cell a test through a cell stopped at, and says nothing was validated', async () => {
+      const { root } = await testWith(
+        scriptTest({
+          code: markedCode,
+          stopAtLine: 6,
+          status: 'succeeded',
+          steps: [flattenStep, step({ status: 'stopped', stoppedAtLine: 6, shown: [shownRate], inputRows: 120, outputRows: null })],
+        }),
+      );
+
+      expect(byTestId(root, 'test-step-clean')?.textContent).toContain('Stopped at a cell');
+      expect(byTestId(root, 'test-stopped')?.textContent).toContain('Ran through the cell Rate and stopped at line 6');
+      expect(byTestId(root, 'test-success')?.textContent).toContain('ran to the end of the cell');
+      expect(byTestId(root, 'test-shown')?.textContent).toContain('rate');
+    });
+
+    it('numbers a cell that has no name', async () => {
+      const { root } = await testWith(
+        scriptTest({
+          code: 'def clean(raw, ctx):\n    # %%\n    x = 1\n    # %%\n    return raw\n',
+          stopAtLine: 4,
+          status: 'succeeded',
+          steps: [flattenStep, step({ status: 'stopped', stoppedAtLine: 4 })],
+        }),
+      );
+
+      expect(byTestId(root, 'test-stopped')?.textContent).toContain('Ran through the cell 1 and stopped at line 4');
+    });
+
+    it('keeps the previews of a script that then failed, next to its traceback', async () => {
+      const { root } = await testWith(
+        scriptTest({
+          status: 'failed',
+          errorCode: 'step.clean',
+          error: "KeyError: 'age'",
+          steps: [flattenStep, step({ status: 'failed', error: "KeyError: 'age'\n\nTraceback (most recent call last):", shown: [shownMain] })],
+        }),
+      );
+
+      expect(byTestId(root, 'test-step-error')?.textContent).toContain("KeyError: 'age'");
+      expect(byTestId(root, 'test-shown')?.textContent).toContain('main');
+      expect(byTestId(root, 'test-shown-note')?.textContent).toContain('main, line 3');
+    });
+
+    it('marks a step reused and shows the log first recorded', async () => {
+      const { root } = await testWith(
+        scriptTest({
+          status: 'succeeded',
+          steps: [{ ...flattenStep, reused: true, log: 'Sample: 120 submissions.\nReused from an earlier test.' }, step({})],
+        }),
+      );
+
+      expect(byTestId(byTestId(root, 'test-step-flatten')!, 'step-reused')?.textContent).toBe('Reused');
+      expect(byTestId(root, 'test-step-flatten')?.textContent).toContain('Sample: 120 submissions.');
+      expect(byTestId(root, 'test-step-flatten')?.textContent).toContain('Reused from an earlier test.');
+      expect(byTestId(byTestId(root, 'test-step-clean')!, 'step-reused')).toBeNull();
+    });
+
+    it('shows no preview list for a step that showed nothing', async () => {
+      const { root } = await testWith(scriptTest({ status: 'succeeded', steps: [flattenStep, step({ shown: [] })] }));
+
+      expect(byTestId(root, 'test-shown')).toBeNull();
+    });
+  });
+
+
+  it('shows an indicator test its table as the dashboard will see it, written in the format being edited', async () => {
+    const coverage = indicatorVersion('coverage', 1, { format: 'count', unit: 'households' });
+    const opened = await open('analyst', { scripts: withIndicators(coverage) });
+    await selectIndicator(opened, coverage);
+    opened.http.expectOne((r) => r.url === inputsUrl && r.params.get('kind') === 'indicator').flush(scriptInputs({ source: 'clean' }));
+    const { root, http, harness } = opened;
+    opened.editor().replace(draftCode);
+    await settle(harness);
+    byTestId<HTMLButtonElement>(root, 'test-on-sample')!.click();
+    await settle(harness);
+    const facts = {
+      measures: ['value'],
+      defaultMeasure: 'value',
+      ratio: false,
+      dimensions: ['municipality'],
+      defaultDimension: 'municipality',
+      geometry: [],
+      rows: 2,
+      defaultMeasureNulls: 0,
+      defaultMeasureMax: 0.75,
+      totals: { value: 0.75 },
+      duplicateRows: 0,
+      charts: { municipality: { values: 2, groups: [{ group: 'Cali', value: 0.5, numerator: null, denominator: null }, { group: 'Buga', value: 0.25, numerator: null, denominator: null }] } },
+    };
+    const indicatorStep: TestStep = { ...flattenStep, step: 'indicator', tables: [], dashboard: facts };
+    http
+      .expectOne((r) => r.url === testsUrl && r.method === 'POST')
+      .flush(scriptTest({ kind: 'indicator', name: 'coverage', code: draftCode, status: 'succeeded', steps: [flattenStep, indicatorStep] }));
+    await settle(harness);
+
+    const stat = () => byTestId(byTestId(root, 'indicator-view')!, 'stat-value')?.textContent;
+    expect(byTestId(root, 'indicator-view')).not.toBeNull();
+    expect(stat()).toBe('1 households');
+
+    const format = byTestId<HTMLSelectElement>(root, 'meta-format')!;
+    typeInto(format, 'percent');
+    await settle(harness);
+
+    expect(stat()).toBe('75% households');
+    expect(byTestId(root, 'test-panel')?.textContent).toContain('75%');
+  });
+
+  it('shows no dashboard view for a test of script 1', async () => {
+    const opened = await open('analyst');
+    await startTest(opened);
+    opened.http
+      .expectOne((r) => r.url === testsUrl && r.method === 'POST')
+      .flush(scriptTest({ status: 'succeeded', steps: [flattenStep, { ...flattenStep, step: 'clean' }] }));
+    await settle(opened.harness);
+
+    expect(byTestId(opened.root, 'indicator-view')).toBeNull();
+  });
+
 });

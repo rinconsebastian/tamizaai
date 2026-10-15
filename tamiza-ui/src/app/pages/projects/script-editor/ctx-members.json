@@ -1,0 +1,31 @@
+{
+  "ctx": [
+    { "name": "project_name", "kind": "property", "signature": "ctx.project_name" },
+    { "name": "form", "kind": "property", "signature": "ctx.form" },
+    { "name": "log", "kind": "property", "signature": "ctx.log" },
+    { "name": "reference", "kind": "property", "signature": "ctx.reference" },
+    { "name": "show", "kind": "method", "signature": "ctx.show(data, name=None)" }
+  ],
+  "ctx.form": [
+    { "name": "questions", "kind": "property", "signature": "ctx.form.questions" },
+    { "name": "choices", "kind": "property", "signature": "ctx.form.choices" },
+    { "name": "columns", "kind": "property", "signature": "ctx.form.columns" },
+    { "name": "label", "kind": "method", "signature": "ctx.form.label(question, code)" },
+    { "name": "name", "kind": "method", "signature": "ctx.form.name(question, label)" },
+    { "name": "column_label", "kind": "method", "signature": "ctx.form.column_label(table, column)" }
+  ],
+  "ctx.log": [
+    { "name": "debug", "kind": "method", "signature": "ctx.log.debug(message, *args)" },
+    { "name": "info", "kind": "method", "signature": "ctx.log.info(message, *args)" },
+    { "name": "warning", "kind": "method", "signature": "ctx.log.warning(message, *args)" },
+    { "name": "error", "kind": "method", "signature": "ctx.log.error(message, *args)" },
+    { "name": "exception", "kind": "method", "signature": "ctx.log.exception(message, *args)" },
+    { "name": "critical", "kind": "method", "signature": "ctx.log.critical(message, *args)" }
+  ],
+  "ctx.reference": [
+    { "name": "get", "kind": "method", "signature": "ctx.reference.get(name, default=None)" },
+    { "name": "items", "kind": "method", "signature": "ctx.reference.items()" },
+    { "name": "keys", "kind": "method", "signature": "ctx.reference.keys()" },
+    { "name": "values", "kind": "method", "signature": "ctx.reference.values()" }
+  ]
+}

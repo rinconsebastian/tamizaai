@@ -384,7 +384,46 @@
     "versionNumber": "Version {{ number }}",
     "editorLabel": "Python code of script {{ kind }}",
     "save": "Save",
-    "template": "Insert template",
+    "template": "Templates",
+    "templateReplaceTitle": "Replace the code?",
+    "templateReplaceMessage": "The editor has unsaved changes and the template replaces them. Ctrl+Z brings them back.",
+    "templateReplace": "Replace",
+    "templates": {
+      "clean": {
+        "drop-test-submissions": {
+          "name": "Drop test submissions",
+          "description": "Remove submissions whose identifier starts with a prefix, and duplicates."
+        },
+        "fix-types-and-recode": {
+          "name": "Fix types and recode",
+          "description": "Convert a date column and turn empty text into missing values."
+        }
+      },
+      "output": {
+        "columns-for-the-dashboard": {
+          "name": "Columns for the dashboard",
+          "description": "Choose, order and rename the columns of the main table."
+        },
+        "join-repeat-to-main": {
+          "name": "Join a repeat group to main",
+          "description": "Add to each submission the number of rows it has in a repeat group."
+        }
+      },
+      "indicator": {
+        "count-by-group": {
+          "name": "Count by group",
+          "description": "How many submissions there are in each group."
+        },
+        "rate-by-group": {
+          "name": "Rate by group",
+          "description": "The share that meets a condition in each group, with numerator and denominator."
+        },
+        "monthly-series": {
+          "name": "Monthly series",
+          "description": "Submissions per month, for a line chart."
+        }
+      }
+    },
     "upload": "Upload .py",
     "remove": "Remove script",
     "unsaved": "Unsaved changes",
@@ -443,6 +482,167 @@
       "decimal": "A number with two decimals.",
       "percent": "A fraction shown as a percentage: 0.42 is shown as 42%.",
       "currency": "A number with two decimals, in the currency given as the unit."
+    },
+    "checks": {
+      "scriptNames": {
+        "clean": "Script 1",
+        "output": "Script 2",
+        "indicator": "An indicator script"
+      },
+      "syntax": "Syntax error: Python cannot read the code here.",
+      "noContract": "{{ script }} must define {{ signature }}.",
+      "parameters": "The function takes two parameters: {{ signature }}.",
+      "unknownMember": "{{ object }} has no member '{{ member }}'. Its members: {{ members }}.",
+      "unknownReference": "The project has no reference table {{ name }}. Available: {{ available }}.",
+      "noReference": "The project has no reference tables, so there is no {{ name }}. Upload one in Reference data.",
+      "unknownTable": "There is no input table {{ name }}. Available: {{ available }}.",
+      "mixedIndentation": "This line is indented with tabs and spaces. Use four spaces."
+    },
+    "editor": {
+      "keys": "Tab indents. Press Esc, then Tab, to leave the editor. Ctrl+Enter (Cmd+Enter on macOS) runs the cell the cursor is in.",
+      "runCell": "Run cell",
+      "runCellNamed": "Run cell {{ name }}",
+      "problemsTitle": "Problems found while editing",
+      "problemLine": "Line {{ line }}",
+      "problemsHint": "These are hints found without running the script. Saving and testing are never blocked."
+    },
+    "reference": {
+      "title": "Reference",
+      "contractTitle": "The contract of this script",
+      "returns": {
+        "clean": "Return a dictionary of table names to DataFrames. Table names use lowercase letters, digits and underscores. Without script 1, the flattened tables are the clean data.",
+        "output": "Return a dictionary of table names to DataFrames: the tables the clean data dashboard shows. Without script 2, it shows the clean tables.",
+        "indicator": "Return one DataFrame: the columns to break the figure down by (dimensions) and at least one numeric column. By convention value is what a widget plots by default, and numerator and denominator let it plot a rate as a ratio of sums."
+      },
+      "parameters": {
+        "clean": "raw: a dictionary of the flattened tables, \"main\" and one per repeat group. Select answers are choice labels.",
+        "output": "cleaned: a dictionary of the tables script 1 returned (or the flattened tables).",
+        "indicator": "cleaned: a dictionary of the tables script 1 returned (or the flattened tables)."
+      },
+      "cellsTitle": "Cells and ctx.show",
+      "cellsText": "A line that starts with # %% begins a cell. Run cell tests the script from the start and stops at the end of that cell, without validating the output. ctx.show(data, name) adds a preview of a DataFrame, Series or value to the result of a test; in a run it does nothing.",
+      "cellsExample": "def compute(cleaned, ctx):\n    # %% Load\n    main = cleaned[\"main\"]\n    ctx.show(main, \"main\")\n    # %% Count\n    return main.groupby(\"municipality\").size().rename(\"value\").reset_index()",
+      "ctxTitle": "ctx",
+      "example": "Example"
+    },
+    "ctx": {
+      "members": {
+        "root": {
+          "project_name": {
+            "description": "The project's name.",
+            "example": "ctx.log.info(ctx.project_name)"
+          },
+          "form": {
+            "description": "The form dictionary: questions, choices and the labels of the current form.",
+            "example": "ctx.form.questions"
+          },
+          "log": {
+            "description": "A Python logger. Its messages appear in the step's log.",
+            "example": "ctx.log.info(\"%d rows\", len(main))"
+          },
+          "reference": {
+            "description": "The project's reference tables by name, as DataFrames.",
+            "example": "ctx.reference[\"population\"]"
+          },
+          "show": {
+            "description": "Shows a DataFrame, Series or any value in the result of a sample test, as it is at this call, and returns it unchanged. In a run it does nothing.",
+            "example": "main = ctx.show(main, \"main\")"
+          }
+        },
+        "form": {
+          "questions": {
+            "description": "DataFrame of the form's questions: name, path, type, label and list_name.",
+            "example": "ctx.form.questions[[\"name\", \"label\"]]"
+          },
+          "choices": {
+            "description": "DataFrame of the choice lists of the current form: list_name, name and label.",
+            "example": "ctx.form.choices.query(\"list_name == 'municipalities'\")"
+          },
+          "columns": {
+            "description": "DataFrame of the flattened columns that hold answers: table, column, path and label.",
+            "example": "ctx.form.columns.query(\"table == 'main'\")"
+          },
+          "label": {
+            "description": "The label of a choice code in the current form, by question name or path, or None.",
+            "example": "ctx.form.label(\"municipality\", \"cali\")"
+          },
+          "name": {
+            "description": "The code a label stands for, by question name or path. It also searches earlier form versions. None when unknown or ambiguous.",
+            "example": "ctx.form.name(\"municipality\", \"Cali\")"
+          },
+          "column_label": {
+            "description": "The question label of a column of the flattened tables, or None.",
+            "example": "ctx.form.column_label(\"main\", \"age\")"
+          }
+        },
+        "log": {
+          "debug": {
+            "description": "Writes a debug message to the step's log.",
+            "example": "ctx.log.debug(\"columns: %s\", list(main.columns))"
+          },
+          "info": {
+            "description": "Writes an information message to the step's log.",
+            "example": "ctx.log.info(\"Removed %d rows\", removed)"
+          },
+          "warning": {
+            "description": "Writes a warning to the step's log.",
+            "example": "ctx.log.warning(\"%d rows have no age\", missing)"
+          },
+          "error": {
+            "description": "Writes an error message to the step's log. The step goes on.",
+            "example": "ctx.log.error(\"Unexpected value: %s\", value)"
+          },
+          "exception": {
+            "description": "Writes an error message with the current traceback; use it inside an except block.",
+            "example": "ctx.log.exception(\"Could not convert the date\")"
+          },
+          "critical": {
+            "description": "Writes a critical message to the step's log.",
+            "example": "ctx.log.critical(\"No rows left\")"
+          }
+        },
+        "reference": {
+          "get": {
+            "description": "A reference table by name, or the default when the project has none with that name.",
+            "example": "ctx.reference.get(\"population\")"
+          },
+          "items": {
+            "description": "The names of the reference tables with their DataFrames.",
+            "example": "for name, table in ctx.reference.items(): ..."
+          },
+          "keys": {
+            "description": "The names of the project's reference tables.",
+            "example": "list(ctx.reference.keys())"
+          },
+          "values": {
+            "description": "The reference tables as DataFrames.",
+            "example": "[len(t) for t in ctx.reference.values()]"
+          }
+        }
+      }
+    },
+    "sidePanel": "Tables and reference",
+    "sideTabs": {
+      "inputs": "Tables",
+      "reference": "Reference"
+    },
+    "inputs": {
+      "rawIntro": "The flattened tables script 1 receives, as the last run published them.",
+      "cleanIntro": "The clean tables this script receives, as the last run published them.",
+      "publishedAt": "Published {{ when }}. A saved script changes them only from the next run.",
+      "nothingPublished": "The tables appear after the first run. You can write the script without them.",
+      "refresh": "Refresh",
+      "filterLabel": "Filter tables, columns and questions",
+      "filterPlaceholder": "Filter by name or label",
+      "insertHint": "Click a name to insert it at the cursor.",
+      "copyHint": "Click a name to copy it.",
+      "tables": "Tables",
+      "referenceTables": "Reference tables",
+      "questions": "Questions",
+      "rows": "{{ count }} rows",
+      "noMatch": "Nothing matches the filter.",
+      "loadError": "The tables could not be loaded.",
+      "copied": "Copied {{ name }}."
     }
   },
   "runs": {
@@ -482,7 +682,8 @@
     "stepStatus": {
       "succeeded": "Succeeded",
       "failed": "Failed",
-      "skipped": "Skipped"
+      "skipped": "Skipped",
+      "stopped": "Stopped at a cell"
     },
     "referenceTitle": "Reference data used",
     "referenceTable": "({{ rows }} rows, updated {{ updated }})",
@@ -612,7 +813,40 @@
     "previewRows": "First {{ shown }} of {{ rows }} rows.",
     "previewTrimmed": "First {{ shown }} of {{ rows }} rows: fewer are shown to keep the preview under 1 MB.",
     "noPreview": "{{ rows }} rows. Only the first 20 tables of a step are previewed.",
-    "indicator": "indicator {{ name }}"
+    "indicator": "indicator {{ name }}",
+    "shownTitle": "Shown by the script",
+    "shownLine": "line {{ line }}",
+    "shownTable": "{{ name }}, line {{ line }}: first {{ shown }} of {{ rows }} rows.",
+    "shownText": "{{ name }}, line {{ line }}.",
+    "stoppedAt": "Ran through the cell {{ name }} and stopped at line {{ line }}, where the next cell begins. The output was not validated.",
+    "cellNumber": "{{ number }}",
+    "succeededThroughCell": "The script ran to the end of the cell without errors. Nothing was validated, saved or published.",
+    "reused": "Reused",
+    "reusedHint": "The result came from an earlier test with the same inputs.",
+    "view": {
+      "title": "As the dashboard will see it",
+      "measures": "Measures",
+      "defaultMeasure": "{{ measure }} is plotted by default.",
+      "ratio": "Rate",
+      "ratioYes": "numerator / denominator can be plotted as a ratio of sums.",
+      "ratioNo": "No ratio: it needs both numerator and denominator.",
+      "dimensions": "Dimensions",
+      "geometry": "Geometry columns",
+      "none": "none",
+      "chartBy": "Chart by",
+      "plot": "Plot",
+      "plotRatio": "Ratio of numerator to denominator",
+      "tooMany": "{{ dimension }} has more than {{ max }} values, so it is listed but not charted.",
+      "warnings": {
+        "noRows": "The table has no rows, so every widget will be empty.",
+        "noValue": "There is no value column. Widgets plot {{ measure }} by default; name a column value to choose another.",
+        "ratioIncomplete": "numerator and denominator go together: with only one of them, widgets cannot plot a rate.",
+        "emptyValues": "{{ count }} rows have no value in {{ measure }}; widgets leave them out of the sums.",
+        "percentAboveOne": "The format is percent and the largest value is {{ max }}, which shows as {{ shown }}. A percent is a fraction: 0.42 shows as 42%.",
+        "dimensionAsMeasure": "{{ column }} is a number, so widgets offer it as a measure, not as a dimension to break figures down by. Return it as text to use it as a dimension.",
+        "duplicateRows": "{{ count }} rows share the same values in every dimension, so widgets add them up."
+      }
+    }
   },
   "preview": {
     "cut": "(cut at 500 characters)",

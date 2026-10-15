@@ -8,6 +8,7 @@ import {
   IndicatorMetadata,
   IndicatorScript,
   PipelineService,
+  ScriptInputs,
   ScriptList,
   ScriptRef,
   ScriptTest,
@@ -18,7 +19,6 @@ import {
   maxIndicators,
   maxSampleSize,
   minSampleSize,
-  scriptTemplates,
 } from '../../core/projects/pipeline.service';
 import { Alert, Badge, Button, Card, ConfirmDialog, FormField, Input, Skeleton, ToastService } from '../../shared/ui';
 import { CodeEditor } from '../../shared/ui/code-editor';
@@ -28,6 +28,11 @@ import { PipelineRuns } from './pipeline-runs';
 import { PipelineSettingsCard } from './pipeline-settings';
 import { ProjectContext } from './project-context';
 import { ScriptTestPanel } from './script-test-panel';
+import { ResolvedProblem, scriptAssist } from './script-editor/script-assist';
+import { ScriptInputsInfo } from './script-editor/script-analysis';
+import { ScriptSidePanel } from './script-editor/script-side-panel';
+import { TemplateMenu, TemplateOption } from './script-editor/template-menu';
+import { newIndicatorTemplate, scriptTemplates } from './script-templates/templates';
 
 const maxCodeBytes = 200 * 1024;
 
@@ -62,7 +67,9 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
     IndicatorMetadataFields,
     PipelineRuns,
     PipelineSettingsCard,
+    ScriptSidePanel,
     ScriptTestPanel,
+    TemplateMenu,
   ],
   template: `
     <div class="flex flex-col gap-6" *transloco="let t">
@@ -172,8 +179,29 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
               [value]="editorValue()"
               [readonly]="!canEdit() || !!viewing()"
               [label]="indicatorName() ? t('scripts.editorLabelIndicator', { name: indicatorName() }) : t('scripts.editorLabel', { kind: t('scripts.kinds.' + selected().kind) })"
+              [extensions]="assist()"
               (changed)="onEdit($event)"
             />
+            <p class="mt-1 text-xs text-body" data-testid="editor-keys">{{ t('scripts.editor.keys') }}</p>
+            @if (problems().length) {
+              <section class="mt-3" aria-labelledby="problems-title" data-testid="problems">
+                <h3 id="problems-title" class="text-sm font-medium text-heading">
+                  {{ t('scripts.editor.problemsTitle') }}
+                  <tmz-badge class="ms-1" data-testid="problem-count">{{ problems().length }}</tmz-badge>
+                </h3>
+                <ul class="mt-1 flex max-h-40 flex-col gap-1 overflow-y-auto">
+                  @for (problem of problems(); track problem.from + ':' + problem.message) {
+                    <li>
+                      <button type="button" class="flex w-full items-baseline gap-2 text-left text-sm text-body hover:underline" (click)="goToProblem(problem)" data-testid="problem">
+                        <tmz-badge [tone]="problem.severity === 'error' ? 'danger' : 'warning'">{{ t('scripts.editor.problemLine', { line: problem.line }) }}</tmz-badge>
+                        <span class="min-w-0">{{ problem.message }}</span>
+                      </button>
+                    </li>
+                  }
+                </ul>
+                <p class="mt-1 text-xs text-body">{{ t('scripts.editor.problemsHint') }}</p>
+              </section>
+            }
             @if (saveError(); as message) {
               <p class="mt-2 text-sm text-fg-danger-strong" data-testid="save-error">{{ message }}</p>
             }
@@ -190,9 +218,7 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
                 }
               } @else if (canEdit()) {
                 <button tmzButton type="button" [disabled]="busy() || !dirty()" (click)="save()" data-testid="save">{{ t('scripts.save') }}</button>
-                <button tmzButton variant="secondary" type="button" (click)="insertTemplate()" data-testid="template">
-                  {{ t('scripts.template') }}
-                </button>
+                <app-template-menu [label]="t('scripts.template')" [options]="templateOptions()" (chosen)="chooseTemplate($event)" />
                 <label tmzButton variant="secondary" class="cursor-pointer">
                   {{ t('scripts.upload') }}
                   <input type="file" accept=".py,text/x-python,text/plain" class="sr-only" (change)="upload($event)" data-testid="upload" />
@@ -232,6 +258,15 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
           }
         </tmz-card>
 
+        <div class="flex min-w-0 flex-col gap-6">
+        <app-script-side-panel
+          [kind]="selected().kind"
+          [inputs]="inputs()"
+          [failed]="inputsFailed()"
+          [canInsert]="canEdit() && !viewing()"
+          (pick)="insertName($event)"
+          (refresh)="reloadInputs()"
+        />
         <tmz-card [heading]="t('scripts.versionsTitle')" class="min-w-0">
           @if (versions().length === 0) {
             <p class="text-sm text-body">{{ t('scripts.noVersions') }}</p>
@@ -257,14 +292,15 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
             </ol>
           }
         </tmz-card>
+        </div>
       </div>
 
       @if (test(); as test) {
-        <app-script-test-panel [started]="test" [projectId]="projectId()" [draft]="draft()" />
+        <app-script-test-panel [started]="test" [projectId]="projectId()" [draft]="draft()" [metadata]="indicatorName() ? shownMetadata() : null" />
       }
 
       <app-pipeline-settings />
-      <app-pipeline-runs />
+      <app-pipeline-runs (runEnded)="reloadInputs()" />
     </div>
   `,
 })
@@ -301,7 +337,27 @@ export class ProjectScripts {
   /** The latest test started from this page; the panel follows it until it ends. */
   protected readonly test = signal<ScriptTest | null>(null);
 
+  /** What the side panel shows, by source: the raw tables for script 1, the clean tables for the others. */
+  protected readonly inputsBySource = signal<Partial<Record<'raw' | 'clean', ScriptInputs>>>({});
+  protected readonly inputsFailed = signal(false);
+  /** The problems the editor's checks found in the text, for the list under the editor. */
+  protected readonly problems = signal<ResolvedProblem[]>([]);
+
   protected readonly canEdit = computed(() => this.context.can('analyst'));
+  protected readonly inputs = computed(() => this.inputsBySource()[this.selected().kind === 'clean' ? 'raw' : 'clean'] ?? null);
+  /** The editor's extensions: completion, checks, hover and cell actions; rebuilt when the script kind or the inputs change. */
+  protected readonly assist = computed(() => {
+    const inputs = this.inputs();
+    const info: ScriptInputsInfo | null = inputs && { tables: inputs.tables, referenceTables: inputs.referenceTables, questions: inputs.questions };
+    return scriptAssist({
+      kind: this.selected().kind,
+      inputs: info,
+      translate: (key, params) => this.transloco.translate(key, params),
+      canRun: this.canEdit() && !this.viewing(),
+      runCell: (stopLine) => this.startTest(stopLine ?? undefined),
+      problems: (found) => this.problems.set(found),
+    });
+  });
   protected readonly indicators = computed(() => this.scripts()?.indicators ?? []);
   /** The selected indicator's name, or null while script 1 or script 2 is selected. */
   protected readonly indicatorName = computed(() => {
@@ -328,12 +384,13 @@ export class ProjectScripts {
   );
   /** What the editor starts from: a version being viewed, the template of a new indicator, or the saved code. Edits flow back through `onEdit`. */
   protected readonly editorValue = computed(() =>
-    this.viewing() ? (this.viewing()!.code ?? '') : this.newIndicator() ? scriptTemplates.indicator : this.savedCode(),
+    this.viewing() ? (this.viewing()!.code ?? '') : this.newIndicator() ? newIndicatorTemplate.source : this.savedCode(),
   );
   protected readonly shownMetadata = computed(() => (this.viewing() ? metadataOf(this.viewing()!) : this.meta()));
 
   constructor() {
     this.load();
+    this.loadInputs();
   }
 
   /** Asks before discarding unsaved edits; used when switching scripts and by the route guard. */
@@ -371,6 +428,7 @@ export class ProjectScripts {
     this.selected.set(script);
     this.resetDraft();
     this.loadVersions();
+    this.loadInputs();
   }
 
   protected badgeTone(kind: FixedScriptKind) {
@@ -407,9 +465,9 @@ export class ProjectScripts {
     this.saveError.set(null);
     this.fieldErrors.set({});
     this.meta.set(metadata);
-    this.draft.set(scriptTemplates.indicator);
+    this.draft.set(newIndicatorTemplate.source);
     // Explicit, because the editor's value input does not change when the previous script had the template as its code.
-    this.editor()?.replace(scriptTemplates.indicator);
+    this.editor()?.replace(newIndicatorTemplate.source);
   }
 
   protected save(): void {
@@ -484,7 +542,10 @@ export class ProjectScripts {
   }
 
   /** Tests the editor's text, saved or not, on a sample of the project's submissions; an indicator is tested under its name. */
-  protected startTest(): void {
+  protected startTest(stopAtLine?: number): void {
+    if (this.testing()) {
+      return;
+    }
     const size = Number(this.sampleSize());
     this.testError.set(null);
     if (!Number.isInteger(size) || size < minSampleSize || size > maxSampleSize) {
@@ -497,7 +558,7 @@ export class ProjectScripts {
       return;
     }
     this.testing.set(true);
-    this.service.startTest(this.projectId(), this.selected(), code, size).subscribe({
+    this.service.startTest(this.projectId(), this.selected(), code, size, stopAtLine).subscribe({
       next: (test) => {
         this.testing.set(false);
         this.test.set(test);
@@ -510,8 +571,73 @@ export class ProjectScripts {
     });
   }
 
-  protected insertTemplate(): void {
-    this.editor()?.replace(scriptTemplates[this.selected().kind]);
+  /** Reads the tables the selected script receives, unless they are already known. */
+  private loadInputs(force = false): void {
+    const kind = this.selected().kind;
+    const source = kind === 'clean' ? 'raw' : 'clean';
+    if (!force && this.inputsBySource()[source]) {
+      return;
+    }
+    this.service.scriptInputs(this.projectId(), kind).subscribe({
+      next: (inputs) => {
+        this.inputsFailed.set(false);
+        this.inputsBySource.update((known) => ({ ...known, [inputs.source]: inputs }));
+      },
+      error: () => this.inputsFailed.set(true),
+    });
+  }
+
+  /** Reads the published tables again, after a run ended or on the panel's refresh button. */
+  protected reloadInputs(): void {
+    this.inputsBySource.set({});
+    this.loadInputs(true);
+  }
+
+  /** Puts a table, column or question name in the editor as a quoted string, or copies it when the editor is read-only. */
+  protected insertName(name: string): void {
+    if (this.canEdit() && !this.viewing()) {
+      this.editor()?.insertAtCursor(JSON.stringify(name));
+      return;
+    }
+    void navigator.clipboard?.writeText(name);
+    this.toasts.success(this.transloco.translate('scripts.inputs.copied', { name }));
+  }
+
+  protected goToProblem(problem: ResolvedProblem): void {
+    this.editor()?.goTo(problem.from);
+  }
+
+  /** The templates of the selected script's kind with their translated names and descriptions. */
+  protected templateOptions(): TemplateOption[] {
+    const kind = this.selected().kind;
+    return scriptTemplates[kind].map(({ id }) => ({
+      id,
+      name: this.transloco.translate(`scripts.templates.${kind}.${id}.name`),
+      description: this.transloco.translate(`scripts.templates.${kind}.${id}.description`),
+    }));
+  }
+
+  /** Replaces the editor's text with a template as one edit that can be undone, after asking when there are edits to lose. */
+  protected async chooseTemplate(id: string): Promise<void> {
+    const template = scriptTemplates[this.selected().kind].find((candidate) => candidate.id === id);
+    if (!template) {
+      return;
+    }
+    const startingPoint = this.newIndicator() ? newIndicatorTemplate.source : this.savedCode();
+    if (this.draft() !== startingPoint && this.draft() !== template.source) {
+      const t = (key: string) => this.transloco.translate(key);
+      const confirmed = await this.confirmDialog.confirm({
+        title: t('scripts.templateReplaceTitle'),
+        message: t('scripts.templateReplaceMessage'),
+        confirmLabel: t('scripts.templateReplace'),
+        cancelLabel: t('common.cancel'),
+        tone: 'danger',
+      });
+      if (!confirmed) {
+        return;
+      }
+    }
+    this.editor()?.replace(template.source);
   }
 
   protected upload(event: Event): void {

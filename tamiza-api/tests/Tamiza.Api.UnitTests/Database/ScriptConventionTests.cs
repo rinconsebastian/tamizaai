@@ -67,4 +67,17 @@ public sealed class ScriptConventionTests
             name => Assert.StartsWith("ix_script_versions_", name));
         Assert.Contains("CREATE UNIQUE INDEX ix_script_versions_project_id_kind_name_number", sql);
     }
+
+    [Fact]
+    public void The_script_workbench_script_names_its_check_constraint()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0009_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0009_add_script_workbench.sql", resource);
+        Assert.Contains("ADD CONSTRAINT ck_script_tests_stop_line CHECK (stop_line > 0)", sql);
+        Assert.Equal(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count,
+            System.Text.RegularExpressions.Regex.Matches(sql, @"ADD CONSTRAINT (?:pk|fk|ck)_\w+ (?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count);
+    }
 }

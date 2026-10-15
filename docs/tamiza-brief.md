@@ -177,7 +177,7 @@ def compute(cleaned: dict[str, pd.DataFrame], ctx) -> pd.DataFrame: ...
 
 An indicator has a name (the name of its published table, immutable), a label, an optional description, an optional unit and a format (`count`, `decimal`, `percent` or `currency`), saved with every version of its script.
 
-`ctx` exposes: the project's reference data, the form dictionary (questions, choices and labels) and a logger whose messages are shown in the UI.
+`ctx` exposes: the project's reference data, the form dictionary (questions, choices and labels), a logger whose messages are shown in the UI and `ctx.show(data, name)`, which adds a preview of a DataFrame or value to the result of a sample test (and does nothing in a run).
 
 #### Requirement: Optional scripts with default behavior
 - Without script 1, `cleaned` = `raw`.
@@ -204,7 +204,7 @@ The chain SHALL run manually, when a synchronization finishes (configurable) or 
 Every save of a script SHALL create an immutable version. Each run records which version of each script it used, duration, input and output rows, logs and errors.
 
 #### Requirement: Sample test run
-An `analyst` SHALL be able to run a script in test mode on a sample (500 records by default) and see a preview of the resulting tables without publishing anything.
+An `analyst` SHALL be able to run a script in test mode on a sample (500 records by default) and see a preview of the resulting tables without publishing anything. A test can run through one `# %%` cell of the script (stopping at the next marker, with no output validation), shows what the script passed to `ctx.show`, reuses the flattened sample and the result of the saved script 1 from an earlier test when nothing they read changed, and for an indicator shows its table as the indicators dashboard will offer it, with warnings.
 
 #### Requirement: Run limits
 Each run SHALL have configurable time and memory limits. Scripts cannot install packages.
@@ -270,7 +270,7 @@ Widgets sit on a 12-column grid that analysts and admins move and resize by drag
 - `script_versions`: id, project_id, kind (clean/output/indicator), name (the indicator's name; empty for the two fixed scripts), code, label, description, unit, format (the indicator's metadata at that version), number (per project and kind, and per name), author_id, created_at.
 - `runs`: id, project_id, status (queued/running/succeeded/failed), trigger, the versions of script 1 and script 2 used and `indicator_versions` (name, version, number of each indicator script used), reference_tables, started_at, finished_at, error. Its steps are in `run_steps`: one for flatten, clean and output and one per indicator (`step` = `indicator` and its `name`), each with status, duration, rows and log.
 - `sampling_frames`: project_id, dimensions, targets.
-- `script_tests`: id, project_id, requested_by, kind, code (the tested draft), sample_size, status, clean_version_id, queued_at, started_at, finished_at, error, steps (per-step logs and table previews). Deleted 24 hours after they end.
+- `script_tests`: id, project_id, requested_by, kind, code (the tested draft), sample_size, status, clean_version_id, queued_at, started_at, finished_at, error, stop_line (the line of the `# %%` marker the draft is run through, null for a whole test), steps (per-step logs, table previews, what the draft showed and, for an indicator, the facts of its table). Deleted 24 hours after they end.
 - `reference_tables`: id, project_id, name, file_name, columns (name, header, type), row_count, updated_by, updated_at. The rows are in `reference_table_contents` (one JSONB array per table), not in a per-project schema.
 - `dashboard_widgets`: id, project_id, chart_type (stat/bar/column/line/histogram/pie/map), title, config (the widget's query: indicator, measure or ratio, group column, filters, geometry column, histogram ranges), layout (x, y, w, h on the 12-column grid), created_by, created_at, updated_by, updated_at. One row per widget of the indicators dashboard.
 - `form_versions`: project_id, uid (a Kobo form version, `__version__`), status (pending/available/failed/not_found), fields and choices (the version's questions and choice lists, with labels in the default language), deployed_at, recorded_at, fetched_at, attempts, next_attempt_at, error. One row per version a project's submissions use; recorded when a submission with the version is stored, fetched from Kobo once.
@@ -306,7 +306,7 @@ Implement in this order, one change per line:
 ### Next, in this order (agreed 2026-10-14, before loading real data)
 
 7a. `split-indicator-scripts`: instead of one script 3 returning one `indicators` table, a project has any number of named indicator scripts, each returning one table published under its name in `p_<id>_indicators`, with the rows and columns its indicator needs (any numeric column as a measure, `value` by default; `numerator`/`denominator` optional for ratios of sums), metadata per indicator (label, description, unit, format), per-table publishing so one failing indicator leaves its previous table and the others publish, and widgets that plot one indicator table each. Clean cut: the single-table contract is dropped without migration, since no real data exists yet. Implemented.
-7b. `add-script-workbench`: script-editing ergonomics: a panel of the available tables and columns with their types, autocompletion of `ctx`, tables and columns in the editor, Tab indentation and basic linting, inline `ctx` reference and better templates, and stateless exploration cells on the sample test (`# %%` cells and `ctx.show(df, name)` previews re-run from scratch on a cached sample; no persistent kernel) with an "as the dashboard will see it" preview for indicator tables.
+7b. `add-script-workbench`: script-editing ergonomics: a panel of the available tables and columns with their types, autocompletion of `ctx`, tables and columns in the editor, Tab indentation and basic linting, inline `ctx` reference and better templates, and stateless exploration cells on the sample test (`# %%` cells and `ctx.show(df, name)` previews re-run from scratch on a cached sample; no persistent kernel) with an "as the dashboard will see it" preview for indicator tables. Implemented.
 7c. `add-local-dev-kit`: download of a sample test's inputs (`context.json`, the input and reference Parquet files) through a single-use link, and a small `tamiza-sdk` package built from the database-free runner (`load_context`, `load_tables`, `check`) to write scripts in Jupyter locally and upload them.
 
 Deferred with a reason: a Jupyter-like persistent kernel in the browser (it contradicts the per-step process isolation, the one-job worker and the 4 GB VPS target); a shared helper module across indicator scripts; widgets that compare several indicator tables.

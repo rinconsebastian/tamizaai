@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from tamiza import interchange, names
+from tamiza import interchange, names, shows
 
 POLL_SECONDS = 0.25
 MAX_LOG_BYTES = 1024 * 1024
@@ -34,7 +34,17 @@ class OutputTable:
     rows: int
     path: Path
     column_labels: dict[str, str] = field(default_factory=dict)  # question labels of flattened columns, by name
-    column_labels: dict[str, str] = field(default_factory=dict)  # question labels of flattened columns, by name
+
+
+@dataclass
+class ShownValue:
+    """One ``ctx.show`` call: a Parquet file with the first rows of a table, or the text of any other value."""
+
+    name: str
+    line: int
+    rows: int
+    path: Path | None = None
+    text: str | None = None
 
 
 @dataclass
@@ -44,6 +54,9 @@ class ScriptOutcome:
     error: str | None = None
     error_code: str | None = None  # limit.time, limit.memory or None
     tables: list[OutputTable] = field(default_factory=list)
+    stopped_at: int | None = None  # the line of the ``# %%`` marker a script run through a cell reached
+    # What the script passed to ``ctx.show``, kept whatever the outcome.
+    shown: list[ShownValue] = field(default_factory=list)
 
 
 def run_script(
@@ -56,11 +69,15 @@ def run_script(
     limits: Limits,
     reference: dict[str, Path] | None = None,
     name: str | None = None,
+    show: bool = False,
+    stop_line: int | None = None,
 ) -> ScriptOutcome:
     """
     Prepares ``work_dir/<kind>``, runs the script there, moves its Parquet outputs into ``out_dir`` and removes the
     step directory, whatever happened. ``reference`` maps the project's reference tables to their Parquet files.
-    ``name`` is the indicator an ``indicator`` script computes, which names the table it produces.
+    ``name`` is the indicator an ``indicator`` script computes, which names the table it produces. With ``show``, what
+    the script passes to ``ctx.show`` is returned in ``shown`` (the Parquet files moved to ``out_dir/_shows``), also
+    when the script fails; ``stop_line`` stops it at that ``# %%`` marker (``stopped_at``), with no tables.
     """
     step_dir = work_dir / kind
     shutil.rmtree(step_dir, ignore_errors=True)
@@ -75,17 +92,33 @@ def run_script(
             shutil.copyfile(path, step_dir / "reference" / f"{table}.parquet")
         (step_dir / "script.py").write_text(code, encoding="utf-8")
         (step_dir / "context.json").write_text(json.dumps(context), encoding="utf-8")
-        return _collect(step_dir, out_dir, *launch(step_dir, kind, limits, name))
+        outcome = _collect(step_dir, out_dir, *launch(step_dir, kind, limits, name, show, stop_line))
+        if show:
+            outcome.shown = _collect_shown(step_dir, out_dir / "_shows")
+        return outcome
     finally:
         shutil.rmtree(step_dir, ignore_errors=True)
 
 
-def launch(step_dir: Path, kind: str, limits: Limits, name: str | None = None) -> tuple[dict | None, str, str | None]:
+def launch(
+    step_dir: Path, kind: str, limits: Limits, name: str | None = None, show: bool = False, stop_line: int | None = None
+) -> tuple[dict | None, str, str | None]:
     """Runs the child and returns its result (or None), its log and the limit it hit (``time``/``memory``) if any."""
     log_path = step_dir / "log.txt"
     with log_path.open("wb") as log_file:
         process = subprocess.Popen(
-            [sys.executable, "-I", "-u", "-m", "tamiza.runner", str(step_dir), kind, *([name] if name else [])],
+            [
+                sys.executable,
+                "-I",
+                "-u",
+                "-m",
+                "tamiza.runner",
+                str(step_dir),
+                kind,
+                *([name] if name else []),
+                *(["--show"] if show else []),
+                *(["--stop-line", str(stop_line)] if stop_line is not None else []),
+            ],
             cwd=step_dir,
             env=child_environment(step_dir),
             stdin=subprocess.DEVNULL,
@@ -177,6 +210,8 @@ def _collect(step_dir: Path, out_dir: Path, result: dict | None, log: str, limit
         return ScriptOutcome(False, log, "The script was stopped because it exceeded the memory limit.", "limit.memory")
     if result is None:
         return ScriptOutcome(False, log, "The script process ended without a result.")
+    if result.get("status") == "stopped" and isinstance(result.get("line"), int):
+        return ScriptOutcome(True, log, stopped_at=result["line"])
     if result.get("status") != "succeeded":
         error = result.get("error") or "The script failed."
         if result.get("traceback"):
@@ -197,3 +232,16 @@ def _collect(step_dir: Path, out_dir: Path, result: dict | None, log: str, limit
         shutil.move(source, target)
         tables.append(OutputTable(name, interchange.count_rows(target), target))
     return ScriptOutcome(True, log, tables=tables)
+
+
+def _collect_shown(step_dir: Path, target: Path) -> list[ShownValue]:
+    """Moves the recorded previews out of the step directory, which is removed next."""
+    shown = []
+    for entry in shows.read_index(step_dir / "shows"):
+        path = None
+        if entry["file"] is not None:
+            target.mkdir(parents=True, exist_ok=True)
+            path = target / f"{len(shown) + 1}.parquet"
+            shutil.move(step_dir / "shows" / entry["file"], path)
+        shown.append(ShownValue(entry["name"], entry["line"], entry["rows"], path, entry["text"]))
+    return shown
