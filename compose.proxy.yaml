@@ -1,0 +1,20 @@
+# Optional override for a server where a reverse proxy runs in Docker on a shared network.
+# It also connects ui to that network, so the proxy reaches it as http://tamiza-ui:8080 and no host port is needed.
+# Use it together with compose.yaml; the network must already exist (the proxy's own network).
+#
+#   docker compose -f compose.yaml -f compose.proxy.yaml up -d --build --wait
+#   (or COMPOSE_FILE=compose.yaml:compose.proxy.yaml in .env)
+#
+# Portainer: Add stack > Repository > Compose path "compose.yaml", Additional paths "compose.proxy.yaml".
+services:
+  ui:
+    networks:
+      default:
+      proxy:
+        aliases: [tamiza-ui]
+
+networks:
+  proxy:
+    external: true
+    # Name of the network the reverse proxy is attached to.
+    name: ${PROXY_NETWORK:-bridgemysql}

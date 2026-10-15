@@ -1,0 +1,96 @@
+# Tamiza for KoboToolbox: deployment settings.
+# Copy this file to .env and fill in every REQUIRED value before `docker compose up -d`.
+# Compose refuses to start and names the variable when a required value is missing.
+
+# --- Public access -------------------------------------------------------------------------------
+
+# REQUIRED. Public base URL of this installation, as browsers and Kobo reach it.
+# Use HTTPS for anything other than localhost: sign-in needs a secure context.
+# Example: https://tamiza.example.org
+TAMIZA_PUBLIC_URL=https://tamiza.solidata.com.co
+
+# Optional. Host port for the ui service, the only published port. Default: 8088 (8080 is left
+# free for a local Keycloak). Prefix an address to bind one interface only, e.g. 127.0.0.1:8088
+# behind a local HTTPS proxy.
+TAMIZA_HTTP_PORT=8088
+
+# --- Authentication (external Keycloak; see docs/keycloak.md) -------------------------------------
+
+# REQUIRED. Realm URL as the browser sees it; also the expected token issuer.
+# Example: https://auth.example.org/realms/tamiza
+OIDC_AUTHORITY=https://auth.solidatas.com/realms/tamiza
+
+# REQUIRED. Public client the UI signs in with. Example: tamiza-ui
+OIDC_CLIENT_ID=tamiza-ui
+
+# REQUIRED. Audience the API requires in access tokens (added by a Keycloak audience mapper).
+# Example: tamiza-api
+OIDC_AUDIENCE=tamiza-api
+
+# Optional. Discovery document URL reachable from inside the stack, when it differs from
+# OIDC_AUTHORITY (for example, Keycloak on the same host). Default: derived from OIDC_AUTHORITY.
+# Example: http://keycloak.internal:8080/realms/tamiza/.well-known/openid-configuration
+OIDC_METADATA_ADDRESS=https://auth.solidatas.com/realms/tamiza/.well-known/openid-configuration
+
+# Optional. Scopes the UI requests. Default: openid profile email
+OIDC_SCOPE=openid profile email
+
+# Optional. Require HTTPS for the discovery document. Set to false only for a development realm
+# served over plain HTTP. Default: true
+OIDC_REQUIRE_HTTPS_METADATA=true
+
+# Optional. Comma-separated emails with the global superadmin role. Granted only when Keycloak
+# marks the email as verified. Changes apply after restarting the api service. Default: empty.
+TAMIZA_SUPERADMIN_EMAILS=rinconsebastian@solidata.com.co
+
+# --- Kobo ----------------------------------------------------------------------------------------
+
+# Optional. Allow Kobo servers on private networks (10.x, 192.168.x, localhost...) and over plain
+# HTTP, for a self-hosted Kobo on the same network. Keep false unless you need it: it lets users
+# point the API at internal addresses. See docs/kobo.md. Default: false
+TAMIZA_KOBO_ALLOW_PRIVATE_NETWORKS=false
+
+# --- Database ------------------------------------------------------------------------------------
+
+# REQUIRED. Password for the database role. Generate one with: openssl rand -hex 24
+# Avoid ';' and quotes. It is read when the database volume is first created; changing it
+# afterwards also requires ALTER ROLE inside the database (see docs/operations.md).
+POSTGRES_PASSWORD=10311de8ce1725b522230c79075814accbef25194a8839b8
+
+# Optional. Database role used by api and analytics. Default: tamiza
+POSTGRES_USER=tamiza
+
+# --- Runtime -------------------------------------------------------------------------------------
+
+# Optional. Tag for the tamiza-ui, tamiza-api and tamiza-analytics images. Default: dev
+TAMIZA_VERSION=prod
+
+# Optional. Minimum log level for the api service (Trace, Debug, Information, Warning, Error).
+# Default: Information
+TAMIZA_LOG_LEVEL=Information
+
+# Optional. Seconds between analytics worker cycles. Default: 5
+TAMIZA_WORKER_POLL_SECONDS=5
+
+# --- Python scripts ------------------------------------------------------------------------------
+# Limits for each analyst script in a pipeline run. A script that exceeds one is stopped and its
+# step fails. Keep TAMIZA_RUN_MEMORY_MB a few hundred MB below ANALYTICS_MEMORY_LIMIT: the worker
+# itself needs room next to the script. See docs/operations.md.
+
+# Optional. Seconds a script may run. Default: 600
+TAMIZA_RUN_TIMEOUT_SECONDS=600
+
+# Optional. Memory a script may use, in MB. Default: 1024
+TAMIZA_RUN_MEMORY_MB=1024
+
+# --- Memory limits -------------------------------------------------------------------------------
+# Optional. Per-service limits; the defaults add up to 3200m, which fits a 4 GB VPS.
+
+# Default: 1024m
+DB_MEMORY_LIMIT=1024m
+# Default: 512m
+API_MEMORY_LIMIT=512m
+# Default: 1536m
+ANALYTICS_MEMORY_LIMIT=1536m
+# Default: 128m
+UI_MEMORY_LIMIT=128m

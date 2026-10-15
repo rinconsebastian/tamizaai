@@ -44,6 +44,14 @@ tamiza.example.org {
 }
 ```
 
+**Proxy in Docker on a shared network.** When the reverse proxy itself runs in a container (Nginx Proxy Manager, Traefik...), it cannot reach `127.0.0.1` of the host. Use the override [compose.proxy.yaml](../compose.proxy.yaml): it also connects `ui` to the proxy's existing Docker network, so the proxy forwards to `http://tamiza-ui:8080` and no host port is involved. Set `PROXY_NETWORK` in `.env` to that network's name (default `bridgemysql`) and keep `TAMIZA_HTTP_PORT=127.0.0.1:8088` so nothing is exposed on the server's addresses:
+
+```sh
+docker compose -f compose.yaml -f compose.proxy.yaml up -d --build --wait
+```
+
+In Portainer, deploy from the repository with Compose path `compose.yaml` and, under *Additional paths*, `compose.proxy.yaml`. Only `ui` joins the proxy network; `api`, `analytics` and `db` stay on the stack's own network. Local development keeps using `compose.yaml` alone.
+
 Any proxy works if it forwards to the `ui` port and passes `X-Forwarded-Proto`. Only the `ui` service publishes a port. The API is served by the same origin under `/api/`, and `analytics` and `db` are reachable only on the internal Compose network.
 
 ## Upgrade
