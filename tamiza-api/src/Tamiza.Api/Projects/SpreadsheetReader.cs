@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using MiniExcelLibs;
 using MiniExcelLibs.Csv;
 
@@ -21,11 +22,23 @@ public static class SpreadsheetReader
     /// <summary>
     /// The rows of the file, read lazily. CSV cells are strings; XLSX cells are strings, doubles, booleans or
     /// <see cref="DateTime"/>s. <paramref name="content"/> must be seekable (XLSX needs it, and CSV is sniffed for its
-    /// separator first).
+    /// separator first). XLSX gaps are returned as empty rows. Empty and white-space-only CSV lines are skipped unless
+    /// <paramref name="keepBlankLines"/> is set, which returns them as empty rows so that positions match the file's rows.
     /// </summary>
-    public static IEnumerable<List<object?>> Rows(Stream content, ExcelType type, char separator = ',')
+    public static IEnumerable<List<object?>> Rows(Stream content, ExcelType type, char separator = ',', bool keepBlankLines = false)
     {
-        MiniExcelLibs.IConfiguration? configuration = type == ExcelType.CSV ? new CsvConfiguration { Seperator = separator } : null;
+        MiniExcelLibs.IConfiguration? configuration = null;
+        if (type == ExcelType.CSV)
+        {
+            var csv = new CsvConfiguration { Seperator = separator };
+            if (keepBlankLines)
+            {
+                csv.StreamReaderFunc = stream => new BlankLineReader(stream, separator);
+            }
+
+            configuration = csv;
+        }
+
         return MiniExcel.Query(content, useHeaderRow: false, excelType: type, configuration: configuration)
             .Select(row => ((IDictionary<string, object?>)row).Values.ToList());
     }
@@ -51,4 +64,31 @@ public static class SpreadsheetReader
         DateTime date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
         _ => Convert.ToString(cell, CultureInfo.InvariantCulture)?.Trim() ?? "",
     };
+
+    /// <summary>
+    /// MiniExcel drops empty and white-space-only CSV lines. This reader gives it the separator for such a line instead, which
+    /// MiniExcel reads as a row of empty cells. A line inside a quoted value that spans lines is passed on unchanged.
+    /// </summary>
+    private sealed class BlankLineReader(Stream stream, char separator)
+        : StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: -1, leaveOpen: true)
+    {
+        private bool _inQuotes;
+
+        public override string? ReadLine()
+        {
+            var line = base.ReadLine();
+            if (line is null)
+            {
+                return null;
+            }
+
+            var continuesQuote = _inQuotes;
+            if (line.Count(c => c == '"') % 2 == 1)
+            {
+                _inQuotes = !_inQuotes;
+            }
+
+            return !continuesQuote && string.IsNullOrWhiteSpace(line) ? separator.ToString() : line;
+        }
+    }
 }

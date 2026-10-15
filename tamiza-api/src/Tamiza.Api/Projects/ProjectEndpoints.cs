@@ -31,6 +31,7 @@ public static partial class ProjectEndpoints
         project.MapPut("/kobo-token", ReplaceTokenAsync).RequireProjectRole(ProjectRole.Admin).WithName("ReplaceKoboToken");
         project.MapPost("/kobo-check", RecheckAsync).RequireProjectRole(ProjectRole.Analyst).WithName("RecheckKoboConnection");
         project.MapGet("/form-fields", GetFormFieldsAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetFormFields");
+        project.MapGet("/form-choices", GetFormChoicesAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetFormChoices");
         project.MapGet("/webhook", GetWebhookAsync).RequireProjectRole(ProjectRole.Admin).WithName("GetWebhookSettings");
         project.MapPost("/webhook/secret", RegenerateSecretAsync).RequireProjectRole(ProjectRole.Admin).WithName("RegenerateWebhookSecret");
         return api;
@@ -250,6 +251,10 @@ public static partial class ProjectEndpoints
 
     private static async Task<Ok<List<FormField>>> GetFormFieldsAsync(Guid projectId, TamizaDbContext db, CancellationToken ct) =>
         TypedResults.Ok(await db.Projects.Where(p => p.Id == projectId).Select(p => p.FormFields).SingleAsync(ct));
+
+    /// <summary>The choice lists of the form snapshot, in form order.</summary>
+    private static async Task<Ok<List<FormChoice>>> GetFormChoicesAsync(Guid projectId, TamizaDbContext db, CancellationToken ct) =>
+        TypedResults.Ok(await db.Projects.Where(p => p.Id == projectId).Select(p => p.FormChoices).SingleAsync(ct));
 
     private static async Task<Ok<WebhookSettings>> GetWebhookAsync(
         Guid projectId, TamizaDbContext db, SecretProtector secrets, IOptions<TamizaOptions> options, CancellationToken ct)

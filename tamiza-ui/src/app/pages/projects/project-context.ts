@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { FormField, ProjectDetails, ProjectRole, ProjectsService, hasRole } from '../../core/projects/projects.service';
+import { FormChoice, FormField, ProjectDetails, ProjectRole, ProjectsService, hasRole } from '../../core/projects/projects.service';
 
 /** The project open on the project page, shared by its sections. */
 @Injectable()
@@ -8,7 +8,15 @@ export class ProjectContext {
 
   readonly project = signal<ProjectDetails | null>(null);
   readonly formFields = signal<FormField[] | null>(null);
+  /** The form's choice lists, read once per form check by the pages that need them. */
+  readonly formChoices = signal<FormChoice[] | null>(null);
+  /** The last read of the choices failed; `loadFormChoices()` tries again. */
+  readonly formChoicesFailed = signal(false);
   readonly role = computed(() => this.project()?.myRole);
+
+  /** Bumped when the form check changes, so a read started for the previous form is dropped. */
+  private formGeneration = 0;
+  private loadingChoices = false;
 
   can(minimum: ProjectRole): boolean {
     return hasRole(this.role(), minimum);
@@ -19,6 +27,31 @@ export class ProjectContext {
     if (project && this.formFields() === null) {
       this.service.formFields(project.id).subscribe((fields) => this.formFields.set(fields));
     }
+  }
+
+  /** Reads the choices unless they are loaded or being read; after a failure, reads them again. */
+  loadFormChoices(): void {
+    const project = this.project();
+    if (!project || this.formChoices() !== null || this.loadingChoices) {
+      return;
+    }
+    const generation = this.formGeneration;
+    this.loadingChoices = true;
+    this.formChoicesFailed.set(false);
+    this.service.formChoices(project.id).subscribe({
+      next: (choices) => {
+        if (generation === this.formGeneration) {
+          this.loadingChoices = false;
+          this.formChoices.set(choices);
+        }
+      },
+      error: () => {
+        if (generation === this.formGeneration) {
+          this.loadingChoices = false;
+          this.formChoicesFailed.set(true);
+        }
+      },
+    });
   }
 
   /**
@@ -32,10 +65,14 @@ export class ProjectContext {
     }
   }
 
-  /** Replaces the details after an update; a new form check invalidates the field list. */
+  /** Replaces the details after an update; a new form check invalidates the field list and the choices. */
   update(project: ProjectDetails): void {
     if (project.formCheckedAt !== this.project()?.formCheckedAt) {
       this.formFields.set(null);
+      this.formChoices.set(null);
+      this.formChoicesFailed.set(false);
+      this.formGeneration++;
+      this.loadingChoices = false;
     }
     this.project.set(project);
   }

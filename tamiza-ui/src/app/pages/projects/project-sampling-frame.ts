@@ -3,11 +3,29 @@ import { DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import { Component, LOCALE_ID, computed, inject, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
+import { Downloader } from '../../core/download.service';
 import { FormField, ProjectsService, SamplingFrame, SamplingFrameInput } from '../../core/projects/projects.service';
-import { Alert, Button, Card, ConfirmDialog, Skeleton, Table, TableContainer, ToastService, dateTimeFormat, tableCell, tableHead, tableHeaderCell, tableRow } from '../../shared/ui';
-import { ImportFrameData, ImportFrameDialog, ImportedFrame } from './import-frame-dialog';
+import {
+  Alert,
+  Button,
+  Card,
+  ConfirmDialog,
+  Disclosure,
+  Skeleton,
+  Table,
+  TableContainer,
+  ToastService,
+  dateTimeFormat,
+  tableCell,
+  tableHead,
+  tableHeaderCell,
+  tableRow,
+} from '../../shared/ui';
+import { FrameFileGuide } from './frame-file-guide';
+import { FrameQuestionsData, FrameQuestionsDialog, FrameQuestionsResult, FrameRowsFromQuestions } from './frame-questions-dialog';
+import { ImportFrameData, ImportFrameDialog, ImportFrameResult, ImportedFrame } from './import-frame-dialog';
 import { ProjectContext } from './project-context';
-import { fieldIssue, frameFields } from './sampling-frame-fields';
+import { choiceList, choiceLists, chosenCodes, fieldIssue, frameFields, maxFrameQuestions, templateIssue, trimCode } from './sampling-frame-fields';
 
 interface EditableDimension {
   name: string;
@@ -23,26 +41,34 @@ const pageSize = 50;
 const cellInput =
   'block w-full min-w-28 min-h-10 rounded-base border bg-neutral-secondary-medium px-2.5 py-2 text-sm text-heading focus:border-brand focus:ring-brand';
 
+/** Dialogs that fill the screen on phones and float from `md` up. */
+const fullScreenOnPhones = { maxWidth: '100vw', maxHeight: '100dvh' };
+
 /**
- * The project's sampling frame. Everyone reads it as a summary line and a paginated table; an analyst or admin changes it from
- * the "Edit" and "Import from file" actions, and the editor goes away again once the frame is saved. A project without a frame
- * opens its editor straight away for those who can edit it.
+ * The project's sampling frame. Everyone reads it as a summary line and a paginated table, and can download it as a workbook.
+ * An analyst or admin changes it from the "Edit" and "Import from file" actions, and the editor goes away again once the frame is
+ * saved. A project without a frame offers them three ways to start: choose questions, import a file or type it in.
  */
 @Component({
   selector: 'app-project-sampling-frame',
-  imports: [DatePipe, NgTemplateOutlet, TranslocoDirective, Alert, Button, Card, Skeleton, Table, TableContainer],
+  imports: [DatePipe, NgTemplateOutlet, TranslocoDirective, Alert, Button, Card, Disclosure, FrameFileGuide, Skeleton, Table, TableContainer],
   template: `
     <section *transloco="let t">
       <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 class="text-lg font-semibold text-heading">{{ t('frame.title') }}</h2>
-        @if (loaded() && canEdit()) {
+        @if (loaded() && !loadError() && (frame() || editing())) {
           <div class="flex flex-wrap gap-2">
-            @if (!editing()) {
-              <button tmzButton size="sm" type="button" (click)="edit()" data-testid="edit-frame">{{ t('frame.edit') }}</button>
+            @if (frame() && !editing()) {
+              @if (canEdit()) {
+                <button tmzButton size="sm" type="button" (click)="edit()" data-testid="edit-frame">{{ t('frame.edit') }}</button>
+              }
+              <button tmzButton variant="secondary" size="sm" type="button" [disabled]="downloading()" [attr.aria-busy]="downloading() || null" (click)="download()" data-testid="download-frame">
+                {{ downloading() ? t('frame.download.downloading') : t('frame.download.action') }}
+              </button>
             }
-            <button tmzButton [variant]="frame() || dimensions().length ? 'secondary' : 'primary'" size="sm" type="button" (click)="openImport()" data-testid="open-import">
-              {{ t('frame.import') }}
-            </button>
+            @if (canEdit()) {
+              <button tmzButton variant="secondary" size="sm" type="button" (click)="openImport()" data-testid="open-import">{{ t('frame.import') }}</button>
+            }
           </div>
         }
       </div>
@@ -61,6 +87,11 @@ const cellInput =
 
       @if (!loaded()) {
         <div aria-busy="true" class="flex flex-col gap-3" data-testid="frame-loading"><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div>
+      } @else if (loadError(); as message) {
+        <tmz-alert tone="danger" [heading]="t('frame.loadFailed')" data-testid="frame-load-failed">
+          {{ message }}
+          <div class="mt-3"><button tmzButton variant="secondary" size="sm" type="button" (click)="loadFrame()" data-testid="frame-retry">{{ t('frame.retry') }}</button></div>
+        </tmz-alert>
       } @else if (!editing()) {
         @if (frame(); as saved) {
           <p class="mb-3 text-sm text-body" data-testid="frame-summary">
@@ -89,6 +120,19 @@ const cellInput =
             </table>
           </tmz-table-container>
           <div class="mt-3"><ng-container [ngTemplateOutlet]="pager" [ngTemplateOutletContext]="{ total: saved.targets.length, label: t('frame.title') }" /></div>
+        } @else if (canEdit()) {
+          <tmz-card data-testid="frame-start">
+            <h3 class="text-base font-medium text-heading">{{ t('frame.start.heading') }}</h3>
+            <p class="mt-1 text-sm text-body">{{ t('frame.start.intro') }}</p>
+            <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <button tmzButton type="button" [disabled]="!context.formFields()" (click)="openPicker()" data-testid="start-questions">{{ t('frame.start.questions') }}</button>
+              <button tmzButton variant="secondary" type="button" (click)="openImport()" data-testid="start-import">{{ t('frame.start.import') }}</button>
+              <button tmzButton variant="secondary" type="button" (click)="typeIn()" data-testid="start-type">{{ t('frame.start.type') }}</button>
+            </div>
+            <tmz-disclosure class="mt-5 border-t border-default pt-3" [heading]="t('frame.guide.heading')" data-testid="start-guide">
+              <app-frame-file-guide [fields]="context.formFields()" [choices]="context.formChoices()" [templateLink]="!!context.formFields()" (template)="openPicker()" />
+            </tmz-disclosure>
+          </tmz-card>
         } @else {
           <p class="text-sm text-body" data-testid="frame-empty">{{ t('frame.emptyViewer') }}</p>
         }
@@ -131,9 +175,14 @@ const cellInput =
               </li>
             }
           </ul>
-          <button tmzButton variant="secondary" size="sm" class="mt-4" type="button" [disabled]="dimensions().length >= 10" (click)="addDimension()" data-testid="add-dimension">
-            {{ t('frame.addDimension') }}
-          </button>
+          <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            <button tmzButton variant="secondary" size="sm" type="button" [disabled]="dimensions().length >= maxDimensions" (click)="addDimension()" data-testid="add-dimension">
+              {{ t('frame.addDimension') }}
+            </button>
+            <button tmzButton variant="secondary" size="sm" type="button" [disabled]="!context.formFields()" (click)="openPicker(true)" data-testid="create-rows-from-questions">
+              {{ t('frame.editor.createRows') }}
+            </button>
+          </div>
 
           @if (dimensions().length) {
             <div class="mt-6">
@@ -176,7 +225,14 @@ const cellInput =
                 <p class="mt-3 text-sm text-body" data-testid="frame-no-rows">{{ t('frame.noRows') }}</p>
               }
               <div class="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div><button tmzButton variant="secondary" size="sm" type="button" (click)="addRow()" data-testid="add-row">{{ t('frame.addRow') }}</button></div>
+                <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                  <button tmzButton variant="secondary" size="sm" type="button" (click)="addRow()" data-testid="add-row">{{ t('frame.addRow') }}</button>
+                  @if (rowsWithoutTarget(); as count) {
+                    <button tmzButton variant="secondary" size="sm" type="button" (click)="removeRowsWithoutTarget()" data-testid="remove-empty-targets">
+                      {{ t('frame.editor.removeEmpty', { count: format(count) }) }}
+                    </button>
+                  }
+                </div>
                 <ng-container [ngTemplateOutlet]="pager" [ngTemplateOutletContext]="{ total: rows().length, label: t('frame.targetsTitle') }" />
               </div>
             </div>
@@ -187,13 +243,9 @@ const cellInput =
 
         <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
           @if (errorCount(); as count) {
-            <p class="text-sm text-fg-danger-strong" role="alert" data-testid="error-count">
-              {{ firstErrorRow() === null ? t('frame.errorCount', { count }) : t('frame.errorCountFirst', { count, row: firstErrorRow()! + 1 }) }}
-            </p>
+            <p class="text-sm text-fg-danger-strong" role="alert" data-testid="error-count">{{ errorCountText(count) }}</p>
           }
-          @if (frame() || dirty()) {
-            <button tmzButton variant="secondary" type="button" (click)="cancel()" data-testid="cancel-edit">{{ t('common.cancel') }}</button>
-          }
+          <button tmzButton variant="secondary" type="button" (click)="cancel()" data-testid="cancel-edit">{{ t('common.cancel') }}</button>
           <button tmzButton type="button" [disabled]="saving()" (click)="save()" data-testid="save-frame">{{ t('frame.save') }}</button>
         </div>
       }
@@ -205,9 +257,10 @@ export class ProjectSamplingFrame {
   private readonly errorsService = inject(ApiErrors);
   private readonly toasts = inject(ToastService);
   private readonly transloco = inject(TranslocoService);
-  private readonly context = inject(ProjectContext);
+  protected readonly context = inject(ProjectContext);
   private readonly dialog = inject(Dialog);
   private readonly confirmDialog = inject(ConfirmDialog);
+  private readonly downloader = inject(Downloader);
   private readonly decimal = new DecimalPipe(inject(LOCALE_ID));
 
   protected readonly tableHead = tableHead;
@@ -216,8 +269,11 @@ export class ProjectSamplingFrame {
   protected readonly tableCell = tableCell;
   protected readonly dateTimeFormat = dateTimeFormat;
   protected readonly pageSize = pageSize;
+  protected readonly maxDimensions = maxFrameQuestions;
 
   protected readonly loaded = signal(false);
+  /** Why the frame could not be read; nothing that edits the frame is offered until a read succeeds, since Save replaces it. */
+  protected readonly loadError = signal<string | null>(null);
   protected readonly frame = signal<SamplingFrame | null>(null);
   protected readonly editing = signal(false);
   protected readonly dimensions = signal<EditableDimension[]>([]);
@@ -225,6 +281,7 @@ export class ProjectSamplingFrame {
   protected readonly page = signal(0);
   protected readonly errors = signal<Record<string, string>>({});
   protected readonly saving = signal(false);
+  protected readonly downloading = signal(false);
 
   protected readonly canEdit = computed(() => this.context.can('analyst'));
   protected readonly fields = computed<FormField[]>(() => frameFields(this.context.formFields()));
@@ -238,6 +295,7 @@ export class ProjectSamplingFrame {
       .slice(this.page() * pageSize, (this.page() + 1) * pageSize)
       .map((target, offset) => ({ ...target, index: this.page() * pageSize + offset })),
   );
+  protected readonly rowsWithoutTarget = computed(() => this.rows().filter((row) => row.target.trim() === '').length);
   protected readonly errorCount = computed(() => Object.keys(this.errors()).length);
   /** The first row, in order, that the API refused; the counter names it and the grid opens on its page. */
   protected readonly firstErrorRow = computed(() => {
@@ -253,16 +311,19 @@ export class ProjectSamplingFrame {
 
   constructor() {
     this.context.loadFormFields();
+    this.loadFrame();
+  }
+
+  protected loadFrame(): void {
+    this.loaded.set(false);
+    this.loadError.set(null);
     this.service.samplingFrame(this.context.project()!.id).subscribe({
       next: (frame) => {
         this.setFrame(frame ?? null);
-        // Nobody can read a frame that is not there; whoever can write one is taken to the place to do it.
-        this.editing.set(!frame && this.canEdit());
         this.loaded.set(true);
       },
       error: (error) => {
-        this.errorsService.report(error);
-        this.editing.set(this.canEdit());
+        this.loadError.set(this.errorsService.parse(error).message);
         this.loaded.set(true);
       },
     });
@@ -285,6 +346,18 @@ export class ProjectSamplingFrame {
 
   protected count(kind: 'dimensions' | 'combinations', n: number): string {
     return this.transloco.translate(`frame.${kind}${n === 1 ? 'One' : 'Many'}`, { count: this.decimal.transform(n) });
+  }
+
+  protected format(value: number): string {
+    return this.decimal.transform(value) ?? String(value);
+  }
+
+  protected errorCountText(count: number): string {
+    const first = this.firstErrorRow();
+    const plural = count === 1 ? 'One' : 'Many';
+    return first === null
+      ? this.transloco.translate(`frame.errorCount${plural}`, { count: this.format(count) })
+      : this.transloco.translate(`frame.errorCountFirst${plural}`, { count: this.format(count), row: this.format(first + 1) });
   }
 
   protected pageEnd(total: number): number {
@@ -316,11 +389,16 @@ export class ProjectSamplingFrame {
     this.editing.set(true);
   }
 
-  /** Back to the saved frame, with whatever was typed or imported discarded. */
+  /** The empty editor, from the start panel. */
+  protected typeIn(): void {
+    this.edit();
+  }
+
+  /** Back to the saved frame (or to the start panel without one), with whatever was typed or imported discarded. */
   protected cancel(): void {
     this.setFrame(this.frame());
     this.errors.set({});
-    this.editing.set(!this.frame());
+    this.editing.set(false);
   }
 
   protected addDimension(): void {
@@ -344,6 +422,13 @@ export class ProjectSamplingFrame {
 
   protected removeRow(index: number): void {
     this.rows.update((rows) => rows.filter((_, i) => i !== index));
+    this.clampPage(this.rows().length);
+  }
+
+  /** Rows nobody gave a target are not planned; saving needs a target in every row, so they can go in one step. */
+  protected removeRowsWithoutTarget(): void {
+    this.rows.update((rows) => rows.filter((row) => row.target.trim() !== ''));
+    this.errors.set({});
     this.clampPage(this.rows().length);
   }
 
@@ -382,18 +467,154 @@ export class ProjectSamplingFrame {
     });
   }
 
+  /** Prepares the saved frame as a workbook and starts its download; the action ends with one success or one error message. */
+  protected download(): void {
+    if (this.downloading()) {
+      return;
+    }
+    this.downloading.set(true);
+    this.service.exportSamplingFrame(this.context.project()!.id).subscribe({
+      next: (file) => {
+        this.downloading.set(false);
+        this.downloader.start(file.downloadUrl);
+        this.toasts.success(this.transloco.translate('frame.download.ready'));
+      },
+      error: (error) => {
+        this.downloading.set(false);
+        this.errorsService.report(error);
+      },
+    });
+  }
+
   protected async openImport(): Promise<void> {
     if (!(await this.confirmDiscard())) {
       return;
     }
-    const ref = this.dialog.open<ImportedFrame, ImportFrameData>(ImportFrameDialog, {
-      data: { projectId: this.context.project()!.id, fields: this.fields() },
+    const ref = this.dialog.open<ImportFrameResult, ImportFrameData>(ImportFrameDialog, {
+      data: {
+        projectId: this.context.project()!.id,
+        fields: this.fields(),
+        snapshot: this.context.formFields(),
+        choices: this.context.formChoices(),
+        savedDimensions: this.frame()?.dimensions ?? [],
+      },
       ariaLabelledBy: 'import-frame-title',
       autoFocus: 'first-tabbable',
       restoreFocus: true,
       backdropClass: ['cdk-overlay-dark-backdrop'],
+      ...fullScreenOnPhones,
     });
-    ref.closed.subscribe((imported) => imported && this.load(imported));
+    ref.closed.subscribe((result) => {
+      if (result?.kind === 'rows') {
+        this.load(result);
+      } else if (result?.kind === 'template') {
+        // The import dialog has closed; the picker opens in its place, never on top of it.
+        this.openPicker();
+      }
+    });
+  }
+
+  /** Opens the question picker; from the editor, with the editor's questions and values ticked. */
+  protected openPicker(fromEditor = false): void {
+    const context = this.context;
+    const initial = fromEditor
+      ? this.dimensions()
+          .map((dimension, i) => ({ field: dimension.field, values: this.rows().map((row) => row.values[i] ?? '') }))
+          .filter((dimension) => dimension.field)
+      : undefined;
+    const ref = this.dialog.open<FrameQuestionsResult, FrameQuestionsData>(FrameQuestionsDialog, {
+      data: {
+        projectId: context.project()!.id,
+        snapshot: context.formFields() ?? [],
+        choices: context.formChoices,
+        choicesFailed: context.formChoicesFailed,
+        loadChoices: () => context.loadFormChoices(),
+        initial,
+      },
+      ariaLabelledBy: 'frame-questions-title',
+      autoFocus: 'first-tabbable',
+      restoreFocus: true,
+      backdropClass: ['cdk-overlay-dark-backdrop'],
+      ...fullScreenOnPhones,
+    });
+    ref.closed.subscribe((result) => result?.kind === 'rows' && void this.createRows(result));
+  }
+
+  /**
+   * Loads rows made from questions into the editor (design D9). A question the editor already maps keeps that dimension's name.
+   * Targets carry over only when the questions are exactly the ones the editor maps; replacing rows asks first, naming what is lost.
+   */
+  private async createRows(result: FrameRowsFromQuestions): Promise<void> {
+    const dimensions = this.dimensions();
+    const rows = this.rows();
+    const mapped = dimensions.map((d) => d.field);
+    const chosen = result.questions.map((q) => q.field);
+    const sameQuestions =
+      mapped.length === chosen.length && new Set(mapped).size === mapped.length && mapped.every((field) => field && chosen.includes(field));
+
+    if (rows.length && !(await this.confirmReplace(sameQuestions))) {
+      return;
+    }
+
+    // Each new row keeps the target of the first editor row with the same value for every question, trimmed and ignoring case.
+    const targets = new Map<string, string>();
+    if (sameQuestions) {
+      const positions = chosen.map((field) => mapped.indexOf(field));
+      for (const row of rows) {
+        const key = rowKey(positions.map((i) => row.values[i] ?? ''));
+        if (!targets.has(key)) {
+          targets.set(key, row.target);
+        }
+      }
+    }
+
+    this.dimensions.set(
+      result.questions.map((question) => ({ name: dimensions.find((d) => d.field === question.field)?.name || question.header, field: question.field })),
+    );
+    this.rows.set(result.rows.map((values) => ({ values: [...values], target: targets.get(rowKey(values)) ?? '' })));
+    this.page.set(0);
+    this.errors.set({});
+    this.editing.set(true);
+    this.toasts.info(this.transloco.translate('frame.editor.rowsCreated'));
+  }
+
+  /** Asks before rows made from questions replace the editor's rows, saying what will not be kept. */
+  private confirmReplace(sameQuestions: boolean): Promise<boolean> {
+    const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
+    const snapshot = this.context.formFields() ?? [];
+    const lists = choiceLists(this.context.formChoices());
+    const parts = [t('frame.editor.replaceRows', { count: this.format(this.rows().length) })];
+    if (!sameQuestions) {
+      parts.push(t('frame.editor.targetsNotKept'));
+    }
+
+    // Dimensions the picker cannot offer: unmapped, gone from the form, multiple-choice or in a repeat group.
+    const fields = this.dimensions().map((dimension) => snapshot.find((f) => f.xpath === dimension.field));
+    const lost = this.dimensions()
+      .map((dimension, i) => {
+        const field = fields[i];
+        return !field || templateIssue(field) !== null ? dimension.name || `${t('frame.unnamed')} ${i + 1}` : null;
+      })
+      .filter((name): name is string => name !== null);
+    if (lost.length) {
+      parts.push(t('frame.editor.lostDimensions', { names: lost.join(', ') }));
+    }
+
+    const columnChoices = fields.map((field) => (field && !templateIssue(field) ? choiceList(field, lists) : null));
+    const notChoices = this.rows().filter((row) =>
+      columnChoices.some((list, i) => list !== null && trimCode(row.values[i] ?? '') !== '' && !chosenCodes(list, [row.values[i]]).length),
+    ).length;
+    if (notChoices) {
+      parts.push(t(notChoices === 1 ? 'frame.editor.notChoicesOne' : 'frame.editor.notChoicesMany', { count: this.format(notChoices) }));
+    }
+
+    return this.confirmDialog.confirm({
+      title: t('frame.editor.replaceTitle'),
+      message: parts.join(' '),
+      confirmLabel: t('frame.editor.replace'),
+      cancelLabel: t('common.cancel'),
+      tone: 'danger',
+    });
   }
 
   /** Puts the imported rows into the editor; nothing is saved until the user presses Save. */
@@ -429,4 +650,9 @@ function snapshot(frame: SamplingFrame | null): { dimensions: EditableDimension[
     dimensions: (frame?.dimensions ?? []).map((d) => ({ name: d.name, field: d.field })),
     rows: (frame?.targets ?? []).map((t) => ({ values: [...t.values], target: String(t.target) })),
   };
+}
+
+/** Values compared as the dashboard compares them: trimmed and ignoring case. */
+function rowKey(values: string[]): string {
+  return values.map((value) => trimCode(value).toLowerCase()).join('\u001f');
 }

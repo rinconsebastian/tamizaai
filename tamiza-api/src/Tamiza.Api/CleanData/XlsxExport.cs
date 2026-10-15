@@ -95,7 +95,7 @@ public static class XlsxExport
         return name.Length == 0 ? "Sheet1" : name;
     }
 
-    private static string CutToCell(string text, out bool cut)
+    internal static string CutToCell(string text, out bool cut)
     {
         cut = text.Length > MaxCellLength;
         if (!cut)

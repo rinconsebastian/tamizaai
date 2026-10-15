@@ -41,6 +41,7 @@ const apiErrorCodes = [
   'data.xlsxTooManyRows',
   'data.exportTooLarge',
   'indicators.notPublished',
+  'samplingFrame.none',
 ];
 
 function lookup(root: unknown, path: string): unknown {
