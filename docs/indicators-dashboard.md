@@ -37,8 +37,8 @@ Every widget has a title, a type, one **indicator**, what to **plot** (a measure
 | Type | Shows | Group by | Notes |
 |---|---|---|---|
 | **Stat tile** | One number: the measure summed, or the ratio of sums, over every row the query matches. | Optional | Says over how many rows it was summed. |
-| **Bar chart** | Horizontal bars, one per group value. | Required | |
-| **Column chart** | Vertical columns, one per group value. | Required | |
+| **Bar chart** | Horizontal bars, one per group value. | Required | Can be [ordered](#bar-and-column-order). |
+| **Column chart** | Vertical columns, one per group value. | Required | Can be [ordered](#bar-and-column-order). |
 | **Line chart** | A line through the group values. | Required | Group values are in natural order (2 before 10), so a `round` column of 1, 2, 10 reads as a trend. |
 | **Histogram** | How many rows fall in each of a number of equal-width ranges of the plotted value. | Optional | 10 ranges by default, up to 100. Without a group column each row of the table is counted; with one, each group's value. |
 | **Pie chart** | One slice per group value, sized by its share of the total. | Required | See below. |
@@ -57,6 +57,23 @@ Every widget has a title, a type, one **indicator**, what to **plot** (a measure
 ### Duplicate rows are summed
 
 Rows that share the same group value are **summed** before they are plotted, in the database. A table that has one row per form version, for example, still charts as one bar per municipality: two rows for `Cali`, with values 40 and 35, plot 75. Summing is right for counts and wrong for rates, which is why a rate should carry its `numerator` and `denominator` and be plotted as a **ratio**: three rows for `Cali` with numerators 40, 10 and 50 and denominators 100, 50 and 50 plot 0.5, not the sum of three rates.
+
+### Bar and column order
+
+Without an order, the bars and columns follow the **group column's own order**: numbers from smallest to largest (`1`, `2`, `10`), dates and timestamps from earliest to latest, false before true, and text in alphabetical order (so a *text* column holding `1`, `2` and `10` reads `1`, `10`, `2`). A group with no value, shown as **(none)**, comes last; a group that is an empty text has a blank label and comes first.
+
+A bar or column widget can instead be ordered with **Order bars by** and **Direction** in its form:
+
+- **Plotted value** orders the bars by the number they show (largest first when you pick it), whether that is a measure or a ratio.
+- **A column** of the table orders them by that column. This is how a script gives a chart a custom order that no alphabet gives, such as age ranges: publish a column such as `sort_key` (`1` for `0-4`, `2` for `5-9`, `3` for `10-14`) and order by it.
+- A bar can stand for several rows. When the order column is not the group column, a bar is placed by the **smallest** value of that column among its rows, in both directions, so switching the direction reverses the order of bars whose values differ.
+- A bar with **no value** in the order column goes last, ascending or descending. Bars with equal values stay in the default order between them.
+- The order is applied before the row limit, so a widget that reaches the limit shows the first bars of its order.
+- **Compare as** appears for a text, integer or decimal column. **Text** puts `10` before `2`; **Number** puts `2` before `10`. A text column is compared as text unless you pick Number, and an integer or decimal column as a number. As a number, a text value is read when it is a plain number: an optional sign, digits with an optional decimal point, and an optional exponent (`-5`, `1.10`, `1e3`), spaces around it allowed. Anything else (`n/a`, an empty text, `1,5` with a decimal comma, `NaN`) **counts as no value** and goes last; it never fails the widget.
+- A date, timestamp or true/false column is always compared in its own order, so it has no *Compare as*.
+- If a script change removes the order column, the widget names it, as it does for a removed group column.
+
+Line charts keep their natural order (`2` before `10`) and, like pie, histogram and map widgets, have no order setting.
 
 ### Filters
 

@@ -18,6 +18,7 @@ import {
   maxFilters,
   maxTitleLength,
   needsGroup,
+  WidgetSort,
 } from '../../../core/projects/indicators.service';
 import { Alert, Button, Disclosure, FormField, Input } from '../../../shared/ui';
 import { DataFilterDialog, DataFilterDialogData, DataFilterDialogResult } from '../data-filter-dialog';
@@ -33,11 +34,20 @@ export interface WidgetDialogData {
   timeZone: string;
 }
 
+function sortKeyOf(sort: WidgetSort | null): string {
+  return !sort ? '' : sort.by === 'value' ? 'value' : `column:${sort.column ?? ''}`;
+}
+
+/** How a column is compared when the order does not say: text as text, a number as a number, others in their own order (null). */
+function ownComparison(type: string): 'text' | 'number' | null {
+  return type === 'text' ? 'text' : type === 'integer' || type === 'decimal' ? 'number' : null;
+}
+
 /** Debounce of the live preview: one request once the draft stops changing. */
 export const previewDelayMs = 400;
 
 type Mode = 'measure' | 'ratio';
-type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'groupBy' | 'geometryColumn' | 'buckets', string>>;
+type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'groupBy' | 'geometryColumn' | 'buckets' | 'sort', string>>;
 
 /**
  * Adds or edits a widget (design D6, D8): its chart type and title, its query (the indicator, a measure or a ratio of two numeric
@@ -146,6 +156,36 @@ type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'gr
               }
             </select>
           </tmz-form-field>
+        }
+
+        @if (sortable()) {
+          <tmz-form-field [label]="t('indicators.dialog.sortBy')" fieldId="widgetSortBy" [error]="shown().sort">
+            <select tmzInput id="widgetSortBy" (change)="setSortKey($any($event.target).value)" data-testid="dialog-sort-by">
+              <option value="" [selected]="sortKey() === ''">{{ t('indicators.dialog.sortDefault') }}</option>
+              <option value="value" [selected]="sortKey() === 'value'">{{ t('indicators.dialog.sortValue') }}</option>
+              @for (column of sortColumns(); track column) {
+                <option [value]="'column:' + column" [selected]="sortKey() === 'column:' + column">{{ column }}</option>
+              }
+            </select>
+          </tmz-form-field>
+
+          @if (sortKey() !== '') {
+            <tmz-form-field [label]="t('indicators.dialog.sortDirection')" fieldId="widgetSortDirection">
+              <select tmzInput id="widgetSortDirection" (change)="sortDirection.set($any($event.target).value)" data-testid="dialog-sort-direction">
+                <option value="asc" [selected]="sortDirection() === 'asc'">{{ t('indicators.dialog.sortAsc') }}</option>
+                <option value="desc" [selected]="sortDirection() === 'desc'">{{ t('indicators.dialog.sortDesc') }}</option>
+              </select>
+            </tmz-form-field>
+          }
+
+          @if (showCompareAs()) {
+            <tmz-form-field [label]="t('indicators.dialog.sortCompareAs')" fieldId="widgetSortCompareAs" [hint]="compareAs() === 'number' ? t('indicators.dialog.sortCompareAsNumberHelp') : null">
+              <select tmzInput id="widgetSortCompareAs" (change)="sortCompareAs.set($any($event.target).value)" data-testid="dialog-sort-compare-as">
+                <option value="text" [selected]="compareAs() === 'text'">{{ t('indicators.dialog.sortCompareText') }}</option>
+                <option value="number" [selected]="compareAs() === 'number'">{{ t('indicators.dialog.sortCompareNumber') }}</option>
+              </select>
+            </tmz-form-field>
+          }
         }
 
         @if (chartType() === 'map') {
@@ -259,6 +299,11 @@ export class WidgetDialog {
   protected readonly filters = signal<DataFilter[]>(this.start.filters.map(normalizeFilter));
   protected readonly geometryColumn = signal(this.start.geometryColumn ?? '');
   protected readonly buckets = signal(this.start.buckets === null ? '' : String(this.start.buckets));
+  /** The order, as the "Order bars by" select holds it: '' for the default order, 'value', or 'column:' and the column's name. */
+  protected readonly sortKey = signal(sortKeyOf(this.start.sort));
+  protected readonly sortDirection = signal<'asc' | 'desc'>(this.start.sort?.direction ?? 'asc');
+  /** What was chosen, or saved; what is sent also depends on the column's type (see `compareAs`). */
+  protected readonly sortCompareAs = signal<'text' | 'number' | null>(this.start.sort?.compareAs ?? null);
 
   /** The chosen indicator's published table; null while it loads, when none is chosen or when it cannot be read. */
   protected readonly catalog = signal<IndicatorColumns | null>(null);
@@ -293,6 +338,26 @@ export class WidgetDialog {
     this.columnsWith(this.catalog()?.numeric ?? [], [this.measure(), this.numerator(), this.denominator()]).filter((name, i, all) => all.indexOf(name) === i),
   );
   protected readonly allColumns = computed(() => this.columnsWith(this.catalog()?.columns.map((c) => c.name) ?? [], [this.groupBy()]));
+  protected readonly sortColumn = computed(() => (this.sortKey().startsWith('column:') ? this.sortKey().slice('column:'.length) : ''));
+  /** A saved sort column the table no longer has is kept in front here only, not in the group-by or filter lists. */
+  protected readonly sortColumns = computed(() => this.columnsWith(this.catalog()?.columns.map((c) => c.name) ?? [], [this.sortColumn()]));
+  protected readonly sortable = computed(() => this.chartType() === 'bar' || this.chartType() === 'column');
+  /** The sort column's type; null while the table loads, when it cannot be read and when the table no longer has the column. */
+  private readonly sortType = computed(() => this.catalog()?.columns.find((c) => c.name === this.sortColumn())?.type ?? null);
+  /** Only a text, integer or decimal column is compared as text or as a number; a date, timestamp or true/false column is not. */
+  protected readonly showCompareAs = computed(() => this.sortable() && ['text', 'integer', 'decimal'].includes(this.sortType() ?? ''));
+  /**
+   * How the sort column is compared, as it is shown and sent. A date, timestamp or true/false column sends none, which also clears
+   * a value left from a previous column. For a text, integer or decimal column, a missing value shows the type's own way. While the
+   * type is unknown, what was saved is kept.
+   */
+  protected readonly compareAs = computed<'text' | 'number' | null>(() => {
+    const type = this.sortType();
+    if (type === null) {
+      return this.sortCompareAs();
+    }
+    return this.showCompareAs() ? (this.sortCompareAs() ?? ownComparison(type)) : null;
+  });
   /** A geometry is WKT text. */
   protected readonly geometryColumns = computed(() =>
     this.columnsWith(this.catalog()?.columns.filter((c) => c.type === 'text').map((c) => c.name) ?? [], [this.geometryColumn()]),
@@ -308,8 +373,20 @@ export class WidgetDialog {
       filters: this.filters(),
       geometryColumn: this.geometryColumn() || null,
       buckets: buckets === '' ? null : Number(buckets),
+      sort: this.sortConfig(),
     });
   });
+
+  private sortConfig(): WidgetSort | null {
+    const key = this.sortKey();
+    if (key === '') {
+      return null;
+    }
+    const direction = this.sortDirection();
+    return key === 'value'
+      ? { by: 'value', column: null, compareAs: null, direction }
+      : { by: 'column', column: this.sortColumn() || null, compareAs: this.compareAs(), direction };
+  }
 
   /** What is wrong with the draft, by field. */
   protected readonly problems = computed<Problems>(() => {
@@ -337,6 +414,9 @@ export class WidgetDialog {
     }
     if (type === 'histogram' && config.buckets !== null && (!Number.isInteger(config.buckets) || config.buckets < 1 || config.buckets > maxBuckets)) {
       problems.buckets = t('indicators.dialog.errors.buckets', { max: maxBuckets });
+    }
+    if (config.sort?.by === 'column' && !config.sort.column) {
+      problems.sort = t('indicators.dialog.errors.sort');
     }
     return problems;
   });
@@ -407,6 +487,28 @@ export class WidgetDialog {
     this.serverFieldErrors.set({});
   }
 
+  /**
+   * Choosing an order sets the direction that reads naturally (the plotted value, largest first; a column, smallest first) when the
+   * order was off or changes between the value and a column; moving between columns keeps it. A column sets how it is compared from
+   * its type.
+   */
+  protected setSortKey(value: string): void {
+    const previous = this.sortKey();
+    this.sortKey.set(value);
+    this.serverFieldErrors.set({});
+    if (value === 'value' && previous !== 'value') {
+      this.sortDirection.set('desc');
+    } else if (value.startsWith('column:') && !previous.startsWith('column:')) {
+      this.sortDirection.set('asc');
+    }
+    if (value.startsWith('column:')) {
+      const type = this.catalog()?.columns.find((c) => c.name === this.sortColumn())?.type;
+      this.sortCompareAs.set(type ? ownComparison(type) : null);
+    } else {
+      this.sortCompareAs.set(null);
+    }
+  }
+
   protected setMode(value: string): void {
     this.mode.set(value as Mode);
     this.serverFieldErrors.set({});
@@ -424,6 +526,9 @@ export class WidgetDialog {
     this.groupBy.set('');
     this.geometryColumn.set('');
     this.filters.set([]);
+    this.sortKey.set('');
+    this.sortDirection.set('asc');
+    this.sortCompareAs.set(null);
     this.fresh = true;
     this.serverFieldErrors.set({});
   }
@@ -518,6 +623,7 @@ export class WidgetDialog {
     if (name.includes('groupby')) return 'groupBy';
     if (name.includes('geometrycolumn')) return 'geometryColumn';
     if (name.includes('buckets')) return 'buckets';
+    if (name.includes('sort')) return 'sort';
     return null;
   }
 }

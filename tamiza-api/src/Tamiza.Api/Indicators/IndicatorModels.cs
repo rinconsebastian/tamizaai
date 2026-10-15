@@ -27,6 +27,30 @@ public sealed record WidgetLayout(int X, int Y, int W, int H);
 /// <summary>The ratio of the sums of two numeric columns, such as a rate: <c>sum(numerator) / sum(denominator)</c>.</summary>
 public sealed record WidgetRatio(string Numerator, string Denominator);
 
+/// <summary>The values of <see cref="WidgetSort"/>, stored as strings: the endpoints' JSON options have no enum converter.</summary>
+public static class SortValues
+{
+    public const string ByValue = "value";
+    public const string ByColumn = "column";
+    public const string Text = "text";
+    public const string Number = "number";
+    public const string Asc = "asc";
+    public const string Desc = "desc";
+}
+
+/// <summary>
+/// The order of a bar or column widget. <paramref name="By"/> is <c>value</c> (the plotted value) or <c>column</c>;
+/// <paramref name="CompareAs"/> is <c>text</c> or <c>number</c> for a text, integer or decimal column, and null otherwise.
+/// </summary>
+public sealed record WidgetSort(string? By, string? Column, string? CompareAs, string? Direction)
+{
+    public WidgetSort Normalize() => this with
+    {
+        Column = string.IsNullOrEmpty(Column) ? null : Column,
+        CompareAs = string.IsNullOrEmpty(CompareAs) ? null : CompareAs,
+    };
+}
+
 /// <summary>
 /// A widget's query as a request carries it: anything left out takes its default (<see cref="WidgetConfig"/>). It is the
 /// <c>config</c> of a widget and of the query endpoint's body.
@@ -38,6 +62,7 @@ public sealed record WidgetRatio(string Numerator, string Denominator);
 /// <param name="Filters">At most 50, built as the clean data dashboard's.</param>
 /// <param name="GeometryColumn">The column of WKT text a map plots.</param>
 /// <param name="Buckets">Histogram only: the number of equal-width ranges, 10 when left out, at most 100.</param>
+/// <param name="Sort">Bar and column only: the order of the bars; left out, the group column's own order.</param>
 public sealed record WidgetConfigInput(
     string? Indicator = null,
     string? Measure = null,
@@ -45,7 +70,8 @@ public sealed record WidgetConfigInput(
     string? GroupBy = null,
     IReadOnlyList<DataFilter>? Filters = null,
     string? GeometryColumn = null,
-    int? Buckets = null)
+    int? Buckets = null,
+    WidgetSort? Sort = null)
 {
     public WidgetConfig Normalize() => new(
         Indicator ?? "",
@@ -54,7 +80,8 @@ public sealed record WidgetConfigInput(
         string.IsNullOrEmpty(GroupBy) ? null : GroupBy,
         Filters ?? [],
         string.IsNullOrEmpty(GeometryColumn) ? null : GeometryColumn,
-        Buckets);
+        Buckets,
+        Sort?.Normalize());
 }
 
 /// <summary>A widget's query with its defaults applied. With no <see cref="Measure"/> and no <see cref="Ratio"/>, the table's default measure is plotted.</summary>
@@ -65,7 +92,8 @@ public sealed record WidgetConfig(
     string? GroupBy,
     IReadOnlyList<DataFilter> Filters,
     string? GeometryColumn,
-    int? Buckets)
+    int? Buckets,
+    WidgetSort? Sort = null)
 {
     public const int DefaultBuckets = 10;
     public const int MaxBuckets = 100;

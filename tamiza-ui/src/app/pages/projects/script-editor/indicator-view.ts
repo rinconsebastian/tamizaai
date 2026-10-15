@@ -184,6 +184,6 @@ export class IndicatorView {
   });
 
   private config(parts: Pick<WidgetConfig, 'measure' | 'ratio'>): WidgetConfig {
-    return { indicator: '', groupBy: this.dimension() ?? null, filters: [], geometryColumn: null, buckets: null, ...parts };
+    return { indicator: '', groupBy: this.dimension() ?? null, filters: [], geometryColumn: null, buckets: null, sort: null, ...parts };
   }
 }

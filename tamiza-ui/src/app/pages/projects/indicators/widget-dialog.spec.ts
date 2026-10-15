@@ -10,6 +10,7 @@ import {
   indicator,
   indicatorsUrl,
   isColumns,
+  isPatch,
   isQuery,
   open,
   overlay,
@@ -371,7 +372,7 @@ describe('the widget dialog', () => {
       expect(request.request.body).toEqual({
         title: 'Attendance by round',
         chartType: 'line',
-        config: { indicator: 'coverage', measure: 'numerator', ratio: null, groupBy: 'round', filters: [], geometryColumn: null, buckets: null },
+        config: { indicator: 'coverage', measure: 'numerator', ratio: null, groupBy: 'round', filters: [], geometryColumn: null, buckets: null, sort: null },
       });
       request.flush(widget('w9', { title: 'Attendance by round', chartType: 'line' }), { status: 201, statusText: 'Created' });
       await settle(context.harness);
@@ -647,6 +648,205 @@ describe('the widget dialog', () => {
       await openDialog();
       expect(dialog().className).toContain('lg:w-[min(64rem');
       expect(field('dialog-preview').closest('section')!.className).toContain('lg:sticky');
+    });
+  });
+
+  describe('the order of bars and columns', () => {
+    const typed = catalog({
+      columns: [...catalog().columns, { name: 'visited_on', type: 'date', label: null }, { name: 'urban', type: 'boolean', label: null }],
+    });
+    const sorted = (overrides: Partial<NonNullable<WidgetConfig['sort']>> = {}) =>
+      ({ by: 'column', column: 'round', compareAs: 'number', direction: 'asc', ...overrides }) as NonNullable<WidgetConfig['sort']>;
+
+    async function saveNew(context: Context) {
+      await change(context, field('dialog-title'), 'Ordered');
+      await click(context, field('dialog-save'));
+      return context.http.expectOne(isCreate).request.body.config as WidgetConfig;
+    }
+
+    it('is offered for a bar and a column chart only', async () => {
+      const context = await openDialog();
+      expect(field('dialog-sort-by')).not.toBeNull(); // a new widget is a column chart
+
+      await change(context, field('dialog-chart-type'), 'bar');
+      expect(field('dialog-sort-by')).not.toBeNull();
+
+      for (const type of ['line', 'pie', 'stat', 'histogram', 'map']) {
+        await change(context, field('dialog-chart-type'), type);
+        expect(field('dialog-sort-by')).toBeNull();
+      }
+    });
+
+    it('offers the default order, the plotted value and every column, and starts on the default order', async () => {
+      await openDialog({ columns: typed });
+
+      expect(optionsOf('dialog-sort-by')).toEqual([
+        '', 'value', 'column:municipality', 'column:value', 'column:numerator', 'column:denominator', 'column:round', 'column:geometry', 'column:visited_on', 'column:urban',
+      ]);
+      expect(optionTexts('dialog-sort-by').slice(0, 2)).toEqual(['Default order', 'Plotted value']);
+      expect(field<HTMLSelectElement>('dialog-sort-by').value).toBe('');
+      expect(field('dialog-sort-direction')).toBeNull();
+      expect(field('dialog-sort-compare-as')).toBeNull();
+    });
+
+    it('sends no order when none is chosen', async () => {
+      const context = await openDialog();
+
+      expect((await saveNew(context)).sort).toBeNull();
+    });
+
+    it('sorts descending when the plotted value is chosen, ascending when a column is, and keeps the direction between columns', async () => {
+      const context = await openDialog({ columns: typed });
+
+      await change(context, field('dialog-sort-by'), 'value');
+      expect(field<HTMLSelectElement>('dialog-sort-direction').value).toBe('desc');
+      expect(optionTexts('dialog-sort-direction')).toEqual(['Ascending', 'Descending']);
+
+      await change(context, field('dialog-sort-by'), 'column:round');
+      expect(field<HTMLSelectElement>('dialog-sort-direction').value).toBe('asc');
+
+      await change(context, field('dialog-sort-direction'), 'desc');
+      await change(context, field('dialog-sort-by'), 'column:municipality');
+      expect(field<HTMLSelectElement>('dialog-sort-direction').value).toBe('desc');
+    });
+
+    it('offers to compare a text, integer or decimal column as text or as a number, preselected from its type', async () => {
+      const context = await openDialog({ columns: typed });
+
+      await change(context, field('dialog-sort-by'), 'column:municipality');
+      expect(field<HTMLSelectElement>('dialog-sort-compare-as').value).toBe('text');
+      expect(optionTexts('dialog-sort-compare-as')).toEqual(['Text (10 before 2)', 'Number (2 before 10)']);
+
+      await change(context, field('dialog-sort-by'), 'column:round');
+      expect(field<HTMLSelectElement>('dialog-sort-compare-as').value).toBe('number');
+      expect(dialog().textContent).toContain('Values that are not numbers go last.');
+
+      await change(context, field('dialog-sort-by'), 'column:value');
+      expect(field<HTMLSelectElement>('dialog-sort-compare-as').value).toBe('number');
+    });
+
+    it('does not offer the comparison for the plotted value or for a date or true/false column', async () => {
+      const context = await openDialog({ columns: typed });
+
+      await change(context, field('dialog-sort-by'), 'value');
+      expect(field('dialog-sort-compare-as')).toBeNull();
+      await change(context, field('dialog-sort-by'), 'column:visited_on');
+      expect(field('dialog-sort-compare-as')).toBeNull();
+      await change(context, field('dialog-sort-by'), 'column:urban');
+      expect(field('dialog-sort-compare-as')).toBeNull();
+    });
+
+    it('saves the order chosen', async () => {
+      const context = await openDialog({ columns: typed });
+      await change(context, field('dialog-sort-by'), 'column:municipality');
+      await change(context, field('dialog-sort-compare-as'), 'number');
+      await change(context, field('dialog-sort-direction'), 'desc');
+
+      expect((await saveNew(context)).sort).toEqual({ by: 'column', column: 'municipality', compareAs: 'number', direction: 'desc' });
+    });
+
+    it('saves the plotted value without a column or a comparison', async () => {
+      const context = await openDialog({ columns: typed });
+      await change(context, field('dialog-sort-by'), 'value');
+
+      expect((await saveNew(context)).sort).toEqual({ by: 'value', column: null, compareAs: null, direction: 'desc' });
+    });
+
+    it('sends no comparison after moving from a text column to a date column', async () => {
+      const context = await openDialog({ columns: typed });
+      await change(context, field('dialog-sort-by'), 'column:municipality');
+      await change(context, field('dialog-sort-compare-as'), 'number');
+      await change(context, field('dialog-sort-by'), 'column:visited_on');
+
+      expect((await saveNew(context)).sort).toEqual({ by: 'column', column: 'visited_on', compareAs: null, direction: 'asc' });
+    });
+
+    it('drops the order from the query of a chart type that has none', async () => {
+      const context = await openDialog({ columns: typed });
+      await change(context, field('dialog-sort-by'), 'value');
+      await change(context, field('dialog-chart-type'), 'line');
+
+      expect((await saveNew(context)).sort).toBeNull();
+    });
+
+    it('previews the order', async () => {
+      const context = await openDialog({ columns: typed });
+      await change(context, field('dialog-sort-by'), 'column:round');
+
+      const query = await previewAnswer(context, result([row('Cali', 75)]));
+
+      expect(query.config.sort).toEqual(sorted());
+    });
+
+    it('shows a saved order in its three controls', async () => {
+      await openDialog({ existing: widget('w1', { config: config({ sort: sorted({ column: 'municipality', compareAs: 'number', direction: 'desc' }) }) }), columns: typed });
+
+      expect(field<HTMLSelectElement>('dialog-sort-by').value).toBe('column:municipality');
+      expect(field<HTMLSelectElement>('dialog-sort-direction').value).toBe('desc');
+      expect(field<HTMLSelectElement>('dialog-sort-compare-as').value).toBe('number');
+    });
+
+    it('shows a saved order by the plotted value', async () => {
+      await openDialog({ existing: widget('w1', { config: config({ sort: { by: 'value', column: null, compareAs: null, direction: 'desc' } }) }), columns: typed });
+
+      expect(field<HTMLSelectElement>('dialog-sort-by').value).toBe('value');
+      expect(field<HTMLSelectElement>('dialog-sort-direction').value).toBe('desc');
+      expect(field('dialog-sort-compare-as')).toBeNull();
+    });
+
+    it('shows the type\'s own comparison for a saved order that left it open, and sends it', async () => {
+      const context = await openDialog({ existing: widget('w1', { config: config({ sort: sorted({ compareAs: null }) }) }), columns: typed });
+
+      expect(field<HTMLSelectElement>('dialog-sort-compare-as').value).toBe('number');
+      await click(context, field('dialog-save'));
+      expect(context.http.expectOne(isPatch).request.body.config.sort.compareAs).toBe('number');
+    });
+
+    it('keeps a saved sort column the table no longer has, in the order list only', async () => {
+      const context = await openDialog({ existing: widget('w1', { config: config({ sort: sorted({ column: 'gone', compareAs: 'text' }) }) }), columns: typed });
+
+      expect(optionsOf('dialog-sort-by')[2]).toBe('column:gone');
+      expect(field<HTMLSelectElement>('dialog-sort-by').value).toBe('column:gone');
+      expect(optionsOf('dialog-group-by')).not.toContain('gone');
+      expect(optionsOf('filter-column')).not.toContain('gone');
+      // Its type is unknown, so what was saved is sent unchanged.
+      await click(context, field('dialog-save'));
+      expect(context.http.expectOne(isPatch).request.body.config.sort).toEqual(sorted({ column: 'gone', compareAs: 'text' }));
+    });
+
+    it('sends no comparison for a saved order whose column has become a date column', async () => {
+      const context = await openDialog({ existing: widget('w1', { config: config({ sort: sorted({ column: 'visited_on', compareAs: 'number' }) }) }), columns: typed });
+
+      expect(field('dialog-sort-compare-as')).toBeNull();
+      await click(context, field('dialog-save'));
+      expect(context.http.expectOne(isPatch).request.body.config.sort.compareAs).toBeNull();
+    });
+
+    it('starts again from the default order when another indicator is chosen', async () => {
+      const context = await openDialog({ columns: typed });
+      await change(context, field('dialog-sort-by'), 'column:round');
+      await change(context, field('dialog-sort-direction'), 'desc');
+
+      await change(context, field('dialog-indicator'), 'target');
+      await answerColumns(context, typed);
+
+      expect(field<HTMLSelectElement>('dialog-sort-by').value).toBe('');
+      expect(field('dialog-sort-direction')).toBeNull();
+    });
+
+    it('shows a refusal of the order under "Order bars by"', async () => {
+      const context = await openDialog({ columns: typed });
+      await change(context, field('dialog-sort-by'), 'column:visited_on');
+      await change(context, field('dialog-title'), 'Ordered');
+      await click(context, field('dialog-save'));
+
+      context.http
+        .expectOne(isCreate)
+        .flush({ title: 'x', errors: { 'config.sort.column': ["The table has no column 'visited_on'."] } }, { status: 400, statusText: 'Bad Request' });
+      await settle(context.harness);
+
+      expect(errorOf('widgetSortBy')).toBe("The table has no column 'visited_on'.");
+      expect(field('dialog-error')).toBeNull();
     });
   });
 });

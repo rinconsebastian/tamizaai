@@ -355,4 +355,18 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
             ],
             paths);
     }
+
+    [Fact]
+    public async Task The_openapi_document_describes_the_sort_of_a_widget()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        using var anonymous = h.Factory.CreateClient();
+
+        var document = await anonymous.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        Assert.True(schemas.GetProperty("WidgetConfig").GetProperty("properties").TryGetProperty("sort", out _));
+        var sort = schemas.GetProperty("WidgetSort").GetProperty("properties").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(["by", "column", "compareAs", "direction"], sort);
+    }
 }

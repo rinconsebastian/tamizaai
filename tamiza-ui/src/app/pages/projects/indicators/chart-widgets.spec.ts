@@ -390,4 +390,39 @@ describe('chart widgets', () => {
       expect(label(context)).toBe('Pie chart of Households visited by municipality: 4 slices. Largest: Cali, 50%.');
     });
   });
+
+  describe('order of bars and columns', () => {
+    // As the server returns them under an order: largest first, which is neither alphabetical nor the reverse of it.
+    const ordered = [row('Palmira', 120), row('Cali', 75), row('Buga', 40)];
+    const sort = { by: 'value', column: null, compareAs: null, direction: 'desc' } as const;
+
+    it('sends the order with the query of a bar chart and draws the bars in the order returned, first at the top (largest value first)', async () => {
+      const context = await show('bar', { sort }, ordered);
+
+      expect(context.query.config.sort).toEqual(sort);
+      const ys = marks(context).map((m) => Number(m.getAttribute('y')));
+      expect(ys).toEqual([...ys].sort((a, b) => a - b));
+      expect(marks(context)).toHaveLength(3);
+      await toggle(context);
+      expect(tableRows(context).map((r) => r[0])).toEqual(['Palmira', 'Cali', 'Buga']);
+    });
+
+    it('sends the order with the query of a column chart and draws the columns in the order returned, first on the left', async () => {
+      const context = await show('column', { sort }, ordered);
+
+      expect(context.query.config.sort).toEqual(sort);
+      const xs = marks(context).map((m) => x(m));
+      expect(xs).toEqual([...xs].sort((a, b) => a - b));
+      await toggle(context);
+      expect(tableRows(context).map((r) => r[0])).toEqual(['Palmira', 'Cali', 'Buga']);
+    });
+
+    it('lists the rows of a chart without an order as the server returned them (default order)', async () => {
+      const context = await show('column', {}, [row('1', 10), row('2', 20), row('10', 30)]);
+
+      expect(context.query.config.sort).toBeNull();
+      await toggle(context);
+      expect(tableRows(context).map((r) => r[0])).toEqual(['1', '2', '10']);
+    });
+  });
 });

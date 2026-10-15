@@ -5,7 +5,7 @@ import { RouterLink } from '@angular/router';
 import { TranslocoDirective } from '@jsverse/transloco';
 import { catchError, distinctUntilChanged, map, of, switchMap, tap, timer } from 'rxjs';
 import { ApiErrors } from '../../../core/api-error';
-import { ChartType, IndicatorEntry, IndicatorsService, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
+import { ChartType, IndicatorEntry, IndicatorsService, QueryResult, WidgetConfig, WidgetSort } from '../../../core/projects/indicators.service';
 import { Alert, Button, Skeleton } from '../../../shared/ui';
 import { AxisChart } from './axis-chart';
 import { plainIndicator, valueFormatter } from './format';
@@ -14,6 +14,11 @@ import { PieWidget } from './pie-widget';
 import { StatWidget } from './stat-widget';
 
 type State = { kind: 'idle' } | { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; result: QueryResult };
+
+/** Plotting the value is always by number, and which column it is makes no sense then: those are not sent. */
+function sortFor(sort: WidgetSort): WidgetSort {
+  return sort.by === 'value' ? { ...sort, column: null, compareAs: null } : sort;
+}
 
 /** The query a chart type actually uses: settings that belong to another chart type are not sent, and a stat tile never groups. */
 export function queryFor(type: ChartType, config: WidgetConfig): WidgetConfig {
@@ -25,6 +30,7 @@ export function queryFor(type: ChartType, config: WidgetConfig): WidgetConfig {
     filters: config.filters,
     geometryColumn: type === 'map' ? config.geometryColumn : null,
     buckets: type === 'histogram' ? config.buckets : null,
+    sort: (type === 'bar' || type === 'column') && config.sort ? sortFor(config.sort) : null,
   };
 }
 
