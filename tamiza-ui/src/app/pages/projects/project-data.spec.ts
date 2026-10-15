@@ -1,14 +1,18 @@
 import { TestBed } from '@angular/core/testing';
 import { INGESTION_POLL_MS, IngestionStatus, SyncItem, SyncPage } from '../../core/projects/ingestion.service';
+import { PipelineSettings } from '../../core/projects/pipeline.service';
 import { FormVersionItem, FormVersionList, ProjectRole } from '../../core/projects/projects.service';
 import { vi } from 'vitest';
 import { ToastService } from '../../shared/ui';
 import { tick } from '../../../testing/cdk';
-import { byTestId, openProjectSection, projectId, settle, typeInto } from '../../../testing/project-harness';
+import { byTestId, details, openProjectSection, projectId, settle, typeInto } from '../../../testing/project-harness';
 
 const statusUrl = `/api/v1/projects/${projectId}/ingestion`;
 const syncsUrl = `/api/v1/projects/${projectId}/syncs`;
 const versionsUrl = `/api/v1/projects/${projectId}/form-versions`;
+const pipelineUrl = `/api/v1/projects/${projectId}/pipeline`;
+const runs: PipelineSettings = { runAfterSync: true, runIntervalHours: 24, nextRunAt: '2026-10-03T08:00:00Z' };
+const text = (element: Element | null) => element?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 
 function sync(overrides: Partial<SyncItem> = {}): SyncItem {
   return {
@@ -51,22 +55,24 @@ describe('ProjectData', () => {
     log: SyncPage = { items: [sync()], total: 1 },
     pollMs?: number,
     versions: FormVersionList = { versions: [], withoutVersion: 0 },
+    pipeline: PipelineSettings = runs,
   ) {
     const providers = pollMs ? [{ provide: INGESTION_POLL_MS, useValue: pollMs }] : [];
     const opened = await openProjectSection('data', role, {}, providers);
     opened.http.expectOne(statusUrl).flush(current);
     opened.http.expectOne((r) => r.url === syncsUrl && r.method === 'GET').flush(log);
     opened.http.expectOne(versionsUrl).flush(versions);
+    opened.http.expectOne(pipelineUrl).flush(pipeline);
     await settle(opened.harness);
     return opened;
   }
 
   afterEach(() => document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = '')));
 
-  it('shows the Data tab and the status to viewers, without actions and with a read-only schedule', async () => {
+  it('shows the Submissions section and the status to viewers, without actions and with the schedules as a line', async () => {
     const { root } = await open('viewer');
 
-    expect(root.querySelector(`a[href="/projects/${projectId}/data"]`)?.textContent).toContain('Data');
+    expect(root.querySelector(`a[href="/projects/${projectId}/data"]`)?.textContent).toContain('Submissions');
     expect(byTestId(root, 'submission-count')?.textContent?.trim()).toBe('117');
     expect(byTestId(root, 'deleted-count')?.textContent?.trim()).toBe('3');
     expect(byTestId(root, 'last-webhook')?.textContent).toContain('None received yet');
@@ -74,7 +80,9 @@ describe('ProjectData', () => {
     expect(byTestId(root, 'sync-now')).toBeNull();
     expect(byTestId(root, 'full-sync')).toBeNull();
     expect(byTestId(root, 'schedule-form')).toBeNull();
-    expect(byTestId(root, 'schedule-read-only')?.textContent).toContain('Every 12 hours');
+    expect(text(byTestId(root, 'schedule-line'))).toBe('Synchronizes every 12 hours · checks for deletions every 24 hours');
+    expect(text(byTestId(root, 'runs-line'))).toContain('Scripts run after each synchronization with changes · also run every 24 hours');
+    expect(byTestId(root, 'schedule-edit')).toBeNull();
   });
 
   it('lets analysts start a sync, then disables the actions while it is active', async () => {
@@ -122,8 +130,65 @@ describe('ProjectData', () => {
     expect(byTestId(root, 'active-sync')?.textContent).toContain('Running');
   });
 
+  it('reads the schedules as a line for an admin, with the inputs behind an Edit button', async () => {
+    const { root, harness } = await open('admin');
+    expect(byTestId(root, 'schedule-form')).toBeNull();
+    expect(byTestId(root, 'pipeline-settings-form')).toBeNull();
+
+    const edit = byTestId<HTMLButtonElement>(root, 'schedule-edit')!;
+    expect(edit.getAttribute('aria-expanded')).toBe('false');
+    edit.click();
+    await settle(harness);
+    expect(edit.getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector<HTMLInputElement>('#syncIntervalHours')!.value).toBe('12');
+    expect(root.querySelector<HTMLInputElement>('#runIntervalHours')!.value).toBe('24');
+  });
+
+  it('hides the inputs again after a saved schedule, and the line reads the new interval', async () => {
+    const { root, http, harness } = await open('admin');
+    byTestId<HTMLButtonElement>(root, 'schedule-edit')!.click();
+    await settle(harness);
+    typeInto(root.querySelector<HTMLInputElement>('#syncIntervalHours')!, '6');
+    byTestId<HTMLFormElement>(root, 'schedule-form')!.dispatchEvent(new Event('submit'));
+    http.expectOne((r) => r.url === statusUrl && r.method === 'PATCH').flush(status({ syncIntervalHours: 6 }));
+    await settle(harness);
+
+    expect(byTestId(root, 'schedule-form')).toBeNull();
+    expect(text(byTestId(root, 'schedule-line'))).toContain('every 6 hours');
+  });
+
+  it('saves the run settings from the same place and shows their range error next to the field', async () => {
+    const { root, http, harness } = await open('admin');
+    byTestId<HTMLButtonElement>(root, 'schedule-edit')!.click();
+    await settle(harness);
+    typeInto(root.querySelector<HTMLInputElement>('#runIntervalHours')!, '500');
+    byTestId<HTMLInputElement>(root, 'run-after-sync')!.checked = false;
+    byTestId<HTMLFormElement>(root, 'pipeline-settings-form')!.dispatchEvent(new Event('submit'));
+    const invalid = http.expectOne((r) => r.url === pipelineUrl && r.method === 'PUT');
+    expect(invalid.request.body).toEqual({ runAfterSync: false, runIntervalHours: 500 });
+    invalid.flush({ errors: { runIntervalHours: ['Enter a whole number of hours from 1 to 168, or no schedule.'] } }, { status: 400, statusText: 'Bad Request' });
+    await settle(harness);
+    expect(text(root.querySelector('#runIntervalHours-error'))).toContain('1 to 168');
+    expect(byTestId(root, 'pipeline-settings-form')).not.toBeNull(); // a refused value keeps the inputs open
+
+    typeInto(root.querySelector<HTMLInputElement>('#runIntervalHours')!, '');
+    byTestId<HTMLFormElement>(root, 'pipeline-settings-form')!.dispatchEvent(new Event('submit'));
+    http.expectOne((r) => r.url === pipelineUrl && r.method === 'PUT').flush({ runAfterSync: false, runIntervalHours: null, nextRunAt: null });
+    await settle(harness);
+    expect(byTestId(root, 'pipeline-settings-form')).toBeNull();
+    expect(text(byTestId(root, 'runs-line'))).toBe('Scripts do not run after a synchronization · No schedule');
+  });
+
+  it('lets an analyst read the schedules but not edit them', async () => {
+    const { root } = await open('analyst');
+    expect(byTestId(root, 'schedule-summary')).not.toBeNull();
+    expect(byTestId(root, 'schedule-edit')).toBeNull();
+  });
+
   it('saves the schedule for admins and shows range errors next to the fields', async () => {
     const { root, http, harness } = await open('admin');
+    byTestId<HTMLButtonElement>(root, 'schedule-edit')!.click();
+    await settle(harness);
     typeInto(root.querySelector<HTMLInputElement>('#syncIntervalHours')!, '0');
 
     byTestId<HTMLFormElement>(root, 'schedule-form')!.dispatchEvent(new Event('submit'));
@@ -169,6 +234,32 @@ describe('ProjectData', () => {
     expect(table.textContent).toContain('Deletion check');
     expect(table.textContent).toContain('Ada');
     expect(byTestId(root, 'log-cards')?.children.length).toBe(5);
+  });
+
+  it('reads the log in four columns, with the end of each run under its start', async () => {
+    const { root } = await open('viewer');
+    const headings = Array.from(byTestId(root, 'log-table')!.querySelectorAll('th')).map((th) => text(th));
+    expect(headings).toEqual(['Started', 'Kind', 'Status', 'Changes']);
+    expect(text(byTestId(root, 'log-ended'))).toMatch(/^Ended .*2026/);
+    expect(text(byTestId(root, 'log-table')!.querySelector('tbody td:last-child'))).toBe('4 new, 2 updated, 0 deleted');
+  });
+
+  it('shows the requester under the kind of a manual run, and nothing for a scheduled one', async () => {
+    const items = [sync({ id: 'a', trigger: 'manual', requestedBy: { id: 'u1', name: 'Ada' } }), sync({ id: 'b' })];
+    const { root } = await open('viewer', status(), { items, total: 2 });
+    const rows = Array.from(byTestId(root, 'log-table')!.querySelectorAll('tbody tr')).map((row) => text(row.children[1]));
+    expect(rows[0]).toContain('Started by Ada');
+    expect(rows[1]).not.toContain('Started by');
+  });
+
+  it('puts the log before the form versions, and only the stored count in large type', async () => {
+    const { root } = await open('viewer');
+    const log = byTestId(root, 'log-table')!;
+    const versions = byTestId(root, 'form-versions')!;
+    expect(log.compareDocumentPosition(versions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(versions.id).toBe('form-versions'); // the target of the link from General
+    expect(byTestId(root, 'submission-count')!.className).toContain('text-2xl');
+    expect(byTestId(root, 'deleted-count')!.className).not.toContain('text-2xl');
   });
 
   it('shows an empty log and pages through a long one', async () => {
@@ -309,14 +400,42 @@ describe('ProjectData', () => {
     });
 
     it('points to the re-check only when a version failed or was not found', async () => {
-      const { root } = await open('viewer', status(), undefined, undefined, mixed);
+      const { root } = await open('analyst', status(), undefined, undefined, mixed);
       const hint = byTestId(root, 'versions-retry-hint')!;
       expect(hint.textContent).toContain('Re-checking the form retries failed and not found versions.');
-      expect(hint.querySelector('a')?.getAttribute('href')).toBe(`/projects/${projectId}/overview`);
+      expect(hint.querySelector('a')).toBeNull(); // no round trip to another page: the action is right here
       TestBed.resetTestingModule();
 
       const healthy = await open('viewer', status(), undefined, undefined, { versions: [version(), version({ uid: 'vOther', status: 'pending' })], withoutVersion: 0 });
       expect(byTestId(healthy.root, 'versions-retry-hint')).toBeNull();
+    });
+
+    it('offers an analyst a Re-check button in place, which retries the versions and lists them again', async () => {
+      const { root, http, harness } = await open('analyst', status(), undefined, undefined, mixed);
+      byTestId<HTMLButtonElement>(root, 'versions-recheck')!.click();
+      await settle(harness);
+
+      const request = http.expectOne(`/api/v1/projects/${projectId}/kobo-check`);
+      expect(request.request.method).toBe('POST');
+      request.flush(details('analyst', { unavailableFormVersions: 0 }));
+      await settle(harness);
+      http.expectOne(versionsUrl).flush({ versions: [version({ uid: 'vCurrentCurrentCurrent1', current: true })], withoutVersion: 0 });
+      await settle(harness);
+
+      expect(byTestId(root, 'version-row-failed')).toBeNull();
+      expect(byTestId(root, 'versions-retry-hint')).toBeNull();
+    });
+
+    it('tells a viewer whom to ask, without a button or a link', async () => {
+      const { root } = await open('viewer', status(), undefined, undefined, mixed);
+      const hint = byTestId(root, 'versions-retry-hint')!;
+      expect(text(hint)).toContain('Ask an analyst or admin to re-check the form');
+      expect(hint.querySelector('a, button')).toBeNull();
+    });
+
+    it('explains the labels in the empty state instead of in an introduction', async () => {
+      const { root } = await open('viewer');
+      expect(text(byTestId(root, 'versions-empty'))).toContain('use the labels of the form version their submission was made with');
     });
 
     it('explains an empty list', async () => {

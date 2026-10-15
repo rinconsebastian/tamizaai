@@ -99,7 +99,7 @@ describe('map widget', () => {
 
       expect(byTestId(context.root, 'chart-svg')!.getAttribute('role')).toBe('img');
       expect(byTestId(context.root, 'chart-svg')!.getAttribute('aria-label')).toBe('Map of Coverage: 4 places drawn, from 10 to 90; 0 left out.');
-      byTestId(context.root, 'chart-toggle')!.click();
+      byTestId(context.root, 'widget-table-toggle')!.click();
       await settle(context.harness);
 
       expect(byTestId(context.root, 'chart-svg')).toBeNull();
@@ -113,7 +113,7 @@ describe('map widget', () => {
       expect(regions(context).map(titleOf)).toEqual(['Cali: 90%', 'Pasto: 10%']);
       expect(text(byTestId(context.root, 'map-legend-min'))).toBe('10%');
       expect(text(byTestId(context.root, 'map-legend-max'))).toBe('90%');
-      byTestId(context.root, 'chart-toggle')!.click();
+      byTestId(context.root, 'widget-table-toggle')!.click();
       await settle(context.harness);
       expect(all(context.root, 'widget-table-row').map((r) => Array.from(r.children).map(text))).toEqual([
         ['Cali', '90%', 'Region'],
@@ -198,7 +198,7 @@ describe('map widget', () => {
     it('lists the left-out rows in the table too', async () => {
       const context = await show(rows);
 
-      byTestId(context.root, 'chart-toggle')!.click();
+      byTestId(context.root, 'widget-table-toggle')!.click();
       await settle(context.harness);
       const cells = all(context.root, 'widget-table-row').map((r) => Array.from(r.children).map(text));
       expect(cells.slice(2)).toEqual([['Pasto', '10', 'Left out'], ['Quibdó', '70', 'Left out'], ['Leticia', '30', 'Left out']]);

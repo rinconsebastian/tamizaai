@@ -1,5 +1,5 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, LOCALE_ID, computed, effect, inject, input, signal } from '@angular/core';
+import { Component, LOCALE_ID, computed, effect, inject, input, model, output, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import { TranslocoDirective } from '@jsverse/transloco';
@@ -63,12 +63,12 @@ export function queryFor(type: ChartType, config: WidgetConfig): WidgetConfig {
               </tmz-alert>
             } @else {
               @if (result.rowLimitReached) {
-                <tmz-alert tone="warning" data-testid="widget-row-limit">{{ t('indicators.widget.rowLimit', { count: result.rows.length }) }}</tmz-alert>
+                <p class="shrink-0 text-xs text-fg-warning" data-testid="widget-row-limit">{{ t('indicators.widget.rowLimit', { count: result.rows.length }) }}</p>
               }
               @if (result.rows.length === 0) {
                 <p class="text-sm text-body" data-testid="widget-empty">{{ t('indicators.widget.empty') }}</p>
               } @else {
-                @if (chartType() !== 'stat') {
+                @if (showToggle() && chartType() !== 'stat') {
                   <div class="flex shrink-0 justify-end">
                     <button tmzButton variant="secondary" size="sm" type="button" [attr.aria-pressed]="asTable()" (click)="asTable.set(!asTable())" data-testid="chart-toggle">
                       {{ asTable() ? t('indicators.widget.showChart') : t('indicators.widget.showTable') }}
@@ -125,11 +125,18 @@ export class WidgetView {
   /** Wait this long after the last change before asking (a draft being typed); 0 asks at once. */
   readonly debounceMs = input(0);
   readonly placeholder = input('');
-  /** Every widget's table at once; the widget's own toggle can still change it afterwards. */
-  readonly allTables = input(false);
 
-  protected readonly asTable = signal(false);
+  /** Show the table of the rows instead of the chart. The grid drives it from the tile header; elsewhere the widget's own toggle does. */
+  readonly asTable = model(false);
+  /** Whether the widget shows its own chart/table toggle; the grid turns it off and puts the toggle in the tile header. */
+  readonly showToggle = input(true);
+  /** True while the widget has rows it can show as a chart or as a table (never for a stat tile), so a host can offer the toggle. */
+  readonly tableAvailable = output<boolean>();
   protected readonly state = signal<State>({ kind: 'idle' });
+  private readonly drawable = computed(() => {
+    const result = this.result();
+    return this.chartType() !== 'stat' && !!result && result.published && !result.missing.indicator && !result.missing.columns.length && result.rows.length > 0;
+  });
 
   protected readonly result = computed(() => {
     const state = this.state();
@@ -155,7 +162,7 @@ export class WidgetView {
   });
 
   constructor() {
-    effect(() => this.asTable.set(this.allTables()));
+    effect(() => this.tableAvailable.emit(this.drawable()));
     toObservable(this.key)
       .pipe(
         distinctUntilChanged(),

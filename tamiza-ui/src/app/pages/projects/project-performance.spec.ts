@@ -323,23 +323,54 @@ describe('ProjectPerformance', () => {
       expect(text(byTestId(root, 'unusable'))).toBe('3');
     });
 
-    it('explains an unavailable metric, naming the missing field, with a link to the Overview', async () => {
-      const { root } = await open(
-        'viewer',
-        dashboard({
-          completionTime: {
-            available: false, missingFields: ['start', 'end'], usableDurations: null, unusableDurations: null, outliers: null,
-            medianSeconds: null, meanWithoutOutliersSeconds: null, lowerFenceSeconds: null, upperFenceSeconds: null,
-          },
-        }),
-      );
+    const unavailableTime = () =>
+      dashboard({
+        completionTime: {
+          available: false, missingFields: ['start', 'end'], usableDurations: null, unusableDurations: null, outliers: null,
+          medianSeconds: null, meanWithoutOutliersSeconds: null, lowerFenceSeconds: null, upperFenceSeconds: null,
+        },
+      });
+
+    it.each<ProjectRole>(['analyst', 'admin'])('explains an unavailable metric to a %s, naming the missing field, with a link to re-check', async (role) => {
+      const { root } = await open(role, unavailableTime());
       const notice = byTestId(root, 'completion-unavailable')!;
+      expect(notice.getAttribute('class')).toContain('border-warning-subtle'); // a full alert for someone who can act
       expect(text(notice)).toContain('Missing in the form: start, end');
       expect(text(notice)).toContain('enable the start and end metadata');
       expect(byTestId(root, 'completion-link')?.getAttribute('href')).toBe(`/projects/${projectId}/overview`);
       expect(byTestId(root, 'median')).toBeNull();
       // The other parts still show.
       expect(byTestId(root, 'enumerator-table')).not.toBeNull();
+    });
+
+    it('tells a viewer the same, in one muted line without a link', async () => {
+      const { root } = await open('viewer', unavailableTime());
+      const notice = byTestId(root, 'completion-unavailable')!;
+      expect(notice.tagName).toBe('P');
+      expect(text(notice)).toContain('Missing in the form: start, end');
+      expect(text(notice)).toContain('enable the start and end metadata');
+      expect(text(notice)).toContain('an analyst or admin');
+      expect(byTestId(root, 'completion-link')).toBeNull();
+    });
+
+    it('puts a dash and a short reason in the headline strip when the part is unavailable', async () => {
+      const { root } = await open('viewer', unavailableTime());
+      expect(text(byTestId(root, 'median-unavailable'))).toBe('—');
+      expect(text(byTestId(root, 'headline'))).toContain('Not available');
+    });
+
+    it('shows the unusable count, and no mean, when no duration is usable', async () => {
+      const { root } = await open(
+        'viewer',
+        dashboard({
+          completionTime: {
+            available: true, missingFields: [], usableDurations: 0, unusableDurations: 3, outliers: 0,
+            medianSeconds: null, meanWithoutOutliersSeconds: null, lowerFenceSeconds: null, upperFenceSeconds: null,
+          },
+        }),
+      );
+      expect(byTestId(root, 'mean')).toBeNull();
+      expect(text(byTestId(root, 'unusable'))).toBe('3');
     });
   });
 
@@ -541,8 +572,9 @@ describe('ProjectPerformance', () => {
       const cards = root.querySelectorAll('[data-testid="coverage-card-item"]');
       expect(cards).toHaveLength(3);
       expect(text(cards[1])).toContain('130%');
-      expect(text(cards[1])).toContain('Municipality: cali (Cali)');
-      expect(text(cards[2])).toContain('Target: 0');
+      expect(text(cards[1])).toContain('Municipality: cali (Cali) · Sex: m');
+      expect(text(cards[1])).toContain('130 / 100');
+      expect(text(cards[2])).toContain('5 / 0'); // achieved / target
       expect(cards[2].querySelector('[role="progressbar"]')).toBeNull();
       expect(byTestId(root, 'coverage-cards')!.className).toContain('md:hidden');
     });
@@ -583,15 +615,15 @@ describe('ProjectPerformance', () => {
       expect(text(byTestId(root, 'outside-count'))).toBe('40');
       const items = root.querySelectorAll('[data-testid="outside-item"]');
       expect(items).toHaveLength(1);
-      expect(text(items[0].children[0])).toBe('Municipality: 05001 · Sex: f (Female)');
-      expect(text(items[0].children[1])).toBe('40 submissions');
+      expect(Array.from(items[0].querySelectorAll('td')).map((cell) => text(cell))).toEqual(['05001', 'f Female', '40']);
+      expect(Array.from(byTestId(root, 'outside-list')!.querySelectorAll('th')).map((th) => text(th))).toEqual(['Municipality', 'Sex', 'Submissions']);
     });
 
     it('shows an empty answer outside the frame', async () => {
       const base = dashboard();
       const outsideTop = [{ values: [null, { code: 'f', label: null }], submissions: 3 }];
       const { root } = await open('viewer', dashboard({ coverage: { ...base.coverage, outsideFrame: 3, outsideTop } }));
-      expect(text(byTestId(root, 'outside-item')!.children[0])).toBe('Municipality: (empty) · Sex: f');
+      expect(Array.from(byTestId(root, 'outside-item')!.querySelectorAll('td')).map((cell) => text(cell))).toEqual(['(empty)', 'f', '3']);
     });
 
     it('omits the list when nothing is outside the frame', async () => {
@@ -608,6 +640,67 @@ describe('ProjectPerformance', () => {
       const table = byTestId(root, 'coverage-table')!;
       expect(table.querySelector('b, script')).toBeNull();
       expect(text(table.querySelector('tbody td'))).toBe('<b>x</b> <script>alert(1)</script>');
+    });
+  });
+
+  describe('headline strip and toolbar', () => {
+    it('opens with the three headline figures, each shown once', async () => {
+      const { root } = await open('viewer');
+      const strip = byTestId(root, 'headline')!;
+      expect(text(strip)).toContain('Submissions');
+      expect(text(strip)).toContain('Median completion time');
+      expect(text(strip)).toContain('Overall progress');
+      expect(strip.contains(byTestId(root, 'total'))).toBe(true);
+      expect(strip.contains(byTestId(root, 'median'))).toBe(true);
+      expect(strip.contains(byTestId(root, 'overall-percent'))).toBe(true);
+      expect(root.querySelectorAll('[data-testid="total"]')).toHaveLength(1);
+      expect(root.querySelectorAll('[data-testid="median"]')).toHaveLength(1);
+    });
+
+    it('shows a dash and the reason in the strip when the project has no sampling frame', async () => {
+      const none = dashboard({ coverage: { state: 'notConfigured', dimensions: [], rows: [], overallPercent: null, outsideFrame: 0, outsideTop: [] } });
+      const { root } = await open('viewer', none);
+      expect(text(byTestId(root, 'overall-unavailable'))).toBe('—');
+      expect(text(byTestId(root, 'headline'))).toContain('No sampling frame');
+    });
+
+    it('groups the two dates in a labelled fieldset', async () => {
+      const { root } = await open('viewer');
+      const fieldset = root.querySelector('fieldset')!;
+      expect(text(fieldset.querySelector('legend'))).toBe('Date range');
+      expect(fieldset.contains(byTestId(root, 'range-from'))).toBe(true);
+      expect(fieldset.contains(byTestId(root, 'range-to'))).toBe(true);
+    });
+
+    it('keeps Refresh and Clear as equal secondary buttons, with no card around the toolbar', async () => {
+      const { root } = await open('viewer');
+      expect(byTestId(root, 'refresh')!.className).toContain('bg-neutral-secondary-medium');
+      expect(byTestId(root, 'range-form')!.closest('tmz-card')).toBeNull();
+    });
+
+    it('writes the computation time to the minute, without seconds', async () => {
+      const { root } = await open('viewer', dashboard({ computedAt: '2026-10-02T15:42:37Z' }));
+      expect(text(byTestId(root, 'computed-at'))).toMatch(/2026, \d{1,2}:42 [AP]M$/);
+    });
+
+    it('shows the count without a reception time as a footnote that still reads when it is zero', async () => {
+      const { root } = await open('viewer', dashboard({ submissions: { total: 3, withoutReceptionTime: 0, days: [] } }));
+      expect(text(byTestId(root, 'without-time'))).toBe('0');
+      expect(text(byTestId(root, 'submissions-card'))).toContain('Without a reception time');
+    });
+
+    it('lists the outside-the-frame combinations after the targets table', async () => {
+      const { root } = await open('viewer');
+      const targets = byTestId(root, 'coverage-table')!;
+      const outside = byTestId(root, 'outside-list')!;
+      expect(targets.compareDocumentPosition(outside) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('summarises an enumerator on a phone in two lines', async () => {
+      const { root } = await open('viewer');
+      const card = root.querySelector('[data-testid="enumerator-card"]')!;
+      expect(card.querySelectorAll('p')).toHaveLength(2);
+      expect(text(card.querySelectorAll('p')[1])).toBe('8 submissions · mean 1 h 05 min · outliers 1 · last Sep 3, 2026');
     });
   });
 });

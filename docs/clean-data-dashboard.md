@@ -15,15 +15,15 @@ Two **sources** can be shown:
 
 The dashboard opens on the output tables when the project has published them and on the clean tables otherwise. When both exist, a switch above the table changes source. The flattened *raw* tables and the indicators are not shown here.
 
-The **Table** list names every published table of the source with its row count. Below it, the page says when the tables were published and by which run (its short ID, with a link to the runs). Without any published table the page says so; analysts and admins get a link to the scripts.
+The **Table** list names every published table of the source with its row count. Below it, one line says when the tables were published and by which run (its short ID; analysts and admins also get a link to the runs list) and which time zone times are shown in. Without any published table the page says so; analysts and admins get a link to the scripts.
 
-Each column header shows the column's name, the **question label** when the column has one (only flattened columns do, see [question labels](scripts.md#question-labels)), and its **type**: text, integer, decimal, true/false, date or timestamp. Empty values appear as a dash. Text longer than 500 characters is cut on screen and marked as cut; exports hold the full text.
+Each column header shows the column's name and, on one secondary line, the **question label** when the column has one (only flattened columns do, see [question labels](scripts.md#question-labels)) and its **type**: text, integer, decimal, true/false, date or timestamp. Empty values appear as a dash. Text longer than 500 characters is cut on screen and marked as cut; exports hold the full text.
 
 Rows come in the order your script returned them until you sort a column, so sort the DataFrame in the script if the order matters ([Rules for what scripts return](scripts.md#rules-for-what-scripts-return)).
 
 ## Paging and sorting
 
-The table is read from the database one page at a time, at 25, 50 (the default) or 100 rows per page, with the number of rows that match. Nothing is loaded into the browser except the page.
+The table is read from the database one page at a time, at 25, 50 (the default) or 100 rows per page. A line above the table gives the number of rows that match, with **Export** at its right end. The paging controls appear only when the table has more rows than the smallest page. Nothing is loaded into the browser except the page.
 
 Click a column's name to sort by it: first ascending, then descending, then back to no sort. Empty values always come last. Rows with the same value keep one order from page to page.
 
@@ -52,12 +52,12 @@ A run replaces the published tables as a whole. If one finishes while you browse
 
 ## Exports
 
-**Export** downloads the whole table, with the filters and sort you have applied, as:
+**Export**, on the line with the row count, downloads the whole table, with the filters and sort you have applied, as:
 
 - **CSV**: UTF-8 with a byte order mark (so Excel shows accents), comma separated, with a header row of column names. Dates are `2026-09-01`, timestamps `2026-09-01T21:30:00-05:00` in the project's time zone, decimals use a dot, true/false are `true`/`false`, and empty values are empty fields. Values are written as published. Spreadsheet programs read a text that starts with `=`, `+`, `-` or `@` in a CSV as a formula, so use XLSX when the data may hold such text and you open it in a spreadsheet.
 - **XLSX**: one sheet named after the table, a header row, and each value in a cell of its type: numbers as numbers, dates and timestamps as dates (a timestamp keeps the project's local time, since Excel has no time zones), true/false as booleans, and text as text, never as a formula. A sheet holds at most 1,048,575 rows, so a bigger export is refused with a suggestion to use CSV or a filter. A text longer than Excel's limit of 32,767 characters is cut, and Tamiza tells you how many cells were.
 
-The file is prepared on the server first: the page shows *Preparing the export…* while the database is read, and then the browser downloads the file under the name `<project>_<table>_<date>.<csv|xlsx>`. The download link works **once** and expires about five minutes after the file is ready; opening it again, or after it expired, gives a "not found". The link does not need your sign-in, so do not share it. Preparing an export does not stop a run from publishing: the tables are only held while the file is being written, not while it downloads.
+The file is prepared on the server first: the Export button shows *Preparing the export…* while the database is read, and then the browser downloads the file under the name `<project>_<table>_<date>.<csv|xlsx>`. The download link works **once** and expires about five minutes after the file is ready; opening it again, or after it expired, gives a "not found". The link does not need your sign-in, so do not share it. Preparing an export does not stop a run from publishing: the tables are only held while the file is being written, not while it downloads.
 
 An operator can limit the size of a file and how many exports are prepared at once; see [operations.md](operations.md#common-changes). An export that exceeds the size limit fails with a message and leaves nothing behind.
 

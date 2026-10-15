@@ -55,7 +55,11 @@ describe('ProjectIndicators', () => {
 
       expect(all(root, 'widget-title').map(text)).toEqual(['Coverage by municipality', 'Response rate']);
       expect(byTestId(root, 'indicators-empty')).toBeNull();
-      expect(text(byTestId(root, 'indicators-count'))).toBe('2 of 50 widgets');
+      // Only whoever can add widgets is told how many there are; the limit is theirs to run into.
+      expect(byTestId(root, 'indicators-count') === null).toBe(role === 'viewer');
+      if (role !== 'viewer') {
+        expect(text(byTestId(root, 'indicators-count'))).toBe('2 of 50 widgets');
+      }
     });
 
     it('lists the indicators with their label, name, format, unit and whether they have published', async () => {
@@ -66,13 +70,16 @@ describe('ProjectIndicators', () => {
       ];
       const { root } = await open('viewer', [], null, { indicators });
 
-      expect(text(byTestId(root, 'indicator-table-card')!.querySelector('h2'))).toContain('Indicators (3)');
+      const card = byTestId(root, 'indicator-table-card')!;
+      expect(text(card.querySelector('summary h3'))).toBe('Indicators (3)'); // behind a disclosure, after the widgets
+      expect(text(card.querySelector('summary'))).toContain('· 2 published');
+      expect((card.querySelector('details') as HTMLDetailsElement).open).toBe(false);
       const rows = indicators.map((i) => byTestId(root, `indicator-row-${i.name}`)!);
       expect(rows.map((r) => text(byTestId(r, 'indicator-label')))).toEqual(['Coverage', 'Households visited', 'Target']);
       expect(rows.map((r) => text(byTestId(r, 'indicator-name')))).toEqual(['coverage', 'households_visited', 'target']);
       expect(rows.map((r) => text(byTestId(r, 'indicator-format')))).toEqual(['Count', 'Count · households', 'Count']);
-      expect(text(byTestId(rows[0], 'indicator-published'))).toMatch(/^Published .*2026.* by run abcdef12/);
-      expect(text(rows[1])).toContain('Visits made');
+      expect(text(byTestId(rows[0], 'indicator-published'))).toMatch(/^Published .*2026, \d{1,2}:\d{2} [AP]M$/); // to the minute
+      expect(text(rows[1])).not.toContain('Visits made'); // the description is the widget dialog's hint, not the list's
       expect(text(rows[1])).toContain('12,450');
       expect(text(byTestId(rows[2], 'indicator-unpublished'))).toBe('Not published yet');
       expect(byTestId(rows[2], 'indicator-published')).toBeNull();
@@ -97,7 +104,7 @@ describe('ProjectIndicators', () => {
     ])('gives editing controls to the roles that may edit, for a %s', async (role, editor) => {
       const { root } = await open(role, two, answer);
 
-      for (const id of ['widget-add', 'widget-move', 'widget-resize', 'widget-edit', 'widget-remove']) {
+      for (const id of ['widget-add', 'widget-move', 'widget-resize', 'menu-trigger']) {
         expect(all(root, id).length > 0, id).toBe(editor);
       }
       expect(all(root, 'widget-move')).toHaveLength(editor ? 2 : 0);
@@ -202,9 +209,9 @@ describe('ProjectIndicators', () => {
     it('turns the export of every indicator off', async () => {
       const { root } = await open('viewer', [], null, unpublished);
 
-      const buttons = all(root, 'indicator-table').flatMap((table) => Array.from(table.querySelectorAll<HTMLButtonElement>('tbody button')));
-      expect(buttons).toHaveLength(defaultIndicators.length);
-      expect(buttons.every((b) => b.disabled)).toBe(true);
+      // Nothing has a table, so there is nothing to export: no export control is offered at all.
+      expect(all(root, 'indicator-table')).toHaveLength(1);
+      expect(root.querySelectorAll('[data-testid^="indicator-export-"]')).toHaveLength(0);
     });
   });
 
@@ -344,7 +351,7 @@ describe('ProjectIndicators', () => {
       const { root } = await open('viewer', [], null, { indicators });
 
       expect(byTestId<HTMLButtonElement>(root, 'indicator-export-coverage')!.disabled).toBe(false);
-      expect(byTestId<HTMLButtonElement>(root, 'indicator-export-target')!.disabled).toBe(true);
+      expect(byTestId(root, 'indicator-export-target')).toBeNull();
     });
 
     it('reports a refused export', async () => {
@@ -378,7 +385,14 @@ describe('ProjectIndicators', () => {
 
     /** Opens the widget dialog, which reads the columns of the indicator it starts on. */
     async function openDialog(context: Context, button: string, index = 0) {
-      all(context.root, button)[index].click();
+      if (button === 'widget-edit' || button === 'widget-remove') {
+        // Edit and Remove are the two items of the widget's actions menu.
+        all(context.root, 'menu-trigger')[index].click();
+        await settle(context.harness);
+        (document.querySelector(`[data-testid="${button}"]`) as HTMLElement).click();
+      } else {
+        all(context.root, button)[index].click();
+      }
       await settle(context.harness);
       if (button === 'widget-add' || button === 'widget-edit') {
         context.http.expectOne(isColumns).flush(catalog());
@@ -464,6 +478,100 @@ describe('ProjectIndicators', () => {
 
       expect(byTestId<HTMLButtonElement>(root, 'widget-add')!.disabled).toBe(true);
       expect(text(byTestId(root, 'widget-limit'))).toContain('(2)');
+    });
+  });
+
+  describe('the restructured page', () => {
+    it('puts the widgets before the indicator list, which waits behind a closed disclosure', async () => {
+      const { root } = await open('viewer', two, answer);
+      const grid = byTestId(root, 'widget-grid')!;
+      const card = byTestId(root, 'indicator-table-card')!;
+      expect(grid.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect((card.querySelector('details') as HTMLDetailsElement).open).toBe(false);
+    });
+
+    it('shows the indicators expanded inside the empty state while none has published', async () => {
+      const { root } = await open('analyst', [], null, unpublished);
+      const empty = byTestId(root, 'indicators-empty')!;
+      expect(empty.contains(byTestId(root, 'indicator-table'))).toBe(true);
+      expect(root.querySelector('details')).toBeNull(); // no disclosure to open: the list is part of the message
+    });
+
+    it('has no card around the toolbar and shows a viewer only the switch to tables, with no count', async () => {
+      const { root } = await open('viewer', two, answer);
+      const toolbar = byTestId(root, 'indicators-toolbar')!;
+      expect(toolbar.closest('tmz-card')).toBeNull();
+      expect(byTestId(toolbar, 'indicators-count')).toBeNull();
+      expect(byTestId(toolbar, 'tables-toggle')).not.toBeNull();
+      expect(byTestId(toolbar, 'widget-add')).toBeNull();
+    });
+
+    it('merges the count and the limit into one line for an editor', async () => {
+      const { root } = await open('analyst', two, answer, { limits: { maxWidgets: 2, maxQueryRows: 5000 } });
+      expect(byTestId(root, 'indicators-count')).toBeNull();
+      expect(text(byTestId(root, 'widget-limit'))).toContain('(2)');
+      expect(byTestId<HTMLButtonElement>(root, 'widget-add')!.disabled).toBe(true);
+    });
+
+    it('hides the toolbar when there are no widgets and offers Add inside the empty card', async () => {
+      const { root } = await open('analyst', [], null);
+      expect(byTestId(root, 'indicators-toolbar')).toBeNull();
+      expect(byTestId(byTestId(root, 'no-widgets')!, 'widget-add')).not.toBeNull();
+    });
+
+    it('offers the table toggle in the tile header only once the widget has something to draw, and not for a stat tile', async () => {
+      const { root } = await open('viewer', two, answer);
+      const tiles = all(root, 'widget');
+      expect(byTestId(tiles[0], 'widget-table-toggle')).not.toBeNull();
+      expect(byTestId(tiles[0], 'chart-toggle')).toBeNull(); // not also in the body
+      expect(byTestId(tiles[1], 'widget-table-toggle')).toBeNull(); // a single figure has no plot
+    });
+
+    it('does not offer the table toggle while the widget has no rows', async () => {
+      const { root } = await open('viewer', [widget('w1')], result([]));
+      expect(byTestId(root, 'widget-table-toggle')).toBeNull();
+    });
+
+    it('keeps a tile short while its indicator has not published', async () => {
+      const { root } = await open('viewer', [widget('w1')], null, unpublished);
+      expect(byTestId(root, 'widget')!.style.gridRow).toContain('span 2');
+      expect(byTestId(root, 'widget')!.style.gridRow).not.toContain('span 4');
+    });
+
+    it('collapses edit and remove into one actions menu named after the widget', async () => {
+      const context = await open('analyst', two, answer);
+      const trigger = all(context.root, 'menu-trigger')[0];
+      expect(trigger.getAttribute('aria-label')).toBe('Actions for Coverage by municipality');
+      expect(all(context.root, 'widget-edit')).toHaveLength(0); // the items exist once the menu is open
+      trigger.click();
+      await settle(context.harness);
+      const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+      expect(items.map((i) => text(i))).toEqual(['Edit widget', 'Remove widget']);
+    });
+  });
+
+  describe('exporting one indicator', () => {
+    const exported = { downloadUrl: '/api/v1/data-exports/token', fileName: 'coverage.csv', rowCount: 120, cutCells: 0, expiresAt: '2026-10-02T12:05:00Z' };
+
+    it('shows the busy state on that indicator only, and ends with one message', async () => {
+      const context = await open('viewer', [], null);
+      byTestId(context.root, 'indicator-export-coverage')!.click();
+      await settle(context.harness);
+      (overlay().querySelector('[data-testid="indicators-export-csv"]') as HTMLElement).click();
+      await settle(context.harness);
+
+      const busy = byTestId<HTMLButtonElement>(context.root, 'indicator-export-coverage')!;
+      const other = byTestId<HTMLButtonElement>(context.root, 'indicator-export-households_visited')!;
+      expect(busy.disabled).toBe(true);
+      expect(busy.getAttribute('aria-busy')).toBe('true');
+      expect(busy.getAttribute('aria-label')).toBe('Preparing the export…');
+      expect(other.disabled).toBe(false);
+      expect(TestBed.inject(ToastService).toasts()).toHaveLength(0);
+
+      context.http.expectOne(`${indicatorsUrl}/coverage/exports`).flush(exported);
+      await settle(context.harness);
+      expect(busy.disabled).toBe(false);
+      expect(TestBed.inject(ToastService).toasts()).toHaveLength(1);
     });
   });
 });

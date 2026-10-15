@@ -29,7 +29,7 @@ const statusTones: Record<RunStatus | 'stopped', Tone> = {
             {{ t('scriptTests.title', { kind: kindLabel(test), size: test.sampleSize }) }}
           </h2>
           <tmz-badge [tone]="tone(test.status)" data-testid="test-status">{{ t('runs.status.' + test.status) }}</tmz-badge>
-          <span class="text-sm text-body">{{ test.queuedAt | date: 'mediumTime' }}</span>
+          <span class="text-sm text-body">{{ test.queuedAt | date: 'shortTime' }}</span>
         </div>
 
         @if (stale()) {
@@ -41,8 +41,8 @@ const statusTones: Record<RunStatus | 'stopped', Tone> = {
         @if (test.status === 'failed' && test.error) {
           <p class="mb-3 break-words text-sm text-fg-danger-strong" data-testid="test-error">{{ errorText(test) }}</p>
         }
-        @if (test.status === 'succeeded') {
-          <p class="mb-3 text-sm text-body" data-testid="test-success">{{ test.stopAtLine ? t('scriptTests.succeededThroughCell') : t('scriptTests.succeeded') }}</p>
+        @if (test.status === 'succeeded' && test.stopAtLine) {
+          <p class="mb-3 text-sm text-body" data-testid="test-success">{{ t('scriptTests.succeededThroughCell') }}</p>
         }
 
         <div class="flex flex-col gap-3">

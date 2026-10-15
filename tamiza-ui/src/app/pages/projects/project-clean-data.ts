@@ -29,6 +29,7 @@ import {
   Table,
   TableContainer,
   ToastService,
+  dateTimeFormat,
   tableCell,
   tableHead,
   tableHeaderCell,
@@ -72,74 +73,60 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
 
         @if (overview.sources.length === 0) {
           <tmz-card [heading]="t('cleanData.empty.title')" data-testid="data-empty">
-            <p class="text-sm text-body">{{ t('cleanData.empty.body') }}</p>
             @if (context.can('analyst')) {
-              <p class="mt-2 text-sm text-body">{{ t('cleanData.empty.editor') }}</p>
+              <p class="text-sm text-body">{{ t('cleanData.empty.editor') }}</p>
               <a tmzButton variant="secondary" class="mt-4" [routerLink]="['..', 'scripts']" data-testid="data-empty-link">{{ t('cleanData.empty.editorLink') }}</a>
             } @else {
-              <p class="mt-2 text-sm text-body" data-testid="data-empty-viewer">{{ t('cleanData.empty.viewer') }}</p>
+              <p class="text-sm text-body" data-testid="data-empty-viewer">{{ t('cleanData.empty.viewer') }}</p>
             }
           </tmz-card>
         } @else {
-          <tmz-card>
-            <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-              <div class="flex min-w-0 flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
-                @if (overview.sources.length > 1) {
-                  <div role="group" [attr.aria-label]="t('cleanData.sourceLabel')" class="inline-flex w-full rounded-base shadow-xs sm:w-auto" data-testid="source-switch">
-                    @for (item of overview.sources; track item.source) {
-                      <button
-                        type="button"
-                        class="min-h-10 flex-1 border px-4 py-2.5 text-sm font-medium first:rounded-s-base last:rounded-e-base focus:z-10 focus:outline-none focus:ring-4 focus:ring-neutral-tertiary sm:flex-none"
-                        [class]="item.source === source() ? 'border-transparent bg-brand text-white' : 'border-default-medium bg-neutral-secondary-medium text-body hover:bg-neutral-tertiary-medium hover:text-heading'"
-                        [attr.aria-pressed]="item.source === source()"
-                        (click)="selectSource(item.source)"
-                        [attr.data-testid]="'source-' + item.source"
-                      >
-                        {{ t('cleanData.source.' + item.source) }}
-                      </button>
-                    }
-                  </div>
-                }
-                <div class="min-w-0 sm:w-80">
-                  <label for="dataTable" class="mb-2 block text-sm font-medium text-heading">{{ t('cleanData.tableLabel') }}</label>
-                  <select tmzInput id="dataTable" (change)="selectTable($any($event.target).value)" data-testid="table-select">
-                    @for (item of tables(); track item.name) {
-                      <option [value]="item.name" [selected]="item.name === table()">
-                        {{ item.rowCount === null ? item.name : t('cleanData.tableOption', { name: item.name, count: (item.rowCount | number) }) }}
-                      </option>
-                    }
-                  </select>
+          <div class="flex flex-col gap-3">
+            <div class="flex min-w-0 flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+              @if (overview.sources.length > 1) {
+                <div role="group" [attr.aria-label]="t('cleanData.sourceLabel')" class="inline-flex w-full rounded-base shadow-xs sm:w-auto" data-testid="source-switch">
+                  @for (item of overview.sources; track item.source) {
+                    <button
+                      type="button"
+                      class="min-h-10 flex-1 border px-4 py-2.5 text-sm font-medium first:rounded-s-base last:rounded-e-base focus:z-10 focus:outline-none focus:ring-4 focus:ring-neutral-tertiary sm:flex-none"
+                      [class]="item.source === source() ? 'border-transparent bg-brand text-white' : 'border-default-medium bg-neutral-secondary-medium text-body hover:bg-neutral-tertiary-medium hover:text-heading'"
+                      [attr.aria-pressed]="item.source === source()"
+                      (click)="selectSource(item.source)"
+                      [attr.data-testid]="'source-' + item.source"
+                    >
+                      {{ t('cleanData.source.' + item.source) }}
+                    </button>
+                  }
                 </div>
-              </div>
-
-              <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <button
-                  tmzButton
-                  variant="secondary"
-                  type="button"
-                  [cdkMenuTriggerFor]="exportMenu"
-                  [disabled]="exporting() || !table()"
-                  [attr.title]="t('cleanData.export.help')"
-                  data-testid="export-button"
-                >
-                  {{ exporting() ? t('cleanData.export.preparing') : t('cleanData.export.button') }}
-                </button>
+              }
+              <div class="min-w-0 sm:w-80">
+                <label for="dataTable" class="mb-2 block text-sm font-medium text-heading">{{ t('cleanData.tableLabel') }}</label>
+                <select tmzInput id="dataTable" (change)="selectTable($any($event.target).value)" data-testid="table-select">
+                  @for (item of tables(); track item.name) {
+                    <option [value]="item.name" [selected]="item.name === table()">
+                      {{ item.rowCount === null ? item.name : t('cleanData.tableOption', { name: item.name, count: (item.rowCount | number) }) }}
+                    </option>
+                  }
+                </select>
               </div>
             </div>
 
-            <div class="mt-4 flex flex-col gap-1 text-sm text-body">
+            <p class="text-sm text-body">
               @if (publishedAt(); as published) {
-                <p data-testid="published">
-                  {{ t('cleanData.published', { time: (published | date: 'medium') }) }}
+                <span data-testid="published">
+                  {{ t('cleanData.published', { time: (published | date: dateTimeFormat) }) }}
                   @if (runId(); as run) {
                     {{ t('cleanData.publishedRun', { run: shortId(run) }) }}
                   }
-                  <a [routerLink]="['..', 'scripts']" class="ms-1 text-fg-brand hover:underline">{{ t('cleanData.runsLink') }}</a>
-                </p>
+                  @if (context.can('analyst')) {
+                    <a [routerLink]="['..', 'scripts']" fragment="runs" class="ms-1 text-fg-brand hover:underline">{{ t('cleanData.runsLink') }}</a>
+                  }
+                </span>
+                ·
               }
-              <p data-testid="zone">{{ t('cleanData.zone', { zone: timeZone() }) }}</p>
-            </div>
-          </tmz-card>
+              <span data-testid="zone">{{ t('cleanData.zone', { zone: timeZone() }) }}</span>
+            </p>
+          </div>
 
           <ng-template #exportMenu>
             <div cdkMenu class="z-10 min-w-48 rounded-base border border-default-medium bg-neutral-primary-medium py-2 shadow-lg" data-testid="export-menu">
@@ -153,21 +140,44 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
           </ng-template>
 
           @if (republishedAt(); as time) {
-            <tmz-alert tone="brand" data-testid="republished">{{ t('cleanData.republished', { time: (time | date: 'medium') }) }}</tmz-alert>
+            <tmz-alert tone="brand" [announce]="true" data-testid="republished">{{ t('cleanData.republished', { time: (time | date: dateTimeFormat) }) }}</tmz-alert>
           }
           @if (goneTable(); as gone) {
-            <tmz-alert tone="warning" data-testid="table-gone">
+            <tmz-alert tone="warning" [announce]="true" data-testid="table-gone">
               {{ table() ? t('cleanData.tableGone', { name: gone, next: table() }) : t('cleanData.tableGoneNone', { name: gone }) }}
             </tmz-alert>
           }
           @if (dropped().length) {
-            <tmz-alert tone="warning" [heading]="t('cleanData.dropped.title')" data-testid="dropped">
+            <tmz-alert tone="warning" [announce]="true" [heading]="t('cleanData.dropped.title')" data-testid="dropped">
               <ul class="mt-1 list-disc ps-5">
                 @for (item of dropped(); track item) {
                   <li>{{ droppedText(item, t) }}</li>
                 }
               </ul>
             </tmz-alert>
+          }
+
+          @if (table()) {
+            <div class="flex items-center justify-between gap-3">
+              <p class="text-sm text-body" data-testid="row-count">
+                @if (page(); as page) {
+                  {{ query().filters.length ? t('cleanData.matching', { count: (page.total | number) }) : t('cleanData.total', { count: (page.total | number) }) }}
+                }
+              </p>
+              <button
+                tmzButton
+                variant="secondary"
+                size="sm"
+                type="button"
+                [cdkMenuTriggerFor]="exportMenu"
+                [disabled]="exporting()"
+                [attr.aria-busy]="exporting()"
+                [attr.title]="t('cleanData.export.help')"
+                data-testid="export-button"
+              >
+                {{ exporting() ? t('cleanData.export.preparing') : t('cleanData.export.button') }}
+              </button>
+            </div>
           }
 
           @if (page(); as page) {
@@ -188,17 +198,8 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
                 </ul>
               }
 
-              <p class="mb-2 text-sm text-body" data-testid="row-count">
-                {{ query().filters.length ? t('cleanData.matching', { count: (page.total | number) }) : t('cleanData.total', { count: (page.total | number) }) }}
-              </p>
-
               @if (page.rows.length === 0) {
-                <tmz-card data-testid="no-rows">
-                  <p class="text-sm text-body">{{ query().filters.length ? t('cleanData.noMatch') : t('cleanData.emptyTable') }}</p>
-                  @if (query().filters.length) {
-                    <button tmzButton variant="secondary" class="mt-4" type="button" (click)="clearFilters()">{{ t('cleanData.clearFilters') }}</button>
-                  }
-                </tmz-card>
+                <p class="mb-2 text-sm text-body" data-testid="no-rows">{{ query().filters.length ? t('cleanData.noMatch') : t('cleanData.emptyTable') }}</p>
               }
 
               <tmz-table-container class="max-h-[70vh] overflow-y-auto" [class.opacity-60]="pageLoading()">
@@ -229,10 +230,13 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
                               <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4h18l-7 8.5V20l-4-2v-5.5z" /></svg>
                             </button>
                           </div>
-                          @if (column.label) {
-                            <span class="block max-w-xs truncate text-xs font-normal" [attr.title]="column.label" data-testid="column-label">{{ column.label }}</span>
-                          }
-                          <span class="block text-xs font-normal" data-testid="column-type">{{ t('preview.types.' + column.type) }}</span>
+                          <span class="flex max-w-xs items-baseline gap-1 text-xs font-normal">
+                            @if (column.label) {
+                              <span class="min-w-0 truncate" [attr.title]="column.label" data-testid="column-label">{{ column.label }}</span>
+                              <span aria-hidden="true">·</span>
+                            }
+                            <span class="shrink-0" data-testid="column-type">{{ t('preview.types.' + column.type) }}</span>
+                          </span>
                         </th>
                       }
                     </tr>
@@ -261,6 +265,7 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
                 </table>
               </tmz-table-container>
 
+              @if (page.rows.length > 0 && page.total > smallestPageSize) {
               <nav class="mt-3 flex flex-col gap-3 text-sm text-body sm:flex-row sm:items-center sm:justify-between" [attr.aria-label]="t('cleanData.paging.label')">
                 <div class="flex items-center gap-2">
                   <label for="dataPageSize">{{ t('cleanData.paging.size') }}</label>
@@ -280,6 +285,7 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
                   </div>
                 </div>
               </nav>
+              }
             </div>
           } @else if (pageLoading()) {
             <tmz-card><div class="flex flex-col gap-3" aria-busy="true" data-testid="data-loading"><tmz-skeleton class="w-1/3" /><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div></tmz-card>
@@ -305,6 +311,8 @@ export class ProjectCleanData {
   protected readonly context = inject(ProjectContext);
 
   protected readonly pageSizes = pageSizes;
+  protected readonly smallestPageSize = pageSizes[0];
+  protected readonly dateTimeFormat = dateTimeFormat;
   protected readonly tableHead = tableHead;
   protected readonly tableHeaderCell = tableHeaderCell;
   protected readonly tableRow = tableRow;
@@ -468,6 +476,11 @@ export class ProjectCleanData {
 
   /** Changes the address; the address then drives `apply`. */
   private go(changes: { source?: DataSource | null; table?: string | null; query?: DataQuery }, replace = false): void {
+    if (!replace) {
+      // A notice about the view as the member found it has done its job once they act on the view.
+      this.dropped.set([]);
+      this.republishedAt.set(null);
+    }
     const source = changes.source !== undefined ? changes.source : this.source();
     const table = changes.table !== undefined ? changes.table : this.table();
     const query = changes.query ?? this.query();
@@ -568,7 +581,6 @@ export class ProjectCleanData {
       return;
     }
     this.exporting.set(true);
-    this.toasts.info(this.transloco.translate('cleanData.export.preparing'));
     this.service.export(this.projectId, source, table, format, { filters: this.query().filters, sort: this.query().sort }).subscribe({
       next: (result) => {
         this.exporting.set(false);

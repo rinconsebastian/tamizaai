@@ -13,6 +13,7 @@ import {
   TableContainer,
   ToastService,
   Tone,
+  dateTimeFormat,
   tableCell,
   tableHead,
   tableHeaderCell,
@@ -32,12 +33,7 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
   imports: [DatePipe, TranslocoDirective, Badge, Button, Card, Skeleton, Table, TableContainer],
   template: `
     <section *transloco="let t">
-      <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 class="text-lg font-semibold text-heading">{{ t('runs.title') }}</h2>
-        @if (context.can('analyst')) {
-          <button tmzButton type="button" [disabled]="busy()" (click)="start()" data-testid="run-now">{{ t('runs.runNow') }}</button>
-        }
-      </div>
+      <h2 id="runs" class="mb-3 text-lg font-semibold text-heading">{{ t('runs.title') }}</h2>
       @if (log(); as log) {
         @if (log.items.length === 0) {
           <tmz-card><p class="text-sm text-body" data-testid="runs-empty">{{ t('runs.empty') }}</p></tmz-card>
@@ -49,15 +45,17 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
                   <tmz-badge [tone]="tone(run.status)">{{ t('runs.status.' + run.status) }}</tmz-badge>
                   <span class="text-body">{{ t('runs.triggers.' + run.trigger) }}</span>
                 </div>
-                <p class="text-body">{{ (run.startedAt ?? run.queuedAt) | date: 'medium' }}</p>
-                <p class="mt-1 flex flex-wrap gap-1">
-                  @for (step of fixedSteps(run); track step.step) {
-                    <tmz-badge [tone]="stepTone(step.status)">{{ t('runs.steps.' + step.step) }}</tmz-badge>
-                  }
-                  @if (indicatorSteps(run).length) {
-                    <tmz-badge [tone]="stepTone(indicatorStatus(run))">{{ indicatorsSummary(run) }}</tmz-badge>
-                  }
-                </p>
+                <p class="text-body">{{ (run.startedAt ?? run.queuedAt) | date: dateTimeFormat }}</p>
+                @if (hasProblem(run)) {
+                  <p class="mt-1 flex flex-wrap gap-1">
+                    @for (step of fixedSteps(run); track step.step) {
+                      <tmz-badge [tone]="stepTone(step.status)">{{ t('runs.steps.' + step.step) }}</tmz-badge>
+                    }
+                    @if (indicatorSteps(run).length) {
+                      <tmz-badge [tone]="stepTone(indicatorStatus(run))">{{ indicatorsSummary(run) }}</tmz-badge>
+                    }
+                  </p>
+                }
                 @if (run.error) {
                   <p class="mt-2 break-words text-fg-danger-strong">{{ errorText(run) }}</p>
                 }
@@ -72,7 +70,6 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
                   <th scope="col" [class]="tableHeaderCell">{{ t('runs.columns.started') }}</th>
                   <th scope="col" [class]="tableHeaderCell">{{ t('runs.columns.status') }}</th>
                   <th scope="col" [class]="tableHeaderCell">{{ t('runs.columns.steps') }}</th>
-                  <th scope="col" [class]="tableHeaderCell">{{ t('runs.columns.versions') }}</th>
                   <th scope="col" [class]="tableHeaderCell">{{ t('runs.columns.duration') }}</th>
                   <th scope="col" [class]="tableHeaderCell"><span class="sr-only">{{ t('runs.details') }}</span></th>
                 </tr>
@@ -81,7 +78,7 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
                 @for (run of log.items; track run.id) {
                   <tr [class]="tableRow" [attr.data-testid]="'run-row-' + run.status">
                     <td [class]="tableCell + ' whitespace-nowrap'">
-                      {{ (run.startedAt ?? run.queuedAt) | date: 'medium' }}
+                      {{ (run.startedAt ?? run.queuedAt) | date: dateTimeFormat }}
                       <span class="block text-xs">{{ t('runs.triggers.' + run.trigger) }}{{ run.requestedBy ? ' · ' + run.requestedBy.name : '' }}</span>
                     </td>
                     <td [class]="tableCell">
@@ -91,16 +88,19 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
                       }
                     </td>
                     <td [class]="tableCell">
-                      <span class="flex flex-wrap gap-1">
-                        @for (step of fixedSteps(run); track step.step) {
-                          <tmz-badge [tone]="stepTone(step.status)">{{ t('runs.steps.' + step.step) }}</tmz-badge>
-                        }
-                        @if (indicatorSteps(run).length) {
-                          <tmz-badge [tone]="stepTone(indicatorStatus(run))" data-testid="run-indicators">{{ indicatorsSummary(run) }}</tmz-badge>
-                        }
-                      </span>
+                      @if (hasProblem(run)) {
+                        <span class="flex flex-wrap gap-1">
+                          @for (step of fixedSteps(run); track step.step) {
+                            <tmz-badge [tone]="stepTone(step.status)">{{ t('runs.steps.' + step.step) }}</tmz-badge>
+                          }
+                          @if (indicatorSteps(run).length) {
+                            <tmz-badge [tone]="stepTone(indicatorStatus(run))" data-testid="run-indicators">{{ indicatorsSummary(run) }}</tmz-badge>
+                          }
+                        </span>
+                      } @else {
+                        <span class="text-body">{{ t('runs.allSucceeded') }}</span>
+                      }
                     </td>
-                    <td [class]="tableCell + ' whitespace-nowrap'">{{ versions(run) }}</td>
                     <td [class]="tableCell + ' whitespace-nowrap'">{{ duration(run.startedAt, run.finishedAt) ?? '—' }}</td>
                     <td [class]="tableCell">
                       <button tmzButton variant="secondary" size="sm" type="button" (click)="open(run)" [attr.data-testid]="'run-details-' + run.id">
@@ -145,13 +145,17 @@ export class PipelineRuns {
   protected readonly tableRow = tableRow;
   protected readonly tableCell = tableCell;
   protected readonly duration = durationText;
+  protected readonly dateTimeFormat = dateTimeFormat;
 
   /** Emits when a run that was queued or running has ended, so the tables it published can be read again. */
   readonly runEnded = output<void>();
+  /** The newest run, whenever the first page is read; the page shows it in its last-run strip. Null when there is none. */
+  readonly latest = output<RunSummary | null>();
 
   protected readonly log = signal<RunPage | null>(null);
   protected readonly page = signal(1);
-  protected readonly busy = signal(false);
+  /** Whether a run is being queued; the page's "Run now" waits for it. */
+  readonly busy = signal(false);
   protected readonly pageFrom = computed(() => (this.page() - 1) * pageSize + 1);
   protected readonly pageTo = computed(() => Math.min(this.page() * pageSize, this.log()?.total ?? 0));
   private readonly active = computed(() => !!this.log()?.items.some((run) => run.status === 'queued' || run.status === 'running'));
@@ -175,7 +179,8 @@ export class PipelineRuns {
     });
   }
 
-  protected start(): void {
+  /** Queues a run now (analysts and admins) and shows it at the top of the list. */
+  start(): void {
     this.busy.set(true);
     this.service.startRun(this.projectId()).subscribe({
       next: () => {
@@ -197,6 +202,9 @@ export class PipelineRuns {
           const wasActive = this.active();
           this.page.set(page);
           this.log.set(log);
+          if (page === 1) {
+            this.latest.emit(log.items[0] ?? null);
+          }
           if (wasActive && !this.active()) {
             this.runEnded.emit();
           }
@@ -224,6 +232,11 @@ export class PipelineRuns {
     return stepTones[status];
   }
 
+  /** A run worth a closer look: a step failed or was skipped. A run where every step succeeded needs no list of them. */
+  protected hasProblem(run: RunSummary): boolean {
+    return run.steps.some((step) => step.status !== 'succeeded');
+  }
+
   protected fixedSteps(run: RunSummary): StepSummary[] {
     return run.steps.filter((step) => step.step !== 'indicator');
   }
@@ -241,14 +254,6 @@ export class PipelineRuns {
   protected indicatorsSummary(run: RunSummary): string {
     const steps = this.indicatorSteps(run);
     return this.transloco.translate('runs.indicatorsSummary', { done: steps.filter((s) => s.status === 'succeeded').length, total: steps.length });
-  }
-
-  /** The versions of script 1 and script 2 the run used, then how many indicators it ran. */
-  protected versions(run: RunSummary): string {
-    const v = run.versions;
-    const fixed = [v.clean, v.output].map((n) => (n === null ? '—' : `v${n}`));
-    const count = v.indicators.length;
-    return [...fixed, this.transloco.translate(count === 1 ? 'runs.indicatorCountOne' : 'runs.indicatorCount', { count })].join(' / ');
   }
 
   /** The translated message for the run's error code, or the API's text. */

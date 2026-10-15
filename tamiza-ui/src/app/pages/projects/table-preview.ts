@@ -8,7 +8,7 @@ import { Table, TableContainer, tableCell, tableHead, tableHeaderCell, tableRow 
   selector: 'app-table-preview',
   imports: [TranslocoDirective, Table, TableContainer],
   template: `
-    <tmz-table-container *transloco="let t" class="max-h-96 overflow-y-auto">
+    <tmz-table-container *transloco="let t" [class]="fill() ? '' : 'max-h-96 overflow-y-auto'">
       <table tmzTable data-testid="preview-table">
         <thead [class]="tableHead + ' sticky top-0'">
           <tr>
@@ -49,6 +49,8 @@ export class TablePreview {
   readonly columns = input.required<{ name: string; type: ColumnType | string; label?: string | null }[]>();
   readonly rows = input.required<unknown[][]>();
   readonly cutCells = input<number[][] | null>(null);
+  /** The host scrolls vertically itself (a dialog body), so the table is not capped at a height of its own. */
+  readonly fill = input(false);
 
   protected readonly tableHead = tableHead;
   protected readonly tableHeaderCell = tableHeaderCell;

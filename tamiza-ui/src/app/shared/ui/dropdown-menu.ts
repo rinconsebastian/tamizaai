@@ -5,6 +5,8 @@ export interface MenuItem {
   id: string;
   label: string;
   danger?: boolean;
+  /** Lets tests and scripts find the item in the menu's overlay. */
+  testId?: string;
 }
 
 /** Flowbite dropdown markup on the CDK menu: arrow keys move between items, Escape closes and returns focus. */
@@ -30,6 +32,7 @@ export interface MenuItem {
             cdkMenuItem
             type="button"
             (cdkMenuItemTriggered)="selected.emit(item.id)"
+            [attr.data-testid]="item.testId ?? null"
             [class]="
               'block w-full text-left px-4 py-2 text-sm min-h-10 hover:bg-neutral-tertiary-medium focus:bg-neutral-tertiary-medium focus:outline-none ' +
               (item.danger ? 'text-fg-danger' : 'text-body hover:text-heading')

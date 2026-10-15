@@ -1,8 +1,9 @@
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { Component, computed, input, output, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { TranslocoDirective } from '@jsverse/transloco';
 import type { InputColumn, InputQuestion, ScriptInputs } from '../../../core/projects/pipeline.service';
-import { Alert, Button, Input, Skeleton } from '../../../shared/ui';
+import { Alert, Button, Disclosure, Input, Skeleton, dateTimeFormat } from '../../../shared/ui';
 
 interface TableView {
   name: string;
@@ -22,14 +23,32 @@ function matches(filter: string, ...texts: (string | null | undefined)[]): boole
  */
 @Component({
   selector: 'app-script-inputs-panel',
-  imports: [DatePipe, DecimalPipe, TranslocoDirective, Alert, Button, Input, Skeleton],
+  imports: [DatePipe, DecimalPipe, RouterLink, TranslocoDirective, Alert, Button, Disclosure, Input, Skeleton],
   template: `
     <div class="flex flex-col gap-3 text-sm" *transloco="let t" data-testid="inputs-panel">
       <div class="flex items-start justify-between gap-2">
-        <p class="text-body" data-testid="inputs-intro">
-          {{ inputs()?.source === 'clean' ? t('scripts.inputs.cleanIntro') : t('scripts.inputs.rawIntro') }}
+        <p class="text-body" data-testid="inputs-status">
+          @if (inputs() === null || failed()) {
+            {{ t('scripts.inputs.title') }}
+          } @else if (inputs()!.publishedAt; as published) {
+            <span data-testid="inputs-published">{{ t(inputs()!.source === 'clean' ? 'scripts.inputs.cleanPublished' : 'scripts.inputs.rawPublished', { when: (published | date: dateTimeFormat) }) }}</span>
+          } @else {
+            <span data-testid="inputs-none">{{ t('scripts.inputs.nothingPublished') }}</span>
+          }
         </p>
-        <button tmzButton variant="ghost" size="sm" type="button" (click)="refresh.emit()" data-testid="inputs-refresh">{{ t('scripts.inputs.refresh') }}</button>
+        <button
+          tmzButton
+          variant="ghost"
+          size="sm"
+          type="button"
+          class="shrink-0"
+          [attr.aria-label]="t('scripts.inputs.refresh')"
+          [attr.title]="t('scripts.inputs.refresh')"
+          (click)="refresh.emit()"
+          data-testid="inputs-refresh"
+        >
+          <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" /></svg>
+        </button>
       </div>
 
       @if (failed()) {
@@ -37,12 +56,6 @@ function matches(filter: string, ...texts: (string | null | undefined)[]): boole
       } @else if (inputs() === null) {
         <div aria-busy="true" class="flex flex-col gap-2"><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div>
       } @else {
-        @if (inputs()!.publishedAt; as published) {
-          <p class="text-body" data-testid="inputs-published">{{ t('scripts.inputs.publishedAt', { when: (published | date: 'medium') }) }}</p>
-        } @else {
-          <p class="text-body" data-testid="inputs-none">{{ t('scripts.inputs.nothingPublished') }}</p>
-        }
-
         <div>
           <label class="sr-only" for="inputs-filter">{{ t('scripts.inputs.filterLabel') }}</label>
           <input tmzInput id="inputs-filter" type="search" [value]="filter()" [placeholder]="t('scripts.inputs.filterPlaceholder')" (input)="filter.set($any($event.target).value)" data-testid="inputs-filter" />
@@ -82,7 +95,12 @@ function matches(filter: string, ...texts: (string | null | undefined)[]): boole
 
         @if (referenceTables().length) {
           <section aria-labelledby="inputs-reference">
-            <h3 id="inputs-reference" class="mb-1 font-medium text-heading">{{ t('scripts.inputs.referenceTables') }}</h3>
+            <div class="mb-1 flex items-baseline justify-between gap-2">
+              <h3 id="inputs-reference" class="font-medium text-heading">{{ t('scripts.inputs.referenceTables') }}</h3>
+              @if (manageLink(); as link) {
+                <a [routerLink]="link" class="text-xs text-fg-brand hover:underline" data-testid="inputs-manage-reference">{{ t('scripts.inputs.manage') }}</a>
+              }
+            </div>
             <ul class="flex flex-col gap-1">
               @for (table of referenceTables(); track table.name) {
                 <li>
@@ -106,8 +124,7 @@ function matches(filter: string, ...texts: (string | null | undefined)[]): boole
         }
 
         @if (questions().length) {
-          <section aria-labelledby="inputs-questions">
-            <h3 id="inputs-questions" class="mb-1 font-medium text-heading">{{ t('scripts.inputs.questions') }}</h3>
+          <tmz-disclosure [heading]="t('scripts.inputs.questions')" [status]="'(' + questions().length + ')'" [open]="!!filter()" data-testid="inputs-questions">
             <ul class="flex max-h-72 flex-col gap-0.5 overflow-y-auto">
               @for (question of questions(); track question.path) {
                 <li class="flex flex-wrap items-baseline gap-x-2">
@@ -119,7 +136,7 @@ function matches(filter: string, ...texts: (string | null | undefined)[]): boole
                 </li>
               }
             </ul>
-          </section>
+          </tmz-disclosure>
         }
 
         @if (filter() && !tables().length && !referenceTables().length && !questions().length) {
@@ -135,6 +152,9 @@ export class ScriptInputsPanel {
   readonly failed = input(false);
   /** Whether activating a name inserts it (the editor can be edited) or copies it. */
   readonly canInsert = input(false);
+  /** Where the reference tables are managed, shown as a link for whoever may; null for everyone else. */
+  readonly manageLink = input<string[] | null>(null);
+  protected readonly dateTimeFormat = dateTimeFormat;
   readonly pick = output<string>();
   readonly refresh = output<void>();
 

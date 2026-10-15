@@ -2,7 +2,7 @@
 
 Each project can have up to two Python scripts that clean the raw Kobo submissions and prepare tables for reading, and any number of **indicator scripts** that each compute one indicator, up to 100. Tamiza runs them in order every time the project's data changes, publishes each result only if it succeeds, and records what happened in the run log.
 
-Analysts and admins write scripts in the project's **Scripts** section; viewers can read them. Every save creates a version you can view and restore.
+Analysts and admins write scripts in the project's **Settings > Scripts** page; viewers can read them. Every save creates a version you can view and restore.
 
 ## The chain
 
@@ -51,7 +51,7 @@ Kobo stores and sends the answers to select questions as the choices' **names**,
 - A `select_one` answer is the label of its choice: `No`.
 - A `select_multiple` answer is the labels of its choices, in the order of the answer, joined by `; `: `Water; Electric power`. Kobo's own exports join labels with a space, but labels contain spaces too, so a space cannot be split back reliably; `main["services"].str.split("; ")` can.
 - Labels are always in the form's **default language**, its first language.
-- **Each answer uses the labels of the form version its submission was made with.** A form is often redeployed during fieldwork, and a choice can be added, removed or relabeled between versions. If version `vA` called a choice `Si` and a later version `vB` calls it `Sí`, the submissions made with `vA` hold `Si` and those made with `vB` hold `Sí`. Answers in repeat groups use their submission's version, and a question that the current form no longer has is still translated by the version that had it. The project's **Data** section lists the versions in use and whether their labels are available (see [kobo.md](kobo.md#7-form-versions-and-choice-labels)).
+- **Each answer uses the labels of the form version its submission was made with.** A form is often redeployed during fieldwork, and a choice can be added, removed or relabeled between versions. If version `vA` called a choice `Si` and a later version `vB` calls it `Sí`, the submissions made with `vA` hold `Si` and those made with `vB` hold `Sí`. Answers in repeat groups use their submission's version, and a question that the current form no longer has is still translated by the version that had it. The project's **Settings > Submissions** page lists the versions in use and whether their labels are available (see [kobo.md](kobo.md#7-form-versions-and-choice-labels)).
 - The "or other" option of a select question is labeled `Other`, as Kobo shows it. What the respondent typed stays in its own column.
 - The raw submissions are never changed; only the tables the scripts receive and the dashboards read show labels.
 
@@ -105,7 +105,7 @@ A column is named after its question (`has_water`), which is short and meant for
 - **Only the latest deployed version.** Unlike [choice labels](#choice-labels), which follow the version of each submission, a column has one label for all its rows, taken from the form's **latest deployed version** in its default language. If a question was relabeled in a later version, every answer, including those given with the earlier one, is under the new text. Edits that were not deployed do not count.
 - **Columns without a label.** These have none: system columns (`_id`, `_index`...); columns of questions that the deployed version no longer has, which the flatten log lists per table (`main: 2 columns are not in the deployed form version and have no question label: old_question, legacy_age.`); and questions with no label in the default language, which the log does not list.
 - **The "or other" text.** What the respondent typed for an "or other" option (`water_source_other`) belongs to its select question and is labeled with the question's label and `: Specify other`.
-- **When labels are not applied.** If the form has no deployed version recorded, or Tamiza has not been able to read the deployed version's definition yet (the **Data** section shows its status), the run publishes the tables without labels, and the flatten log says so (`Question labels not applied: the definition of the deployed form version vC is not available (failed).`). The next run after the definition is read publishes them. Re-checking the form in the Overview retries it.
+- **When labels are not applied.** If the form has no deployed version recorded, or Tamiza has not been able to read the deployed version's definition yet (the **Settings > Submissions** page shows its status), the run publishes the tables without labels, and the flatten log says so (`Question labels not applied: the definition of the deployed form version vC is not available (failed).`). The next run after the definition is read publishes them. Re-checking the form in **Settings > General** retries it.
 - **Redeploying.** The published comments change at the next run, like the rest of the published tables; **Run now** applies them at once.
 - **Tables a script returns carry no labels.** Script 1 can rename, merge and compute columns, so Tamiza cannot tell which question an output column comes from. The clean tables are the exception when there is no script 1: they are the flattened tables, so they keep the labels. Output column names are always reduced to lowercase letters, digits and underscores (see [Rules for what scripts return](#rules-for-what-scripts-return)), so a label cannot be used as a name either.
 
@@ -172,7 +172,7 @@ An indicator is one function that receives the cleaned tables and returns **one 
 
 #### The indicator's name and metadata
 
-Create an indicator with **Add indicator** in the Scripts section. It has:
+Create an indicator with **Add indicator** in the Scripts section (under **Settings**). It has:
 
 | Field | Rules |
 |---|---|
@@ -182,7 +182,7 @@ Create an indicator with **Add indicator** in the Scripts section. It has:
 | **Unit** | Optional, up to 32 characters (`households`, `COP`, `%`). |
 | **Format** | How the dashboard shows the numbers: `count` (a whole number with thousands separators), `decimal` (two decimals), `percent` (a **fraction** shown as a percentage: 0.42 reads `42%`) or `currency` (two decimals; the unit is the currency code, such as `COP`). |
 
-The metadata is saved with every version of the script, so restoring a version brings back its label, unit and format too. If you store 42 for 42 %, choose `decimal` with the unit `%` instead of `percent`.
+The metadata is saved with every version of the script, so restoring a version brings back its label, unit and format too. Above the editor the indicator is one line (label, name, format and unit) with an **Edit details** button that opens the fields; they stay open while they hold edits or the API refused one. Viewers, and anyone looking at an older version, see the same details as plain text. If you store 42 for 42 %, choose `decimal` with the unit `%` instead of `percent`.
 
 A project can have up to **100 indicators**. Each has its own versions, its own sample test and its own step in the run, so an indicator that fails never stops the others.
 
@@ -238,12 +238,17 @@ Asking for a reference table the project does not have, such as `ctx.reference["
 
 ## The editor
 
+The Scripts section lives under **Settings**. Above the editor one row picks the script: **1. Clean**, **2. Output** and an **Indicators** menu that lists each indicator with its label, name and version (a project with more than ten gets a filter), next to **Add indicator**. The selected script shows its version. Under the row, a line shows the **latest run** (its status, when it started and, if a step failed, which one) with a link to the run list at the bottom of the page and, for analysts and admins, **Run now**.
+
+Under the editor, one row holds **Save**, the **Sample size**, **Test on sample**, **Download sample**, **Templates** and a **More actions** menu with **Upload .py** and **Remove script**. The result of a test appears right below the editor, and the sample download below it. **Checks** lists what the editor found while you type (every role sees it; the note that checks never block saving is for those who can save). The signature the script has to define is shown above the editor.
+
 The editor is for writing a script without leaving the page. It knows the tables your script receives, what `ctx` offers and what the contract asks for, and it tells you what it can before you run anything. None of this blocks saving or testing: a test and a run decide whether a script works.
 
-**The side panel.** Beside the editor (below it on a phone) there are two tabs.
+**The side panel.** Beside the editor (below it on a phone) there are three tabs.
 
-- **Tables** lists what the selected script receives *as the last run published it*: the flattened tables for script 1, the clean tables for script 2 and the indicators, with each table's row count and each column's type and [question label](#question-labels), and when they were published. It also lists the project's [reference tables](#reference-data) with their columns, and the form's questions. A script you saved after the last run does not change the list until the next run (a test shows the tables its draft really received). Before the first run the panel says so, and the editor works without it. **Filter** matches names and labels; **Refresh** reads the tables again, which also happens when a run ends. Click a name to put it in the editor at the cursor as a quoted string (`"has_water"`); when you cannot edit (a viewer, or an old version on view) the click copies the name instead.
+- **Tables** lists what the selected script receives *as the last run published it*: the flattened tables for script 1, the clean tables for script 2 and the indicators, with each table's row count and each column's type and [question label](#question-labels), and when they were published. It also lists the project's [reference tables](#reference-data) with their columns (analysts and admins get a **Manage** link to them), and, in a collapsed group, the form's questions (a filter opens it). A script you saved after the last run does not change the list until the next run (a test shows the tables its draft really received). Before the first run the panel says so, and the editor works without it. **Filter** matches names and labels; the refresh button reads the tables again, which also happens when a run ends. Click a name to put it in the editor at the cursor as a quoted string (`"has_water"`); when you cannot edit (a viewer, or an old version on view) the click copies the name instead.
 - **Reference** lists the contract of the selected script, what it must return, cells and `ctx.show`, and every member of `ctx`, `ctx.form`, `ctx.log` and `ctx.reference` with a description and an example.
+- **Versions** lists the saved versions of the script, newest first. Click one to read it (read-only); analysts and admins can restore it.
 
 **Completion.** While you type, the editor offers the members of `ctx`, `ctx.form` and `ctx.log` after a dot (with their signatures), the questions of the form as the first argument of `ctx.form.label(` and `ctx.form.name(`, the input tables inside `cleaned["`, the reference tables inside `ctx.reference["`, and columns with their type and table inside the brackets after a table: `cleaned["main"]["`, `ctx.reference["population"]["` or a variable you assigned from a table (`main = cleaned["main"]` and then `main["`). Anywhere else in a subscript string it offers the columns of every input table. **Ctrl+Space** opens the list on demand. Hovering a member of `ctx` shows its signature and description.
 
@@ -343,7 +348,7 @@ A test runs your script from the start every time. To explore the data the way y
 
 ### Download a sample
 
-In the Scripts section, set the **Sample size** (the same field as a test) and click **Download sample**. Analysts and admins can; viewers cannot. The worker prepares the sample like a test, after the tests that are waiting and before the runs, reusing the flattened sample a recent test kept, and the panel shows when it is ready. **Download .zip** then saves a file named after the project and the date.
+In **Settings > Scripts**, set the **Sample size** (the same field as a test) and click **Download sample**. Analysts and admins can; viewers cannot. The worker prepares the sample like a test, after the tests that are waiting and before the runs, reusing the flattened sample a recent test kept, and a strip under the test result shows when it is ready: the number of submissions, the size and until when it is kept, the tables of the zip on one line (flattened, clean and reference), and a notice that the file holds the project's submissions. **Download .zip** then saves a file named after the project and the date.
 
 | In the zip | What it is |
 |---|---|
@@ -436,7 +441,7 @@ second.tables["piped_water_rate"]
 
 ### Upload it
 
-In the Scripts section, select the script (or add the indicator with the same name), click **Upload .py**, choose the file, run **Test on sample** and **Save**. For the same sample and script, a successful `check` returns the same tables as the test: the same names, columns, types and values.
+In **Settings > Scripts**, select the script (or add the indicator with the same name), click **Upload .py**, choose the file, run **Test on sample** and **Save**. For the same sample and script, a successful `check` returns the same tables as the test: the same names, columns, types and values.
 
 ### What is different from the server
 
@@ -447,15 +452,17 @@ In the Scripts section, select the script (or add the indicator with the same na
 
 ## Reference data
 
-Reference tables hold data that does not come from the form but that scripts need: population projections, municipality codes, price lists. They are per project, in the **Reference data** section. Every member can list them and preview their first 100 rows; analysts and admins upload, replace and delete them.
+Reference tables hold data that does not come from the form but that scripts need: population projections, municipality codes, price lists. They are per project, in the **Settings > Reference data** page. Every member can list them and preview their first 100 rows (a column whose header was renamed shows the file's original header under its name); analysts and admins upload, replace and delete them. **Preview** is the button of each row; **Replace** and **Delete** are in the row's actions menu. The script editor's **Tables** tab links to this page with **Manage**.
 
 **Uploading.** Choose a CSV or XLSX file of up to 10 MB and a name. The name is how scripts find the table (`ctx.reference["population"]`): lowercase letters, digits and underscores, starting with a letter, at most 63 characters, unique in the project. A project can have up to 50 reference tables.
+
+**Replacing.** **Replace** opens the same dialog with the name fixed: choose the file, and the table keeps its name while its rows and columns become those of the file. If the file is refused, the dialog says why and keeps your choice. Runs that already started keep the rows the table had when they started.
 
 **Reading the file.**
 
 - The first non-empty row is the header. XLSX files are read from their first sheet; CSV files must be UTF-8, separated by commas or semicolons.
 - A file needs at least one row below the header, at most 200 columns and at most 5,000,000 values (rows times columns).
-- **Column names** are adjusted the same way question names are (`Municipality code` → `municipality_code`, `Población 2026` → `poblacion_2026`); an empty header becomes `column`, and repeated names get a number (`age`, `age_2`). The upload lists every column it renamed.
+- **Column names** are adjusted the same way question names are (`Municipality code` → `municipality_code`, `Población 2026` → `poblacion_2026`); an empty header becomes `column`, and repeated names get a number (`age`, `age_2`). The upload lists every column it renamed, in a note you can dismiss (a replacement that renames the same columns as before says nothing).
 - **Column types** come from the values. A column is `integer` when every value is a whole number, `decimal` when every value is a number, `date` when every value is a date (an Excel date or `2026-01-31`), and `text` otherwise. Empty cells are empty values and do not change the type.
 - Numbers use a dot as decimal separator; in files separated by semicolons, as Excel writes them in many Spanish-language settings, a comma also works (`12,5`). Thousands separators are not understood: `1.234.567` makes the column text.
 - **Codes keep their zeros.** A value that starts with `0` followed by more digits, such as the DANE code `05001`, is not a number, so its column stays text and the zero is kept. In Excel, store such codes as text.
@@ -482,7 +489,7 @@ def compute(cleaned, ctx):
     })
 ```
 
-**Replacing and deleting.** **Replace** loads a new file into an existing table: it keeps its name, and its rows and columns become those of the new file. **Delete** removes it; scripts that still read it fail from the next run. A run reads every reference table once when it starts, so replacing a table during a run does not affect that run; the next run uses the new rows. The run's details list the reference tables it used, with their row counts and when each was last updated.
+**Deleting, and runs.** **Delete** (after a confirmation) removes a table; scripts that still read it fail from the next run. A run reads every reference table once when it starts, so replacing a table during a run does not affect that run; the next run uses the new rows. The run's details list the reference tables it used, with their row counts and when each was last updated.
 
 ## Rules for what scripts return
 
@@ -503,13 +510,13 @@ A step that fails publishes nothing: the dashboards keep showing the last succes
 - **On a schedule**, every 1 to 168 hours, counted from the start of the last run.
 - **Run now**, for analysts and admins.
 
-Admins change the first two under **When scripts run** in the Scripts section. A webhook delivery never starts a run by itself. A project has at most one run waiting: if one is already queued, another trigger does not add a second; if one is running, one more is queued to follow it.
+Everyone reads these settings as a line on **Settings > Submissions** (the Scripts section only links to the latest run) ("Scripts run after each synchronization with changes · also run every 24 hours · Next scheduled run …"). Admins change the first two with **Edit schedules** on that page, under **When scripts run**. A webhook delivery never starts a run by itself. A project has at most one run waiting: if one is already queued, another trigger does not add a second; if one is running, one more is queued to follow it.
 
 Saving a script does not start a run; the next run uses the latest version of each script. A run records which version of script 1, script 2 and each indicator it used. An indicator you create while a run is running is computed from the next run.
 
 ## The run log
 
-**Runs** lists every run with its status, trigger, the script versions it used and how long it took. **Details** shows each step, with one step per indicator listed by its label and name after the three fixed ones:
+**Runs** lists every run with its status, trigger and how long it took; the steps are shown as badges only for a run where one failed or was skipped. **Details** names the versions of script 1 and script 2 the run used and shows each step, with one step per indicator listed by its label and name after the three fixed ones:
 
 - **Succeeded**, with rows in and out and the tables it published.
 - **Failed**, with the error. For an exception, the traceback shows the lines of your script that raised it. A run with a failed indicator ends as failed and its error names the indicator; the run list shows it, and the other indicators are published all the same.

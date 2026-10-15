@@ -1,6 +1,7 @@
 import { Dialog } from '@angular/cdk/dialog';
 import { DatePipe } from '@angular/common';
-import { Component, computed, inject, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import {
@@ -8,6 +9,8 @@ import {
   IndicatorMetadata,
   IndicatorScript,
   PipelineService,
+  RunStatus,
+  RunSummary,
   SampleDownload,
   ScriptInputs,
   ScriptList,
@@ -21,17 +24,17 @@ import {
   maxSampleSize,
   minSampleSize,
 } from '../../core/projects/pipeline.service';
-import { Alert, Badge, Button, Card, ConfirmDialog, FormField, Input, Skeleton, ToastService } from '../../shared/ui';
+import { Alert, Badge, Button, Card, ConfirmDialog, DropdownMenu, FormField, Input, MenuItem, Skeleton, ToastService, Tone, dateTimeFormat } from '../../shared/ui';
 import { CodeEditor } from '../../shared/ui/code-editor';
 import { AddIndicatorData, AddIndicatorDialog, NewIndicator } from './add-indicator-dialog';
 import { IndicatorMetadataFields } from './indicator-metadata-fields';
 import { PipelineRuns } from './pipeline-runs';
-import { PipelineSettingsCard } from './pipeline-settings';
 import { ProjectContext } from './project-context';
 import { SampleDownloadPanel } from './sample-download-panel';
 import { ScriptTestPanel } from './script-test-panel';
+import { IndicatorMenu, IndicatorMenuItem } from './script-editor/indicator-menu';
 import { ResolvedProblem, scriptAssist } from './script-editor/script-assist';
-import { ScriptInputsInfo } from './script-editor/script-analysis';
+import { ScriptInputsInfo, signatureOf } from './script-editor/script-analysis';
 import { ScriptSidePanel } from './script-editor/script-side-panel';
 import { TemplateMenu, TemplateOption } from './script-editor/template-menu';
 import { newIndicatorTemplate, scriptTemplates } from './script-templates/templates';
@@ -39,6 +42,8 @@ import { newIndicatorTemplate, scriptTemplates } from './script-templates/templa
 const maxCodeBytes = 200 * 1024;
 
 const emptyMetadata: IndicatorMetadata = { label: '', description: '', unit: '', format: 'decimal' };
+
+const runTones: Record<RunStatus, Tone> = { queued: 'neutral', running: 'brand', succeeded: 'success', failed: 'danger' };
 
 function sameScript(a: ScriptRef, b: ScriptRef): boolean {
   return a.kind === b.kind && (a.kind !== 'indicator' || (b.kind === 'indicator' && a.name === b.name));
@@ -57,18 +62,20 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
   selector: 'app-project-scripts',
   imports: [
     DatePipe,
+    RouterLink,
     TranslocoDirective,
     Alert,
     Badge,
     Button,
     Card,
+    DropdownMenu,
     FormField,
     Input,
     Skeleton,
     CodeEditor,
+    IndicatorMenu,
     IndicatorMetadataFields,
     PipelineRuns,
-    PipelineSettingsCard,
     SampleDownloadPanel,
     ScriptSidePanel,
     ScriptTestPanel,
@@ -77,30 +84,27 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
   template: `
     <div class="flex flex-col gap-6" *transloco="let t">
       <div class="grid gap-6 lg:grid-cols-4">
-        <tmz-card class="min-w-0 lg:col-span-3">
-          <nav class="mb-4 flex flex-wrap gap-2" [attr.aria-label]="t('scripts.title')">
-            @for (kind of kinds; track kind) {
-              <button
-                tmzButton
-                type="button"
-                size="sm"
-                [variant]="kind === selected().kind ? 'primary' : 'secondary'"
-                [attr.aria-pressed]="kind === selected().kind"
-                (click)="select({ kind })"
-                [attr.data-testid]="'script-' + kind"
-              >
-                {{ t('scripts.kinds.' + kind) }}
-                <tmz-badge [tone]="badgeTone(kind)" class="ms-1">{{ badgeText(kind) }}</tmz-badge>
-              </button>
-            }
-          </nav>
-
-          <section class="mb-4" aria-labelledby="indicators-heading">
-            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <h2 id="indicators-heading" class="text-sm font-medium text-heading">
-                {{ t('scripts.indicators') }}
-                <tmz-badge class="ms-1" data-testid="indicator-count">{{ indicators().length }}</tmz-badge>
-              </h2>
+        <div class="flex min-w-0 flex-col gap-6 lg:col-span-3">
+          <tmz-card class="min-w-0">
+            <!-- One picker: script 1, script 2, and a menu of the indicators. -->
+            <div class="mb-3 flex flex-wrap items-center gap-2" role="group" [attr.aria-label]="t('scripts.title')">
+              @for (kind of kinds; track kind) {
+                <button
+                  tmzButton
+                  type="button"
+                  size="sm"
+                  [variant]="kind === selected().kind ? 'primary' : 'secondary'"
+                  [attr.aria-pressed]="kind === selected().kind"
+                  (click)="select({ kind })"
+                  [attr.data-testid]="'script-' + kind"
+                >
+                  {{ t('scripts.kinds.' + kind) }}
+                  @if (kind === selected().kind) {
+                    <tmz-badge [tone]="badgeTone(kind)" class="ms-1">{{ badgeText(kind) }}</tmz-badge>
+                  }
+                </button>
+              }
+              <app-indicator-menu [items]="indicatorItems()" [selected]="indicatorName()" [canEdit]="canEdit()" (chosen)="select({ kind: 'indicator', name: $event })" />
               @if (canEdit()) {
                 <button
                   tmzButton
@@ -116,202 +120,193 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
               }
             </div>
             @if (canEdit() && indicators().length >= maxIndicators) {
-              <p class="mb-2 text-sm text-fg-warning" data-testid="indicator-limit">{{ t('scripts.indicatorLimit', { max: maxIndicators }) }}</p>
-            }
-            @if (indicators().length === 0 && !newIndicator()) {
-              <p class="text-sm text-body" data-testid="no-indicators">{{ canEdit() ? t('scripts.noIndicatorsEditor') : t('scripts.noIndicators') }}</p>
-            } @else {
-              <ul class="flex max-h-56 flex-col gap-1 overflow-y-auto" data-testid="indicator-list">
-                @if (newIndicator(); as added) {
-                  <li>
-                    <button type="button" class="flex w-full items-center gap-2 rounded-base border border-brand px-3 py-2 text-left text-sm" aria-pressed="true" [attr.data-testid]="'indicator-' + added">
-                      <span class="min-w-0 flex-1">
-                        <span class="block truncate font-medium text-heading">{{ meta().label }}</span>
-                        <code class="text-xs text-body">{{ added }}</code>
-                      </span>
-                      <tmz-badge tone="brand">{{ t('scripts.newBadge') }}</tmz-badge>
-                    </button>
-                  </li>
-                }
-                @for (indicator of indicators(); track indicator.name) {
-                  <li>
-                    <button
-                      type="button"
-                      class="flex w-full items-center gap-2 rounded-base border border-default px-3 py-2 text-left text-sm hover:bg-neutral-secondary-medium"
-                      [class.border-brand]="indicatorName() === indicator.name"
-                      [attr.aria-pressed]="indicatorName() === indicator.name"
-                      (click)="select({ kind: 'indicator', name: indicator.name })"
-                      [attr.data-testid]="'indicator-' + indicator.name"
-                    >
-                      <span class="min-w-0 flex-1">
-                        <span class="block truncate font-medium text-heading">{{ indicator.label }}</span>
-                        <code class="text-xs text-body">{{ indicator.name }}</code>
-                      </span>
-                      <tmz-badge tone="success">{{ t('scripts.versionShort', { number: indicator.current.number }) }}</tmz-badge>
-                    </button>
-                  </li>
-                }
-              </ul>
-            }
-          </section>
-
-          <p class="mb-3 text-sm text-body">{{ t('scripts.contracts.' + selected().kind) }}</p>
-
-          @if (scripts() === null) {
-            <div aria-busy="true" class="flex flex-col gap-3"><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div>
-          } @else {
-            @if (viewing(); as version) {
-              <tmz-alert tone="brand" class="mb-3" data-testid="viewing-version">
-                {{ t('scripts.viewingVersion', { number: version.number, author: version.author.name }) }}
-              </tmz-alert>
-            }
-            @if (indicatorName(); as name) {
-              <div class="mb-3" data-testid="indicator-meta">
-                <p class="mb-3 text-sm text-body">
-                  {{ t('scripts.fields.name') }}: <code class="text-heading" data-testid="indicator-meta-name">{{ name }}</code>
-                </p>
-                <app-indicator-metadata-fields
-                  [value]="shownMetadata()"
-                  [readonly]="!canEdit() || !!viewing()"
-                  [errors]="fieldErrors()"
-                  (valueChange)="editMetadata($event)"
-                />
-              </div>
-            }
-            <tmz-code-editor
-              [value]="editorValue()"
-              [readonly]="!canEdit() || !!viewing()"
-              [label]="indicatorName() ? t('scripts.editorLabelIndicator', { name: indicatorName() }) : t('scripts.editorLabel', { kind: t('scripts.kinds.' + selected().kind) })"
-              [extensions]="assist()"
-              (changed)="onEdit($event)"
-            />
-            <p class="mt-1 text-xs text-body" data-testid="editor-keys">{{ t('scripts.editor.keys') }}</p>
-            @if (problems().length) {
-              <section class="mt-3" aria-labelledby="problems-title" data-testid="problems">
-                <h3 id="problems-title" class="text-sm font-medium text-heading">
-                  {{ t('scripts.editor.problemsTitle') }}
-                  <tmz-badge class="ms-1" data-testid="problem-count">{{ problems().length }}</tmz-badge>
-                </h3>
-                <ul class="mt-1 flex max-h-40 flex-col gap-1 overflow-y-auto">
-                  @for (problem of problems(); track problem.from + ':' + problem.message) {
-                    <li>
-                      <button type="button" class="flex w-full items-baseline gap-2 text-left text-sm text-body hover:underline" (click)="goToProblem(problem)" data-testid="problem">
-                        <tmz-badge [tone]="problem.severity === 'error' ? 'danger' : 'warning'">{{ t('scripts.editor.problemLine', { line: problem.line }) }}</tmz-badge>
-                        <span class="min-w-0">{{ problem.message }}</span>
-                      </button>
-                    </li>
-                  }
-                </ul>
-                <p class="mt-1 text-xs text-body">{{ t('scripts.editor.problemsHint') }}</p>
-              </section>
-            }
-            @if (saveError(); as message) {
-              <p class="mt-2 text-sm text-fg-danger-strong" data-testid="save-error">{{ message }}</p>
+              <p class="mb-3 text-sm text-fg-warning" data-testid="indicator-limit">{{ t('scripts.indicatorLimit', { max: maxIndicators }) }}</p>
             }
 
-            <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-              @if (viewing(); as version) {
-                <button tmzButton variant="secondary" type="button" (click)="resetDraft()" data-testid="back-to-current">
-                  {{ t('scripts.backToCurrent') }}
-                </button>
-                @if (canEdit() && !version.removed) {
-                  <button tmzButton type="button" [disabled]="busy()" (click)="restore(version)" data-testid="restore">
-                    {{ t('scripts.restore', { number: version.number }) }}
-                  </button>
+            <!-- The last run and the way to start another; the whole list is below. -->
+            <div class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-default pb-4 text-sm text-body" data-testid="last-run">
+              @if (latestRun(); as run) {
+                <tmz-badge [tone]="runTone(run.status)" data-testid="last-run-status">{{ t('runs.status.' + run.status) }}</tmz-badge>
+                <span data-testid="last-run-time">{{ (run.startedAt ?? run.queuedAt) | date: dateTimeFormat }}</span>
+                @if (failedStep(run, t); as failed) {
+                  <span class="text-fg-danger-strong" data-testid="last-run-failed">{{ failed }}</span>
                 }
-              } @else if (canEdit()) {
-                <button tmzButton type="button" [disabled]="busy() || !dirty()" (click)="save()" data-testid="save">{{ t('scripts.save') }}</button>
-                <app-template-menu [label]="t('scripts.template')" [options]="templateOptions()" (chosen)="chooseTemplate($event)" />
-                <label tmzButton variant="secondary" class="cursor-pointer">
-                  {{ t('scripts.upload') }}
-                  <input type="file" accept=".py,text/x-python,text/plain" class="sr-only" (change)="upload($event)" data-testid="upload" />
-                </label>
-                @if (current() && !current()!.removed) {
-                  <button tmzButton variant="danger" type="button" [disabled]="busy()" (click)="remove()" data-testid="remove">
-                    {{ t('scripts.remove') }}
-                  </button>
-                }
-                @if (dirty()) {
-                  <span class="text-sm text-body" data-testid="unsaved">{{ t('scripts.unsaved') }}</span>
-                }
+              } @else if (runsLoaded()) {
+                <span data-testid="last-run-none">{{ t('runs.noneYet') }}</span>
+              }
+              <a [routerLink]="[]" fragment="runs" class="text-fg-brand hover:underline" data-testid="last-run-link">{{ t('runs.title') }}</a>
+              @if (canEdit()) {
+                <button tmzButton size="sm" type="button" class="ms-auto" [disabled]="runs()?.busy()" (click)="runNow()" data-testid="run-now">{{ t('runs.runNow') }}</button>
               }
             </div>
 
-            @if (canEdit() && !viewing()) {
-              <form class="mt-4 flex flex-col gap-3 border-t border-default pt-4 sm:flex-row sm:items-end" novalidate (submit)="$event.preventDefault(); startTest()">
-                <tmz-form-field class="sm:w-48" [label]="t('scriptTests.sampleSize')" fieldId="sample-size" [error]="testError()">
-                  <input
-                    tmzInput
-                    id="sample-size"
-                    type="number"
-                    inputmode="numeric"
-                    [min]="minSampleSize"
-                    [max]="maxSampleSize"
-                    [value]="sampleSize()"
-                    (input)="sampleSize.set($any($event.target).value)"
-                    data-testid="sample-size"
-                  />
-                </tmz-form-field>
-                <button tmzButton variant="secondary" type="submit" [disabled]="testing() || !draft().trim()" data-testid="test-on-sample">
-                  {{ t('scriptTests.start') }}
-                </button>
-                <button tmzButton variant="secondary" type="button" [disabled]="downloading()" (click)="startDownload()" data-testid="download-sample">
-                  {{ t('sampleDownloads.start') }}
-                </button>
-              </form>
-              <p class="mt-2 text-sm text-body">{{ t('scriptTests.hint') }}</p>
-              <p class="mt-1 text-sm text-body">{{ t('sampleDownloads.hint') }}</p>
-            }
-          }
-        </tmz-card>
-
-        <div class="flex min-w-0 flex-col gap-6">
-        <app-script-side-panel
-          [kind]="selected().kind"
-          [inputs]="inputs()"
-          [failed]="inputsFailed()"
-          [canInsert]="canEdit() && !viewing()"
-          (pick)="insertName($event)"
-          (refresh)="reloadInputs()"
-        />
-        <tmz-card [heading]="t('scripts.versionsTitle')" class="min-w-0">
-          @if (versions().length === 0) {
-            <p class="text-sm text-body">{{ t('scripts.noVersions') }}</p>
-          } @else {
-            <ol class="flex max-h-[28rem] flex-col gap-2 overflow-y-auto" data-testid="versions">
-              @for (version of versions(); track version.versionId) {
-                <li>
-                  <button
-                    type="button"
-                    class="w-full rounded-base border border-default px-3 py-2 text-left text-sm hover:bg-neutral-secondary-medium"
-                    [class.border-brand]="viewing()?.number === version.number"
-                    (click)="view(version)"
-                    [attr.data-testid]="'version-' + version.number"
-                  >
-                    <span class="font-medium text-heading">{{ t('scripts.versionNumber', { number: version.number }) }}</span>
-                    @if (version.removed) {
-                      <tmz-badge tone="warning" class="ms-1">{{ t('scripts.removedBadge') }}</tmz-badge>
-                    }
-                    <span class="block text-body">{{ version.author.name }} · {{ version.createdAt | date: 'medium' }}</span>
-                  </button>
-                </li>
+            @if (scripts() === null) {
+              <div aria-busy="true" class="flex flex-col gap-3"><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div>
+            } @else {
+              @if (viewing(); as version) {
+                <tmz-alert tone="brand" class="mb-3" data-testid="viewing-version">
+                  {{ t('scripts.viewingVersion', { number: version.number, author: version.author.name }) }}
+                </tmz-alert>
               }
-            </ol>
+              @if (indicatorName(); as name) {
+                <div class="mb-3" data-testid="indicator-meta">
+                  @if (canEdit() && !viewing()) {
+                    <!-- Set when the indicator was added and rarely changed: a line, with the fields on request. -->
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" data-testid="indicator-meta-summary">
+                      <span class="break-words font-medium text-heading" data-testid="indicator-meta-label">{{ shownMetadata().label || name }}</span>
+                      <code class="text-xs text-body" data-testid="indicator-meta-name">{{ name }}</code>
+                      <span class="text-body">· {{ t('scripts.formats.' + shownMetadata().format) }}{{ shownMetadata().unit ? ' · ' + shownMetadata().unit : '' }}</span>
+                      <button
+                        tmzButton
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        [attr.aria-expanded]="metaShown()"
+                        aria-controls="indicatorMetaFields"
+                        (click)="metaOpen.set(!metaOpen())"
+                        data-testid="edit-details"
+                      >
+                        {{ t('scripts.editDetails') }}
+                      </button>
+                    </div>
+                    @if (metaShown()) {
+                      <app-indicator-metadata-fields
+                        id="indicatorMetaFields"
+                        class="mt-3 block"
+                        [value]="shownMetadata()"
+                        [errors]="fieldErrors()"
+                        (valueChange)="editMetadata($event)"
+                      />
+                    }
+                  } @else {
+                    <dl class="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2" data-testid="indicator-meta-readonly">
+                      <div><dt class="text-body">{{ t('scripts.fields.label') }}</dt><dd class="break-words font-medium text-heading">{{ shownMetadata().label || name }}</dd></div>
+                      <div><dt class="text-body">{{ t('scripts.fields.name') }}</dt><dd><code class="text-heading" data-testid="indicator-meta-name">{{ name }}</code></dd></div>
+                      <div><dt class="text-body">{{ t('scripts.fields.format') }}</dt><dd class="text-heading">{{ t('scripts.formats.' + shownMetadata().format) }}{{ shownMetadata().unit ? ' · ' + shownMetadata().unit : '' }}</dd></div>
+                      @if (shownMetadata().description) {
+                        <div class="sm:col-span-2"><dt class="text-body">{{ t('scripts.fields.description') }}</dt><dd class="break-words text-heading">{{ shownMetadata().description }}</dd></div>
+                      }
+                    </dl>
+                  }
+                </div>
+              }
+              <div class="mb-1 flex flex-wrap items-center gap-2 text-xs text-body">
+                <span>{{ indicatorName() ? t('scripts.editorLabelIndicator', { name: indicatorName() }) : t('scripts.editorLabel', { kind: t('scripts.kinds.' + selected().kind) }) }}</span>
+                <code class="rounded-sm bg-neutral-secondary-soft px-1.5 py-0.5 text-heading" data-testid="contract-signature">{{ signature() }}</code>
+              </div>
+              <tmz-code-editor
+                [value]="editorValue()"
+                [readonly]="!canEdit() || !!viewing()"
+                [label]="indicatorName() ? t('scripts.editorLabelIndicator', { name: indicatorName() }) : t('scripts.editorLabel', { kind: t('scripts.kinds.' + selected().kind) })"
+                [extensions]="assist()"
+                (changed)="onEdit($event)"
+              />
+              <p class="mt-1 text-xs text-body" data-testid="editor-keys">
+                {{ t('scripts.editor.keys') }}
+                @if (canEdit() && !viewing()) {
+                  {{ t('scripts.editor.keysRun') }}
+                }
+              </p>
+              @if (problems().length) {
+                <section class="mt-3" aria-labelledby="problems-title" data-testid="problems">
+                  <h3 id="problems-title" class="text-sm font-medium text-heading">
+                    {{ t('scripts.editor.problemsTitle') }}
+                    <tmz-badge class="ms-1" data-testid="problem-count">{{ problems().length }}</tmz-badge>
+                  </h3>
+                  <ul class="mt-1 flex max-h-40 flex-col gap-1 overflow-y-auto">
+                    @for (problem of problems(); track problem.from + ':' + problem.message) {
+                      <li class="flex flex-wrap items-baseline gap-x-3">
+                        <button type="button" class="flex items-baseline gap-2 text-left text-sm text-body hover:underline" (click)="goToProblem(problem)" data-testid="problem">
+                          <tmz-badge [tone]="problem.severity === 'error' ? 'danger' : 'warning'">{{ t('scripts.editor.problemLine', { line: problem.line }) }}</tmz-badge>
+                          <span class="min-w-0">{{ problem.message }}</span>
+                        </button>
+                        @if (referenceLink() && isReferenceProblem(problem)) {
+                          <a [routerLink]="referenceLink()" class="text-xs text-fg-brand hover:underline" data-testid="problem-reference-link">{{ t('scripts.inputs.manage') }}</a>
+                        }
+                      </li>
+                    }
+                  </ul>
+                  @if (canEdit()) {
+                    <p class="mt-1 text-xs text-body" data-testid="problems-hint">{{ t('scripts.editor.problemsHint') }}</p>
+                  }
+                </section>
+              }
+              @if (saveError(); as message) {
+                <p class="mt-2 text-sm text-fg-danger-strong" data-testid="save-error">{{ message }}</p>
+              }
+
+              @if (viewing(); as version) {
+                <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                  <button tmzButton variant="secondary" type="button" (click)="resetDraft()" data-testid="back-to-current">
+                    {{ t('scripts.backToCurrent') }}
+                  </button>
+                  @if (canEdit() && !version.removed) {
+                    <button tmzButton type="button" [disabled]="busy()" (click)="restore(version)" data-testid="restore">
+                      {{ t('scripts.restore', { number: version.number }) }}
+                    </button>
+                  }
+                </div>
+              } @else if (canEdit()) {
+                <!-- Save, test and download share one row and one sample size; the rarer actions wait in the menus. -->
+                <form class="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start" novalidate (submit)="$event.preventDefault(); startTest()">
+                  <button tmzButton type="button" class="sm:mt-7" [disabled]="busy() || !dirty()" (click)="save()" data-testid="save">{{ t('scripts.save') }}</button>
+                  <tmz-form-field class="sm:w-36" [label]="t('scriptTests.sampleSize')" fieldId="sample-size" [error]="testError()">
+                    <input
+                      tmzInput
+                      id="sample-size"
+                      type="number"
+                      inputmode="numeric"
+                      [min]="minSampleSize"
+                      [max]="maxSampleSize"
+                      [value]="sampleSize()"
+                      (input)="sampleSize.set($any($event.target).value)"
+                      data-testid="sample-size"
+                    />
+                  </tmz-form-field>
+                  <button tmzButton variant="secondary" type="submit" class="sm:mt-7" [disabled]="testing() || !draft().trim()" data-testid="test-on-sample">
+                    {{ t('scriptTests.start') }}
+                  </button>
+                  <button tmzButton variant="secondary" type="button" class="sm:mt-7" [disabled]="downloading()" (click)="startDownload()" data-testid="download-sample">
+                    {{ t('sampleDownloads.start') }}
+                  </button>
+                  <app-template-menu class="sm:mt-7" [label]="t('scripts.template')" [options]="templateOptions()" (chosen)="chooseTemplate($event)" />
+                  <tmz-dropdown-menu class="sm:mt-7" [label]="t('scripts.moreActions')" [items]="moreItems()" (selected)="onMore($event)" />
+                  <input #uploadInput type="file" accept=".py,text/x-python,text/plain" class="sr-only" tabindex="-1" aria-hidden="true" (change)="upload($event)" data-testid="upload" />
+                  @if (dirty()) {
+                    <span class="text-sm text-body sm:mt-8" data-testid="unsaved">{{ t('scripts.unsaved') }}</span>
+                  }
+                </form>
+                <p class="mt-1 text-xs text-body" data-testid="test-hint">{{ t('scriptTests.hint') }}</p>
+              }
+            }
+          </tmz-card>
+
+          @if (test(); as test) {
+            <app-script-test-panel #testPanel [started]="test" [projectId]="projectId()" [draft]="draft()" [metadata]="indicatorName() ? shownMetadata() : null" />
           }
-        </tmz-card>
+
+          @if (sampleDownload(); as sample) {
+            <app-sample-download-panel [started]="sample" [projectId]="projectId()" (again)="requestDownload($event)" />
+          }
+        </div>
+
+        <div class="min-w-0">
+          <app-script-side-panel
+            [kind]="selected().kind"
+            [inputs]="inputs()"
+            [failed]="inputsFailed()"
+            [canInsert]="canEdit() && !viewing()"
+            [manageLink]="referenceLink()"
+            [versions]="versions()"
+            [viewingNumber]="viewing()?.number ?? null"
+            (pick)="insertName($event)"
+            (refresh)="reloadInputs()"
+            (view)="view($event)"
+          />
         </div>
       </div>
 
-      @if (sampleDownload(); as sample) {
-        <app-sample-download-panel [started]="sample" [projectId]="projectId()" (again)="requestDownload($event)" />
-      }
-
-      @if (test(); as test) {
-        <app-script-test-panel [started]="test" [projectId]="projectId()" [draft]="draft()" [metadata]="indicatorName() ? shownMetadata() : null" />
-      }
-
-      <app-pipeline-settings />
-      <app-pipeline-runs (runEnded)="reloadInputs()" />
+      <app-pipeline-runs (runEnded)="reloadInputs()" (latest)="onLatestRun($event)" />
     </div>
   `,
 })
@@ -324,8 +319,17 @@ export class ProjectScripts {
   private readonly dialog = inject(Dialog);
   private readonly context = inject(ProjectContext);
   private readonly editor = viewChild(CodeEditor);
+  private readonly uploadInput = viewChild<ElementRef<HTMLInputElement>>('uploadInput');
+  private readonly testPanel = viewChild('testPanel', { read: ElementRef });
+  protected readonly runs = viewChild(PipelineRuns);
 
   protected readonly kinds = fixedScriptKinds;
+  protected readonly dateTimeFormat = dateTimeFormat;
+  /** The newest run, for the strip under the picker; the runs list below reports it. */
+  protected readonly latestRun = signal<RunSummary | null>(null);
+  protected readonly runsLoaded = signal(false);
+  /** Whether the indicator's details (label, description, unit, format) are open for editing. */
+  protected readonly metaOpen = signal(false);
   protected readonly maxIndicators = maxIndicators;
   protected readonly scripts = signal<ScriptList | null>(null);
   protected readonly selected = signal<ScriptRef>({ kind: 'clean' });
@@ -373,6 +377,27 @@ export class ProjectScripts {
     });
   });
   protected readonly indicators = computed(() => this.scripts()?.indicators ?? []);
+  /** The indicators of the menu: one being added (its script not saved yet) comes first, with its label from the dialog. */
+  protected readonly indicatorItems = computed<IndicatorMenuItem[]>(() => {
+    const added = this.newIndicator();
+    const saved = this.indicators().map((i) => ({ name: i.name, label: i.label, version: i.current.number }));
+    return added ? [{ name: added, label: this.meta().label || added, version: null }, ...saved] : saved;
+  });
+  /** The signature the selected script has to define, shown beside the editor. */
+  protected readonly signature = computed(() => signatureOf(this.selected().kind));
+  /** The details stay open while they hold edits or the API refused one of them, so nothing unsaved or wrong is hidden. */
+  protected readonly metaShown = computed(() => this.metaOpen() || this.metadataDirty() || Object.keys(this.fieldErrors()).length > 0);
+  /** Where the reference tables are managed, for whoever may; null for everyone else. */
+  protected readonly referenceLink = computed(() => (this.canEdit() ? ['/projects', this.projectId(), 'reference'] : null));
+  /** Upload and remove wait in the menu: they are rare next to saving and testing. */
+  protected readonly moreItems = computed<MenuItem[]>(() => {
+    const t = (key: string) => this.transloco.translate(key);
+    const items: MenuItem[] = [{ id: 'upload', label: t('scripts.upload'), testId: 'upload-item' }];
+    if (this.current() && !this.current()!.removed) {
+      items.push({ id: 'remove', label: t('scripts.remove'), danger: true, testId: 'remove' });
+    }
+    return items;
+  });
   /** The selected indicator's name, or null while script 1 or script 2 is selected. */
   protected readonly indicatorName = computed(() => {
     const selected = this.selected();
@@ -389,7 +414,7 @@ export class ProjectScripts {
     const current = this.current();
     return current && !this.newIndicator() ? metadataOf(current) : emptyMetadata;
   });
-  private readonly metadataDirty = computed(
+  protected readonly metadataDirty = computed(
     () => this.indicatorName() !== null && !this.newIndicator() && !sameMetadata(this.meta(), this.savedMetadata()),
   );
   /** A script that was never saved is always unsaved, even before its first edit. */
@@ -443,6 +468,38 @@ export class ProjectScripts {
     this.resetDraft();
     this.loadVersions();
     this.loadInputs();
+  }
+
+  protected runTone(status: RunStatus): Tone {
+    return runTones[status];
+  }
+
+  protected onLatestRun(run: RunSummary | null): void {
+    this.latestRun.set(run);
+    this.runsLoaded.set(true);
+  }
+
+  protected runNow(): void {
+    this.runs()?.start();
+  }
+
+  /** The step that failed in a run, named, for the strip: "Clean failed" or the indicator's name. */
+  protected failedStep(run: RunSummary, t: (key: string, params?: Record<string, unknown>) => string): string | null {
+    const step = run.steps.find((s) => s.status === 'failed');
+    return step ? t('runs.stepFailed', { step: step.step === 'indicator' ? step.name : t('runs.steps.' + step.step) }) : null;
+  }
+
+  /** A check that is about a reference table: its message offers to open the reference data. */
+  protected isReferenceProblem(problem: ResolvedProblem): boolean {
+    return problem.key === 'scripts.checks.noReference' || problem.key === 'scripts.checks.unknownReference';
+  }
+
+  protected onMore(action: string): void {
+    if (action === 'upload') {
+      this.uploadInput()?.nativeElement.click();
+    } else if (action === 'remove') {
+      void this.remove();
+    }
   }
 
   protected badgeTone(kind: FixedScriptKind) {
@@ -574,6 +631,9 @@ export class ProjectScripts {
       next: (test) => {
         this.testing.set(false);
         this.test.set(test);
+        if (stopAtLine === undefined) {
+          setTimeout(() => this.testPanel()?.nativeElement.scrollIntoView?.({ block: 'nearest' }));
+        }
       },
       error: (error) => {
         this.testing.set(false);
@@ -744,6 +804,7 @@ export class ProjectScripts {
 
   /** Shows the selected script's saved code and metadata, dropping edits (callers ask first when there are any). */
   protected resetDraft(): void {
+    this.metaOpen.set(false);
     this.viewing.set(null);
     this.saveError.set(null);
     this.fieldErrors.set({});

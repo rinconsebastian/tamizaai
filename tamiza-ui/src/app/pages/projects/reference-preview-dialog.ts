@@ -1,4 +1,5 @@
 import { DIALOG_DATA, DialogRef } from '@angular/cdk/dialog';
+import { DecimalPipe } from '@angular/common';
 import { Component, inject, signal } from '@angular/core';
 import { TranslocoDirective } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
@@ -14,7 +15,7 @@ export interface ReferencePreviewData {
 /** A reference table's columns with their types and its first 100 rows. */
 @Component({
   selector: 'app-reference-preview-dialog',
-  imports: [TranslocoDirective, Button, Skeleton, TablePreview],
+  imports: [DecimalPipe, TranslocoDirective, Button, Skeleton, TablePreview],
   template: `
     <div
       class="flex max-h-[calc(100vh-2rem)] w-[min(64rem,calc(100vw-2rem))] flex-col rounded-base border border-default bg-neutral-primary-soft shadow-sm"
@@ -25,7 +26,7 @@ export interface ReferencePreviewData {
           <code>{{ data.name }}</code>
           @if (preview(); as preview) {
             <span class="block text-sm font-normal text-body" data-testid="reference-preview-note">
-              {{ t('reference.previewNote', { shown: preview.rows.length, rows: preview.table.rowCount, file: preview.table.fileName }) }}
+              {{ t('reference.previewNote', { shown: preview.rows.length, rows: (preview.table.rowCount | number), file: preview.table.fileName }) }}
             </span>
           }
         </h2>
@@ -33,7 +34,7 @@ export interface ReferencePreviewData {
       </header>
       <div class="min-w-0 overflow-y-auto p-4 md:px-6">
         @if (preview(); as preview) {
-          <app-table-preview [columns]="preview.table.columns" [rows]="preview.rows" />
+          <app-table-preview [columns]="columns(preview)" [rows]="preview.rows" [fill]="true" />
         } @else {
           <div aria-busy="true" class="flex flex-col gap-3"><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div>
         }
@@ -48,6 +49,11 @@ export class ReferencePreviewDialog {
   private readonly errors = inject(ApiErrors);
 
   protected readonly preview = signal<ReferenceTablePreview | null>(null);
+
+  /** The columns as scripts see them; a column whose header was renamed shows the file's original header beneath its name. */
+  protected columns(preview: ReferenceTablePreview) {
+    return preview.table.columns.map((column) => ({ name: column.name, type: column.type, label: column.header !== column.name ? column.header : null }));
+  }
 
   constructor() {
     this.service.preview(this.data.projectId, this.data.name).subscribe({

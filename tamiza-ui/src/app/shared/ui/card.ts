@@ -1,5 +1,10 @@
 import { Component, input } from '@angular/core';
 
+/**
+ * Chrome rule: a card frames a group of controls that belong together (a form, an action row with its status) or headline
+ * figures. Lists, tables, logs and toolbars are plain sections with an h2 or a flex row, and a stat is a label and a value, never
+ * a bordered box inside a card. A card inside a card is a sign the page is carrying more chrome than information.
+ */
 @Component({
   selector: 'tmz-card',
   template: `

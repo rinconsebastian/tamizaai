@@ -148,19 +148,23 @@
       "performance": "Performance",
       "cleanData": "Clean data",
       "indicators": "Indicators",
-      "overview": "Overview",
-      "data": "Data",
+      "overview": "General",
+      "data": "Submissions",
       "scripts": "Scripts",
       "reference": "Reference data",
       "members": "Members",
       "samplingFrame": "Sampling frame",
-      "webhook": "Webhook"
-    }
+      "webhook": "Webhook",
+      "settings": "Settings"
+    },
+    "settingsSections": "Settings sections",
+    "tokenUnreadable": "The saved Kobo API token can no longer be read.",
+    "tokenUnreadableToken": "Replace the token",
+    "tokenUnreadableWebhook": "Regenerate the webhook secret"
   },
   "overview": {
     "tokenUnreadable": "The saved Kobo API token can no longer be read (the encryption keys changed). Replace the token and regenerate the webhook secret.",
     "formTitle": "Kobo form",
-    "formName": "Form",
     "server": "Server",
     "assetUid": "Asset UID",
     "checkedAt": "Last checked",
@@ -168,7 +172,6 @@
     "replaceToken": "Replace API token",
     "saveToken": "Save token",
     "checkTitle": "Form check",
-    "checkIntro": "Which dashboard metrics the form and the sampling frame allow. Missing fields can be added to the form in Kobo.",
     "available": "Available",
     "unavailable": "Unavailable",
     "missing": "Missing in the form: {{ fields }}",
@@ -179,23 +182,26 @@
     "rechecked": "Form checked.",
     "tokenReplaced": "API token replaced.",
     "enumeratorSaved": "Enumerator question saved.",
-    "renamed": "Project renamed.",
     "unavailableVersionsOne": "1 form version has no labels yet. Its answers use the current form's labels until Tamiza can read it.",
     "unavailableVersions": "{{ count }} form versions have no labels yet. Their answers use the current form's labels until Tamiza can read them.",
     "unavailableVersionsAction": "See the form versions",
-    "openDashboard": "Open the performance dashboard",
     "hints": {
       "defineSamplingFrame": "Define a sampling frame to see coverage.",
       "defineSamplingFrameViewer": "Ask an analyst or admin to define the sampling frame.",
       "updateSamplingFrame": "The sampling frame uses fields the form no longer has. Update the frame, or put those questions back in the form.",
       "updateSamplingFrameViewer": "The sampling frame uses fields the form no longer has. Ask an analyst or admin to update it.",
-      "selectEnumeratorField": "Select the question that identifies the enumerator below.",
+      "selectEnumeratorField": "Select the question that identifies the enumerator.",
       "selectEnumeratorFieldViewer": "Ask a project admin to select the question that identifies the enumerator.",
       "openFrame": "Open the sampling frame"
     },
     "timeZone": "Time zone",
-    "timeZoneHint": "The dashboard counts each day in this time zone. Names follow the IANA database, for example America/Bogota.",
-    "timeZoneSaved": "Time zone saved."
+    "timeZoneHint": "The dashboard counts each day in this time zone.",
+    "settingsSaved": "Project settings saved.",
+    "change": "Change",
+    "useBrowserZone": "Use my browser's time zone ({{ zone }})",
+    "enumeratorUsername": "username (form metadata)",
+    "enumeratorGone": "{{ xpath }} — not in the current form; username is used when the form has it",
+    "tokenUnreadableWebhook": "Open the webhook settings"
   },
   "metrics": {
     "dailyEvolution": "Submissions per day",
@@ -210,9 +216,9 @@
     "refresh": "Refresh",
     "computedAt": "Computed at {{ time }}",
     "daysUtc": "Days are counted in UTC.",
-    "daysUtcAction": "Set the project time zone in the Overview.",
+    "daysUtcAction": "Set the project time zone.",
     "daysZone": "Days are counted in the {{ zone }} time zone.",
-    "seeOverview": "See the Overview",
+    "seeOverview": "Re-check the form in Settings",
     "sortBy": "Sort by",
     "previous": "Previous",
     "next": "Next",
@@ -225,7 +231,7 @@
     "submissions": {
       "title": "Submissions",
       "total": "Submissions",
-      "withoutTime": "Without reception time",
+      "withoutTime": "Without a reception time (counted in no day)",
       "perDay": "Submissions per day",
       "showTable": "Show as table",
       "showChart": "Show as chart",
@@ -244,7 +250,8 @@
       "fences": "Outliers are surveys shorter than {{ lower }} min or longer than {{ upper }} min. Durations that cannot be used (end before start, or a missing or invalid time) are left out of every figure.",
       "noneUsable": "No submission has a usable duration in this period.",
       "unavailable": "Completion time needs the form to record when each survey starts and ends. Missing in the form: {{ fields }}.",
-      "howTo": "In Kobo, enable the start and end metadata of the form, deploy it again, then re-check it in the Overview."
+      "howTo": "In Kobo, enable the start and end metadata of the form, deploy it again, then re-check the form.",
+      "howToViewer": "In Kobo, enable the start and end metadata of the form and deploy it again; an analyst or admin then re-checks the form."
     },
     "enumerators": {
       "title": "Enumerators",
@@ -258,9 +265,10 @@
       "sortSubmissions": "Submissions, most first",
       "sortName": "Name, A to Z",
       "unavailable": "Tamiza cannot tell who collected each submission: the form has no username field and no question is selected as the enumerator.",
-      "adminHow": "Select the question that identifies the enumerator.",
-      "adminLink": "Open the Overview",
-      "askAdmin": "Ask a project admin to select the question that identifies the enumerator."
+      "adminHow": "An admin can choose it in the project settings.",
+      "adminLink": "Select the enumerator question",
+      "askAdmin": "Ask a project admin to select the question that identifies the enumerator.",
+      "cardSummary": "{{ submissions }} submissions · mean {{ mean }} · outliers {{ outliers }} · last {{ last }}"
     },
     "coverage": {
       "title": "Sampling frame coverage",
@@ -290,10 +298,16 @@
       "sortFrame": "Order of the frame",
       "sortPercentAsc": "Progress, lowest first",
       "sortPercentDesc": "Progress, highest first"
+    },
+    "range": "Date range",
+    "headline": {
+      "median": "Median completion time",
+      "unavailable": "Not available",
+      "noFrame": "No sampling frame"
     }
   },
   "data": {
-    "statusTitle": "Submissions",
+    "statusTitle": "Status",
     "submissions": "Stored submissions",
     "deleted": "Deleted in Kobo",
     "lastWebhook": "Last webhook delivery",
@@ -324,10 +338,7 @@
       "started": "Started",
       "kind": "Kind",
       "status": "Status",
-      "created": "New",
-      "updated": "Updated",
-      "deleted": "Deleted",
-      "requestedBy": "Started by"
+      "changes": "Changes"
     },
     "kind": {
       "incremental": "Synchronization",
@@ -347,8 +358,7 @@
     },
     "versions": {
       "title": "Form versions",
-      "intro": "Answers to select questions are shown with the labels of the form version their submission was made with.",
-      "empty": "No form versions yet. They appear as submissions arrive.",
+      "empty": "No form versions yet. They appear as submissions arrive. Answers to select questions use the labels of the form version their submission was made with.",
       "current": "Current",
       "notDeployed": "—",
       "withoutVersion": "{{ count }} submissions have no form version. Their answers use the current form's labels.",
@@ -356,8 +366,7 @@
       "nextAttempt": "Next attempt:",
       "copied": "Form version copied.",
       "copy": "Copy the full version ID",
-      "retryHint": "Re-checking the form retries failed and not found versions.",
-      "retryLink": "Open the Overview",
+      "retryHint": "Answers made with a version Tamiza could not read use the current form’s labels. Re-checking the form retries failed and not found versions.",
       "columns": {
         "version": "Version",
         "deployed": "Deployed",
@@ -369,8 +378,15 @@
         "pending": "Pending",
         "failed": "Failed",
         "not_found": "Not found"
-      }
-    }
+      },
+      "retryHintViewer": "Answers made with a version Tamiza could not read use the current form’s labels. Ask an analyst or admin to re-check the form; that retries failed and not found versions."
+    },
+    "scheduleLine": "Synchronizes every {{ sync }} hours · checks for deletions every {{ reconcile }} hours",
+    "runsAfterSync": "Scripts run after each synchronization with changes",
+    "runsNotAfterSync": "Scripts do not run after a synchronization",
+    "runsEvery": "also run every {{ hours }} hours",
+    "editSchedules": "Edit schedules",
+    "endedAt": "Ended {{ time }}"
   },
   "scripts": {
     "title": "Scripts",
@@ -378,11 +394,6 @@
       "clean": "1. Clean",
       "output": "2. Output",
       "indicator": "Indicator"
-    },
-    "contracts": {
-      "clean": "clean(raw, ctx) receives the flattened tables and returns the cleaned ones. Without it, the flattened tables are the clean data.",
-      "output": "prepare_output(cleaned, ctx) returns the tables for the clean-data dashboard. Optional.",
-      "indicator": "compute(cleaned, ctx) returns one table for this indicator: the columns it is broken down by and at least one numeric column, such as value. The table is published under the indicator’s name."
     },
     "notSet": "not set",
     "removedBadge": "removed",
@@ -505,12 +516,13 @@
       "mixedIndentation": "This line is indented with tabs and spaces. Use four spaces."
     },
     "editor": {
-      "keys": "Tab indents. Press Esc, then Tab, to leave the editor. Ctrl+Enter (Cmd+Enter on macOS) runs the cell the cursor is in.",
+      "keys": "Tab indents. Press Esc, then Tab, to leave the editor.",
       "runCell": "Run cell",
       "runCellNamed": "Run cell {{ name }}",
-      "problemsTitle": "Problems found while editing",
+      "problemsTitle": "Checks",
       "problemLine": "Line {{ line }}",
-      "problemsHint": "These are hints found without running the script. Saving and testing are never blocked."
+      "problemsHint": "Hints only: saving and testing are never blocked.",
+      "keysRun": "Ctrl+Enter (Cmd+Enter on macOS) runs the cell the cursor is in."
     },
     "reference": {
       "title": "Reference",
@@ -529,7 +541,8 @@
       "cellsText": "A line that starts with # %% begins a cell. Run cell tests the script from the start and stops at the end of that cell, without validating the output. ctx.show(data, name) adds a preview of a DataFrame, Series or value to the result of a test; in a run it does nothing.",
       "cellsExample": "def compute(cleaned, ctx):\n    # %% Load\n    main = cleaned[\"main\"]\n    ctx.show(main, \"main\")\n    # %% Count\n    return main.groupby(\"municipality\").size().rename(\"value\").reset_index()",
       "ctxTitle": "ctx",
-      "example": "Example"
+      "example": "Example",
+      "tablesNote": "The tables in the Tables tab are the ones the last run published. A saved script changes them only from the next run."
     },
     "ctx": {
       "members": {
@@ -630,12 +643,10 @@
     "sidePanel": "Tables and reference",
     "sideTabs": {
       "inputs": "Tables",
-      "reference": "Reference"
+      "reference": "Reference",
+      "versions": "Versions"
     },
     "inputs": {
-      "rawIntro": "The flattened tables script 1 receives, as the last run published them.",
-      "cleanIntro": "The clean tables this script receives, as the last run published them.",
-      "publishedAt": "Published {{ when }}. A saved script changes them only from the next run.",
       "nothingPublished": "The tables appear after the first run. You can write the script without them.",
       "refresh": "Refresh",
       "filterLabel": "Filter tables, columns and questions",
@@ -648,8 +659,16 @@
       "rows": "{{ count }} rows",
       "noMatch": "Nothing matches the filter.",
       "loadError": "The tables could not be loaded.",
-      "copied": "Copied {{ name }}."
-    }
+      "copied": "Copied {{ name }}.",
+      "title": "Tables",
+      "rawPublished": "Flattened tables · published {{ when }}",
+      "cleanPublished": "Clean tables · published {{ when }}",
+      "manage": "Manage"
+    },
+    "editDetails": "Edit details",
+    "moreActions": "More actions",
+    "indicatorsMenu": "Indicators ({{ count }})",
+    "indicatorFilter": "Filter indicators"
   },
   "runs": {
     "title": "Runs",
@@ -665,7 +684,6 @@
       "started": "Started",
       "status": "Status",
       "steps": "Steps",
-      "versions": "Script versions",
       "duration": "Duration"
     },
     "triggers": {
@@ -696,7 +714,14 @@
     "noReference": "This run used no reference tables.",
     "indicatorsSummary": "Indicators {{ done }}/{{ total }}",
     "indicatorCount": "{{ count }} indicators",
-    "indicatorCountOne": "1 indicator"
+    "indicatorCountOne": "1 indicator",
+    "allSucceeded": "All succeeded",
+    "scriptNames": {
+      "clean": "Script 1",
+      "output": "Script 2"
+    },
+    "noneYet": "No runs yet.",
+    "stepFailed": "{{ step }} failed"
   },
   "pipeline": {
     "settingsTitle": "When scripts run",
@@ -711,11 +736,11 @@
   },
   "webhook": {
     "title": "Webhook settings",
-    "intro": "Kobo sends each new submission to this address as it arrives. Enter these values in the form's REST Services.",
+    "intro": "Enter these values in the form’s REST Services in Kobo, which then sends each new submission as it arrives.",
     "secretUnreadable": "The webhook secret can no longer be read. Regenerate it and update Kobo.",
     "url": "Endpoint URL",
     "username": "Username",
-    "secret": "Password (secret)",
+    "secret": "Secret",
     "hide": "Hide",
     "show": "Show",
     "copy": "Copy",
@@ -727,20 +752,23 @@
       "register": "Choose Register a new service and give it a name.",
       "url": "Paste the endpoint URL.",
       "type": "Keep JSON as the type. Leave the field subset and the custom wrapper empty.",
-      "auth": "Under Security choose Basic Authorization and paste the username and password.",
+      "auth": "Under Security choose Basic Authorization and paste the username and the secret (Kobo calls it the password).",
       "save": "Save the service."
     },
     "copied": "Copied to the clipboard.",
     "copyFailed": "Could not copy. Select the text and copy it manually.",
     "regenerateTitle": "Regenerate the webhook secret?",
-    "regenerateMessage": "Kobo stops being able to send submissions until you update the password in its REST Service.",
+    "regenerateMessage": "Kobo stops being able to send submissions until you update the secret in its REST Service.",
     "regenerated": "New secret generated. Update it in Kobo.",
     "lastDelivery": "Last delivery received: {{ time }}",
-    "noDelivery": "No delivery received yet. Once the REST Service is saved in Kobo, new submissions appear in the Data section within seconds."
+    "noDelivery": "No delivery received yet. Once the REST Service is saved in Kobo, new submissions appear within seconds.",
+    "adminsOnly": "Only project admins can see the webhook settings.",
+    "hidden": "Hidden",
+    "seeSubmissions": "See Submissions",
+    "loadFailed": "The webhook settings could not be loaded. Reload the page to try again."
   },
   "members": {
     "inviteTitle": "Add a member",
-    "inviteIntro": "Enter the email the person uses in Keycloak. If they have not signed in to Tamiza yet, the invitation waits until they do with that email verified. Tamiza does not send email: let them know.",
     "email": "Email",
     "role": "Role",
     "invite": "Add",
@@ -751,7 +779,6 @@
     "pendingTitle": "Pending invitations",
     "pendingRole": "Invited as {{ role }}",
     "revoke": "Revoke",
-    "noPending": "No pending invitations.",
     "makeRole": {
       "admin": "Make admin",
       "analyst": "Make analyst",
@@ -763,7 +790,12 @@
     "removeTitle": "Remove {{ name }}?",
     "removeMessage": "They lose access to this project immediately.",
     "revokeTitle": "Revoke the invitation for {{ email }}?",
-    "revokeMessage": "Signing in with this email will no longer add them to the project."
+    "revokeMessage": "Signing in with this email will no longer add them to the project.",
+    "add": "Add member",
+    "emailHint": "The email they sign in with. Tamiza sends no email: let them know.",
+    "you": "You",
+    "removeSelfTitle": "Remove yourself?",
+    "removeSelfMessage": "You lose access to this project immediately."
   },
   "frame": {
     "target": "Target",
@@ -776,10 +808,9 @@
     "mapField": "Form field for “{{ name }}”",
     "chooseField": "Choose a form field",
     "applyImport": "Load into the editor",
-    "dimensionsTitle": "Dimensions",
     "dimensionsIntro": "Each dimension maps to a question of the form, for example municipality or sex.",
-    "dimensionName": "Name of dimension {{ n }}",
-    "dimensionField": "Form field of dimension {{ n }}",
+    "dimensionName": "Name",
+    "dimensionField": "Form field",
     "remove": "Remove",
     "addDimension": "Add dimension",
     "targetsTitle": "Targets",
@@ -798,7 +829,31 @@
     "saved": "Sampling frame saved.",
     "importApplied": "The imported rows are in the editor. Review them and save.",
     "chooseFile": "Choose a file",
-    "noFile": "No file chosen"
+    "noFile": "No file chosen",
+    "title": "Sampling frame",
+    "edit": "Edit",
+    "import": "Import from file",
+    "editorTitle": "Dimensions and targets",
+    "summary": "{{ dimensions }} · {{ combinations }} · saved {{ date }}",
+    "dimensionsOne": "{{ count }} dimension",
+    "dimensionsMany": "{{ count }} dimensions",
+    "combinationsOne": "{{ count }} combination",
+    "combinationsMany": "{{ count }} combinations",
+    "removeDimension": "Remove dimension {{ n }}",
+    "noRows": "No rows yet. Add a row for the first combination and its target.",
+    "errorCountFirst": "{{ count }} problems to fix before saving, the first in row {{ row }}.",
+    "moreErrors": "and {{ count }} more.",
+    "discardTitle": "Discard your changes?",
+    "discardMessage": "The edits to the sampling frame have not been saved.",
+    "discard": "Discard",
+    "issue": {
+      "repeat": "— in a repeat group",
+      "multiple": "— multiple choice"
+    },
+    "warning": {
+      "repeat": "Coverage cannot count this question: it is answered once per repeat.",
+      "multiple": "Coverage cannot count this question: an answer can hold several choices."
+    }
   },
   "sampleDownloads": {
     "start": "Download sample",
@@ -810,11 +865,7 @@
     "waitingForTest": "Waiting for a test to finish. The sample is prepared right after it.",
     "waitingForDownload": "Waiting for another sample to be prepared.",
     "ready": "The sample holds {{ submissions }} submissions (you asked for {{ requested }}).",
-    "rawTables": "Flattened tables, the input of script 1:",
-    "cleanTables": "Clean tables, what script 1 (version {{ version }}) returns:",
-    "noScript1": "The project has no script 1, so the clean tables are the flattened ones.",
-    "referenceTables": "Reference tables:",
-    "noReference": "none",
+    "noScript1": "No script 1: the clean tables are the flattened ones",
     "tableRows": "{{ name }} ({{ rows }} rows)",
     "script1Failed": "Script 1 (version {{ version }}) failed on this sample: {{ error }}. The zip holds only the flattened tables. Fix script 1 and download again to get its clean tables.",
     "size": "Size: {{ size }}.",
@@ -822,12 +873,16 @@
     "download": "Download .zip",
     "notice": "This file contains the project's submissions. Keep it as safely as the survey data, and delete it when you no longer need it.",
     "expired": "This download is no longer available. Prepare a new one.",
-    "again": "Prepare again"
+    "again": "Prepare again",
+    "rawLine": "Flattened: {{ tables }}",
+    "cleanLine": "Clean v{{ version }}: {{ tables }}",
+    "referenceLine": "Reference: {{ tables }}",
+    "noReferenceLine": "Reference: none"
   },
   "scriptTests": {
     "sampleSize": "Sample size",
     "start": "Test on sample",
-    "hint": "Runs the code in the editor, saved or not, on a sample of submissions. Nothing is saved or published.",
+    "hint": "Tests and samples use the code in the editor, saved or not. Nothing is saved or published.",
     "sampleSizeRange": "Enter a whole number of submissions from {{ min }} to {{ max }}.",
     "title": "Test of {{ kind }} on {{ size }} submissions",
     "stale": "The editor has changed since this test. Test again to see the result of the current code.",
@@ -836,7 +891,6 @@
     "waitingForRun": "Waiting for a run to finish. The test starts right after it.",
     "waitingForTest": "Waiting for another test to finish.",
     "waitingForDownload": "Waiting for a sample download to be prepared. The test starts right after it.",
-    "succeeded": "The test succeeded. Save the script to use it in the next run.",
     "savedClean": "Clean (saved version {{ number }})",
     "draft": "{{ kind }} (draft)",
     "table": "Table",
@@ -892,7 +946,6 @@
   },
   "reference": {
     "title": "Reference data",
-    "intro": "Tables your scripts read by name, for example population projections or municipality codes: ctx.reference[\"population\"].",
     "add": "Upload table",
     "emptyEditor": "No reference tables yet. Upload a CSV or XLSX file; scripts read it with ctx.reference[\"name\"] from the next run.",
     "emptyViewer": "This project has no reference tables.",
@@ -919,13 +972,16 @@
     "uploaded": "Reference table {{ name }} uploaded. Scripts can read it from the next run.",
     "replaced": "Reference table {{ name }} replaced. Scripts read the new rows from the next run.",
     "deleted": "Reference table {{ name }} deleted.",
-    "renamed": "Columns of {{ name }} renamed for scripts:",
     "emptyHeader": "(empty header)",
-    "replaceTitle": "Replace {{ name }}?",
-    "replaceMessage": "The rows and columns of {{ name }} will be those of {{ file }}. Runs that already started keep the current rows.",
+    "replaceTitle": "Replace {{ name }}",
     "deleteTitle": "Delete {{ name }}?",
     "deleteMessage": "Scripts that read ctx.reference[\"{{ name }}\"] fail from the next run.",
-    "previewNote": "First {{ shown }} of {{ rows }} rows, from {{ file }}."
+    "previewNote": "First {{ shown }} of {{ rows }} rows, from {{ file }}.",
+    "actionsFor": "Actions for {{ name }}",
+    "renamedSummary": "Columns of {{ name }} were renamed for scripts ({{ count }}).",
+    "renamedList": "Renamed columns",
+    "dismiss": "Dismiss",
+    "replaceIntro": "Choose the file that replaces {{ name }}: its rows and columns become those of the file. Runs that already started keep the current rows."
   },
   "cleanData": {
     "sourceLabel": "Source",
@@ -938,7 +994,7 @@
     "published": "Published {{ time }}",
     "publishedRun": "by run {{ run }}",
     "runsLink": "See the runs",
-    "zone": "Times are shown in {{ zone }}.",
+    "zone": "Times in {{ zone }}.",
     "republished": "The tables were republished at {{ time }}. You are seeing the new rows.",
     "dropped": {
       "title": "Part of this view no longer applies",
@@ -1044,7 +1100,9 @@
       "status": "Status",
       "rows": "Rows",
       "published": "Published",
-      "notPublished": "Not published yet"
+      "notPublished": "Not published yet",
+      "summary": "· {{ count }} published",
+      "rowCount": "{{ count }} rows"
     },
     "published": "Published {{ time }}",
     "publishedRun": "by run {{ run }}",
@@ -1066,7 +1124,8 @@
       "csv": "CSV file",
       "xlsx": "Excel file (XLSX)",
       "preparing": "Preparing the export…",
-      "ready": "Export ready: {{ rows }} rows. The download starts now."
+      "ready": "Export ready: {{ rows }} rows. The download starts now.",
+      "label": "Export {{ label }}"
     },
     "remove": {
       "title": "Remove {{ title }}?",
@@ -1089,7 +1148,11 @@
       "edit": "Edit {{ title }}",
       "remove": "Remove {{ title }}",
       "help": "Arrow keys move the widget by one cell. Hold shift, or use the resize handle, to change its size.",
-      "status": "{{ title }}: column {{ column }}, row {{ row }}, {{ width }} wide, {{ height }} high."
+      "status": "{{ title }}: column {{ column }}, row {{ row }}, {{ width }} wide, {{ height }} high.",
+      "showTable": "Show {{ title }} as a table",
+      "actionsFor": "Actions for {{ title }}",
+      "editItem": "Edit widget",
+      "removeItem": "Remove widget"
     },
     "widget": {
       "notPublished": "{{ label }} has not published yet.",
@@ -1182,7 +1245,8 @@
         "groupBy": "Choose the column to group by.",
         "geometry": "Choose the geometry column of the map.",
         "buckets": "Enter a whole number from 1 to {{ max }}, or leave it empty."
-      }
+      },
+      "filtersCount": "Filters ({{ count }})"
     }
   }
 }

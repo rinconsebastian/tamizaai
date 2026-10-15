@@ -2,7 +2,7 @@
 
 The indicators dashboard is a canvas of **widgets**: stat tiles, charts and maps that members of a project arrange over the tables its indicator scripts published. Each widget plots **one indicator**. It is the third tab of a project, after [Performance](performance-dashboard.md) and [Clean data](clean-data-dashboard.md). Every member can see it and export the tables; analysts and admins build it.
 
-It shows what the last successful run of each [indicator script](scripts.md#3-indicator-scripts-computecleaned-ctx) published, and nothing else: it does not read the stored submissions, does not contact Kobo and never starts a run. When a run fails, or one indicator fails, the table of the last successful run stays on screen. At the top the page lists the project's indicators with their label, unit and format and whether each has published a table. While none has, the page says that no indicator has published yet; analysts and admins get a link to the scripts, and the widgets already configured are kept and listed, so a dashboard can be laid out before the first run.
+It shows what the last successful run of each [indicator script](scripts.md#3-indicator-scripts-computecleaned-ctx) published, and nothing else: it does not read the stored submissions, does not contact Kobo and never starts a run. When a run fails, or one indicator fails, the table of the last successful run stays on screen. The widgets come first. After them, a collapsed list titled **Indicators (N) · M published** shows each indicator with its label, unit and format, whether it has published a table, when, and its row count; open it to read it or to export a table. While no indicator has published, the page says so with the list expanded as part of that message; analysts and admins get a link to the scripts, and the widgets already configured are kept and listed, so a dashboard can be laid out before the first run. A widget whose indicator has not published stays short until it does.
 
 ## What an indicator script must provide
 
@@ -100,7 +100,7 @@ Then add a **Map** widget over `households_per_1000_people`, group by `municipal
 
 ## Building the dashboard
 
-The **Add widget** button opens the widget form. Each widget has an edit and a remove button in its header. All of this is for **analysts and admins**: a `viewer` sees every widget, switches to tables and exports, but has no add, edit, remove or move controls, and the API refuses their requests.
+The **Add widget** button opens the widget form. Each widget has an actions menu in its header with **Edit widget** and **Remove widget**. Above the widgets, editors see how many of the allowed widgets exist; when the limit is reached the line says so and **Add widget** is off. All of this is for **analysts and admins**: a `viewer` sees every widget, switches to tables and exports, but has no add, edit, remove or move controls, and the API refuses their requests.
 
 - **A project holds at most 50 widgets** by default; the page shows how many are used and, at the limit, says so and disables **Add widget**. An operator can change the limit; see [operations.md](operations.md#common-changes).
 - Every member sees the same dashboard: it is saved with the project, not per person. If two members change the same widget at the same time, the last change is kept.
@@ -117,11 +117,11 @@ Widgets sit on a grid of 12 columns. A new widget goes below the existing ones, 
 
 ## Show as table
 
-Every widget except the stat tile has a **Show as table** button that replaces the picture with the numbers it plots, formatted like the chart (a histogram lists its ranges and their counts, a map its groups with the kind of shape each has). The button above the grid, **Show all as tables**, does the same for every widget at once, in reading order. Each chart also carries a text description for assistive technology.
+Every widget except the stat tile has a table button in its header (shown once the widget has rows to draw) that replaces the picture with the numbers it plots, formatted like the chart (a histogram lists its ranges and their counts, a map its groups with the kind of shape each has). The button above the grid, **Show all as tables**, does the same for every widget at once, in reading order, and resets the choice made on single widgets. Each chart also carries a text description for assistive technology.
 
 ## Export
 
-**Export**, in the indicator's entry of the list, downloads the **whole published table of that indicator**, exactly as published and without the widgets' filters, as CSV or XLSX. Viewers can export. It is the same file, the same single-use download link and the same limits as the [clean data exports](clean-data-dashboard.md#exports): the CSV has a byte order mark, a geometry column is exported as its WKT text, and an XLSX is refused above 1,048,575 rows. Exporting one indicator never delays another indicator's publishing, and a widget does not export on its own; a chart cannot be saved as an image, so use **Show as table** to see its numbers.
+**Export**, the download button at the end of a published indicator's entry in the list, downloads the **whole published table of that indicator**, exactly as published and without the widgets' filters, as CSV or XLSX. Viewers can export. It is the same file, the same single-use download link and the same limits as the [clean data exports](clean-data-dashboard.md#exports): the CSV has a byte order mark, a geometry column is exported as its WKT text, and an XLSX is refused above 1,048,575 rows. While one indicator's file is being prepared only its button shows that it is busy, and the page ends with one message. Exporting one indicator never delays another indicator's publishing, and a widget does not export on its own; a chart cannot be saved as an image, so use **Show as table** to see its numbers.
 
 ## When a table changes
 

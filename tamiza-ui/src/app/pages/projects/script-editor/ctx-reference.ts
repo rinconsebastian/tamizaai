@@ -20,6 +20,8 @@ import { ctxMembersByPath, memberGroup, signatureOf } from './script-analysis';
         <p class="mt-1 text-body" data-testid="reference-returns">{{ t('scripts.reference.returns.' + kind()) }}</p>
       </section>
 
+      <p class="text-body" data-testid="reference-tables-note">{{ t('scripts.reference.tablesNote') }}</p>
+
       <section aria-labelledby="reference-cells">
         <h3 id="reference-cells" class="mb-1 font-medium text-heading">{{ t('scripts.reference.cellsTitle') }}</h3>
         <p class="text-body">{{ t('scripts.reference.cellsText') }}</p>

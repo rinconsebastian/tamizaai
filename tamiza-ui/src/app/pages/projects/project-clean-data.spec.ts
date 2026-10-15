@@ -174,7 +174,22 @@ describe('ProjectCleanData', () => {
       const { root } = await open('viewer');
 
       expect(text(byTestId(root, 'published'))).toMatch(/^Published .*2026.* by run abcdef12/);
-      expect(text(byTestId(root, 'zone'))).toBe('Times are shown in America/Bogota.');
+      expect(text(byTestId(root, 'zone'))).toBe('Times in America/Bogota.');
+    });
+
+    it.each<[ProjectRole, boolean]>([
+      ['analyst', true],
+      ['admin', true],
+      ['viewer', false],
+    ])('links the run to the runs list for a %s: %s', async (role, hasLink) => {
+      const { root } = await open(role);
+
+      expect(text(byTestId(root, 'published'))).toContain('by run abcdef12'); // the run id is text for every role
+      const link = byTestId(root, 'published')!.querySelector('a');
+      expect(!!link).toBe(hasLink);
+      if (link) {
+        expect(link.getAttribute('href')).toBe('/projects/p1/scripts#runs');
+      }
     });
 
     it.each<[ProjectRole, boolean]>([
@@ -250,6 +265,44 @@ describe('ProjectCleanData', () => {
 
       expect(text(byTestId(root, 'no-rows'))).toBe('This table has no rows.');
       expect(byTestId(root, 'page-info')).toBeNull();
+    });
+  });
+
+  describe('layout', () => {
+    it('has no card around the toolbar, and puts the row count and Export on one line', async () => {
+      const { root } = await open('viewer');
+      expect(byTestId(root, 'table-select')!.closest('tmz-card')).toBeNull();
+      const line = byTestId(root, 'row-count')!.parentElement!;
+      expect(line.contains(byTestId(root, 'export-button'))).toBe(true);
+    });
+
+    it('keeps Export usable before the first page arrives', async () => {
+      const { root } = await open('viewer', { first: null });
+      expect(byTestId<HTMLButtonElement>(root, 'export-button')!.disabled).toBe(false);
+      expect(text(byTestId(root, 'row-count'))).toBe('');
+    });
+
+    it('puts the label and the type of a column on one line, the type always shown', async () => {
+      const { root } = await open('viewer');
+      const header = root.querySelector('[data-testid="column-header"]')!;
+      expect(header.querySelector('[data-testid="column-label"]')!.parentElement).toBe(header.querySelector('[data-testid="column-type"]')!.parentElement);
+      expect(text(header.querySelector('[data-testid="column-type"]'))).toBe('text');
+    });
+
+    it('says when and by which run in one line with the zone', async () => {
+      const { root } = await open('viewer');
+      expect(byTestId(root, 'published')!.parentElement).toBe(byTestId(root, 'zone')!.parentElement);
+    });
+
+    it('hides the paging controls on a short table and shows them on a long one', async () => {
+      const short = await open('viewer', { first: page({ total: 25 }) });
+      expect(short.root.querySelector('nav[aria-label="Pages"]')).toBeNull();
+      expect(byTestId(short.root, 'page-size')).toBeNull();
+    });
+
+    it('shows the paging controls when there are more rows than the smallest page', async () => {
+      const { root } = await open('viewer', { first: page({ total: 26 }) });
+      expect(byTestId(root, 'page-size')).not.toBeNull();
     });
   });
 
@@ -352,6 +405,17 @@ describe('ProjectCleanData', () => {
       expect(address()).toMatch(/[?&]f=[A-Za-z0-9_-]+/);
     });
 
+    it('explains that the list of values may be incomplete only when it is full', async () => {
+      const context = await open('viewer');
+      const dialog = await openDialog(context, 0);
+      typeInto(byTestId<HTMLSelectElement>(dialog, 'filter-op')!, 'in');
+      await settle(context.harness);
+
+      context.http.expectOne(isValues).flush({ values: Array.from({ length: 50 }, (_, i) => ({ value: 'value ' + i, count: 50 - i })) });
+      await settle(context.harness);
+      expect(text(byTestId(dialog, 'filter-values-help'))).toContain('50 most frequent values are listed');
+    });
+
     it('lists the most frequent values for "is one of", searches once typing stops, and filters by the chosen ones', async () => {
       const context = await open('viewer');
       const dialog = await openDialog(context, 0);
@@ -365,6 +429,7 @@ describe('ProjectCleanData', () => {
       await settle(context.harness);
       const labels = Array.from(dialog.querySelectorAll('[data-testid="filter-option"]')).map((o) => text(o.closest('label')));
       expect(labels).toEqual(['Cali830', 'Palmira120', '(empty text)3']);
+      expect(byTestId(dialog, 'filter-values-help')).toBeNull(); // the list is complete, so there is nothing to explain
 
       const search = byTestId<HTMLInputElement>(dialog, 'filter-search')!;
       for (const typed of ['p', 'pa', 'pal']) {
@@ -539,7 +604,9 @@ describe('ProjectCleanData', () => {
       const context = await open('viewer', { section: `clean-data?f=${filters}`, first: page({ rows: [], total: 0 }) });
 
       expect(text(byTestId(context.root, 'no-rows'))).toContain('No rows match the filters.');
-      await click(context, context.root.querySelector<HTMLElement>('[data-testid="no-rows"] button'));
+      expect(context.root.querySelector('[data-testid="no-rows"] button')).toBeNull(); // the chips row already offers it, once
+      expect(context.root.querySelectorAll('[data-testid="clear-filters"]')).toHaveLength(1);
+      await click(context, byTestId(context.root, 'clear-filters'));
       const request = context.http.expectOne(isQuery);
       expect(body(request).filters).toEqual([]);
       request.flush(page());
@@ -609,6 +676,14 @@ describe('ProjectCleanData', () => {
       expect(text(byTestId(root, 'dropped'))).toContain('The sort on salary was removed.');
       expect(text(byTestId(root, 'filter-chip'))).toBe('name contains “a”');
       expect(address()).not.toContain('salary');
+      expect(byTestId(root, 'dropped')!.getAttribute('role')).toBe('status'); // announced to screen readers
+
+      // The notice is gone as soon as the member acts on the view.
+      root.querySelector<HTMLElement>('[data-testid="sort-button"]')!.click();
+      await settle(harness);
+      http.expectOne(isQuery).flush(page({ total: 1 }));
+      await settle(harness);
+      expect(byTestId(root, 'dropped')).toBeNull();
     });
 
     it('drops every filter when the server refuses a value although every column exists', async () => {
@@ -745,12 +820,16 @@ describe('ProjectCleanData', () => {
       const context = await open('viewer');
 
       await chooseFormat(context, 'export-csv');
-      expect(byTestId<HTMLButtonElement>(context.root, 'export-button')!.disabled).toBe(true);
-      expect(TestBed.inject(ToastService).toasts().at(-1)?.message).toBe('Preparing the export…');
+      const exportButton = byTestId<HTMLButtonElement>(context.root, 'export-button')!;
+      expect(exportButton.disabled).toBe(true);
+      expect(exportButton.getAttribute('aria-busy')).toBe('true');
+      expect(text(exportButton)).toBe('Preparing the export…'); // the busy state is on the button, with no second message
+      expect(TestBed.inject(ToastService).toasts()).toHaveLength(0);
       context.http.expectOne(isExport).flush(exported());
       await settle(context.harness);
 
       expect(downloader.start).toHaveBeenCalledExactlyOnceWith('/api/v1/data-exports/token123');
+      expect(TestBed.inject(ToastService).toasts()).toHaveLength(1); // one message for one export
       expect(TestBed.inject(ToastService).toasts().at(-1)?.message).toBe('Export ready: 830 rows. The download starts now.');
       expect(byTestId<HTMLButtonElement>(context.root, 'export-button')!.disabled).toBe(false);
     });

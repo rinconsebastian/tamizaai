@@ -1,0 +1,38 @@
+# Proposal
+
+## Why
+
+A project page shows ten tabs of equal weight, but only three of them, Performance, Clean data and Indicators, are what members open every day to analyse the survey; the other seven (Overview, Data, Scripts, Reference data, Members, Sampling frame, Webhook) are configured once by the person who sets the project up and then rarely touched. Inside the sections, set-once forms stay permanently expanded, status and explanatory text sit above the content, and bordered cards nest inside bordered cards, so every screen reads as heavier than its information. Real data is about to be loaded and analysts will spend their time in the dashboards, so the interface should present analysis first and configuration on demand.
+
+## What Changes
+
+- **Navigation.** The project page shows four top-level sections to every member: the three dashboards and, set apart at the end of the row with a gear icon, **Settings**. Settings groups the seven configuration sections. From 768 px wide a secondary row of pills under the tab bar navigates among them while one is open; below that width the existing single native select lists the dashboards and then a "Settings" group. Every section keeps its address, so bookmarks, the create-project landing on the webhook page and every cross-section link keep working without redirects.
+- **Settings sections renamed for their new home.** "Overview" becomes **General** (Kobo form, form check, name, time zone, enumerator question, API token) and "Data" becomes **Submissions** (ingestion status, synchronization, schedules, log, form versions); route segments do not change. Webhook stays admin-only; all other sections stay readable by every member, as the specs require.
+- **Deep links that land.** Anchor scrolling is enabled; links from the dashboards into Settings carry fragments (`#runs`, `#form-versions`, `#enumeratorField`) and their copy names the action rather than a tab ("Set the project time zone" instead of "…in the Overview"). The broken-token and broken-secret alerts link to each other's page.
+- **Dashboards lighter and analysis-first.** Performance opens with a strip of its three headline figures, its range and freshness controls become one plain toolbar, diagnostics (outliers, outside-the-frame combinations, unavailable-metric explanations) are demoted below the main content and shown as full alerts only to roles that can act. Clean data loses its toolbar card, collapses its two metadata lines into one, moves Export next to the row count it acts on, hides paging on short tables and clears stale notices on the next action. Indicators puts the widget canvas first, folds the indicator inventory into a disclosure, drops the toolbar card, moves per-widget table toggles and actions into the tile header and compacts the widget dialog.
+- **Configuration pages read first, edit on request.** Set-once settings (synchronization and run schedules, enumerator question, indicator metadata, sampling frame, API token) show their current value with an edit action instead of a permanently open form; rare flows (add member, import a sampling frame) open in dialogs; secondary content (Kobo setup steps, form-version explanations, "When scripts run") sits in collapsible disclosures that open only when they need attention. "When scripts run" moves from Scripts to Submissions, next to the synchronization schedule.
+- **Scripts page reorganised** around the editor: one picker row (script 1, script 2, an indicators menu), a one-line indicator summary with "Edit details", one action row (Save, Test on sample, Download sample, Templates, an overflow menu for Upload and Remove), the test result right under the editor, versions as a third side-panel tab, a last-run strip with "Run now" at the top and the runs list at the bottom, and viewer-only noise removed (editing hints, disabled inputs).
+- **Shared presentation rules.** Date-times are shown to the minute (no seconds). Cards frame only control groups and headline figures; lists and tables are plain sections. Long-running actions (exports) show their busy state on the pressed control and end with one message. Notices inserted after an action are announced to screen readers.
+- Members: list first, "Add member" dialog, pending invitations folded into the list, a "You" badge and the last-admin rule reflected in the menu. Sampling frame: read-only summary and table when a frame exists, "Edit" and "Import from file" (dialog), dimension and target editing in one block, a discard guard for unsaved edits. Reference data: per-row overflow menu, a "Manage" link from the script editor's inputs panel, replace errors shown inline. Webhook: one card, status line first, setup steps collapsible once deliveries arrive, Regenerate demoted, an admins-only notice for other roles.
+- Documentation (`docs/kobo.md`, `docs/performance-dashboard.md`, `docs/scripts.md`, `docs/clean-data-dashboard.md`, `docs/indicators-dashboard.md`, README) updated to the new section names and locations.
+
+No API, database or script-contract changes. No URL changes. Every capability any role has today remains reachable by that role.
+
+## Capabilities
+
+### New Capabilities
+
+None.
+
+### Modified Capabilities
+
+- `web-ui`: adds the project page's navigation contract (four top-level sections, Settings grouping, secondary navigation from 768 px, one native select below, addresses unchanged, Webhook admin-only), the rule that set-once settings are shown as values with an edit action, the date-time display rule (to the minute), and feedback while a long action runs.
+- `dashboard-indicators`: the requirement "Indicators dashboard and its indicators" lets the indicator list follow the widgets behind a disclosure that opens on demand, and merges it into the empty state while nothing has published.
+- `ingestion`: the requirement "Form version status" names the renamed section (Submissions) in its scenario.
+
+## Impact
+
+- **tamiza-ui**: `shared/ui/tabs-nav.ts` (grouped items, optgroup), a new `pages/projects/project-settings-layout.ts` rendered by an empty-path route that wraps the seven configuration routes in `app.routes.ts` (no address changes), a new `shared/ui/disclosure.ts`, a shared date-time format constant, `pages/projects/project-page.ts` (tab model, header alert), `app.config.ts` (anchor scrolling), every project section component (`project-performance.ts`, `project-clean-data.ts`, `project-indicators.ts` and `indicators/*`, `project-overview.ts`, `project-data.ts`, `project-scripts.ts` with `pipeline-runs.ts`, `pipeline-settings.ts`, `sample-download-panel.ts`, `script-test-panel.ts`, `script-editor/*`, `project-reference.ts` and its dialogs, `project-members.ts` plus a new add-member dialog, `project-sampling-frame.ts` plus a new import dialog, `project-webhook.ts`), `public/i18n/en.json`, and the corresponding Vitest specs (tab lists, data-testids kept wherever possible, dialog tests through the overlay container as `project-reference.spec.ts` already does).
+- **tamiza-api**, **tamiza-analytics**, database: none.
+- **Docs**: section names and locations in `docs/kobo.md`, `docs/performance-dashboard.md`, `docs/scripts.md`, `docs/clean-data-dashboard.md`, `docs/indicators-dashboard.md`, `README.md`.
+- **Out of scope, deferred with a reason**: a dedicated settings layout with redirects (more churn for the same grouping), a setup checklist hub (needs a new aggregate endpoint), merging Overview, Webhook and form versions into one "Kobo connection" page (splits a 231-line spec and every doc reference), sortable table headers replacing the sort selects on Performance, a shared pagination component, a daily-visible Scripts tab for analysts (a one-line follow-up if the two-click path hurts).

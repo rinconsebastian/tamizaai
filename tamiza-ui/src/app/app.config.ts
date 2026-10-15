@@ -6,7 +6,7 @@ import {
   provideAppInitializer,
   provideBrowserGlobalErrorListeners,
 } from '@angular/core';
-import { provideRouter, withComponentInputBinding } from '@angular/router';
+import { provideRouter, withComponentInputBinding, withInMemoryScrolling } from '@angular/router';
 import { provideTransloco } from '@jsverse/transloco';
 import { StsConfigLoader, provideAuth } from 'angular-auth-oidc-client';
 import { routes } from './app.routes';
@@ -18,7 +18,8 @@ import { TranslocoHttpLoader } from './core/i18n/transloco-loader';
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
-    provideRouter(routes, withComponentInputBinding()),
+    // Fragment links (#runs, #form-versions) scroll to their target.
+    provideRouter(routes, withComponentInputBinding(), withInMemoryScrolling({ anchorScrolling: 'enabled' })),
     provideHttpClient(withInterceptors([apiAuthInterceptor])),
     provideAuth({
       loader: { provide: StsConfigLoader, useFactory: createStsConfigLoader, deps: [HttpClient] },

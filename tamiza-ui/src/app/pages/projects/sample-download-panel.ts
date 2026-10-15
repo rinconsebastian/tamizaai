@@ -38,55 +38,36 @@ export function sizeText(bytes: number): string {
           @case ('succeeded') {
             @if (download.contents; as contents) {
               <div class="flex flex-col gap-3" data-testid="download-ready">
-                <p class="text-sm text-body">
-                  {{ t('sampleDownloads.ready', { submissions: contents.sample.submissions.toLocaleString('en'), requested: contents.sample.requested.toLocaleString('en') }) }}
-                </p>
-                <ul class="flex flex-col gap-1 text-sm text-body" data-testid="download-tables">
-                  <li>
-                    <span class="font-medium text-heading">{{ t('sampleDownloads.rawTables') }}</span>
-                    {{ tables(contents.raw.tables) }}
-                  </li>
-                  @switch (contents.clean.status) {
-                    @case ('succeeded') {
-                      <li>
-                        <span class="font-medium text-heading">{{ t('sampleDownloads.cleanTables', { version: contents.clean.version }) }}</span>
-                        {{ tables(contents.clean.tables) }}
-                      </li>
-                    }
-                    @case ('none') {
-                      <li>{{ t('sampleDownloads.noScript1') }}</li>
-                    }
-                  }
-                  <li>
-                    <span class="font-medium text-heading">{{ t('sampleDownloads.referenceTables') }}</span>
-                    {{ contents.reference.length ? tables(contents.reference) : t('sampleDownloads.noReference') }}
-                  </li>
-                </ul>
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <p class="text-sm text-body" data-testid="download-summary">
+                    {{ t('sampleDownloads.ready', { submissions: contents.sample.submissions.toLocaleString('en'), requested: contents.sample.requested.toLocaleString('en') }) }}
+                    <span data-testid="download-size">
+                      {{ t('sampleDownloads.size', { size: sizeLabel(download) }) }}
+                      @if (download.expiresAt) {
+                        {{ t('sampleDownloads.until', { time: (download.expiresAt | date: 'shortTime') }) }}
+                      }
+                    </span>
+                  </p>
+                  <button tmzButton type="button" [disabled]="linking()" (click)="save()" data-testid="download-button">
+                    {{ t('sampleDownloads.download') }}
+                  </button>
+                </div>
+                <p class="text-sm text-body" data-testid="download-tables">{{ tablesLine(contents, t) }}</p>
                 @if (contents.clean.status === 'failed') {
                   <tmz-alert tone="warning" data-testid="download-script1-warning">
                     {{ t('sampleDownloads.script1Failed', { version: contents.clean.version ?? '—', error: contents.clean.error ?? '' }) }}
                   </tmz-alert>
                 }
-                <p class="text-sm text-body" data-testid="download-size">
-                  {{ t('sampleDownloads.size', { size: sizeLabel(download) }) }}
-                  @if (download.expiresAt) {
-                    {{ t('sampleDownloads.until', { time: (download.expiresAt | date: 'shortTime') }) }}
-                  }
-                </p>
-                <div>
-                  <button tmzButton type="button" [disabled]="linking()" (click)="save()" data-testid="download-button">
-                    {{ t('sampleDownloads.download') }}
-                  </button>
-                </div>
                 @if (linkError(); as message) {
                   <tmz-alert tone="danger" data-testid="download-link-error">{{ message }}</tmz-alert>
                 }
-                <p class="text-sm text-body" data-testid="download-notice">{{ t('sampleDownloads.notice') }}</p>
+                <p class="text-xs text-body" data-testid="download-notice">{{ t('sampleDownloads.notice') }}</p>
               </div>
             }
           }
           @default {
             <p class="text-sm text-body" role="status" data-testid="download-progress">{{ progress(download) }}</p>
+            <p class="mt-1 text-xs text-body" data-testid="download-explanation">{{ t('sampleDownloads.hint') }}</p>
           }
         }
       }
@@ -158,6 +139,18 @@ export class SampleDownloadPanel {
       default:
         return t('sampleDownloads.starting');
     }
+  }
+
+  /** The tables of the zip on one line: "Flattened: main (320 rows) · Clean v3: main (300 rows) · Reference: population (1,122 rows)". */
+  protected tablesLine(contents: NonNullable<SampleDownload['contents']>, t: (key: string, params?: Record<string, unknown>) => string): string {
+    const parts = [t('sampleDownloads.rawLine', { tables: this.tables(contents.raw.tables) })];
+    if (contents.clean.status === 'succeeded') {
+      parts.push(t('sampleDownloads.cleanLine', { version: contents.clean.version, tables: this.tables(contents.clean.tables) }));
+    } else if (contents.clean.status === 'none') {
+      parts.push(t('sampleDownloads.noScript1'));
+    }
+    parts.push(contents.reference.length ? t('sampleDownloads.referenceLine', { tables: this.tables(contents.reference) }) : t('sampleDownloads.noReferenceLine'));
+    return parts.join(' · ');
   }
 
   /** "main (320 rows), members (871 rows)". */

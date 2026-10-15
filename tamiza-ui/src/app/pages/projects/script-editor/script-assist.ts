@@ -32,6 +32,8 @@ export interface ResolvedProblem {
   line: number;
   severity: 'error' | 'warning';
   message: string;
+  /** The translation key of the check, so a page can add an action to some of them. */
+  key: string;
 }
 
 export interface AssistOptions {
@@ -209,6 +211,7 @@ export function lintProblems(state: EditorState, options: AssistOptions): Resolv
       line: state.doc.lineAt(from).number,
       severity: problem.severity,
       message: options.translate(problem.key, params),
+      key: problem.key,
     };
   });
 }

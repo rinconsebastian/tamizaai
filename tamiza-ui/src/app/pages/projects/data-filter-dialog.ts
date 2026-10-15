@@ -77,7 +77,9 @@ export const valueSearchDelayMs = 300;
                 (input)="searchTyped($any($event.target).value)"
                 data-testid="filter-search"
               />
-              <p class="mt-2 text-xs text-body">{{ t('cleanData.filter.valuesHelp', { count: maxValues }) }}</p>
+              @if (listed().length >= maxValues) {
+                <p class="mt-2 text-xs text-body" data-testid="filter-values-help">{{ t('cleanData.filter.valuesHelp', { count: maxValues }) }}</p>
+              }
             }
             <ul class="mt-2 max-h-60 divide-y divide-default overflow-y-auto rounded-base border border-default" data-testid="filter-value-list">
               @if (loading()) {

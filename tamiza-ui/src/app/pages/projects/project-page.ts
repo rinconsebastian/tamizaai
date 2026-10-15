@@ -1,16 +1,19 @@
 import { Component, computed, inject, input, effect } from '@angular/core';
-import { RouterLink, RouterOutlet } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
+import { filter, map, startWith } from 'rxjs';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { HttpErrorResponse } from '@angular/common/http';
 import { signal } from '@angular/core';
 import { ApiErrors } from '../../core/api-error';
 import { ProjectsService } from '../../core/projects/projects.service';
-import { Badge, Button, Skeleton, TabItem, TabsNav } from '../../shared/ui';
+import { Alert, Badge, Button, Skeleton, TabItem, TabsNav } from '../../shared/ui';
 import { ProjectContext } from './project-context';
+import { projectSections } from './project-sections';
 
 @Component({
   selector: 'app-project-page',
-  imports: [RouterOutlet, RouterLink, TranslocoDirective, Badge, Button, Skeleton, TabsNav],
+  imports: [RouterOutlet, RouterLink, TranslocoDirective, Alert, Badge, Button, Skeleton, TabsNav],
   providers: [ProjectContext],
   template: `
     <section *transloco="let t">
@@ -23,6 +26,14 @@ import { ProjectContext } from './project-context';
           </div>
           <p class="text-sm text-body break-words">{{ project.formName }}</p>
         </header>
+        @if (project.tokenUnreadable && context.can('admin') && !onGeneral()) {
+          <tmz-alert tone="danger" class="mb-6" data-testid="token-unreadable-banner">
+            {{ t('project.tokenUnreadable') }}
+            <a routerLink="overview" class="font-medium underline">{{ t('project.tokenUnreadableToken') }}</a>
+            ·
+            <a routerLink="webhook" class="font-medium underline">{{ t('project.tokenUnreadableWebhook') }}</a>
+          </tmz-alert>
+        }
         <tmz-tabs-nav class="mb-6 block" [items]="tabs()" [label]="t('project.sections')" />
         <router-outlet />
       } @else if (notFound()) {
@@ -43,31 +54,34 @@ export class ProjectPage {
   private readonly service = inject(ProjectsService);
   private readonly errors = inject(ApiErrors);
   private readonly transloco = inject(TranslocoService);
-  private readonly context = inject(ProjectContext);
+  protected readonly context = inject(ProjectContext);
+  private readonly router = inject(Router);
 
   /** Bound from the `:id` route parameter. */
   readonly id = input.required<string>();
 
   protected readonly project = this.context.project;
+  /** General shows the same warning beside the token it concerns, so the banner steps aside there. */
+  protected readonly onGeneral = toSignal(
+    this.router.events.pipe(
+      filter((event) => event instanceof NavigationEnd),
+      startWith(null),
+      map(() => this.router.url.split(/[?#]/)[0].endsWith('/overview')),
+    ),
+    { initialValue: false },
+  );
   protected readonly notFound = signal(false);
   protected readonly tabs = computed<TabItem[]>(() => {
     const id = this.id();
     const t = (key: string) => this.transloco.translate(key);
-    const tabs: TabItem[] = [
+    const sections = projectSections(id, this.context.can('admin')).map((s) => ({ label: t(s.labelKey), link: s.link }));
+    return [
       { label: t('project.tabs.performance'), link: `/projects/${id}/performance` },
       { label: t('project.tabs.cleanData'), link: `/projects/${id}/clean-data` },
       { label: t('project.tabs.indicators'), link: `/projects/${id}/indicators` },
-      { label: t('project.tabs.overview'), link: `/projects/${id}/overview` },
-      { label: t('project.tabs.data'), link: `/projects/${id}/data` },
-      { label: t('project.tabs.scripts'), link: `/projects/${id}/scripts` },
-      { label: t('project.tabs.reference'), link: `/projects/${id}/reference` },
-      { label: t('project.tabs.members'), link: `/projects/${id}/members` },
-      { label: t('project.tabs.samplingFrame'), link: `/projects/${id}/sampling-frame` },
+      // Settings opens the first configuration section and stands for all of them.
+      { label: t('project.tabs.settings'), link: sections[0].link, children: sections },
     ];
-    if (this.context.can('admin')) {
-      tabs.push({ label: t('project.tabs.webhook'), link: `/projects/${id}/webhook` });
-    }
-    return tabs;
   });
 
   constructor() {

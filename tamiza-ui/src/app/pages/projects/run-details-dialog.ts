@@ -4,7 +4,7 @@ import { Component, inject, signal } from '@angular/core';
 import { TranslocoDirective } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { PipelineService, RunDetails, RunStepStatus } from '../../core/projects/pipeline.service';
-import { Badge, Button, Skeleton, Tone } from '../../shared/ui';
+import { Badge, Button, Skeleton, Tone, dateTimeFormat } from '../../shared/ui';
 import { durationText } from './pipeline-runs.util';
 
 export interface RunDetailsData {
@@ -27,7 +27,8 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
         <h2 id="run-details-title" class="text-lg font-medium text-heading">
           {{ t('runs.detailsTitle') }}
           @if (details(); as details) {
-            <span class="block text-sm font-normal text-body">{{ (details.run.startedAt ?? details.run.queuedAt) | date: 'medium' }} · {{ t('runs.triggers.' + details.run.trigger) }}</span>
+            <span class="block text-sm font-normal text-body">{{ (details.run.startedAt ?? details.run.queuedAt) | date: dateTimeFormat }} · {{ t('runs.triggers.' + details.run.trigger) }}</span>
+            <span class="block text-sm font-normal text-body" data-testid="run-script-versions">{{ scriptVersions(details, t) }}</span>
           }
         </h2>
         <button tmzButton variant="ghost" size="sm" type="button" (click)="ref.close()" data-testid="close-run">{{ t('runs.close') }}</button>
@@ -81,7 +82,7 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
                 @for (table of details.referenceTables; track table.name) {
                   <li>
                     <code class="text-heading">{{ table.name }}</code>
-                    {{ t('runs.referenceTable', { rows: table.rows, updated: (table.updatedAt | date: 'medium') }) }}
+                    {{ t('runs.referenceTable', { rows: table.rows, updated: (table.updatedAt | date: dateTimeFormat) }) }}
                   </li>
                 }
               </ul>
@@ -104,6 +105,7 @@ export class RunDetailsDialog {
 
   protected readonly details = signal<RunDetails | null>(null);
   protected readonly duration = durationText;
+  protected readonly dateTimeFormat = dateTimeFormat;
 
   constructor() {
     this.service.run(this.data.projectId, this.data.runId).subscribe({
@@ -117,6 +119,17 @@ export class RunDetailsDialog {
 
   protected tone(status: RunStepStatus): Tone {
     return stepTones[status];
+  }
+
+  /** The versions of script 1 and script 2 the run used, as one line ("Script 1 v4 · Script 2 v2"); a script the run did without is left out. */
+  protected scriptVersions(details: RunDetails, t: (key: string, params?: Record<string, unknown>) => string): string {
+    const { clean, output } = details.run.versions;
+    return [
+      clean === null ? null : `${t('runs.scriptNames.clean')} ${t('scripts.versionShort', { number: clean })}`,
+      output === null ? null : `${t('runs.scriptNames.output')} ${t('scripts.versionShort', { number: output })}`,
+    ]
+      .filter((part) => part !== null)
+      .join(' · ');
   }
 
   /** The version of an indicator's script the run used. */

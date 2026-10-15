@@ -14,6 +14,7 @@ import {
   Skeleton,
   Table,
   TableContainer,
+  dateTimeFormat,
   tableCell,
   tableHead,
   tableHeaderCell,
@@ -35,151 +36,181 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
   imports: [DatePipe, DecimalPipe, RouterLink, TranslocoDirective, Alert, Button, Card, FormField, Input, Skeleton, Table, TableContainer],
   template: `
     <div class="flex flex-col gap-6" *transloco="let t" [attr.aria-busy]="loading()">
-      <tmz-card>
+      <div class="flex flex-col gap-3">
         <form class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start" (submit)="$event.preventDefault(); load()" data-testid="range-form">
-          <tmz-form-field class="sm:w-48" [label]="t('performance.from')" fieldId="performanceFrom" [error]="fieldErrors()['from']">
-            <input tmzInput id="performanceFrom" type="date" [value]="from()" [attr.max]="to() || null" (change)="setFrom($any($event.target).value)" data-testid="range-from" />
-          </tmz-form-field>
-          <tmz-form-field class="sm:w-48" [label]="t('performance.to')" fieldId="performanceTo" [error]="fieldErrors()['to']">
-            <input tmzInput id="performanceTo" type="date" [value]="to()" [attr.min]="from() || null" (change)="setTo($any($event.target).value)" data-testid="range-to" />
-          </tmz-form-field>
-          <div class="flex flex-col gap-3 sm:mt-7 sm:flex-row">
-            <button tmzButton variant="secondary" type="button" [disabled]="!from() && !to()" (click)="clear()" data-testid="range-clear">{{ t('performance.clear') }}</button>
-            <button tmzButton type="submit" [disabled]="loading()" data-testid="refresh">{{ t('performance.refresh') }}</button>
+          <fieldset class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start">
+            <legend class="sr-only">{{ t('performance.range') }}</legend>
+            <tmz-form-field class="sm:w-44" [label]="t('performance.from')" fieldId="performanceFrom" [error]="fieldErrors()['from']">
+              <input tmzInput id="performanceFrom" type="date" [value]="from()" [attr.max]="to() || null" (change)="setFrom($any($event.target).value)" data-testid="range-from" />
+            </tmz-form-field>
+            <tmz-form-field class="sm:w-44" [label]="t('performance.to')" fieldId="performanceTo" [error]="fieldErrors()['to']">
+              <input tmzInput id="performanceTo" type="date" [value]="to()" [attr.min]="from() || null" (change)="setTo($any($event.target).value)" data-testid="range-to" />
+            </tmz-form-field>
+          </fieldset>
+          <div class="flex gap-3 sm:mt-7">
+            <button tmzButton variant="secondary" size="sm" type="button" [disabled]="!from() && !to()" (click)="clear()" data-testid="range-clear">{{ t('performance.clear') }}</button>
+            <button tmzButton variant="secondary" size="sm" type="submit" [disabled]="loading()" data-testid="refresh">{{ t('performance.refresh') }}</button>
           </div>
         </form>
         @if (data(); as data) {
-          <div class="mt-4 flex flex-col gap-1 text-sm text-body">
-            <p data-testid="computed-at">{{ t('performance.computedAt', { time: (data.computedAt | date: 'medium') }) }}</p>
+          <p class="text-sm text-body">
+            <span data-testid="computed-at">{{ t('performance.computedAt', { time: (data.computedAt | date: dateTimeFormat) }) }}</span>
+            ·
             @if (data.timeZone === 'UTC') {
-              <p data-testid="days-zone">
+              <span data-testid="days-zone">
                 {{ t('performance.daysUtc') }}
                 @if (context.can('admin')) {
                   <a [routerLink]="['..', 'overview']" class="text-fg-brand hover:underline" data-testid="zone-link">{{ t('performance.daysUtcAction') }}</a>
                 }
-              </p>
+              </span>
             } @else {
-              <p data-testid="days-zone">{{ t('performance.daysZone', { zone: data.timeZone }) }}</p>
+              <span data-testid="days-zone">{{ t('performance.daysZone', { zone: data.timeZone }) }}</span>
             }
-          </div>
+          </p>
         }
-      </tmz-card>
+      </div>
 
       @if (error(); as message) {
         <tmz-alert tone="danger" data-testid="performance-error">{{ message }}</tmz-alert>
       }
 
       @if (data(); as data) {
-        <tmz-card [heading]="t('performance.submissions.title')" data-testid="submissions-card">
-          <dl class="grid grid-cols-2 gap-4">
-            <div class="rounded-base border border-default bg-neutral-secondary-soft p-4">
+        <!-- The three headline figures; the cards below hold the detail. -->
+        <tmz-card data-testid="headline">
+          <dl class="grid grid-cols-3 divide-x divide-default">
+            <div class="min-w-0 pe-3">
               <dt class="text-sm text-body">{{ t('performance.submissions.total') }}</dt>
-              <dd class="text-2xl font-semibold text-heading tabular-nums" data-testid="total">{{ data.submissions.total | number }}</dd>
+              <dd class="text-lg font-semibold text-heading tabular-nums sm:text-2xl" data-testid="total">{{ data.submissions.total | number }}</dd>
             </div>
-            <div class="rounded-base border border-default bg-neutral-secondary-soft p-4">
-              <dt class="text-sm text-body">{{ t('performance.submissions.withoutTime') }}</dt>
-              <dd class="text-2xl font-semibold text-heading tabular-nums" data-testid="without-time">{{ data.submissions.withoutReceptionTime | number }}</dd>
+            <div class="min-w-0 px-3">
+              <dt class="text-sm text-body">{{ t('performance.headline.median') }}</dt>
+              @if (data.completionTime.available) {
+                <dd class="text-lg font-semibold text-heading sm:text-2xl" data-testid="median">{{ duration(data.completionTime.medianSeconds) }}</dd>
+              } @else {
+                <dd class="text-lg font-semibold text-heading sm:text-2xl" data-testid="median-unavailable">—</dd>
+                <dd class="text-xs text-body">{{ t('performance.headline.unavailable') }}</dd>
+              }
+            </div>
+            <div class="min-w-0 ps-3">
+              <dt class="text-sm text-body">{{ t('performance.coverage.overall') }}</dt>
+              @if (data.coverage.state === 'notConfigured') {
+                <dd class="text-lg font-semibold text-heading sm:text-2xl" data-testid="overall-unavailable">—</dd>
+                <dd class="text-xs text-body">{{ t('performance.headline.noFrame') }}</dd>
+              } @else if (data.coverage.overallPercent !== null) {
+                <dd class="text-lg font-semibold text-heading tabular-nums sm:text-2xl" data-testid="overall-percent">{{ data.coverage.overallPercent | number: '1.0-1' }}%</dd>
+                <dd class="mt-1 h-2 w-full rounded-full bg-neutral-quaternary" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="cap(data.coverage.overallPercent)" [attr.aria-label]="t('performance.coverage.overall')">
+                  <div class="h-2 rounded-full bg-brand" [style.width.%]="cap(data.coverage.overallPercent)" data-testid="overall-bar"></div>
+                </dd>
+              } @else {
+                <dd class="text-lg font-semibold text-heading sm:text-2xl">—</dd>
+                <dd class="text-xs text-body" data-testid="overall-none">{{ t('performance.coverage.overallNone') }}</dd>
+              }
             </div>
           </dl>
-          @if (data.submissions.days.length) {
-            <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
-              <h3 class="text-base font-medium text-heading">{{ t('performance.submissions.perDay') }}</h3>
-              <button tmzButton variant="secondary" size="sm" type="button" [attr.aria-pressed]="asTable()" (click)="asTable.set(!asTable())" data-testid="chart-toggle">
-                {{ asTable() ? t('performance.submissions.showChart') : t('performance.submissions.showTable') }}
-              </button>
-            </div>
-            @if (asTable()) {
-              <tmz-table-container class="mt-3 max-h-96 overflow-y-auto">
-                <table tmzTable data-testid="days-table">
-                  <thead [class]="tableHead">
-                    <tr>
-                      <th scope="col" [class]="tableHeaderCell">{{ t('performance.submissions.day') }}</th>
-                      <th scope="col" [class]="tableHeaderCell + ' text-end'">{{ t('performance.submissions.count') }}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (day of data.submissions.days; track day.day) {
-                      <tr [class]="tableRow">
-                        <td [class]="tableCell + ' tabular-nums'">{{ day.day }}</td>
-                        <td [class]="tableCell + ' text-end tabular-nums'">{{ day.count | number }}</td>
-                      </tr>
-                    }
-                  </tbody>
-                </table>
-              </tmz-table-container>
-            } @else {
-              <div class="mt-3" data-testid="days-chart">
-                <p class="mb-1 text-xs text-body">{{ t('performance.submissions.peak', { count: (chart().peak | number) }) }}</p>
-                <div class="border-b border-default">
-                  <svg
-                    role="img"
-                    class="block h-40 w-full"
-                    preserveAspectRatio="none"
-                    [attr.viewBox]="'0 0 ' + chart().width + ' ' + chartHeight"
-                    [attr.aria-label]="chartLabel(t)"
-                  >
-                    @for (bar of chart().bars; track bar.day) {
-                      <rect class="fill-brand" [attr.x]="bar.x" [attr.y]="bar.y" [attr.width]="bar.width" [attr.height]="bar.height">
-                        <title>{{ bar.day }}: {{ bar.count }}</title>
-                      </rect>
-                    }
-                  </svg>
-                </div>
-                <div class="mt-1 flex justify-between gap-3 text-xs text-body tabular-nums">
-                  <span>{{ data.submissions.days[0].day }}</span>
-                  <span>{{ data.submissions.days[data.submissions.days.length - 1].day }}</span>
-                </div>
-              </div>
-            }
-          } @else {
-            <p class="mt-4 text-sm text-body" data-testid="days-empty">{{ t('performance.submissions.noDays') }}</p>
-          }
         </tmz-card>
 
-        <tmz-card [heading]="t('performance.completion.title')" data-testid="completion-card">
-          @if (data.completionTime; as time) {
-            @if (time.available) {
-              <dl class="grid grid-cols-2 gap-4 lg:grid-cols-4">
-                <div class="rounded-base border border-default bg-neutral-secondary-soft p-4">
-                  <dt class="text-sm text-body">{{ t('performance.completion.median') }}</dt>
-                  <dd class="text-xl font-semibold text-heading sm:text-2xl" data-testid="median">{{ duration(time.medianSeconds) }}</dd>
-                </div>
-                <div class="rounded-base border border-default bg-neutral-secondary-soft p-4">
-                  <dt class="text-sm text-body">{{ t('performance.completion.mean') }}</dt>
-                  <dd class="text-xl font-semibold text-heading sm:text-2xl" data-testid="mean">{{ duration(time.meanWithoutOutliersSeconds) }}</dd>
-                </div>
-                <div class="rounded-base border border-default bg-neutral-secondary-soft p-4">
-                  <dt class="text-sm text-body">{{ t('performance.completion.outliers') }}</dt>
-                  <dd class="text-2xl font-semibold text-heading tabular-nums" data-testid="outliers">{{ time.outliers ?? 0 | number }}</dd>
-                </div>
-                <div class="rounded-base border border-default bg-neutral-secondary-soft p-4">
-                  <dt class="text-sm text-body">{{ t('performance.completion.unusable') }}</dt>
-                  <dd class="text-2xl font-semibold text-heading tabular-nums" data-testid="unusable">{{ time.unusableDurations ?? 0 | number }}</dd>
-                </div>
-              </dl>
-              @if (time.lowerFenceSeconds !== null && time.upperFenceSeconds !== null) {
-                <p class="mt-4 text-sm text-body" data-testid="fences">
-                  {{
-                    t('performance.completion.fences', {
-                      lower: (fenceMinutes(time.lowerFenceSeconds) | number: '1.0-1'),
-                      upper: (fenceMinutes(time.upperFenceSeconds) | number: '1.0-1')
-                    })
-                  }}
-                </p>
+        <div class="grid gap-6 lg:grid-cols-2">
+          <tmz-card [heading]="t('performance.submissions.perDay')" data-testid="submissions-card">
+            @if (data.submissions.days.length) {
+              <div class="flex justify-end">
+                <button tmzButton variant="secondary" size="sm" type="button" [attr.aria-pressed]="asTable()" (click)="asTable.set(!asTable())" data-testid="chart-toggle">
+                  {{ asTable() ? t('performance.submissions.showChart') : t('performance.submissions.showTable') }}
+                </button>
+              </div>
+              @if (asTable()) {
+                <tmz-table-container class="mt-3 max-h-96 overflow-y-auto">
+                  <table tmzTable data-testid="days-table">
+                    <thead [class]="tableHead">
+                      <tr>
+                        <th scope="col" [class]="tableHeaderCell">{{ t('performance.submissions.day') }}</th>
+                        <th scope="col" [class]="tableHeaderCell + ' text-end'">{{ t('performance.submissions.count') }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (day of data.submissions.days; track day.day) {
+                        <tr [class]="tableRow">
+                          <td [class]="tableCell + ' tabular-nums'">{{ day.day }}</td>
+                          <td [class]="tableCell + ' text-end tabular-nums'">{{ day.count | number }}</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </tmz-table-container>
               } @else {
-                <p class="mt-4 text-sm text-body" data-testid="no-usable">{{ t('performance.completion.noneUsable') }}</p>
+                <div class="mt-3" data-testid="days-chart">
+                  <p class="mb-1 text-xs text-body">{{ t('performance.submissions.peak', { count: (chart().peak | number) }) }}</p>
+                  <div class="border-b border-default">
+                    <svg
+                      role="img"
+                      class="block h-40 w-full"
+                      preserveAspectRatio="none"
+                      [attr.viewBox]="'0 0 ' + chart().width + ' ' + chartHeight"
+                      [attr.aria-label]="chartLabel(t)"
+                    >
+                      @for (bar of chart().bars; track bar.day) {
+                        <rect class="fill-brand" [attr.x]="bar.x" [attr.y]="bar.y" [attr.width]="bar.width" [attr.height]="bar.height">
+                          <title>{{ bar.day }}: {{ bar.count }}</title>
+                        </rect>
+                      }
+                    </svg>
+                  </div>
+                  <div class="mt-1 flex justify-between gap-3 text-xs text-body tabular-nums">
+                    <span>{{ data.submissions.days[0].day }}</span>
+                    <span>{{ data.submissions.days[data.submissions.days.length - 1].day }}</span>
+                  </div>
+                </div>
               }
             } @else {
-              <tmz-alert tone="warning" data-testid="completion-unavailable">
-                <p>{{ t('performance.completion.unavailable', { fields: time.missingFields.join(', ') }) }}</p>
-                <p class="mt-2">
-                  {{ t('performance.completion.howTo') }}
-                  <a [routerLink]="['..', 'overview']" class="font-medium underline" data-testid="completion-link">{{ t('performance.seeOverview') }}</a>
-                </p>
-              </tmz-alert>
+              <p class="text-sm text-body" data-testid="days-empty">{{ t('performance.submissions.noDays') }}</p>
             }
-          }
-        </tmz-card>
+            <p class="mt-4 text-sm text-body">
+              {{ t('performance.submissions.withoutTime') }}: <span class="font-medium text-heading tabular-nums" data-testid="without-time">{{ data.submissions.withoutReceptionTime | number }}</span>
+            </p>
+          </tmz-card>
+
+          <tmz-card [heading]="t('performance.completion.title')" data-testid="completion-card">
+            @if (data.completionTime; as time) {
+              @if (time.available) {
+                @if (time.lowerFenceSeconds !== null && time.upperFenceSeconds !== null) {
+                  <dl>
+                    <dt class="text-sm text-body">{{ t('performance.completion.mean') }}</dt>
+                    <dd class="text-xl font-semibold text-heading sm:text-2xl" data-testid="mean">{{ duration(time.meanWithoutOutliersSeconds) }}</dd>
+                  </dl>
+                } @else {
+                  <p class="text-sm text-body" data-testid="no-usable">{{ t('performance.completion.noneUsable') }}</p>
+                }
+                <p class="mt-3 text-sm text-body" data-testid="completion-counts">
+                  {{ t('performance.completion.outliers') }}: <span class="font-medium text-heading tabular-nums" data-testid="outliers">{{ time.outliers ?? 0 | number }}</span>
+                  ·
+                  {{ t('performance.completion.unusable') }}: <span class="font-medium text-heading tabular-nums" data-testid="unusable">{{ time.unusableDurations ?? 0 | number }}</span>
+                </p>
+                @if (time.lowerFenceSeconds !== null && time.upperFenceSeconds !== null) {
+                  <p class="mt-2 text-xs text-body" data-testid="fences">
+                    {{
+                      t('performance.completion.fences', {
+                        lower: (fenceMinutes(time.lowerFenceSeconds) | number: '1.0-1'),
+                        upper: (fenceMinutes(time.upperFenceSeconds) | number: '1.0-1')
+                      })
+                    }}
+                  </p>
+                }
+              } @else if (context.can('analyst')) {
+                <tmz-alert tone="warning" data-testid="completion-unavailable">
+                  <p>{{ t('performance.completion.unavailable', { fields: time.missingFields.join(', ') }) }}</p>
+                  <p class="mt-2">
+                    {{ t('performance.completion.howTo') }}
+                    <a [routerLink]="['..', 'overview']" class="font-medium underline" data-testid="completion-link">{{ t('performance.seeOverview') }}</a>
+                  </p>
+                </tmz-alert>
+              } @else {
+                <p class="text-sm text-body" data-testid="completion-unavailable">
+                  {{ t('performance.completion.unavailable', { fields: time.missingFields.join(', ') }) }}
+                  {{ t('performance.completion.howToViewer') }}
+                </p>
+              }
+            }
+          </tmz-card>
+        </div>
 
         <tmz-card [heading]="t('performance.enumerators.title')" data-testid="enumerators-card">
           @if (data.enumerators.available) {
@@ -193,21 +224,27 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                   <option value="name" [selected]="enumeratorSort() === 'name'">{{ t('performance.enumerators.sortName') }}</option>
                 </select>
               </div>
-              <!-- Phones: stacked cards. md and up: a table. -->
+              <!-- Phones: two-line cards. md and up: a table. -->
               <ul class="flex flex-col gap-3 md:hidden" data-testid="enumerator-cards">
                 @for (row of enumeratorPage(); track $index) {
                   <li class="rounded-base border border-default bg-neutral-primary-soft p-4 text-sm" data-testid="enumerator-card">
-                    <p class="mb-2 break-words font-medium text-heading">
+                    <p class="break-words font-medium text-heading">
                       @if (row.name !== null) {
                         {{ row.name }}
                       } @else {
                         <em>{{ t('performance.enumerators.none') }}</em>
                       }
                     </p>
-                    <p class="text-body">{{ t('performance.enumerators.submissions') }}: {{ row.submissions | number }}</p>
-                    <p class="text-body">{{ t('performance.enumerators.mean') }}: {{ duration(row.meanSeconds) }}</p>
-                    <p class="text-body">{{ t('performance.enumerators.outliers') }}: {{ row.outliers | number }}</p>
-                    <p class="text-body">{{ t('performance.enumerators.last') }}: {{ row.lastSubmissionAt ? (row.lastSubmissionAt | date: 'medium') : '—' }}</p>
+                    <p class="mt-1 text-body">
+                      {{
+                        t('performance.enumerators.cardSummary', {
+                          submissions: (row.submissions | number),
+                          mean: duration(row.meanSeconds),
+                          outliers: (row.outliers | number),
+                          last: row.lastSubmissionAt ? (row.lastSubmissionAt | date: 'mediumDate') : '—'
+                        })
+                      }}
+                    </p>
                   </li>
                 }
               </ul>
@@ -235,7 +272,7 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                         <td [class]="tableCell + ' text-end tabular-nums'">{{ row.submissions | number }}</td>
                         <td [class]="tableCell + ' whitespace-nowrap text-end'">{{ duration(row.meanSeconds) }}</td>
                         <td [class]="tableCell + ' text-end tabular-nums'">{{ row.outliers | number }}</td>
-                        <td [class]="tableCell + ' whitespace-nowrap'">{{ row.lastSubmissionAt ? (row.lastSubmissionAt | date: 'medium') : '—' }}</td>
+                        <td [class]="tableCell + ' whitespace-nowrap'">{{ row.lastSubmissionAt ? (row.lastSubmissionAt | date: dateTimeFormat) : '—' }}</td>
                       </tr>
                     }
                   </tbody>
@@ -251,18 +288,19 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                 </nav>
               }
             }
-          } @else {
+          } @else if (context.can('admin')) {
             <tmz-alert tone="warning" data-testid="enumerators-unavailable">
               <p>{{ t('performance.enumerators.unavailable') }}</p>
               <p class="mt-2">
-                @if (context.can('admin')) {
-                  {{ t('performance.enumerators.adminHow') }}
-                  <a [routerLink]="['..', 'overview']" fragment="enumeratorField" class="font-medium underline" data-testid="enumerators-link">{{ t('performance.enumerators.adminLink') }}</a>
-                } @else {
-                  {{ t('performance.enumerators.askAdmin') }}
-                }
+                {{ t('performance.enumerators.adminHow') }}
+                <a [routerLink]="['..', 'overview']" fragment="enumeratorField" class="font-medium underline" data-testid="enumerators-link">{{ t('performance.enumerators.adminLink') }}</a>
               </p>
             </tmz-alert>
+          } @else {
+            <p class="text-sm text-body" data-testid="enumerators-unavailable">
+              {{ t('performance.enumerators.unavailable') }}
+              {{ t('performance.enumerators.askAdmin') }}
+            </p>
           }
         </tmz-card>
 
@@ -291,55 +329,16 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                 }
               }
 
-              <div class="grid gap-4 lg:grid-cols-2">
-                <div class="rounded-base border border-default bg-neutral-secondary-soft p-4" data-testid="overall">
-                  <p class="text-sm text-body">{{ t('performance.coverage.overall') }}</p>
-                  @if (coverage.overallPercent !== null) {
-                    <p class="text-2xl font-semibold text-heading tabular-nums" data-testid="overall-percent">{{ coverage.overallPercent | number: '1.0-1' }}%</p>
-                    <div class="mt-2 h-2 w-full rounded-full bg-neutral-quaternary" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="cap(coverage.overallPercent)" [attr.aria-label]="t('performance.coverage.overall')">
-                      <div class="h-2 rounded-full bg-brand" [style.width.%]="cap(coverage.overallPercent)" data-testid="overall-bar"></div>
-                    </div>
-                    <p class="mt-2 text-xs text-body">{{ t('performance.coverage.overallHelp') }}</p>
-                  } @else {
-                    <p class="mt-1 text-sm text-heading" data-testid="overall-none">{{ t('performance.coverage.overallNone') }}</p>
-                  }
-                </div>
-                <div class="rounded-base border border-default bg-neutral-secondary-soft p-4" data-testid="outside">
-                  <p class="text-sm text-body">{{ t('performance.coverage.outside') }}</p>
-                  <p class="text-2xl font-semibold text-heading tabular-nums" data-testid="outside-count">{{ coverage.outsideFrame | number }}</p>
-                  <p class="mt-1 text-xs text-body">{{ t('performance.coverage.outsideHelp') }}</p>
-                </div>
-              </div>
+              <ul class="mb-5 flex flex-col gap-1 text-xs text-body">
+                <li data-testid="overall-help">{{ t('performance.coverage.overallHelp') }}</li>
+                <li data-testid="outside">
+                  {{ t('performance.coverage.outside') }}:
+                  <span class="text-sm font-medium text-heading tabular-nums" data-testid="outside-count">{{ coverage.outsideFrame | number }}</span>.
+                  {{ t('performance.coverage.outsideHelp') }}
+                </li>
+              </ul>
 
-              @if (coverage.outsideTop.length) {
-                <h3 class="mb-2 mt-5 text-base font-medium text-heading">{{ t('performance.coverage.outsideTop') }}</h3>
-                <ul class="flex flex-col divide-y divide-default rounded-base border border-default" data-testid="outside-list">
-                  @for (combination of coverage.outsideTop; track $index) {
-                    <li class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 py-3 text-sm" data-testid="outside-item">
-                      <span class="min-w-0 break-words text-heading">
-                        @for (value of combination.values; track $index; let last = $last) {
-                          <span>
-                            <span class="text-body">{{ coverage.dimensions[$index]?.name }}: </span>
-                            @if (value) {
-                              <span class="font-mono">{{ value.code }}</span>@if (value.label) {
-                                <span class="text-body"> ({{ value.label }})</span>
-                              }
-                            } @else {
-                              <em class="text-body">{{ t('performance.coverage.empty') }}</em>
-                            }
-                          </span>
-                          @if (!last) {
-                            <span class="text-body"> · </span>
-                          }
-                        }
-                      </span>
-                      <span class="whitespace-nowrap tabular-nums text-body">{{ t('performance.coverage.submissionsCount', { count: (combination.submissions | number) }) }}</span>
-                    </li>
-                  }
-                </ul>
-              }
-
-              <h3 class="mb-3 mt-6 text-base font-medium text-heading">{{ t('performance.coverage.rowsTitle') }}</h3>
+              <h3 class="mb-3 text-base font-medium text-heading">{{ t('performance.coverage.rowsTitle') }}</h3>
               @if (coverage.rows.length === 0) {
                 <p class="text-sm text-body" data-testid="coverage-empty">{{ t('performance.coverage.noRows') }}</p>
               } @else {
@@ -354,19 +353,25 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                 <ul class="flex flex-col gap-3 md:hidden" data-testid="coverage-cards">
                   @for (row of coveragePage(); track $index) {
                     <li class="rounded-base border border-default bg-neutral-primary-soft p-4 text-sm" data-testid="coverage-card-item">
-                      <ul class="mb-3 flex flex-col gap-1">
-                        @for (value of row.values; track $index) {
-                          <li class="break-words">
-                            <span class="text-body">{{ coverage.dimensions[$index]?.name }}: </span>
-                            <span class="font-mono text-heading">{{ value.code }}</span>@if (value.label) {
-                              <span class="text-body"> ({{ value.label }})</span>
-                            }
-                          </li>
+                      <p class="break-words text-heading">
+                        @for (value of row.values; track $index; let last = $last) {
+                          <span class="text-body">{{ coverage.dimensions[$index]?.name }}: </span>
+                          <span class="font-mono">{{ value.code }}</span>@if (value.label) {
+                            <span class="text-body"> ({{ value.label }})</span>
+                          }
+                          @if (!last) {
+                            <span class="text-body"> · </span>
+                          }
                         }
-                      </ul>
-                      <p class="text-body">{{ t('performance.coverage.target') }}: {{ row.target | number }} · {{ t('performance.coverage.achieved') }}: {{ row.achieved | number }}</p>
+                      </p>
+                      <p class="mt-1 text-body tabular-nums">
+                        <span class="sr-only">{{ t('performance.coverage.achieved') }} / {{ t('performance.coverage.target') }}:</span>
+                        {{ row.achieved | number }} / {{ row.target | number }}
+                        @if (row.percent !== null) {
+                          · <span class="font-medium text-heading">{{ row.percent | number: '1.0-1' }}%</span>
+                        }
+                      </p>
                       @if (row.percent !== null) {
-                        <p class="mt-1 font-medium text-heading tabular-nums">{{ row.percent | number: '1.0-1' }}%</p>
                         <div class="mt-1 h-2 w-full rounded-full bg-neutral-quaternary" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="cap(row.percent)" [attr.aria-label]="t('performance.coverage.percent')">
                           <div class="h-2 rounded-full bg-brand" [style.width.%]="cap(row.percent)" data-testid="row-bar"></div>
                         </div>
@@ -424,12 +429,53 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                   </nav>
                 }
               }
+
+              @if (coverage.outsideTop.length) {
+                <h3 class="mb-2 mt-6 text-base font-medium text-heading">{{ t('performance.coverage.outsideTop') }}</h3>
+                <tmz-table-container>
+                  <table tmzTable data-testid="outside-list">
+                    <thead [class]="tableHead">
+                      <tr>
+                        @for (dimension of coverage.dimensions; track $index) {
+                          <th scope="col" [class]="tableHeaderCell">{{ dimension.name }}</th>
+                        }
+                        <th scope="col" [class]="tableHeaderCell + ' text-end'">{{ t('performance.submissions.count') }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (combination of coverage.outsideTop; track $index) {
+                        <tr [class]="tableRow" data-testid="outside-item">
+                          @for (value of combination.values; track $index) {
+                            <td [class]="tableCell + ' max-w-xs break-words'">
+                              @if (value) {
+                                <span class="font-mono text-heading">{{ value.code }}</span>
+                                @if (value.label) {
+                                  <span class="block text-xs"> {{ value.label }}</span>
+                                }
+                              } @else {
+                                <em>{{ t('performance.coverage.empty') }}</em>
+                              }
+                            </td>
+                          }
+                          <td [class]="tableCell + ' text-end tabular-nums'">{{ combination.submissions | number }}</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </tmz-table-container>
+              }
             }
           }
         </tmz-card>
       } @else if (loading()) {
         <div class="flex flex-col gap-6" aria-busy="true" data-testid="performance-loading">
-          @for (card of [1, 2, 3]; track card) {
+          <tmz-card><div class="grid grid-cols-3 gap-4"><tmz-skeleton class="w-full" /><tmz-skeleton class="w-full" /><tmz-skeleton class="w-full" /></div></tmz-card>
+          <div class="grid gap-6 lg:grid-cols-2">
+            @for (card of [1, 2]; track card) {
+              <tmz-card><div class="flex flex-col gap-3"><tmz-skeleton class="w-1/3" /><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div></tmz-card>
+            }
+          </div>
+          @for (card of [1, 2]; track card) {
             <tmz-card><div class="flex flex-col gap-3"><tmz-skeleton class="w-1/3" /><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div></tmz-card>
           }
         </div>
@@ -444,6 +490,7 @@ export class ProjectPerformance {
   protected readonly context = inject(ProjectContext);
 
   protected readonly pageSize = pageSize;
+  protected readonly dateTimeFormat = dateTimeFormat;
   protected readonly chartHeight = chartHeight;
   protected readonly tableHead = tableHead;
   protected readonly tableHeaderCell = tableHeaderCell;

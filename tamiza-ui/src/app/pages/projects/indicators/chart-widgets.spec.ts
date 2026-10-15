@@ -18,7 +18,7 @@ async function show(chartType: ChartType, settings: Partial<WidgetConfig>, rows:
 }
 
 async function toggle(context: Context) {
-  byTestId(context.root, 'chart-toggle')!.click();
+  byTestId(context.root, 'widget-table-toggle')!.click();
   await settle(context.harness);
 }
 
@@ -42,7 +42,7 @@ describe('chart widgets', () => {
 
       expect(text(byTestId(root, 'stat-value'))).toBe('12,450 households');
       expect(text(byTestId(root, 'stat-label'))).toBe('Households visited: value');
-      expect(byTestId(root, 'chart-toggle')).toBeNull(); // a single figure has no plot
+      expect(byTestId(root, 'widget-table-toggle')).toBeNull(); // a single figure has no plot
       // The server sums the measure over every row; a stat tile never groups.
       expect(query).toEqual({ config: { ...config({ indicator: 'households_visited', measure: 'value' }), groupBy: null }, chartType: 'stat' });
     });
@@ -145,7 +145,7 @@ describe('chart widgets', () => {
       expect(byTestId(context.root, 'chart-svg')).toBeNull();
       expect(tableHeaders(context)).toEqual(['municipality', 'Coverage']);
       expect(tableRows(context)).toEqual([['Cali', '75'], ['Bogotá', '60'], ['Pasto', '35'], ['Quibdó', '90'], ['Leticia', '10']]);
-      expect(text(byTestId(context.root, 'chart-toggle'))).toBe('Show as chart');
+      expect(byTestId(context.root, 'widget-table-toggle')!.getAttribute('aria-pressed')).toBe('true'); // pressed while the table is shown
 
       await toggle(context);
       expect(marks(context)).toHaveLength(5);

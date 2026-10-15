@@ -19,7 +19,7 @@ import {
   maxTitleLength,
   needsGroup,
 } from '../../../core/projects/indicators.service';
-import { Alert, Button, FormField, Input } from '../../../shared/ui';
+import { Alert, Button, Disclosure, FormField, Input } from '../../../shared/ui';
 import { DataFilterDialog, DataFilterDialogData, DataFilterDialogResult } from '../data-filter-dialog';
 import { describeFilter, normalizeFilter } from '../data-view';
 import { WidgetView, queryFor } from './widget-view';
@@ -47,10 +47,10 @@ type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'gr
  */
 @Component({
   selector: 'app-widget-dialog',
-  imports: [TranslocoDirective, Alert, Button, FormField, Input, WidgetView],
+  imports: [TranslocoDirective, Alert, Button, Disclosure, FormField, Input, WidgetView],
   template: `
     <form
-      class="flex h-dvh w-screen flex-col gap-4 overflow-y-auto bg-neutral-primary-soft p-4 md:h-auto md:max-h-[calc(100dvh-2rem)] md:w-[min(46rem,calc(100vw-2rem))] md:rounded-base md:border md:border-default md:p-6 md:shadow-sm"
+      class="flex h-dvh w-screen flex-col gap-4 overflow-y-auto bg-neutral-primary-soft p-4 md:h-auto md:max-h-[calc(100dvh-2rem)] md:w-[min(46rem,calc(100vw-2rem))] lg:w-[min(64rem,calc(100vw-2rem))] md:rounded-base md:border md:border-default md:p-6 md:shadow-sm"
       novalidate
       (submit)="$event.preventDefault(); save()"
       *transloco="let t"
@@ -58,6 +58,8 @@ type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'gr
     >
       <h2 id="widget-dialog-title" class="break-words text-lg font-medium text-heading">{{ data.widget ? t('indicators.dialog.editTitle') : t('indicators.dialog.addTitle') }}</h2>
 
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
+      <div class="flex min-w-0 flex-col gap-4">
       <div class="grid gap-4 sm:grid-cols-2">
         <tmz-form-field [label]="t('indicators.dialog.chartType')" fieldId="widgetType">
           <select tmzInput id="widgetType" (change)="setType($any($event.target).value)" data-testid="dialog-chart-type">
@@ -71,7 +73,7 @@ type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'gr
         </tmz-form-field>
       </div>
 
-      <tmz-form-field [label]="t('indicators.dialog.indicator')" fieldId="widgetIndicator" [error]="shown().indicator" [hint]="entry()?.description ?? null">
+      <tmz-form-field [label]="t('indicators.dialog.indicator')" fieldId="widgetIndicator" [error]="shown().indicator">
         <select tmzInput id="widgetIndicator" (change)="pick($any($event.target).value)" data-testid="dialog-indicator">
           <option value="" [selected]="!indicator()">{{ t('indicators.dialog.indicatorChoose') }}</option>
           @for (option of listed(); track option.name) {
@@ -81,6 +83,9 @@ type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'gr
       </tmz-form-field>
       @if (entry(); as entry) {
         <p class="-mt-2 text-xs text-body" data-testid="dialog-format-note">
+          @if (entry.description) {
+            {{ entry.description }} ·
+          }
           {{ entry.unit ? t('indicators.dialog.formatNoteUnit', { format: t('scripts.formats.' + entry.format), unit: entry.unit }) : t('indicators.dialog.formatNote', { format: t('scripts.formats.' + entry.format) }) }}
         </p>
       }
@@ -91,12 +96,14 @@ type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'gr
       }
 
       <div class="grid gap-4 sm:grid-cols-2">
-        <tmz-form-field [label]="t('indicators.dialog.plot')" fieldId="widgetMode">
-          <select tmzInput id="widgetMode" (change)="setMode($any($event.target).value)" data-testid="dialog-mode">
-            <option value="measure" [selected]="mode() === 'measure'">{{ t('indicators.dialog.modeMeasure') }}</option>
-            <option value="ratio" [selected]="mode() === 'ratio'">{{ t('indicators.dialog.modeRatio') }}</option>
-          </select>
-        </tmz-form-field>
+        @if (numericColumns().length >= 2 || mode() === 'ratio') {
+          <tmz-form-field [label]="t('indicators.dialog.plot')" fieldId="widgetMode">
+            <select tmzInput id="widgetMode" (change)="setMode($any($event.target).value)" data-testid="dialog-mode">
+              <option value="measure" [selected]="mode() === 'measure'">{{ t('indicators.dialog.modeMeasure') }}</option>
+              <option value="ratio" [selected]="mode() === 'ratio'">{{ t('indicators.dialog.modeRatio') }}</option>
+            </select>
+          </tmz-form-field>
+        }
         @if (mode() === 'measure') {
           <tmz-form-field [label]="t('indicators.dialog.measure')" fieldId="widgetMeasure" [error]="shown().measure">
             <select tmzInput id="widgetMeasure" (change)="measure.set($any($event.target).value)" data-testid="dialog-measure">
@@ -159,8 +166,7 @@ type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'gr
         }
       </div>
 
-      <section aria-labelledby="widgetFiltersTitle" data-testid="dialog-filters">
-        <h3 id="widgetFiltersTitle" class="mb-2 text-sm font-medium text-heading">{{ t('indicators.dialog.filters') }}</h3>
+      <tmz-disclosure [heading]="t('indicators.dialog.filtersCount', { count: filters().length })" [open]="startsWithFilters" data-testid="dialog-filters">
         @if (catalog()?.published) {
           @if (filters().length) {
             <ul class="mb-3 flex flex-wrap items-center gap-2">
@@ -192,11 +198,12 @@ type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'gr
         } @else {
           <p class="text-sm text-body">{{ t('indicators.dialog.filtersUnpublished') }}</p>
         }
-      </section>
+      </tmz-disclosure>
+      </div>
 
-      <section aria-labelledby="widgetPreviewTitle">
+      <section aria-labelledby="widgetPreviewTitle" class="lg:sticky lg:top-0 lg:self-start">
         <h3 id="widgetPreviewTitle" class="mb-2 text-sm font-medium text-heading">{{ t('indicators.dialog.preview') }}</h3>
-        <div class="h-72 rounded-base border border-default p-3" data-testid="dialog-preview">
+        <div class="rounded-base border border-default p-3" [class]="chartType() === 'stat' ? 'h-40' : 'h-72'" data-testid="dialog-preview">
           <app-widget-view
             [projectId]="data.projectId"
             [chartType]="chartType()"
@@ -207,6 +214,7 @@ type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'gr
           />
         </div>
       </section>
+      </div>
 
       @if (error(); as message) {
         <tmz-alert tone="danger" data-testid="dialog-error">{{ message }}</tmz-alert>
@@ -234,6 +242,8 @@ export class WidgetDialog {
   protected readonly previewDelayMs = previewDelayMs;
 
   private readonly start = this.data.widget?.config ?? emptyConfig();
+  /** The filters start open only for a widget that already has some; adding the first one never closes or reopens it. */
+  protected readonly startsWithFilters = this.start.filters.length > 0;
 
   protected readonly chartType = signal<ChartType>(this.data.widget?.chartType ?? 'column');
   protected readonly title = signal(this.data.widget?.title ?? '');

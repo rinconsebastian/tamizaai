@@ -154,7 +154,6 @@ async function open(role: ProjectRole, seed: Seed = {}) {
   ];
   const opened = await openProjectSection('scripts', role, {}, providers);
   const { http, harness } = opened;
-  http.expectOne((r) => r.url === settingsUrl).flush(seed.settings ?? { runAfterSync: true, runIntervalHours: null, nextRunAt: null });
   http.expectOne((r) => r.url === runsUrl && r.method === 'GET').flush(seed.runs ?? { items: [run()], total: 1 });
   http
     .expectOne(scriptsUrl)
@@ -172,17 +171,55 @@ function withIndicators(...indicators: ScriptVersionDetails[]): ScriptList {
   return { clean: { kind: 'clean', current: version(2) }, output: { kind: 'output', current: null }, indicators: indicators.map(indicator) };
 }
 
-/** Each entry of the indicator list as "label name version". */
-function indicatorEntries(root: ParentNode): string[] {
-  return [...byTestId(root, 'indicator-list')!.querySelectorAll('li')].map((li) =>
-    [...li.querySelectorAll('span.truncate, code, tmz-badge')].map((e) => e.textContent!.trim()).join(' '),
+type Opened = Awaited<ReturnType<typeof open>>;
+const textOf = (element: Element | null) => element?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+
+/** Each item of the open indicator menu as "label name version". */
+function indicatorEntries(): string[] {
+  return [...document.querySelectorAll('[data-testid="indicator-list"] [role="menuitem"]')].map((item) =>
+    [...item.querySelectorAll('span.truncate, code, tmz-badge')].map((e) => e.textContent!.trim()).join(' '),
   );
 }
 
-/** Selects an indicator and answers the request for its versions. */
-async function selectIndicator(opened: Awaited<ReturnType<typeof open>>, current: ScriptVersionDetails, versions = [summary(current)]) {
-  byTestId<HTMLButtonElement>(opened.root, `indicator-${current.name}`)!.click();
+async function openIndicatorMenu(opened: Opened) {
+  byTestId<HTMLButtonElement>(opened.root, 'indicator-menu')!.click();
   await settle(opened.harness);
+}
+
+/** Opens the indicator menu and chooses an indicator from it. */
+async function pickIndicator(opened: Opened, name: string) {
+  await openIndicatorMenu(opened);
+  document.querySelector<HTMLElement>(`[data-testid="indicator-${name}"]`)!.click();
+  await settle(opened.harness);
+}
+
+/** Opens the "more actions" menu (Upload and Remove) and chooses an item. */
+async function moreItem(opened: Opened, id: string) {
+  byTestId<HTMLButtonElement>(opened.root, 'menu-trigger')!.click();
+  await settle(opened.harness);
+  document.querySelector<HTMLElement>(`[data-testid="${id}"]`)!.click();
+  await settle(opened.harness);
+}
+
+async function openMore(opened: Opened) {
+  byTestId<HTMLButtonElement>(opened.root, 'menu-trigger')!.click();
+  await settle(opened.harness);
+}
+
+async function openVersions(opened: Opened) {
+  byTestId<HTMLButtonElement>(opened.root, 'side-tab-versions')!.click();
+  await settle(opened.harness);
+}
+
+/** Opens the fields of the selected indicator's details. */
+async function editDetails(opened: Opened) {
+  byTestId<HTMLButtonElement>(opened.root, 'edit-details')!.click();
+  await settle(opened.harness);
+}
+
+/** Selects an indicator and answers the request for its versions. */
+async function selectIndicator(opened: Opened, current: ScriptVersionDetails, versions = [summary(current)]) {
+  await pickIndicator(opened, current.name!);
   opened.http.expectOne(`${scriptsUrl}/indicators/${current.name}/versions`).flush(versions);
   await settle(opened.harness);
 }
@@ -330,12 +367,11 @@ describe('ProjectScripts', () => {
 
     expect(editor().text()).toContain('# v2');
     expect(root.querySelector('.cm-content')?.getAttribute('contenteditable')).toBe('false');
-    for (const id of ['save', 'remove', 'upload', 'template', 'run-now', 'pipeline-settings-form', 'test-on-sample', 'sample-size']) {
+    for (const id of ['save', 'remove', 'upload', 'template', 'run-now', 'test-on-sample', 'sample-size']) {
       expect(byTestId(root, id)).toBeNull();
     }
-    expect(byTestId(root, 'pipeline-settings-read-only')?.textContent).toContain('No schedule');
     expect(byTestId(root, 'script-clean')?.textContent).toContain('v2');
-    expect(byTestId(root, 'script-output')?.textContent).toContain('not set');
+    expect(byTestId(root, 'script-output')?.textContent).not.toContain('not set'); // the badge shows on the selected script only
   });
 
   it('saves edits as a new version and reloads the history', async () => {
@@ -377,8 +413,7 @@ describe('ProjectScripts', () => {
     await chooseTemplate(opened, 'drop-test-submissions');
     expect(editor().text()).toContain('def clean(raw, ctx):');
     expect(editor().text()).toContain('# %% Drop test submissions and duplicates');
-    byTestId<HTMLButtonElement>(root, 'indicator-coverage')!.click();
-    await settle(harness);
+    await pickIndicator(opened, 'coverage');
     confirmDialog()!.click();
     await tick();
     await settle(harness);
@@ -482,10 +517,10 @@ describe('ProjectScripts', () => {
   });
 
   it('removes a script only after confirmation', async () => {
-    const { root, http, harness } = await open('admin');
+    const opened = await open('admin');
+    const { root, http, harness } = opened;
 
-    byTestId<HTMLButtonElement>(root, 'remove')!.click();
-    await settle(harness);
+    await moreItem(opened, 'remove');
     http.expectNone((r) => r.method === 'DELETE');
     expect(document.body.textContent).toContain('the flattened tables are published as the clean data');
     confirmDialog()!.click();
@@ -497,11 +532,15 @@ describe('ProjectScripts', () => {
     http.expectOne(`${scriptsUrl}/clean/versions`).flush([summary(version(3, null)), summary(version(2))]);
     await settle(harness);
     expect(byTestId(root, 'script-clean')?.textContent).toContain('removed');
-    expect(byTestId(root, 'remove')).toBeNull();
+    await openMore(opened);
+    expect(document.querySelector('[data-testid="remove"]')).toBeNull(); // nothing left to remove
+    expect(document.querySelector('[data-testid="upload-item"]')).not.toBeNull();
   });
 
   it('shows an older version read-only and restores it', async () => {
-    const { root, http, harness, editor } = await open('analyst');
+    const opened = await open('analyst');
+    const { root, http, harness, editor } = opened;
+    await openVersions(opened);
 
     byTestId<HTMLButtonElement>(root, 'version-1')!.click();
     await settle(harness);
@@ -581,7 +620,8 @@ describe('ProjectScripts', () => {
       "Script 1 (clean) failed: KeyError: 'age'",
       'The run was interrupted because the analytics worker stopped. The next run proceeds normally.',
     ]);
-    expect(table.textContent).toContain('v2 / — / 1 indicator');
+    expect(table.textContent).not.toContain('v2 / —'); // the versions are in the run details now
+    expect(table.querySelectorAll('thead th')).toHaveLength(5);
     expect(byTestId(table, 'run-indicators')?.textContent).toContain('Indicators 1/1');
     expect(table.textContent).toContain('8.0 s');
     expect(byTestId(root, 'run-cards')?.children.length).toBe(5);
@@ -642,28 +682,6 @@ describe('ProjectScripts', () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
 
     http.expectNone((r) => r.url === runsUrl);
-  });
-
-  it('saves the settings for admins and shows field errors', async () => {
-    const { root, http, harness } = await open('admin');
-    const form = byTestId<HTMLFormElement>(root, 'pipeline-settings-form')!;
-    (root.querySelector('#runIntervalHours') as HTMLInputElement).value = '500';
-    byTestId<HTMLInputElement>(root, 'run-after-sync')!.checked = false;
-
-    form.dispatchEvent(new Event('submit'));
-    const invalid = http.expectOne((r) => r.url === settingsUrl && r.method === 'PUT');
-    expect(invalid.request.body).toEqual({ runAfterSync: false, runIntervalHours: 500 });
-    invalid.flush({ errors: { runIntervalHours: ['Enter a whole number of hours from 1 to 168, or no schedule.'] } }, { status: 400, statusText: 'Bad Request' });
-    await settle(harness);
-    expect(byTestId(root, 'field-error')?.textContent).toContain('1 to 168');
-
-    (root.querySelector('#runIntervalHours') as HTMLInputElement).value = '';
-    form.dispatchEvent(new Event('submit'));
-    const cleared = http.expectOne((r) => r.url === settingsUrl && r.method === 'PUT');
-    expect(cleared.request.body).toEqual({ runAfterSync: false, runIntervalHours: null });
-    cleared.flush({ runAfterSync: false, runIntervalHours: null, nextRunAt: null });
-    await settle(harness);
-    expect(byTestId(root, 'field-error')).toBeNull();
   });
 
   // 6.1 — tests on a sample
@@ -850,29 +868,36 @@ describe('ProjectScripts', () => {
     const attendance = indicatorVersion('attendance', 1, { label: 'Attendance' });
     const coverage = indicatorVersion('coverage', 3);
     const opened = await open('viewer', { scripts: withIndicators(attendance, coverage) });
-    const { root } = opened;
+    const { root, http } = opened;
 
-    const entries = indicatorEntries(root);
-    expect(entries).toEqual(['Attendance attendance v1', 'Label of coverage coverage v3']);
-    expect(byTestId(root, 'indicator-count')?.textContent).toContain('2');
+    expect(textOf(byTestId(root, 'indicator-menu'))).toBe('Indicators (2)');
+    await openIndicatorMenu(opened);
+    expect(indicatorEntries()).toEqual(['Attendance attendance v1', 'Label of coverage coverage v3']);
+    document.querySelector<HTMLElement>('[data-testid="indicator-list"] [role="menuitem"]')!.click(); // closes the menu again
+    await settle(opened.harness);
     expect(byTestId(root, 'add-indicator')).toBeNull();
 
+    // The details are text, not inputs that look editable.
+    http.expectOne(`${scriptsUrl}/indicators/attendance/versions`).flush([summary(attendance)]);
     await selectIndicator(opened, coverage);
-    expect(byTestId<HTMLInputElement>(root, 'meta-label')!.value).toBe('Label of coverage');
-    expect(byTestId<HTMLInputElement>(root, 'meta-label')!.readOnly).toBe(true);
-    expect(byTestId<HTMLTextAreaElement>(root, 'meta-description')!.value).toBe('What it measures');
-    expect(byTestId<HTMLInputElement>(root, 'meta-unit')!.value).toBe('households');
-    expect(byTestId<HTMLSelectElement>(root, 'meta-format')!.value).toBe('count');
-    expect(byTestId<HTMLSelectElement>(root, 'meta-format')!.disabled).toBe(true);
+    const details = textOf(byTestId(root, 'indicator-meta-readonly'));
+    expect(details).toContain('Label of coverage');
+    expect(details).toContain('What it measures');
+    expect(details).toContain('Count · households');
+    expect(byTestId(root, 'meta-label')).toBeNull();
+    expect(byTestId(root, 'edit-details')).toBeNull();
     for (const id of ['save', 'remove', 'template', 'test-on-sample']) {
       expect(byTestId(root, id)).toBeNull();
     }
   });
 
-  it('says so when the project has no indicators', async () => {
-    const { root } = await open('analyst');
+  it('says so when the project has no indicators, inside the menu rather than above the editor', async () => {
+    const opened = await open('analyst');
+    const { root } = opened;
 
-    expect(byTestId(root, 'no-indicators')?.textContent).toContain('no indicators yet');
+    expect(byTestId(root, 'no-indicators')).toBeNull();
+    await openIndicatorMenu(opened);
+    expect(textOf(document.querySelector('[data-testid="no-indicators"]'))).toContain('no indicators yet');
     expect(byTestId(root, 'indicator-meta')).toBeNull();
   });
 
@@ -913,10 +938,13 @@ describe('ProjectScripts', () => {
 
     // Nothing exists until the script is saved: no request yet, and the form is unsaved.
     http.expectNone((r) => r.url.includes('/piped_water_rate'));
-    expect(byTestId(root, 'indicator-piped_water_rate')?.textContent).toContain('new');
+    expect(textOf(byTestId(root, 'indicator-menu'))).toContain('Households with piped water');
     expect(byTestId(root, 'indicator-meta-name')?.textContent).toBe('piped_water_rate');
-    expect(byTestId<HTMLInputElement>(root, 'meta-label')!.value).toBe('Households with piped water');
-    expect(byTestId<HTMLSelectElement>(root, 'meta-format')!.value).toBe('percent');
+    expect(textOf(byTestId(root, 'indicator-meta-summary'))).toContain('Percentage');
+    await openIndicatorMenu(opened);
+    expect(textOf(document.querySelector('[data-testid="indicator-piped_water_rate"]'))).toContain('new');
+    document.querySelector<HTMLElement>('[data-testid="indicator-piped_water_rate"]')!.click();
+    await settle(harness);
     expect(editor().text()).toContain('def compute(cleaned, ctx):');
     expect(byTestId(root, 'unsaved')).not.toBeNull();
     expect(byTestId(root, 'remove')).toBeNull();
@@ -931,10 +959,11 @@ describe('ProjectScripts', () => {
     http.expectOne(`${scriptsUrl}/indicators/piped_water_rate/versions`).flush([summary(created)]);
     await settle(harness);
 
-    const entries = indicatorEntries(root);
-    expect(entries).toEqual(['Label of coverage coverage v1', 'Households with piped water piped_water_rate v1']);
-    expect(byTestId(root, 'unsaved')).toBeNull();
-    expect(byTestId(root, 'remove')).not.toBeNull();
+    await openIndicatorMenu(opened);
+    expect(indicatorEntries()).toEqual(['Label of coverage coverage v1', 'Households with piped water piped_water_rate v1']);
+    document.querySelector<HTMLElement>('[data-testid="indicator-coverage"]')!.click(); // closes the menu
+    await settle(harness);
+    http.match((r) => r.url.includes('/indicators/coverage/versions')).forEach((r) => r.flush([]));
     expect(TestBed.inject(ToastService).toasts().at(-1)?.message).toContain('Version 1 saved');
   });
 
@@ -945,6 +974,9 @@ describe('ProjectScripts', () => {
     await selectIndicator(opened, coverage);
     expect(byTestId<HTMLButtonElement>(root, 'save')!.disabled).toBe(true);
     expect(byTestId(root, 'unsaved')).toBeNull();
+    expect(byTestId(root, 'meta-label')).toBeNull(); // a line, not a form, until the details are opened
+    await editDetails(opened);
+    expect(byTestId(root, 'edit-details')!.getAttribute('aria-expanded')).toBe('true');
 
     typeInto(byTestId<HTMLInputElement>(root, 'meta-label')!, 'Coverage of piped water');
     await settle(harness);
@@ -989,8 +1021,9 @@ describe('ProjectScripts', () => {
     http.expectOne(`${scriptsUrl}/indicators/coverage/versions`).flush([]);
     await settle(harness);
 
-    expect(byTestId(root, 'indicator-coverage')?.textContent).toContain('Coverage of piped water');
-    expect(byTestId(root, 'indicator-coverage')?.textContent).toContain('v3');
+    await openIndicatorMenu(opened);
+    expect(textOf(document.querySelector('[data-testid="indicator-coverage"]'))).toContain('Coverage of piped water');
+    expect(textOf(document.querySelector('[data-testid="indicator-coverage"]'))).toContain('v3');
     expect(byTestId(root, 'unsaved')).toBeNull();
     expect(byTestId(root, 'field-error')).toBeNull();
   });
@@ -1001,31 +1034,33 @@ describe('ProjectScripts', () => {
     const opened = await open('analyst', { scripts: withIndicators(attendance, coverage) });
     const { root, http, harness, editor } = opened;
     await selectIndicator(opened, coverage);
+    await editDetails(opened);
     typeInto(byTestId<HTMLInputElement>(root, 'meta-label')!, 'Changed label');
     await settle(harness);
 
-    byTestId<HTMLButtonElement>(root, 'indicator-attendance')!.click();
-    await settle(harness);
+    await pickIndicator(opened, 'attendance');
     expect(document.body.textContent).toContain('Discard unsaved changes?');
     (document.querySelector('.cdk-overlay-container button[tmzButton]:not([data-testid="confirm"])') as HTMLButtonElement).click();
     await tick();
     await settle(harness);
 
     http.expectNone(`${scriptsUrl}/indicators/attendance/versions`);
-    expect(byTestId<HTMLInputElement>(root, 'meta-label')!.value).toBe('Changed label');
-    expect(byTestId(root, 'indicator-coverage')?.getAttribute('aria-pressed')).toBe('true');
+    expect(byTestId<HTMLInputElement>(root, 'meta-label')!.value).toBe('Changed label'); // unsaved edits keep the details open
+    expect(byTestId(root, 'indicator-menu')?.getAttribute('aria-pressed')).toBe('true');
+    expect(textOf(byTestId(root, 'indicator-menu'))).toContain('Label of coverage'); // the menu names the saved indicator
+    expect(textOf(byTestId(root, 'indicator-meta-summary'))).toContain('Changed label');
 
-    byTestId<HTMLButtonElement>(root, 'indicator-attendance')!.click();
-    await settle(harness);
+    await pickIndicator(opened, 'attendance');
     confirmDialog()!.click();
     await tick();
     await settle(harness);
     http.expectOne(`${scriptsUrl}/indicators/attendance/versions`).flush([summary(attendance)]);
     await settle(harness);
 
-    expect(byTestId(root, 'indicator-attendance')?.getAttribute('aria-pressed')).toBe('true');
-    expect(byTestId<HTMLInputElement>(root, 'meta-label')!.value).toBe('Attendance');
-    expect(byTestId<HTMLInputElement>(root, 'meta-unit')!.value).toBe('people');
+    expect(textOf(byTestId(root, 'indicator-menu'))).toContain('Attendance');
+    expect(textOf(byTestId(root, 'indicator-meta-summary'))).toContain('Attendance');
+    expect(textOf(byTestId(root, 'indicator-meta-summary'))).toContain('people');
+    expect(byTestId(root, 'meta-label')).toBeNull(); // the details close when another script is shown
     expect(editor().text()).toContain('# attendance v1');
     expect(byTestId(root, 'unsaved')).toBeNull();
   });
@@ -1036,14 +1071,16 @@ describe('ProjectScripts', () => {
     const opened = await open('analyst', { scripts: withIndicators(current) });
     const { root, http, harness, editor } = opened;
     await selectIndicator(opened, current, [summary(current), summary(older)]);
+    await openVersions(opened);
 
     byTestId<HTMLButtonElement>(root, 'version-1')!.click();
     await settle(harness);
     http.expectOne(`${scriptsUrl}/indicators/coverage/versions/1`).flush(older);
     await settle(harness);
-    expect(byTestId<HTMLInputElement>(root, 'meta-label')!.value).toBe('Old label');
-    expect(byTestId<HTMLInputElement>(root, 'meta-label')!.readOnly).toBe(true);
-    expect(byTestId<HTMLSelectElement>(root, 'meta-format')!.value).toBe('decimal');
+    const shown = textOf(byTestId(root, 'indicator-meta-readonly')); // a list, not inputs that look editable
+    expect(shown).toContain('Old label');
+    expect(shown).toContain('Decimal · cases');
+    expect(byTestId(root, 'meta-label')).toBeNull();
     expect(editor().text()).toContain('# coverage v1');
 
     byTestId<HTMLButtonElement>(root, 'restore')!.click();
@@ -1054,10 +1091,11 @@ describe('ProjectScripts', () => {
     http.expectOne(`${scriptsUrl}/indicators/coverage/versions`).flush([]);
     await settle(harness);
 
-    expect(byTestId(root, 'indicator-coverage')?.textContent).toContain('Old label');
-    expect(byTestId<HTMLInputElement>(root, 'meta-label')!.value).toBe('Old label');
-    expect(byTestId<HTMLInputElement>(root, 'meta-label')!.readOnly).toBe(false);
-    expect(byTestId<HTMLInputElement>(root, 'meta-unit')!.value).toBe('cases');
+    expect(textOf(byTestId(root, 'indicator-menu'))).toContain('Old label');
+    const summaryLine = textOf(byTestId(root, 'indicator-meta-summary')); // editable again, as a line
+    expect(summaryLine).toContain('Old label');
+    expect(summaryLine).toContain('cases');
+    expect(byTestId(root, 'edit-details')).not.toBeNull();
     expect(editor().text()).toContain('# coverage v1');
   });
 
@@ -1068,8 +1106,7 @@ describe('ProjectScripts', () => {
     const { root, http, harness } = opened;
     await selectIndicator(opened, coverage);
 
-    byTestId<HTMLButtonElement>(root, 'remove')!.click();
-    await settle(harness);
+    await moreItem(opened, 'remove');
     http.expectNone((r) => r.method === 'DELETE');
     expect(document.body.textContent).toContain('this indicator’s table is no longer published');
     confirmDialog()!.click();
@@ -1083,8 +1120,9 @@ describe('ProjectScripts', () => {
     http.expectOne(`${scriptsUrl}/clean/versions`).flush([summary(version(2))]);
     await settle(harness);
 
-    expect(byTestId(root, 'indicator-coverage')).toBeNull();
-    expect(byTestId(root, 'indicator-attendance')).not.toBeNull();
+    await openIndicatorMenu(opened);
+    expect(document.querySelector('[data-testid="indicator-coverage"]')).toBeNull();
+    expect(document.querySelector('[data-testid="indicator-attendance"]')).not.toBeNull();
     expect(byTestId(root, 'script-clean')?.getAttribute('aria-pressed')).toBe('true');
     expect(byTestId(root, 'indicator-meta')).toBeNull();
     expect(TestBed.inject(ToastService).toasts().at(-1)?.message).toContain('Indicator removed');
@@ -1161,7 +1199,9 @@ describe('ProjectScripts', () => {
 
     expect(byTestId(root, 'save-error')?.textContent).toContain('at most 100 indicators');
     expect(byTestId(root, 'unsaved')).not.toBeNull();
-    expect(byTestId(root, 'indicator-one_too_many')?.textContent).toContain('new');
+    expect(textOf(byTestId(root, 'indicator-menu'))).toContain('One too many');
+    await openIndicatorMenu(opened);
+    expect(textOf(document.querySelector('[data-testid="indicator-one_too_many"]'))).toContain('new');
   });
 
   it('lists the indicator steps of a run by label and name, with the version used and the error of a failed one', async () => {
@@ -1191,7 +1231,6 @@ describe('ProjectScripts', () => {
     const table = byTestId(root, 'run-table')!;
     expect(byTestId(table, 'run-error')?.textContent?.trim()).toBe("An indicator script failed: attendance: KeyError: 'age'");
     expect(byTestId(table, 'run-indicators')?.textContent).toContain('Indicators 1/2');
-    expect(table.textContent).toContain('v2 / — / 2 indicators');
 
     byTestId<HTMLButtonElement>(root, 'run-details-f')!.click();
     await settle(harness);
@@ -1248,8 +1287,8 @@ describe('ProjectScripts', () => {
     const { root } = await open('analyst');
     const panel = byTestId(root, 'inputs-panel')!;
 
-    expect(byTestId(panel, 'inputs-intro')?.textContent).toContain('flattened tables script 1 receives');
-    expect(byTestId(panel, 'inputs-published')?.textContent).toContain('Published');
+    expect(byTestId(panel, 'inputs-published')?.textContent).toMatch(/^\s*Flattened tables · published Oct 14, 2026/);
+    expect(byTestId(panel, 'inputs-status')?.textContent).not.toContain('A saved script changes them only from the next run'); // that note is in the Reference tab now
     const main = byTestId(panel, 'input-table-main')!;
     expect(main.textContent).toContain('480 rows');
     expect(main.textContent).toContain('has_water');
@@ -1321,15 +1360,14 @@ describe('ProjectScripts', () => {
     const opened = await open('analyst', { scripts: withIndicators(coverage) });
     const { root, http, harness } = opened;
 
-    byTestId<HTMLButtonElement>(root, 'indicator-coverage')!.click();
-    await settle(harness);
+    await pickIndicator(opened, 'coverage');
     http.expectOne(`${scriptsUrl}/indicators/coverage/versions`).flush([summary(coverage)]);
     http.expectOne((r) => r.url === inputsUrl && r.params.get('kind') === 'indicator').flush(
       scriptInputs({ source: 'clean', tables: [{ name: 'main', rows: 2, columns: [{ name: 'municipality', type: 'text' }] }] }),
     );
     await settle(harness);
 
-    expect(byTestId(root, 'inputs-intro')?.textContent).toContain('clean tables this script receives');
+    expect(byTestId(root, 'inputs-published')?.textContent).toContain('Clean tables · published');
     expect(byTestId(root, 'input-table-main')?.textContent).toContain('2 rows');
     expect(byTestId(root, 'input-table-members')).toBeNull();
 
@@ -1360,7 +1398,8 @@ describe('ProjectScripts', () => {
 
     const problems = byTestId(root, 'problems')!;
     expect(problems.textContent).toContain('Syntax error');
-    expect(problems.textContent).toContain('Saving and testing are never blocked');
+    expect(problems.textContent).toContain('saving and testing are never blocked');
+    expect(problems.textContent).toContain('Checks');
     byTestId<HTMLButtonElement>(root, 'problem')!.click();
     expect(document.activeElement).toBe(root.querySelector('.cm-content'));
 
@@ -1452,11 +1491,13 @@ describe('ProjectScripts', () => {
     });
 
     it('offers no cell actions while an older version is on view', async () => {
-      const { root, http, harness, editor } = await open('analyst');
+      const opened = await open('analyst');
+      const { root, http, harness, editor } = opened;
       editor().replace(cellScript);
       await settle(harness);
       expect(root.querySelectorAll('.cm-run-cell')).toHaveLength(3);
 
+      await openVersions(opened);
       byTestId<HTMLButtonElement>(root, 'version-1')!.click();
       await settle(harness);
       confirmDialog()!.click();
@@ -1641,6 +1682,7 @@ describe('ProjectScripts', () => {
     expect(byTestId(root, 'indicator-view')).not.toBeNull();
     expect(stat()).toBe('1 households');
 
+    await editDetails(opened);
     const format = byTestId<HTMLSelectElement>(root, 'meta-format')!;
     typeInto(format, 'percent');
     await settle(harness);
@@ -1687,9 +1729,9 @@ describe('ProjectScripts', () => {
     const ready = byTestId(root, 'download-ready')!;
     expect(ready.textContent).toContain('The sample holds 300 submissions (you asked for 300)');
     const tables = byTestId(ready, 'download-tables')!.textContent!.replace(/\s+/g, ' ');
-    expect(tables).toContain('main (320 rows), members (871 rows)');
-    expect(tables).toContain('Clean tables, what script 1 (version 2) returns: main (318 rows)');
-    expect(tables).toContain('population (42 rows)');
+    expect(tables).toContain('Flattened: main (320 rows), members (871 rows)');
+    expect(tables).toContain('Clean v2: main (318 rows)');
+    expect(tables).toContain('Reference: population (42 rows)');
     expect(byTestId(ready, 'download-size')?.textContent).toContain('Size: 12.3 MB');
     expect(byTestId(ready, 'download-notice')?.textContent).toContain("contains the project's submissions");
 
@@ -1780,7 +1822,7 @@ describe('ProjectScripts', () => {
       .flush(readyDownload({}, { clean: { status: 'none', version: null, error: null, tables: [] } }));
     await settle(opened.harness);
 
-    expect(byTestId(opened.root, 'download-tables')?.textContent).toContain('no script 1');
+    expect(byTestId(opened.root, 'download-tables')?.textContent).toContain('No script 1');
     expect(byTestId(opened.root, 'download-script1-warning')).toBeNull();
   });
 
@@ -1891,5 +1933,250 @@ describe('ProjectScripts', () => {
     expect(form.className).toContain('sm:flex-row');
     expect(form.contains(byTestId(root, 'sample-size'))).toBe(true);
     expect(root.querySelector('tmz-code-editor')!.compareDocumentPosition(byTestId(root, 'sample-download')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // The restructured page
+
+  describe('the picker', () => {
+    it('shows script 1, script 2 and one indicators menu in a single row', async () => {
+      const { root } = await open('analyst', { scripts: withIndicators(indicatorVersion('coverage', 1)) });
+      const row = byTestId(root, 'script-clean')!.parentElement!;
+      expect(row.contains(byTestId(root, 'script-output'))).toBe(true);
+      expect(row.contains(byTestId(root, 'indicator-menu'))).toBe(true);
+      expect(row.contains(byTestId(root, 'add-indicator'))).toBe(true);
+      expect(textOf(byTestId(root, 'indicator-menu'))).toBe('Indicators (1)');
+    });
+
+    it('puts the version badge on the selected script only', async () => {
+      const { root } = await open('analyst');
+      expect(byTestId(root, 'script-clean')!.querySelector('tmz-badge')).not.toBeNull();
+      expect(byTestId(root, 'script-output')!.querySelector('tmz-badge')).toBeNull();
+    });
+
+    it('filters a long list of indicators in the menu', async () => {
+      const many = Array.from({ length: 12 }, (_, i) => indicatorVersion(`indicator_${String(i).padStart(2, '0')}`, 1));
+      const opened = await open('viewer', { scripts: withIndicators(...many) });
+      await openIndicatorMenu(opened);
+      expect(indicatorEntries()).toHaveLength(12);
+
+      const filter = document.querySelector<HTMLInputElement>('[data-testid="indicator-filter"]')!;
+      typeInto(filter, 'indicator_07');
+      await settle(opened.harness);
+      expect(indicatorEntries()).toHaveLength(1);
+      typeInto(filter, 'zzz');
+      await settle(opened.harness);
+      expect(document.querySelector('[data-testid="no-indicators"]')?.textContent).toContain('Nothing matches the filter');
+    });
+
+    it('offers no filter for a short list', async () => {
+      const opened = await open('viewer', { scripts: withIndicators(indicatorVersion('coverage', 1)) });
+      await openIndicatorMenu(opened);
+      expect(document.querySelector('[data-testid="indicator-filter"]')).toBeNull();
+    });
+  });
+
+  describe('around the editor', () => {
+    it('shows the signature the script defines instead of a paragraph about its contract', async () => {
+      const { root } = await open('analyst');
+      expect(textOf(byTestId(root, 'contract-signature'))).toBe('clean(raw, ctx)');
+      expect(root.textContent).not.toContain('receives the flattened tables and returns the cleaned ones');
+    });
+
+    it.each<[ProjectRole, boolean]>([
+      ['analyst', true],
+      ['viewer', false],
+    ])('tells a %s about the cell shortcut: %s', async (role, shown) => {
+      const { root } = await open(role);
+      const keys = textOf(byTestId(root, 'editor-keys'));
+      expect(keys).toContain('Press Esc, then Tab, to leave the editor');
+      expect(keys.includes('Ctrl+Enter')).toBe(shown);
+    });
+
+    it('keeps save, the sample size, test and download in one row, with one hint', async () => {
+      const { root } = await open('analyst');
+      const form = byTestId(root, 'save')!.closest('form')!;
+      for (const id of ['sample-size', 'test-on-sample', 'download-sample', 'template']) {
+        expect(form.contains(byTestId(root, id)), id).toBe(true);
+      }
+      expect(root.querySelectorAll('[data-testid="test-hint"]')).toHaveLength(1);
+      expect(root.textContent).not.toContain('prepares a zip with a sample');
+    });
+
+    it('keeps upload and remove in the more-actions menu', async () => {
+      const opened = await open('analyst');
+      expect(byTestId(opened.root, 'remove')).toBeNull();
+      await openMore(opened);
+      const items = [...document.querySelectorAll('[role="menuitem"]')].map((item) => textOf(item));
+      expect(items).toEqual(['Upload .py', 'Remove script']);
+    });
+
+    it('opens the file picker from the upload item', async () => {
+      const opened = await open('analyst');
+      const input = byTestId<HTMLInputElement>(opened.root, 'upload')!;
+      const click = vi.spyOn(input, 'click');
+      await moreItem(opened, 'upload-item');
+      expect(click).toHaveBeenCalledOnce();
+    });
+
+    it('shows the test result right under the editor card, before the side panel', async () => {
+      const opened = await open('analyst');
+      await startTest(opened);
+      opened.http.expectOne((r) => r.url === testsUrl && r.method === 'POST').flush(scriptTest());
+      await settle(opened.harness);
+
+      const panel = byTestId(opened.root, 'test-panel')!;
+      const editor = opened.root.querySelector('tmz-code-editor')!;
+      const side = byTestId(opened.root, 'side-panel')!;
+      expect(editor.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(panel.compareDocumentPosition(side) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('does not repeat in words that a test succeeded', async () => {
+      const opened = await open('analyst');
+      await startTest(opened);
+      opened.http
+        .expectOne((r) => r.url === testsUrl && r.method === 'POST')
+        .flush(scriptTest({ status: 'succeeded', steps: [flattenStep, { ...flattenStep, step: 'clean' }] }));
+      await settle(opened.harness);
+      expect(byTestId(opened.root, 'test-status')?.textContent).toContain('Succeeded');
+      expect(byTestId(opened.root, 'test-success')).toBeNull();
+    });
+
+    it('no longer shows when the scripts run: that is set on the Submissions page', async () => {
+      const { root } = await open('admin');
+      expect(byTestId(root, 'pipeline-settings-form')).toBeNull();
+    });
+  });
+
+  describe('the last run', () => {
+    it('shows the newest run and, to editors, a button that starts another', async () => {
+      const opened = await open('analyst');
+      const { root, http, harness } = opened;
+      const strip = byTestId(root, 'last-run')!;
+      expect(textOf(byTestId(strip, 'last-run-status'))).toBe('Succeeded');
+      expect(textOf(byTestId(strip, 'last-run-time'))).toMatch(/2026/);
+      expect(byTestId(strip, 'last-run-failed')).toBeNull();
+      expect(byTestId(strip, 'last-run-link')!.getAttribute('href')).toContain('#runs');
+
+      byTestId<HTMLButtonElement>(strip, 'run-now')!.click();
+      await settle(harness);
+      http.expectOne((r) => r.url === runsUrl && r.method === 'POST').flush(run({ id: 'r2', status: 'queued' }));
+      await settle(harness);
+    });
+
+    it('gives a viewer the run but not the button', async () => {
+      const { root } = await open('viewer');
+      expect(byTestId(root, 'last-run-status')).not.toBeNull();
+      expect(byTestId(root, 'run-now')).toBeNull();
+    });
+
+    it('names the step that failed', async () => {
+      const failed = run({
+        id: 'f',
+        status: 'failed',
+        errorCode: 'step.indicator',
+        error: "attendance: KeyError: 'age'",
+        steps: [
+          { step: 'flatten', name: '', status: 'succeeded', inputRows: 3, outputRows: 9 },
+          { step: 'indicator', name: 'attendance', status: 'failed', inputRows: 8, outputRows: null },
+        ],
+      });
+      const { root } = await open('viewer', { runs: { items: [failed], total: 1 } });
+      expect(textOf(byTestId(root, 'last-run-status'))).toBe('Failed');
+      expect(textOf(byTestId(root, 'last-run-failed'))).toBe('attendance failed');
+    });
+
+    it('says when there is no run yet', async () => {
+      const { root } = await open('viewer', { runs: { items: [], total: 0 } });
+      expect(textOf(byTestId(root, 'last-run-none'))).toBe('No runs yet.');
+    });
+
+    it('shows no step badges for a run where every step succeeded, and the badges for one that did not', async () => {
+      const clean = run({
+        id: 'ok',
+        steps: [
+          { step: 'flatten', name: '', status: 'succeeded', inputRows: 3, outputRows: 9 },
+          { step: 'clean', name: '', status: 'succeeded', inputRows: 9, outputRows: 8 },
+        ],
+      });
+      const bad = run({ id: 'bad', status: 'failed', errorCode: 'step.clean', error: 'x' });
+      const { root } = await open('viewer', { runs: { items: [clean, bad], total: 2 } });
+      const rows = byTestId(root, 'run-table')!.querySelectorAll('tbody tr');
+      expect(textOf(rows[0])).toContain('All succeeded');
+      expect(rows[0].querySelector('tmz-badge[data-testid="run-indicators"]')).toBeNull();
+      expect(rows[1].querySelectorAll('tmz-badge').length).toBeGreaterThan(2);
+    });
+
+    it('names the versions of script 1 and script 2 in the details of a run', async () => {
+      const { root, http, harness } = await open('viewer');
+      byTestId<HTMLButtonElement>(root, 'run-details-r1')!.click();
+      await settle(harness);
+      http.expectOne(`${runsUrl}/r1`).flush({ run: run(), steps: [], referenceTables: [] });
+      await settle(harness);
+      expect(textOf(byTestId(document.querySelector('.cdk-overlay-container')!, 'run-script-versions'))).toBe('Script 1 v2');
+    });
+  });
+
+  describe('the side panel', () => {
+    it('has the versions as its third tab, not as a card of their own', async () => {
+      const opened = await open('analyst');
+      expect([...opened.root.querySelectorAll('[role="tab"]')].map((tab) => textOf(tab))).toEqual(['Tables', 'Reference', 'Versions']);
+      expect(byTestId(opened.root, 'versions')).toBeNull();
+      await openVersions(opened);
+      expect([...byTestId(opened.root, 'versions')!.querySelectorAll('li')]).toHaveLength(2);
+    });
+
+    it('offers analysts a link to manage the reference tables, and viewers none', async () => {
+      const analyst = await open('analyst');
+      expect(byTestId(analyst.root, 'inputs-manage-reference')!.getAttribute('href')).toBe(`/projects/${projectId}/reference`);
+      TestBed.resetTestingModule();
+
+      const viewer = await open('viewer');
+      expect(byTestId(viewer.root, 'inputs-manage-reference')).toBeNull();
+    });
+
+    it('keeps the questions in a closed disclosure that a filter opens', async () => {
+      const { root, harness } = await open('analyst');
+      const questions = byTestId(root, 'inputs-questions')!;
+      expect((questions.querySelector('details') as HTMLDetailsElement).open).toBe(false);
+
+      typeInto(byTestId<HTMLInputElement>(root, 'inputs-filter')!, 'municipality');
+      await settle(harness);
+      expect((questions.querySelector('details') as HTMLDetailsElement).open).toBe(true);
+    });
+
+    it('says in the Reference tab that the tables lag a saved script until the next run', async () => {
+      const { root, harness } = await open('analyst');
+      byTestId<HTMLButtonElement>(root, 'side-tab-reference')!.click();
+      await settle(harness);
+      expect(textOf(byTestId(root, 'reference-tables-note'))).toContain('only from the next run');
+    });
+
+    it('puts a link to the reference data next to a check about a missing reference table', async () => {
+      const opened = await open('analyst', { inputs: scriptInputs({ referenceTables: [] }) });
+      opened.editor().replace('def clean(raw, ctx):\n    return ctx.reference["population"]\n');
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      await settle(opened.harness);
+      expect(byTestId(opened.root, 'problem-reference-link')?.getAttribute('href')).toBe(`/projects/${projectId}/reference`);
+    });
+  });
+
+  describe('the sample download strip', () => {
+    it('explains what the zip is while it is prepared', async () => {
+      const opened = await open('analyst');
+      await requestDownload(opened);
+      opened.http.expectOne((r) => r.url === downloadsUrl && r.method === 'POST').flush(sampleDownload());
+      await settle(opened.harness);
+      expect(textOf(byTestId(opened.root, 'download-explanation'))).toContain('small package to check scripts on your own computer');
+    });
+
+    it('lists the tables of the zip on one line', async () => {
+      const opened = await open('analyst');
+      await requestDownload(opened);
+      opened.http.expectOne((r) => r.url === downloadsUrl && r.method === 'POST').flush(readyDownload());
+      await settle(opened.harness);
+      expect(byTestId(opened.root, 'download-tables')!.tagName).toBe('P');
+      expect(byTestId(opened.root, 'download-tables')!.querySelectorAll('li')).toHaveLength(0);
+    });
   });
 });

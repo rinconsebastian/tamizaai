@@ -21,21 +21,29 @@ export const routes: Routes = [
           { path: 'performance', loadComponent: () => import('./pages/projects/project-performance').then((m) => m.ProjectPerformance) },
           { path: 'clean-data', loadComponent: () => import('./pages/projects/project-clean-data').then((m) => m.ProjectCleanData) },
           { path: 'indicators', loadComponent: () => import('./pages/projects/project-indicators').then((m) => m.ProjectIndicators) },
-          { path: 'overview', loadComponent: () => import('./pages/projects/project-overview').then((m) => m.ProjectOverview) },
-          { path: 'data', loadComponent: () => import('./pages/projects/project-data').then((m) => m.ProjectData) },
           {
-            path: 'scripts',
-            loadComponent: () => import('./pages/projects/project-scripts').then((m) => m.ProjectScripts),
-            // Inline rather than imported from the page, so the editor's chunk stays lazy.
-            canDeactivate: [(component: { confirmDiscard(): Promise<boolean> }) => component.confirmDiscard()],
+            path: '',
+            loadComponent: () => import('./pages/projects/project-settings-layout').then((m) => m.ProjectSettingsLayout),
+            // No address of its own: the configuration sections keep the addresses they always had.
+            children: [
+              { path: 'overview', loadComponent: () => import('./pages/projects/project-overview').then((m) => m.ProjectOverview) },
+              { path: 'data', loadComponent: () => import('./pages/projects/project-data').then((m) => m.ProjectData) },
+              {
+                path: 'scripts',
+                loadComponent: () => import('./pages/projects/project-scripts').then((m) => m.ProjectScripts),
+                // Inline rather than imported from the page, so the editor's chunk stays lazy.
+                canDeactivate: [(component: { confirmDiscard(): Promise<boolean> }) => component.confirmDiscard()],
+              },
+              { path: 'reference', loadComponent: () => import('./pages/projects/project-reference').then((m) => m.ProjectReference) },
+              { path: 'members', loadComponent: () => import('./pages/projects/project-members').then((m) => m.ProjectMembers) },
+              {
+                path: 'sampling-frame',
+                loadComponent: () => import('./pages/projects/project-sampling-frame').then((m) => m.ProjectSamplingFrame),
+                canDeactivate: [(component: { confirmDiscard(): Promise<boolean> }) => component.confirmDiscard()],
+              },
+              { path: 'webhook', loadComponent: () => import('./pages/projects/project-webhook').then((m) => m.ProjectWebhook) },
+            ],
           },
-          { path: 'reference', loadComponent: () => import('./pages/projects/project-reference').then((m) => m.ProjectReference) },
-          { path: 'members', loadComponent: () => import('./pages/projects/project-members').then((m) => m.ProjectMembers) },
-          {
-            path: 'sampling-frame',
-            loadComponent: () => import('./pages/projects/project-sampling-frame').then((m) => m.ProjectSamplingFrame),
-          },
-          { path: 'webhook', loadComponent: () => import('./pages/projects/project-webhook').then((m) => m.ProjectWebhook) },
         ],
       },
       { path: '**', component: NotFoundPage },

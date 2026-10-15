@@ -17,6 +17,11 @@ const variants: Record<ButtonVariant, string> = {
 };
 const sizes: Record<ButtonSize, string> = { sm: 'text-sm px-3 py-2', md: 'text-sm px-4 py-2.5' };
 
+/**
+ * Busy-state rule: a button that starts a long action (an export, a download, a test) shows that it is busy while it runs
+ * (aria-busy and a label such as "Preparing…") and is not usable again until the action ends; other buttons of the same kind stay
+ * usable. The action ends with one message, a success or a failure, never an "in progress" message as well.
+ */
 @Directive({
   selector: 'button[tmzButton], a[tmzButton], label[tmzButton]',
   host: { '[class]': 'classes()' },

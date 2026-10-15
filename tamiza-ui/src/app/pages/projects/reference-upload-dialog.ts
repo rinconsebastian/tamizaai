@@ -7,9 +7,14 @@ import { Alert, Button, FormField, Input } from '../../shared/ui';
 
 export interface ReferenceUploadData {
   projectId: string;
+  /** The name of the table whose rows the file replaces; null to upload a new table. */
+  replace: string | null;
 }
 
-/** Chooses a CSV or XLSX file and a name, and uploads it as a new reference table. Closes with the upload result. */
+/**
+ * Chooses a CSV or XLSX file and a name, and uploads it as a new reference table; or, for a replacement, chooses the file for a table
+ * whose name is fixed. A refused file is explained here, with the choice kept. Closes with the upload result.
+ */
 @Component({
   selector: 'app-reference-upload-dialog',
   imports: [TranslocoDirective, Alert, Button, FormField, Input],
@@ -20,8 +25,8 @@ export interface ReferenceUploadData {
       (submit)="$event.preventDefault(); submit()"
       *transloco="let t"
     >
-      <h2 id="reference-upload-title" class="text-lg font-medium text-heading">{{ t('reference.uploadTitle') }}</h2>
-      <p class="mt-2 text-sm text-body">{{ t('reference.uploadIntro') }}</p>
+      <h2 id="reference-upload-title" class="text-lg font-medium text-heading">{{ data.replace ? t('reference.replaceTitle', { name: data.replace }) : t('reference.uploadTitle') }}</h2>
+      <p class="mt-2 text-sm text-body">{{ data.replace ? t('reference.replaceIntro', { name: data.replace }) : t('reference.uploadIntro') }}</p>
 
       <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
         <label tmzButton variant="secondary" class="cursor-pointer">
@@ -35,7 +40,7 @@ export interface ReferenceUploadData {
       }
 
       <tmz-form-field class="mt-4" [label]="t('reference.name')" fieldId="referenceName" [error]="nameError()" [hint]="t('reference.nameHint')">
-        <input tmzInput id="referenceName" autocomplete="off" [value]="name()" (input)="name.set($any($event.target).value)" data-testid="reference-name" />
+        <input tmzInput id="referenceName" autocomplete="off" [readOnly]="!!data.replace" [value]="name()" (input)="name.set($any($event.target).value)" data-testid="reference-name" />
       </tmz-form-field>
 
       @if (error(); as message) {
@@ -44,7 +49,7 @@ export interface ReferenceUploadData {
 
       <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
         <button tmzButton variant="secondary" type="button" (click)="ref.close()">{{ t('common.cancel') }}</button>
-        <button tmzButton type="submit" [disabled]="busy()" data-testid="reference-upload">{{ t('reference.upload') }}</button>
+        <button tmzButton type="submit" [disabled]="busy()" data-testid="reference-upload">{{ data.replace ? t('reference.replace') : t('reference.upload') }}</button>
       </div>
     </form>
   `,
@@ -57,7 +62,7 @@ export class ReferenceUploadDialog {
   private readonly transloco = inject(TranslocoService);
 
   protected readonly file = signal<File | null>(null);
-  protected readonly name = signal('');
+  protected readonly name = signal(this.data.replace ?? '');
   protected readonly busy = signal(false);
   protected readonly fileError = signal<string | null>(null);
   protected readonly nameError = signal<string | null>(null);
@@ -71,7 +76,7 @@ export class ReferenceUploadDialog {
     }
     this.file.set(file);
     this.fileError.set(null);
-    if (!this.name()) {
+    if (!this.name() && !this.data.replace) {
       this.name.set(suggestedTableName(file.name));
     }
   }
@@ -90,7 +95,10 @@ export class ReferenceUploadDialog {
       return;
     }
     this.busy.set(true);
-    this.service.upload(this.data.projectId, this.name().trim(), file).subscribe({
+    const request = this.data.replace
+      ? this.service.replace(this.data.projectId, this.data.replace, file)
+      : this.service.upload(this.data.projectId, this.name().trim(), file);
+    request.subscribe({
       next: (upload) => this.ref.close(upload),
       error: (error) => {
         this.busy.set(false);

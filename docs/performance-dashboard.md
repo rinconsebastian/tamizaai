@@ -2,13 +2,15 @@
 
 The performance dashboard shows, while a survey is in the field, whether data collection is on track. It is the first tab of every project and the page a project opens on. Every member can see it, viewers included.
 
+The page opens with a strip of the three headline figures: the **total** of submissions, the **median completion time** and the **overall coverage progress**. When a figure cannot be computed, the strip shows a dash and a short reason. The cards below hold the detail. Above the strip, one row holds the date range, **Clear**, **Refresh** and a line saying when the figures were computed and how days are counted.
+
 It is computed from the copy of the submissions that Tamiza stores (see [kobo.md](kobo.md)), with those deleted in Kobo left out. It never contacts Kobo, so it works when Kobo is down, and it does not depend on the [scripts](scripts.md): it works before any script exists and is not affected when a run fails. It uses the answers as Kobo sent them, which matters for [coverage](#sampling-frame-coverage): the values it compares are the form's codes, not their labels.
 
-Which parts a project can show depends on its form; the **Form check** card in the Overview lists what is missing (see [kobo.md](kobo.md#5-check-the-form-for-the-performance-dashboard)).
+Which parts a project can show depends on its form; the **Form check** card in **Settings > General** lists what is missing (see [kobo.md](kobo.md#5-check-the-form-for-the-performance-dashboard)).
 
 ## Days and the date range
 
-A submission's **day** is the date on which Kobo received it (`_submission_time`), in the project's **time zone**. Admins set the time zone in the Overview, under the project settings (for example `America/Bogota`); until then days are counted in UTC, and the dashboard says so. This is the time the server recorded, not the device's clock, so a phone with a wrong date cannot distort it.
+A submission's **day** is the date on which Kobo received it (`_submission_time`), in the project's **time zone**. Admins set the time zone in **Settings > General** (for example `America/Bogota`); until then days are counted in UTC, and the dashboard says so. This is the time the server recorded, not the device's clock, so a phone with a wrong date cannot distort it.
 
 The time zone changes only how the days are drawn: if you change it, past submissions move to the day they belong to in the new zone.
 
@@ -16,17 +18,17 @@ The **from** and **to** dates restrict every part of the page to those days, bot
 
 ## Submissions per day
 
-The total, and one bar per day between the first and the last day with submissions (inside the range, if there is one). Days without submissions in between show as zero. **Show as table** lists the same numbers.
+One bar per day between the first and the last day with submissions (inside the range, if there is one). Days without submissions in between show as zero. **Show as table** lists the same numbers. Below the chart, a line gives the number of submissions that have no reception time.
 
 ## Completion time
 
-The time from `start` to `end`, when the form has both fields: the **median**, the **mean without outliers**, and how many outliers there are.
+The time from `start` to `end`, when the form has both fields: the **median** (in the headline strip), the **mean without outliers**, and, on one line, how many outliers and how many durations cannot be used.
 
 - A duration is an **outlier** when it is below the first quartile minus 1.5 times the interquartile range, or above the third quartile plus 1.5 times that range (Tukey's fences). There is nothing to configure. A form left open overnight, or a survey filled in a few seconds, shows up as an outlier instead of distorting the mean.
 - A duration **that cannot be used** is left out of every figure and counted apart: `end` before `start`, a missing `end`, or a value that is not a date.
 - The fences are shown in minutes so you can see where the line is.
 
-When the form lacks `start` or `end`, the part says which one, and how to enable it in Kobo.
+When the form lacks `start` or `end`, the part says which one, and how to enable it in Kobo. Analysts and admins also get a link to re-check the form; viewers get one line that says whom to ask.
 
 ## Detail per enumerator
 
@@ -44,13 +46,13 @@ For each combination of the [sampling frame](kobo.md#sampling-frame), the dashbo
 
 ### Outside the frame
 
-Submissions that match no combination, or that leave a dimension empty, are counted as **outside the frame**, and the most frequent combinations of their answers (up to 10) are listed. This is where mistakes show up: a code written differently in the form and in the frame, or a code that lost its leading zero. For example, if the frame has `5001` and 40 submissions answer `05001`, those 40 appear here. In a spreadsheet, store such codes as text so `05001` stays `05001`.
+Submissions that match no combination, or that leave a dimension empty, are counted as **outside the frame**, and the most frequent combinations of their answers (up to 10) are listed in a table below the targets, with one column per dimension. This is where mistakes show up: a code written differently in the form and in the frame, or a code that lost its leading zero. For example, if the frame has `5001` and 40 submissions answer `05001`, those 40 appear here. In a spreadsheet, store such codes as text so `05001` stays `05001`.
 
 ### Dimensions that cannot be counted
 
 The dashboard warns, naming the dimension, when a dimension of the frame:
 
-- maps to a question that the form no longer has (for example after a redeploy removed it). Update the frame in the **Sampling frame** section;
+- maps to a question that the form no longer has (for example after a redeploy removed it). Update the frame in **Settings > Sampling frame**;
 - maps to a question inside a **repeat group**, which a submission answers once per repeat, so a submission has no single value to match;
 - maps to a **multiple-choice** question (`select_multiple`), whose answer holds several choices.
 
@@ -58,7 +60,7 @@ Coverage is still shown with the warning, but figures for those dimensions will 
 
 ### Without a frame
 
-The part says that no sampling frame is defined. Admins and analysts get a link to the **Sampling frame** section; viewers only see the message.
+The part says that no sampling frame is defined. Admins and analysts get a link to **Settings > Sampling frame**, which opens the editor where they can type the frame or use **Import from file**; viewers only see the message.
 
 ## Freshness
 

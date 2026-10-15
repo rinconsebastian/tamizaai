@@ -38,7 +38,14 @@ interface Setup {
 /** Opens the dialog to add a widget, or to edit `existing`, and answers the request for the columns of the indicator it starts on. */
 async function openDialog({ existing = null, columns = catalog(), indicators }: Setup = {}) {
   const context = await open('analyst', existing ? [existing] : [], existing ? result([row('Cali', 75)]) : null, indicators ? { indicators } : {});
-  context.root.querySelector<HTMLElement>(`[data-testid="${existing ? 'widget-edit' : 'widget-add'}"]`)!.click();
+  if (existing) {
+    // Edit is an item of the widget's actions menu.
+    context.root.querySelector<HTMLElement>('[data-testid="menu-trigger"]')!.click();
+    await settle(context.harness);
+    document.querySelector<HTMLElement>('[data-testid="widget-edit"]')!.click();
+  } else {
+    context.root.querySelector<HTMLElement>('[data-testid="widget-add"]')!.click();
+  }
   await settle(context.harness);
   await answerColumns(context, columns);
   return context;
@@ -593,6 +600,53 @@ describe('the widget dialog', () => {
 
       const offered = Array.from(filterDialog().querySelectorAll('[data-testid="filter-value-list"] li')).map(text);
       expect(offered).toEqual(['Cali']);
+    });
+  });
+
+  describe('the restructured dialog', () => {
+    it('keeps the filters in a closed disclosure for a new widget, with their count in the heading', async () => {
+      await openDialog();
+      const disclosure = field('dialog-filters');
+      expect(text(disclosure.querySelector('summary h3'))).toBe('Filters (0)');
+      expect((disclosure.querySelector('details') as HTMLDetailsElement).open).toBe(false);
+    });
+
+    it('opens the filters of a widget that already has some', async () => {
+      const withFilter = widget('w1', { config: config({ filters: [{ column: 'round', op: 'range', min: '2' }] }) });
+      await openDialog({ existing: withFilter });
+      const disclosure = field('dialog-filters');
+      expect(text(disclosure.querySelector('summary h3'))).toBe('Filters (1)');
+      expect((disclosure.querySelector('details') as HTMLDetailsElement).open).toBe(true);
+    });
+
+    it('writes the indicator\'s description and its format in one line', async () => {
+      await openDialog({ indicators: [indicator('attendance', { description: 'Pupils present', unit: 'pupils' })] });
+      expect(text(field('dialog-format-note'))).toBe('Pupils present · Values are shown as: Count, with the unit pupils.');
+      expect(fields('dialog-format-note')).toHaveLength(1);
+    });
+
+    it('does not offer a ratio when the table has fewer than two numeric columns', async () => {
+      await openDialog({ columns: catalog({ numeric: ['value'] }) });
+      expect(field('dialog-mode')).toBeNull();
+      expect(field('dialog-measure')).not.toBeNull();
+    });
+
+    it('offers a ratio when the table has two numeric columns', async () => {
+      await openDialog();
+      expect(field('dialog-mode')).not.toBeNull();
+    });
+
+    it('makes the preview of a single figure shorter than the preview of a chart', async () => {
+      const context = await openDialog();
+      expect(field('dialog-preview').className).toContain('h-72');
+      await change(context, field('dialog-chart-type'), 'stat');
+      expect(field('dialog-preview').className).toContain('h-40');
+    });
+
+    it('is wider from lg, with the preview beside the fields', async () => {
+      await openDialog();
+      expect(dialog().className).toContain('lg:w-[min(64rem');
+      expect(field('dialog-preview').closest('section')!.className).toContain('lg:sticky');
     });
   });
 });

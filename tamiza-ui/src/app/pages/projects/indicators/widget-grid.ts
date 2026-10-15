@@ -1,7 +1,8 @@
 import { CdkDrag, CdkDragEnd, CdkDragHandle, CdkDragMove } from '@angular/cdk/drag-drop';
-import { Component, ElementRef, computed, inject, input, output, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { IndicatorEntry, Layout, Widget } from '../../../core/projects/indicators.service';
+import { DropdownMenu, MenuItem } from '../../../shared/ui';
 import { Placed, changed, movedBy, readingOrder, reflow, resizedBy, unitsFor } from './grid-layout';
 import { WidgetView } from './widget-view';
 
@@ -19,15 +20,15 @@ const fallbackWidth = 1200;
  */
 @Component({
   selector: 'app-widget-grid',
-  imports: [CdkDrag, CdkDragHandle, TranslocoDirective, WidgetView],
+  imports: [CdkDrag, CdkDragHandle, TranslocoDirective, DropdownMenu, WidgetView],
   template: `
     <ul #grid class="tmz-grid" *transloco="let t" data-testid="widget-grid">
       @for (widget of ordered(); track widget.id) {
         <li
           class="tmz-item"
           [style.grid-column]="widget.layout.x + 1 + ' / span ' + widget.layout.w"
-          [style.grid-row]="widget.layout.y + 1 + ' / span ' + widget.layout.h"
-          [style.--h]="widget.layout.h"
+          [style.grid-row]="widget.layout.y + 1 + ' / span ' + spanOf(widget)"
+          [style.--h]="spanOf(widget)"
           [attr.data-widget-id]="widget.id"
           data-testid="widget"
         >
@@ -57,25 +58,21 @@ const fallbackWidth = 1200;
                 </button>
               }
               <h3 [id]="'widget-title-' + widget.id" class="min-w-0 flex-1 truncate text-sm font-medium text-heading" [attr.title]="widget.title" data-testid="widget-title">{{ widget.title }}</h3>
-              @if (editable()) {
+              @if (drawable()[widget.id]) {
                 <button
                   type="button"
                   class="inline-flex size-9 shrink-0 items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary"
-                  [attr.aria-label]="t('indicators.grid.edit', { title: widget.title })"
-                  (click)="edit.emit(widget)"
-                  data-testid="widget-edit"
+                  [class.bg-neutral-tertiary-medium]="shownAsTable(widget)"
+                  [attr.aria-pressed]="shownAsTable(widget)"
+                  [attr.aria-label]="t('indicators.grid.showTable', { title: widget.title })"
+                  (click)="toggleTable(widget)"
+                  data-testid="widget-table-toggle"
                 >
-                  <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4" /></svg>
+                  <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4zM4 10h16M4 15h16M10 5v14" /></svg>
                 </button>
-                <button
-                  type="button"
-                  class="inline-flex size-9 shrink-0 items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-fg-danger-strong focus:outline-none focus:ring-4 focus:ring-neutral-tertiary"
-                  [attr.aria-label]="t('indicators.grid.remove', { title: widget.title })"
-                  (click)="remove.emit(widget)"
-                  data-testid="widget-remove"
-                >
-                  <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13" /></svg>
-                </button>
+              }
+              @if (editable()) {
+                <tmz-dropdown-menu [label]="t('indicators.grid.actionsFor', { title: widget.title })" [items]="actions()" (selected)="act(widget, $event)" />
               }
             </header>
             <div class="min-h-0 flex-1 overflow-hidden p-3">
@@ -85,7 +82,9 @@ const fallbackWidth = 1200;
                 [config]="widget.config"
                 [indicator]="indicatorOf(widget)"
                 [scriptsLink]="editable()"
-                [allTables]="allTables()"
+                [showToggle]="false"
+                [asTable]="shownAsTable(widget)"
+                (tableAvailable)="setDrawable(widget.id, $event)"
               />
             </div>
           </article>
@@ -177,9 +176,53 @@ export class WidgetGrid {
   readonly remove = output<Widget>();
 
   protected readonly ordered = computed(() => readingOrder(this.widgets()));
+  /** The widgets whose table the member chose to see (or to hide again), by id; a widget without an entry follows `allTables`. */
+  private readonly tableChoice = signal<Record<string, boolean>>({});
+  /** The widgets that currently have rows to draw, by id: only those get the chart/table toggle. */
+  protected readonly drawable = signal<Record<string, boolean>>({});
+  /** The two actions of every widget's menu, with their translated names. */
+  protected readonly actions = computed<MenuItem[]>(() => [
+    { id: 'edit', label: this.transloco.translate('indicators.grid.editItem'), testId: 'widget-edit' },
+    { id: 'remove', label: this.transloco.translate('indicators.grid.removeItem'), danger: true, testId: 'widget-remove' },
+  ]);
   protected readonly dragging = signal<string | null>(null);
   protected readonly ghost = signal<Layout | null>(null);
   protected readonly status = signal('');
+
+  constructor() {
+    // "Show all as tables" is a bulk switch: it resets the choices made on single widgets.
+    effect(() => {
+      this.allTables();
+      untracked(() => this.tableChoice.set({}));
+    });
+  }
+
+  protected shownAsTable(widget: Widget): boolean {
+    return this.tableChoice()[widget.id] ?? this.allTables();
+  }
+
+  protected toggleTable(widget: Widget): void {
+    const next = !this.shownAsTable(widget);
+    this.tableChoice.update((choice) => ({ ...choice, [widget.id]: next }));
+  }
+
+  protected setDrawable(id: string, value: boolean): void {
+    this.drawable.update((state) => (state[id] === value ? state : { ...state, [id]: value }));
+  }
+
+  protected act(widget: Widget, action: string): void {
+    if (action === 'edit') {
+      this.edit.emit(widget);
+    } else if (action === 'remove') {
+      this.remove.emit(widget);
+    }
+  }
+
+  /** A widget whose indicator has not published yet has nothing to draw, so its tile is short until it does. */
+  protected spanOf(widget: Widget): number {
+    const indicator = this.indicatorOf(widget);
+    return indicator && !indicator.published ? Math.min(widget.layout.h, 2) : widget.layout.h;
+  }
 
   protected indicatorOf(widget: Widget): IndicatorEntry | null {
     return this.indicators().find((indicator) => indicator.name === widget.config.indicator) ?? null;
