@@ -70,7 +70,7 @@ describe('IndicatorsService', () => {
   });
 
   it('starts a query with an indicator and nothing else chosen: the default measure, no group', () => {
-    expect(emptyConfig('coverage')).toEqual({ indicator: 'coverage', measure: null, ratio: null, groupBy: null, filters: [], geometryColumn: null, buckets: null });
+    expect(emptyConfig('coverage')).toEqual({ indicator: 'coverage', measure: null, ratio: null, groupBy: null, filters: [], geometryColumn: null, buckets: null, sort: null });
   });
 
   it('knows which chart types need a column to group by', () => {

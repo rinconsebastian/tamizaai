@@ -253,4 +253,133 @@ public sealed class IndicatorQueryBuilderTests
         Assert.Contains("filters[0]", plan.Errors.Keys);
         Assert.Null(plan.Sql);
     }
+
+    // Order
+
+    private const string Group = From + ".\"municipality\" NULLS LAST";
+
+    private static WidgetConfigInput Sorted(WidgetSort? sort, string groupBy = "municipality") =>
+        new("coverage", null, null, groupBy, null, null, null, sort);
+
+    private static string OrderBy(WidgetConfigInput input, TableColumn[]? columns = null) =>
+        Plan(input, columns: columns).Sql!.Sql.Split('\n').Single(l => l.StartsWith("ORDER BY", StringComparison.Ordinal));
+
+    [Fact]
+    public void Without_an_order_the_groups_follow_the_group_columns_own_type()
+    {
+        Assert.Equal("ORDER BY " + Group, OrderBy(Config()));
+        Assert.Equal("ORDER BY " + From + ".\"year\" NULLS LAST", OrderBy(Config(groupBy: "year")));
+    }
+
+    [Fact]
+    public void An_order_by_the_plotted_value_sorts_by_the_aggregate_and_breaks_ties_by_group()
+    {
+        var order = OrderBy(Sorted(new WidgetSort("value", null, null, "desc")));
+
+        Assert.Equal("ORDER BY (sum(\"value\")::double precision) DESC NULLS LAST, " + Group, order);
+    }
+
+    [Fact]
+    public void An_order_by_the_plotted_ratio_sorts_by_the_ratio()
+    {
+        var input = Sorted(new WidgetSort("value", null, null, "asc")) with { Ratio = new WidgetRatio("numerator", "denominator") };
+
+        Assert.Equal(
+            "ORDER BY (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) ASC NULLS LAST, " + Group, OrderBy(input));
+    }
+
+    [Theory]
+    [InlineData("year", null, "min(\"year\")")]
+    [InlineData("year", "number", "min(\"year\")")]
+    [InlineData("year", "text", "min(NULLIF(\"year\"::text, ''))")]
+    [InlineData("value", null, "min(NULLIF(\"value\", 'NaN'))")]
+    [InlineData("value", "text", "min(NULLIF(\"value\"::text, ''))")]
+    [InlineData("geometry", null, "min(NULLIF(\"geometry\"::text, ''))")]
+    [InlineData("geometry", "text", "min(NULLIF(\"geometry\"::text, ''))")]
+    [InlineData("flag", null, "bool_and(\"flag\")")]
+    public void The_sort_key_depends_on_the_column_type_and_the_comparison(string column, string? compareAs, string key)
+    {
+        var order = OrderBy(Sorted(new WidgetSort("column", column, compareAs, "asc")));
+
+        Assert.Equal($"ORDER BY {key} ASC NULLS LAST, {Group}", order);
+    }
+
+    [Fact]
+    public void A_date_or_timestamp_column_sorts_by_its_smallest_value()
+    {
+        TableColumn[] columns = [.. Columns, new("visited_on", DataColumnType.Date, null), new("seen_at", DataColumnType.Timestamp, null)];
+
+        Assert.Contains("min(\"visited_on\") DESC", OrderBy(Sorted(new WidgetSort("column", "visited_on", null, "desc")), columns));
+        Assert.Contains("min(\"seen_at\") DESC", OrderBy(Sorted(new WidgetSort("column", "seen_at", null, "desc")), columns));
+    }
+
+    [Fact]
+    public void Text_read_as_a_number_is_guarded_inside_the_aggregate()
+    {
+        var order = OrderBy(Sorted(new WidgetSort("column", "geometry", "number", "asc")));
+
+        Assert.StartsWith("ORDER BY min(CASE WHEN \"geometry\"::text ~ '^[[:space:]]*[-+]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][-+]?[0-9]+)?[[:space:]]*$' "
+            + "AND pg_input_is_valid(\"geometry\"::text, 'numeric') THEN \"geometry\"::text::numeric END) ASC NULLS LAST, ", order);
+        Assert.DoesNotContain("\\", order);
+    }
+
+    [Fact]
+    public void A_column_named_with_quotes_is_quoted_in_the_sort_key()
+    {
+        var order = OrderBy(Sorted(new WidgetSort("column", "Odd \"name\"", "number", "asc")));
+
+        Assert.Contains("\"Odd \"\"name\"\"\"::text", order);
+    }
+
+    [Fact]
+    public void The_sort_column_is_reported_missing_after_the_filter_columns()
+    {
+        var input = Config(groupBy: "round", filters: [new DataFilter("region", "empty")]) with { Sort = new WidgetSort("column", "rank", null, "asc") };
+
+        var plan = Plan(input);
+
+        Assert.Null(plan.Errors);
+        Assert.Null(plan.Sql);
+        Assert.Equal(["round", "region", "rank"], plan.MissingColumns);
+    }
+
+    [Theory]
+    [InlineData("flag", "a true/false column")]
+    public void Comparing_a_true_false_column_as_a_number_is_an_error_under_sort_column(string column, string words)
+    {
+        var plan = Plan(Sorted(new WidgetSort("column", column, "number", "asc")));
+
+        Assert.Null(plan.Sql);
+        Assert.Equal($"Column 'flag' is {words}, so it is sorted in its own order and cannot be compared as text or as a number.", plan.Errors!["sort.column"][0]);
+    }
+
+    [Fact]
+    public void A_date_or_timestamp_column_compared_as_text_is_an_error_under_sort_column()
+    {
+        TableColumn[] columns = [.. Columns, new("visited_on", DataColumnType.Date, null), new("seen_at", DataColumnType.Timestamp, null)];
+
+        foreach (var (column, words) in new[] { ("visited_on", "a date column"), ("seen_at", "a timestamp column") })
+        {
+            var plan = Plan(Sorted(new WidgetSort("column", column, "text", "asc")), columns: columns);
+
+            Assert.Contains($"is {words}", plan.Errors!["sort.column"][0]);
+        }
+    }
+
+    [Fact]
+    public void A_missing_sort_column_is_reported_not_checked_for_its_type()
+    {
+        var plan = Plan(Sorted(new WidgetSort("column", "gone", "number", "asc")));
+
+        Assert.Null(plan.Errors);
+        Assert.Equal(["gone"], plan.MissingColumns);
+    }
+
+    [Fact]
+    public void A_per_row_query_has_no_order()
+    {
+        var input = Config(groupBy: null) with { Sort = null };
+
+        Assert.DoesNotContain("ORDER BY", Plan(input, perRow: true).Sql!.Sql);
+    }
 }

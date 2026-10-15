@@ -81,6 +81,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         Assert.Equal(0, config.GetProperty("filters").GetArrayLength());
         Assert.Equal(JsonValueKind.Null, config.GetProperty("geometryColumn").ValueKind);
         Assert.Equal(JsonValueKind.Null, config.GetProperty("buckets").ValueKind);
+        Assert.Equal(JsonValueKind.Null, config.GetProperty("sort").ValueKind); // the group column's own order applies
     }
 
     [Fact]

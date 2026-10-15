@@ -41,6 +41,7 @@ public sealed class IndicatorValidationTests
         Assert.Empty(config.Filters);
         Assert.Null(config.GeometryColumn);
         Assert.Null(config.Buckets);
+        Assert.Null(config.Sort);
     }
 
     [Fact]
@@ -311,4 +312,105 @@ public sealed class IndicatorValidationTests
     }
 
     private static WidgetConfig WithGeometry(WidgetConfig config) => config with { GeometryColumn = "geometry" };
+
+    // Order
+
+    private static WidgetConfig Sorted(WidgetSort? sort, string? groupBy = "municipality") =>
+        new WidgetConfigInput("a", GroupBy: groupBy, Sort: sort).Normalize();
+
+    private static readonly WidgetSort ByColumn = new("column", "round", "number", "asc");
+
+    [Fact]
+    public void A_sort_with_empty_text_fields_takes_them_as_left_out()
+    {
+        var config = Sorted(new WidgetSort("value", "", "", "desc"));
+
+        Assert.Null(config.Sort!.Column);
+        Assert.Null(config.Sort.CompareAs);
+    }
+
+    [Theory]
+    [InlineData("bar")]
+    [InlineData("column")]
+    public void Bar_and_column_widgets_can_be_sorted(string chartType)
+    {
+        Assert.Empty(Check(Sorted(ByColumn), chartType));
+        Assert.Empty(Check(Sorted(new WidgetSort("value", null, null, "desc")), chartType));
+    }
+
+    [Theory]
+    [InlineData("stat")]
+    [InlineData("line")]
+    [InlineData("histogram")]
+    [InlineData("pie")]
+    [InlineData("map")]
+    public void Other_widgets_cannot_be_sorted(string chartType)
+    {
+        var errors = Check(new WidgetConfigInput("a", GroupBy: "g", GeometryColumn: "geometry", Sort: ByColumn).Normalize(), chartType);
+
+        Assert.Equal("Only bar and column widgets can be sorted.", errors["config.sort"][0]);
+    }
+
+    [Fact]
+    public void A_sort_needs_a_group_column()
+    {
+        Assert.Equal("Sorting needs a column to group by.", Check(Sorted(ByColumn, groupBy: null), null)["config.sort"][0]);
+    }
+
+    [Fact]
+    public void A_bad_sort_field_is_named_with_its_message()
+    {
+        Assert.Equal("Sort by 'value' or by 'column'.", Check(Sorted(new WidgetSort("size", null, null, "asc")), "bar")["config.sort.by"][0]);
+        Assert.Equal("The direction must be 'asc' or 'desc'.", Check(Sorted(new WidgetSort("value", null, null, null)), "bar")["config.sort.direction"][0]);
+        Assert.Equal("The direction must be 'asc' or 'desc'.", Check(Sorted(new WidgetSort("value", null, null, "up")), "bar")["config.sort.direction"][0]);
+        Assert.Equal("Compare as 'text' or as 'number'.", Check(Sorted(new WidgetSort("column", "round", "date", "asc")), "bar")["config.sort.compareAs"][0]);
+    }
+
+    [Fact]
+    public void A_sort_by_column_needs_a_column_and_a_sort_by_value_cannot_have_one()
+    {
+        Assert.Equal("Choose a column to sort by.", Check(Sorted(new WidgetSort("column", null, null, "asc")), "bar")["config.sort.column"][0]);
+        Assert.Equal("Sort by the plotted value or by a column, not both.",
+            Check(Sorted(new WidgetSort("value", "round", null, "asc")), "bar")["config.sort.column"][0]);
+        Assert.Equal("The plotted value is always compared as a number.",
+            Check(Sorted(new WidgetSort("value", null, "text", "asc")), "bar")["config.sort.compareAs"][0]);
+    }
+
+    [Fact]
+    public void A_sort_column_name_has_the_column_name_limit()
+    {
+        var tooLong = new string('x', DataQueryBuilder.MaxTextLength + 1);
+
+        Assert.Contains("config.sort.column", Check(Sorted(new WidgetSort("column", tooLong, null, "asc")), "bar").Keys);
+    }
+
+    [Fact]
+    public void The_sort_column_must_be_in_the_table_and_is_named()
+    {
+        var errors = CheckTable(Sorted(new WidgetSort("column", "missing", null, "asc")));
+
+        Assert.Equal("The table has no column 'missing'.", errors["config.sort.column"][0]);
+        Assert.Empty(CheckTable(Sorted(ByColumn with { Column = "year" })));
+        Assert.Empty(CheckTable(Sorted(new WidgetSort("value", null, null, "desc"))));
+    }
+
+    [Theory]
+    [InlineData(DataColumnType.Date, "a date column")]
+    [InlineData(DataColumnType.Timestamp, "a timestamp column")]
+    [InlineData(DataColumnType.Boolean, "a true/false column")]
+    public void A_date_timestamp_or_true_false_column_cannot_be_compared_as_text_or_number(DataColumnType type, string words)
+    {
+        TableColumn[] columns = [new("municipality", DataColumnType.Text, null), new("seen", type, null)];
+        var config = Sorted(new WidgetSort("column", "seen", "number", "asc"));
+        var errors = new FieldErrors();
+
+        IndicatorValidation.CheckAgainstColumns(config, columns, "UTC", "config.", errors);
+
+        Assert.Equal(
+            $"Column 'seen' is {words}, so it is sorted in its own order and cannot be compared as text or as a number.",
+            errors.ToDictionary()["config.sort.column"][0]);
+        var own = new FieldErrors();
+        IndicatorValidation.CheckAgainstColumns(Sorted(new WidgetSort("column", "seen", null, "asc")), columns, "UTC", "config.", own);
+        Assert.Empty(own.ToDictionary());
+    }
 }

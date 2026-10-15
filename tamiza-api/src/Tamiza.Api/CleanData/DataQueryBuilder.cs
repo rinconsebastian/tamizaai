@@ -316,7 +316,7 @@ public static class DataQueryBuilder
         return value is not null;
     }
 
-    private static string Describe(DataColumnType type) => type switch
+    internal static string Describe(DataColumnType type) => type switch
     {
         DataColumnType.Integer => "an integer column",
         DataColumnType.Decimal => "a decimal column",

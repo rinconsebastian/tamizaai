@@ -37,6 +37,18 @@ export interface WidgetRatio {
   denominator: string;
 }
 
+/**
+ * The order of a bar or column widget: by the plotted value or by a column, ascending or descending. `compareAs` says how a text,
+ * integer or decimal column is compared, and is null for other types and for the plotted value (null on a saved widget: the
+ * type's own way).
+ */
+export interface WidgetSort {
+  by: 'value' | 'column';
+  column: string | null;
+  compareAs: 'text' | 'number' | null;
+  direction: 'asc' | 'desc';
+}
+
 /** A widget's query. At most one of `measure` and `ratio` is set; with neither, the table's default measure is plotted. */
 export interface WidgetConfig {
   indicator: string;
@@ -48,6 +60,8 @@ export interface WidgetConfig {
   geometryColumn: string | null;
   /** Histograms only; 10 when null. */
   buckets: number | null;
+  /** Bar and column only; null is the group column's own order. */
+  sort: WidgetSort | null;
 }
 
 export interface Widget {
@@ -112,7 +126,7 @@ export interface WidgetDraft {
 export type WidgetPatch = Partial<Pick<Widget, 'title' | 'chartType' | 'config' | 'layout'>>;
 
 export function emptyConfig(indicator = ''): WidgetConfig {
-  return { indicator, measure: null, ratio: null, groupBy: null, filters: [], geometryColumn: null, buckets: null };
+  return { indicator, measure: null, ratio: null, groupBy: null, filters: [], geometryColumn: null, buckets: null, sort: null };
 }
 
 const base = '/api/v1/projects';

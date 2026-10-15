@@ -141,7 +141,67 @@ public static class IndicatorValidation
         }
 
         CheckFilterShape(config.Filters, prefix, errors);
+        CheckSort(config, chartType, prefix, errors);
     }
+
+    /// <summary>The checks of a widget's order that need no table: where it may be, and the shape of its fields.</summary>
+    private static void CheckSort(WidgetConfig config, string? chartType, string prefix, FieldErrors errors)
+    {
+        if (config.Sort is not { } sort)
+        {
+            return;
+        }
+
+        if (chartType is not null && chartType is not (ChartTypes.Bar or ChartTypes.Column))
+        {
+            errors.Add(prefix + "sort", "Only bar and column widgets can be sorted.");
+            return;
+        }
+
+        if (config.GroupBy is null)
+        {
+            errors.Add(prefix + "sort", "Sorting needs a column to group by.");
+        }
+
+        if (sort.By is not (SortValues.ByValue or SortValues.ByColumn))
+        {
+            errors.Add(prefix + "sort.by", "Sort by 'value' or by 'column'.");
+        }
+
+        if (sort.Direction is not (SortValues.Asc or SortValues.Desc))
+        {
+            errors.Add(prefix + "sort.direction", "The direction must be 'asc' or 'desc'.");
+        }
+
+        if (sort.By == SortValues.ByColumn && sort.Column is null)
+        {
+            errors.Add(prefix + "sort.column", "Choose a column to sort by.");
+        }
+        else if (sort.By == SortValues.ByValue && sort.Column is not null)
+        {
+            errors.Add(prefix + "sort.column", "Sort by the plotted value or by a column, not both.");
+        }
+
+        CheckColumnName(sort.Column, prefix + "sort.column", "sort column", errors);
+
+        if (sort.CompareAs is not null && sort.CompareAs is not (SortValues.Text or SortValues.Number))
+        {
+            errors.Add(prefix + "sort.compareAs", "Compare as 'text' or as 'number'.");
+        }
+        else if (sort.By == SortValues.ByValue && sort.CompareAs is not null)
+        {
+            errors.Add(prefix + "sort.compareAs", "The plotted value is always compared as a number.");
+        }
+    }
+
+    /// <summary>
+    /// What is wrong with comparing <paramref name="column"/> the way <paramref name="sort"/> says: a date, timestamp or true/false
+    /// column is only compared in its own order. Null when the order fits the column.
+    /// </summary>
+    public static string? SortColumnError(WidgetSort sort, TableColumn column) =>
+        sort.By == SortValues.ByColumn && sort.CompareAs is not null && column.Type is DataColumnType.Date or DataColumnType.Timestamp or DataColumnType.Boolean
+            ? $"Column '{column.Name}' is {DataQueryBuilder.Describe(column.Type)}, so it is sorted in its own order and cannot be compared as text or as a number."
+            : null;
 
     private static void CheckColumnName(string? name, string field, string what, FieldErrors errors)
     {
@@ -214,6 +274,18 @@ public static class IndicatorValidation
         if (config.GeometryColumn is not null && !byName.ContainsKey(config.GeometryColumn))
         {
             errors.Add(prefix + "geometryColumn", $"The table has no column '{config.GeometryColumn}'.");
+        }
+
+        if (config.Sort is { By: SortValues.ByColumn, Column: { } sortColumn } sort)
+        {
+            if (!byName.TryGetValue(sortColumn, out var column))
+            {
+                errors.Add(prefix + "sort.column", $"The table has no column '{sortColumn}'.");
+            }
+            else if (SortColumnError(sort, column) is { } sortError)
+            {
+                errors.Add(prefix + "sort.column", sortError);
+            }
         }
 
         var filterErrors = new FieldErrors();

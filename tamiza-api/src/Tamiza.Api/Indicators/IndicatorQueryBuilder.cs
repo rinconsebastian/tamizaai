@@ -36,6 +36,51 @@ public static class IndicatorQueryBuilder
     /// <param name="from">The quoted <c>"schema"."table"</c>.</param>
     /// <param name="maxRows">The most rows the query returns; one more is selected so the caller can tell the limit was reached.</param>
     /// <param name="perRow">With no group column, return each row's value instead of one aggregate (a histogram's input).</param>
+    /// <summary>
+    /// The groups' order. The group column is qualified with the table, so it is the column and not the <c>::text</c> output of the
+    /// same name: without an order, groups follow the column's own type. With one, the sort key comes first and the group
+    /// column breaks ties, so the order is total.
+    /// </summary>
+    private static string OrderBy(WidgetConfig config, Dictionary<string, TableColumn> byName, string from, string aggregate)
+    {
+        var group = $"{from}.{DataSources.Quote(byName[config.GroupBy!].Name)} NULLS LAST";
+        if (config.Sort is not { } sort)
+        {
+            return "ORDER BY " + group;
+        }
+
+        var key = sort.By == SortValues.ByValue ? $"({aggregate})" : ColumnSortKey(sort, byName[sort.Column!]);
+        var direction = sort.Direction == SortValues.Desc ? "DESC" : "ASC";
+        return $"ORDER BY {key} {direction} NULLS LAST, {group}";
+    }
+
+    /// <summary>
+    /// The smallest value of the sort column in the group, compared the way the order says. Text read as a number is guarded, so a
+    /// value that is not one is NULL (and goes last) instead of raising an error that would fail the widget.
+    /// </summary>
+    private static string ColumnSortKey(WidgetSort sort, TableColumn column)
+    {
+        var name = DataSources.Quote(column.Name);
+        var asNumber = sort.CompareAs == SortValues.Number || (sort.CompareAs is null && column.Type is DataColumnType.Integer or DataColumnType.Decimal);
+        return column.Type switch
+        {
+            DataColumnType.Boolean => $"bool_and({name})",
+            DataColumnType.Date or DataColumnType.Timestamp => $"min({name})",
+            DataColumnType.Integer or DataColumnType.Decimal when asNumber =>
+                column.Type == DataColumnType.Decimal ? $"min(NULLIF({name}, 'NaN'))" : $"min({name})",
+            _ when asNumber =>
+                $"min(CASE WHEN {name}::text ~ '{NumberShape}' AND pg_input_is_valid({name}::text, 'numeric') THEN {name}::text::numeric END)",
+            _ => $"min(NULLIF({name}::text, ''))",
+        };
+    }
+
+    /// <summary>
+    /// The text that reads as a number: an optional sign, digits with an optional point and digits, or a point and digits, an optional
+    /// exponent, and spaces around. Bracket classes, not <c>\d</c>, so it reads the same under any locale and
+    /// <c>standard_conforming_strings</c>. Whether the value fits <c>numeric</c> is <c>pg_input_is_valid</c>'s check.
+    /// </summary>
+    private const string NumberShape = "^[[:space:]]*[-+]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][-+]?[0-9]+)?[[:space:]]*$";
+
     public static IndicatorQueryPlan Plan(
         WidgetConfig config, IReadOnlyList<TableColumn> columns, string timeZone, string from, int maxRows, bool perRow = false)
     {
@@ -69,6 +114,15 @@ public static class IndicatorQueryBuilder
             {
                 Need(filter.Column);
             }
+        }
+
+        Need(config.Sort?.Column);
+
+        if (config.Sort is { By: SortValues.ByColumn, Column: { } sortColumn } sortOrder
+            && byName.TryGetValue(sortColumn, out var sortedColumn)
+            && IndicatorValidation.SortColumnError(sortOrder, sortedColumn) is { } sortError)
+        {
+            errors.Add("sort.column", sortError);
         }
 
         foreach (var (name, field) in new[] { (measure, "measure"), (config.Ratio?.Numerator, "ratio.numerator"), (config.Ratio?.Denominator, "ratio.denominator") })
@@ -140,7 +194,7 @@ public static class IndicatorQueryBuilder
         else
         {
             var groupBy = grouped ? $"GROUP BY {Q(config.GroupBy!)}" : "";
-            var orderBy = grouped ? $"ORDER BY {Q(config.GroupBy!)} NULLS LAST" : "";
+            var orderBy = grouped ? OrderBy(config, byName, from, aggregate) : "";
             sql =
                 $"""
                 SELECT {group}, ({aggregate}), {geometry}
