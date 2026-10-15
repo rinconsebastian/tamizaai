@@ -147,18 +147,64 @@ Make someone else admin before stepping down. A superadmin (configured by the op
 
 ## Sampling frame
 
-The sampling frame lists the dimensions of the sample (for example municipality, sex, age range), the form field each one maps to, and the target number of surveys for each combination of values. Every member reads it in **Settings > Sampling frame**: a summary line (dimensions, combinations and the date it was saved) over a table that pages after 50 rows. Admins and analysts press **Edit** to change it, or **Import from file** to load it from a file; a project without a frame opens the editor straight away. The performance dashboard measures coverage against it.
+The sampling frame lists the dimensions of the sample (for example municipality, sex, age range), the form field each one maps to, and the target number of surveys for each combination of values. Every member reads it in **Settings > Sampling frame**: a summary line (dimensions, combinations and the date it was saved) over a table that pages after 50 rows. Every member can **Download** it as an Excel workbook in the layout of the [template](#the-import-template), with its targets. Admins and analysts press **Edit** to change it, or **Import from file** to load it from a file. The performance dashboard measures coverage against it.
 
-The file can be **CSV** (comma- or semicolon-separated, UTF-8) or **XLSX** (first sheet). The first row names the dimensions plus a `target` column; each following row is one combination:
+### Starting a frame
 
-| municipality | sex | age_range | target |
-|---|---|---|---|
-| cali | f | 18_29 | 120 |
-| cali | m | 18_29 | 110 |
+On a project without a frame, admins and analysts see **Plan your sample** with three ways to start, and a closed **How to organize a file** guide below them (viewers only read that no frame is defined yet):
 
-**Import from file** opens a dialog that shows a preview with any row errors (the first 20, and how many more there are), and asks for the form field of each dimension. Nothing is saved until you press **Load into the editor** and then **Save sampling frame**; **Cancel** in the editor goes back to the saved frame, and leaving the page with unsaved edits asks first. A question inside a repeat group or with several choices is marked in the list of form fields, and a note under the field says the dashboard cannot count it. When a save is refused, the editor opens on the first row at fault and names it. Limits: 10 dimensions, 10,000 rows, 5 MB per file. Values are matched against the raw submissions as text, so use the same codes the form stores (the choice *names*, as in the example above, not their labels). This is different from the tables the scripts receive, which show labels (see [Form versions and choice labels](#7-form-versions-and-choice-labels)).
+- **Choose questions** opens the question picker, which writes the rows for you from the form's choices.
+- **Import a file** opens the import dialog described [below](#importing-a-file).
+- **Type it in** opens an empty editor. **Cancel** closes it and returns to the panel.
 
-The performance dashboard compares them ignoring case and surrounding spaces, so `Cali` in the frame counts the answers `cali` and ` cali`. Nothing else is adjusted: a code that lost its leading zero in a spreadsheet (`5001` for `05001`) matches nothing, and those submissions appear as **outside the frame** in the dashboard (keep such codes as text in the file). The dashboard cannot count a dimension that maps to a question inside a repeat group or to a multiple-choice question, or whose question a redeploy removed, and says so (see [performance-dashboard.md](performance-dashboard.md#sampling-frame-coverage)). A frame cannot express ranges (an age range over an integer question): store the range as a code in the form, for example in a `calculate` question.
+### Choosing questions
+
+The question picker lists the form's questions in three groups:
+
+- **Questions with choices**, such as "Municipality · municipio · 1,100 choices". Every choice is used until you narrow them: **Choices** opens the list with a search box, and **Select all** and **Clear** act on the choices the search shows ("Select the 12 shown"), leaving the others as they are. The `other` choice that Kobo adds to an "or other" question is offered unticked.
+- **Questions you type the values for**, such as an integer question, with one value per line. A line over 500 characters is refused.
+- **Coverage cannot count these**: multiple-choice questions, questions inside a repeat group and a top-level question named `target`, shown with the reason and not selectable.
+
+You choose 1 to 10 questions. The footer counts the rows the choices make, for example "5 × 2 × 3 = 30 rows", and stops at the frame's limit of 10,000 rows. When one question narrows another (a department and its municipalities), choose only the more detailed one, or only the municipalities you sample, so the frame does not list combinations that cannot happen. The picker ends in one of two ways:
+
+- **Download Excel template** prepares the [template](#the-import-template) and downloads it.
+- **Create the rows here** puts the rows straight into the editor, with every target empty, so a small frame needs no spreadsheet.
+
+In the editor, **Create rows from questions** opens the picker with the editor's questions ticked: the codes found in the rows for a question with choices, and the values found in the rows for the others. Before it replaces rows it asks, and says what will not be kept: dimensions that cannot be made from questions, rows whose values are not choices of their question and, when the questions changed, the targets. When the questions are the same, each new row keeps the target of the matching row, and dimensions keep their names. **Remove rows without a target (N)** deletes the rows you did not plan, since saving needs a target in every row.
+
+### The import template
+
+The template is an Excel workbook with three sheets:
+
+- **Frame**, the only sheet the import reads. It has one column per chosen question, named after the question (its path instead, such as `hogar/edad`, when another field of the form has the same name or the question is named `target`). A `# <column> label` note column follows each question with choices, and `target` comes last. Every combination is filled in with its codes, stored as text so `05001` keeps its leading zero, and every `target` is empty. A question you typed no values for gives an empty column, which you fill in on the rows you give a target.
+- **Guide**, the rules below, with the project, the day and the form version the template was prepared from. When the form changes, download a new template.
+- **Choices**, with the columns `question column`, `choice code`, `choice label` and `in this file`, so you can look up codes or add rows later.
+
+Fill in the targets you plan, leave the other rows empty, save the file as Excel Workbook (.xlsx) and import it. Every file stays under the 5 MB import limit: when a form's lists are long, the Choices sheet lists only the codes in Frame, and if the file is still too large the label columns are left out (the Guide says which). A template that would still be too large is refused with a message to choose fewer choices or questions.
+
+The downloaded frame uses the same layout with its targets, so it can be edited in Excel and imported again. A dimension whose name starts with `#` or is `target` would not be read back, so its column is named after its question's path, and the Guide says so.
+
+### File rules
+
+The file can be **CSV** (comma- or semicolon-separated, UTF-8) or **XLSX** (only the first sheet is read). The first non-empty row names the dimensions plus a `target` column; each following row is one combination:
+
+| municipality | # municipality label | sex | age_range | target |
+|---|---|---|---|---|
+| cali | Cali | f | 18_29 | 120 |
+| cali | Cali | m | 18_29 | 110 |
+| cali | Cali | f | 30_44 | |
+
+- **`target`** holds a whole number from 0 to 1,000,000, without thousands separators. A row whose `target` is empty is left out: it is not checked, and the preview lists its row number. A target of `0` keeps the row (the third row above is left out).
+- **Columns whose name starts with `#`** are notes, such as the label next to a code. They are not read, and the preview lists them. Values under a column without a name are not read either, and the preview lists that column too.
+- **Blank lines** are skipped and do not count toward the 10,000-row limit. Row numbers in the preview are the ones your spreadsheet program shows.
+
+### Importing a file
+
+**Import from file** opens a dialog with the file guide (open while the project has no frame) and its link to a template with the form's codes. The dialog shows a preview with any row errors (the first 20, and how many more there are), the rows left out for having no target (as ranges such as "2–41, 43–2,201") and the columns not read, and asks for the form field of each dimension. Each column starts with a question chosen for it: the question the saved frame maps a dimension of that name to, then the question whose path is the column name, then the only question with that name, then the only question with that label. When the saved frame and the form point at different questions, nothing is chosen and both are named under the field. Nothing is saved until you press **Load into the editor** and then **Save sampling frame**; **Cancel** in the editor discards the edits, and leaving the page with unsaved edits asks first. A question inside a repeat group or with several choices is marked in the list of form fields, and a note under the field says the dashboard cannot count it. When a save is refused, the editor opens on the first row at fault and names it. Limits: 10 dimensions, 10,000 rows, 5 MB per file. Values are matched against the raw submissions as text, so use the same codes the form stores (the choice *names*, as in the example above, not their labels). This is different from the tables the scripts receive, which show labels (see [Form versions and choice labels](#7-form-versions-and-choice-labels)).
+
+### How submissions are matched
+
+The performance dashboard compares them ignoring case and surrounding spaces, so `Cali` in the frame counts the answers `cali` and ` cali`. Nothing else is adjusted: a code that lost its leading zero in a spreadsheet (`5001` for `05001`) matches nothing, and those submissions appear as **outside the frame** in the dashboard (keep such codes as text in the file, as the [template](#the-import-template) does). The dashboard cannot count a dimension that maps to a question inside a repeat group or to a multiple-choice question, or whose question a redeploy removed, and says so (see [performance-dashboard.md](performance-dashboard.md#sampling-frame-coverage)). A frame cannot express ranges (an age range over an integer question): store the range as a code in the form, for example in a `calculate` question.
 
 ## Self-hosted Kobo on a private network
 

@@ -46,7 +46,7 @@ For each combination of the [sampling frame](kobo.md#sampling-frame), the dashbo
 
 ### Outside the frame
 
-Submissions that match no combination, or that leave a dimension empty, are counted as **outside the frame**, and the most frequent combinations of their answers (up to 10) are listed in a table below the targets, with one column per dimension. This is where mistakes show up: a code written differently in the form and in the frame, or a code that lost its leading zero. For example, if the frame has `5001` and 40 submissions answer `05001`, those 40 appear here. In a spreadsheet, store such codes as text so `05001` stays `05001`.
+Submissions that match no combination, or that leave a dimension empty, are counted as **outside the frame**, and the most frequent combinations of their answers (up to 10) are listed in a table below the targets, with one column per dimension. This is where mistakes show up: a code written differently in the form and in the frame, or a code that lost its leading zero. For example, if the frame has `5001` and 40 submissions answer `05001`, those 40 appear here. In a spreadsheet, store such codes as text so `05001` stays `05001`: the [import template](kobo.md#the-import-template) writes its codes that way, and a frame built with [Choose questions](kobo.md#choosing-questions) takes them from the form.
 
 ### Dimensions that cannot be counted
 
@@ -60,7 +60,7 @@ Coverage is still shown with the warning, but figures for those dimensions will 
 
 ### Without a frame
 
-The part says that no sampling frame is defined. Admins and analysts get a link to **Settings > Sampling frame**, which opens the editor where they can type the frame or use **Import from file**; viewers only see the message.
+The part says that no sampling frame is defined. Admins and analysts get a link to **Settings > Sampling frame**, where they can start one by choosing questions, importing a file or typing it in (see [Starting a frame](kobo.md#starting-a-frame)); viewers only see the message.
 
 ## Freshness
 

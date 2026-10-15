@@ -25,16 +25,20 @@ public static class TestData
          {"name":"age_range","xpath":"group/age_range","type":"select_one","label":"Age range"}]
         """;
 
-    public static async Task<Guid> InsertProjectAsync(string connectionString, Guid createdBy, string name = "Seeded project", string formFieldsJson = "[]")
+    /// <param name="formFieldsJson">Fields in the API's shape, for example with <c>listName</c>, <c>orOther</c> and <c>inRepeat</c>.</param>
+    /// <param name="formChoicesJson">Choices as <c>[{"listName", "name", "label"}]</c>, in form order.</param>
+    public static async Task<Guid> InsertProjectAsync(
+        string connectionString, Guid createdBy, string name = "Seeded project", string formFieldsJson = "[]", string formChoicesJson = "[]")
     {
         var id = Guid.CreateVersion7();
         await ExecuteAsync(connectionString,
             """
             INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
-                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
-            VALUES (@id, @name, 'https://kf.kobotoolbox.org', 'aSeededAsset', 'x', 'x', 'Seeded form', @fields::jsonb, now(), @createdBy, now(), now())
+                                         form_name, form_fields, form_choices, form_checked_at, created_by, created_at, updated_at)
+            VALUES (@id, @name, 'https://kf.kobotoolbox.org', 'aSeededAsset', 'x', 'x', 'Seeded form', @fields::jsonb, @choices::jsonb, now(),
+                    @createdBy, now(), now())
             """,
-            ("id", id), ("name", name), ("createdBy", createdBy), ("fields", formFieldsJson));
+            ("id", id), ("name", name), ("createdBy", createdBy), ("fields", formFieldsJson), ("choices", formChoicesJson));
         return id;
     }
 

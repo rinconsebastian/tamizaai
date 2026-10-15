@@ -171,6 +171,33 @@ public sealed class SamplingFrameApiTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task An_xlsx_with_a_note_column_and_empty_targets_lists_what_was_left_out()
+    {
+        await using var s = await ProjectAsync();
+        using var xlsx = new MemoryStream();
+        await xlsx.SaveAsAsync(new[]
+        {
+            new Dictionary<string, object?> { ["municipality"] = "05001", ["# municipality label"] = "Medellín", ["target"] = 120 },
+            new Dictionary<string, object?> { ["municipality"] = "05088", ["# municipality label"] = "Bello", ["target"] = null },
+            new Dictionary<string, object?> { ["municipality"] = "05266", ["# municipality label"] = "Envigado", ["target"] = 0 },
+        }, excelType: ExcelType.XLSX);
+
+        var response = await UploadAsync(s, xlsx.ToArray(), "frame.xlsx");
+        var preview = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(["municipality"], preview.GetProperty("dimensions").EnumerateArray().Select(d => d.GetString()));
+        Assert.Equal([2, 4], preview.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("row").GetInt32()));
+        Assert.Equal([120, 0], preview.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("target").GetInt32()));
+        Assert.Equal([3], preview.GetProperty("rowsWithoutTarget").EnumerateArray().Select(r => r.GetInt32()));
+        var ignored = Assert.Single(preview.GetProperty("ignoredColumns").EnumerateArray());
+        Assert.Equal("B", ignored.GetProperty("column").GetString());
+        Assert.Equal("# municipality label", ignored.GetProperty("name").GetString());
+        Assert.Equal("note", ignored.GetProperty("reason").GetString());
+        Assert.Empty(preview.GetProperty("errors").EnumerateArray());
+    }
+
+    [Fact]
     public async Task A_file_without_a_target_column_is_reported()
     {
         await using var s = await ProjectAsync();

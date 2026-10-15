@@ -100,6 +100,9 @@
         "failed": "The sample could not be prepared. Prepare it again.",
         "incomplete": "The stored sample is incomplete. Prepare it again.",
         "busy": "Other files are being prepared. Try again in a moment."
+      },
+      "samplingFrame": {
+        "none": "This project has no sampling frame yet."
       }
     }
   },
@@ -801,14 +804,13 @@
     "target": "Target",
     "emptyViewer": "No sampling frame has been defined for this project yet.",
     "importTitle": "Import from a file",
-    "importIntro": "Upload a CSV or XLSX file with one column per dimension and a target column, one combination per row. You can review it before saving.",
-    "previewSummary": "{{ rows }} rows and {{ dimensions }} dimensions found.",
+    "importIntro": "Upload a CSV or XLSX file with one column per dimension and a target column. You review the rows and choose the question of each column before anything is saved.",
     "previewErrors": "Fix these rows in the file and import it again:",
     "rowError": "Row {{ row }}: {{ message }}",
     "mapField": "Form field for “{{ name }}”",
     "chooseField": "Choose a form field",
     "applyImport": "Load into the editor",
-    "dimensionsIntro": "Each dimension maps to a question of the form, for example municipality or sex.",
+    "dimensionsIntro": "Each dimension maps to a question of the form, for example municipality or sex. Its values are the choice codes the form stores (such as 05001), not their labels.",
     "dimensionName": "Name",
     "dimensionField": "Form field",
     "remove": "Remove",
@@ -824,7 +826,6 @@
     "next": "Next",
     "pageInfo": "Rows {{ from }}–{{ to }} of {{ total }}",
     "addDimensionFirst": "Add a dimension to start entering targets.",
-    "errorCount": "{{ count }} problems to fix before saving.",
     "save": "Save sampling frame",
     "saved": "Sampling frame saved.",
     "importApplied": "The imported rows are in the editor. Review them and save.",
@@ -841,7 +842,6 @@
     "combinationsMany": "{{ count }} combinations",
     "removeDimension": "Remove dimension {{ n }}",
     "noRows": "No rows yet. Add a row for the first combination and its target.",
-    "errorCountFirst": "{{ count }} problems to fix before saving, the first in row {{ row }}.",
     "moreErrors": "and {{ count }} more.",
     "discardTitle": "Discard your changes?",
     "discardMessage": "The edits to the sampling frame have not been saved.",
@@ -853,6 +853,108 @@
     "warning": {
       "repeat": "Coverage cannot count this question: it is answered once per repeat.",
       "multiple": "Coverage cannot count this question: an answer can hold several choices."
+    },
+    "guide": {
+      "heading": "How to organize a file",
+      "intro": "One column per dimension and a target column, with one row per combination of values. For example:",
+      "example": "Example of a sampling frame file",
+      "columns": "Name each dimension column as you like, and fill it with the choice codes the form stores (such as 05001), not their labels.",
+      "target": "The column named target holds the surveys planned for each row: a whole number from 0 to {{ max }}.",
+      "rows": "Write each combination of values on its own row, and only once.",
+      "emptyTarget": "A row whose target is empty is left out, so rows you do not plan can stay in the file. A target of 0 keeps the row.",
+      "notes": "Columns whose name starts with # are notes, such as the labels next to the codes. They are not read.",
+      "text": "Keep codes such as 05001 as text, or the spreadsheet drops the leading zero.",
+      "formats": "Save the file as XLSX (only the first sheet is read) or as CSV in UTF-8, separated by commas or semicolons.",
+      "limits": "At most {{ questions }} dimensions, {{ rows }} rows and {{ size }} MB.",
+      "templateLink": "Get a template with your form's codes"
+    },
+    "preview": {
+      "summaryOne": "{{ count }} row found, with {{ dimensions }}.",
+      "summaryMany": "{{ count }} rows found, with {{ dimensions }}.",
+      "rowsWithoutTargetOne": "{{ count }} row without a target is left out.",
+      "rowsWithoutTargetMany": "{{ count }} rows without a target are left out.",
+      "ignoredOne": "{{ count }} column is not read.",
+      "ignoredMany": "{{ count }} columns are not read.",
+      "rowRange": "Row left out: {{ ranges }}",
+      "rowRanges": "Rows left out: {{ ranges }}",
+      "moreRowsOne": "and {{ count }} more row",
+      "moreRowsMany": "and {{ count }} more rows",
+      "ignoredNote": "{{ column }} · {{ name }}",
+      "ignoredUnnamed": "{{ column }} · values under a column without a name",
+      "reading": "Reading the file…",
+      "mappingConflict": "Saved frame: {{ saved }} · Form question: {{ form }}"
+    },
+    "picker": {
+      "title": "Choose questions",
+      "intro": "Choose the questions that define the groups of your sample. Each combination of their values becomes one row.",
+      "search": "Search questions",
+      "selectedCount": "{{ count }} of {{ max }}",
+      "group": {
+        "choices": "Questions with choices",
+        "typed": "Questions you type the values for",
+        "disabled": "Coverage cannot count these"
+      },
+      "choicesOne": "{{ count }} choice",
+      "choicesMany": "{{ count }} choices",
+      "editChoices": "Choices: {{ chosen }} of {{ total }}",
+      "values": "Values, one per line",
+      "valueTooLong": "A value is longer than {{ max }} characters.",
+      "noChoice": "Choose at least one choice.",
+      "targetName": "Its name is reserved for the target column. Map it in the editor under another name.",
+      "back": "Questions",
+      "choicesTitle": "Choices of {{ question }}",
+      "searchChoices": "Search choices",
+      "selectAll": "Select all",
+      "clearAll": "Clear",
+      "selectShown": "Select the {{ count }} shown",
+      "clearShown": "Clear the {{ count }} shown",
+      "chosen": "{{ chosen }} of {{ total }} chosen",
+      "tip": "Choose only the choices you sample, such as the municipalities you visit. When one question narrows another (a department and its municipalities), choose only the more detailed one.",
+      "noneChosen": "Choose at least one question.",
+      "countOne": "{{ count }} row",
+      "countMany": "{{ count }} rows",
+      "formula": "{{ formula }} = {{ rows }}",
+      "tooMany": "These choices make {{ count }} rows; a sampling frame holds at most {{ max }}. Choose fewer choices or questions.",
+      "repeatedHeader": "Two questions would both be named '{{ name }}' in the file. Choose one of them.",
+      "loadFailed": "The form's questions could not be loaded.",
+      "retry": "Try again",
+      "createRows": "Create the rows here"
+    },
+    "template": {
+      "download": "Download Excel template",
+      "downloading": "Preparing the template…",
+      "downloadedOne": "Template downloaded with {{ count }} row. Fill in the target column, then import it here.",
+      "downloadedMany": "Template downloaded with {{ count }} rows. Fill in the target column, then import it here."
+    },
+    "errorCountOne": "{{ count }} problem to fix before saving.",
+    "errorCountMany": "{{ count }} problems to fix before saving.",
+    "errorCountFirstOne": "{{ count }} problem to fix before saving, in row {{ row }}.",
+    "errorCountFirstMany": "{{ count }} problems to fix before saving, the first in row {{ row }}.",
+    "loadFailed": "The sampling frame could not be loaded.",
+    "retry": "Retry",
+    "start": {
+      "heading": "Plan your sample",
+      "intro": "The sampling frame lists the groups of your sample, such as municipality and sex, and the surveys each one needs. The performance dashboard measures coverage against it.",
+      "questions": "Choose questions",
+      "import": "Import a file",
+      "type": "Type it in"
+    },
+    "download": {
+      "action": "Download",
+      "downloading": "Preparing…",
+      "ready": "Sampling frame downloaded."
+    },
+    "editor": {
+      "createRows": "Create rows from questions",
+      "removeEmpty": "Remove rows without a target ({{ count }})",
+      "replaceTitle": "Replace the rows?",
+      "replace": "Replace rows",
+      "replaceRows": "The editor's {{ count }} rows will be replaced by the rows made from the questions.",
+      "targetsNotKept": "The questions changed, so the current targets will not be kept.",
+      "lostDimensions": "These dimensions cannot be made from questions and will not be kept: {{ names }}.",
+      "notChoicesOne": "{{ count }} row has values that are not choices of their question and will not be kept.",
+      "notChoicesMany": "{{ count }} rows have values that are not choices of their question and will not be kept.",
+      "rowsCreated": "The rows are in the editor. Fill in the targets and save."
     }
   },
   "sampleDownloads": {

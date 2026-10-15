@@ -86,7 +86,18 @@ export interface FormField {
   xpath: string;
   type: string;
   label: string | null;
+  /** The choice list of a select question, when the form names one. */
+  listName?: string | null;
+  /** Whether the question accepts "other" (pyxform adds an `other` choice when the form is deployed). */
+  orOther?: boolean;
   inRepeat?: boolean;
+}
+
+/** A choice of the form's lists: its code (`name`, what the answers store) and its label. */
+export interface FormChoice {
+  listName: string;
+  name: string;
+  label: string | null;
 }
 
 export interface Member {
@@ -131,10 +142,34 @@ export interface SamplingFrameInput {
   targets: { values: string[]; target: number | null }[];
 }
 
+/** A column the import did not read: a note (its name starts with `#`) or values under a column without a name. */
+export interface IgnoredColumn {
+  /** The spreadsheet letter of the column. */
+  column: string;
+  name: string | null;
+  reason: 'note' | 'unnamed';
+}
+
 export interface ImportPreview {
   dimensions: string[];
   rows: { row: number; values: string[]; target: number | null }[];
   errors: { row: number; message: string }[];
+  /** Row numbers of the rows left out because their target is empty. */
+  rowsWithoutTarget: number[];
+  ignoredColumns: IgnoredColumn[];
+}
+
+/** The questions of an import template; `values` null means every choice of a question with choices. */
+export interface FrameTemplateRequest {
+  dimensions: { field: string; values: string[] | null }[];
+}
+
+/** A prepared sampling frame workbook, downloaded once through its link. */
+export interface SamplingFrameFile {
+  downloadUrl: string;
+  fileName: string;
+  rowCount: number;
+  expiresAt: string;
 }
 
 const base = '/api/v1/projects';
@@ -169,6 +204,11 @@ export class ProjectsService {
 
   formFields(id: string): Observable<FormField[]> {
     return this.http.get<FormField[]>(`${base}/${id}/form-fields`);
+  }
+
+  /** The choice lists of the form snapshot, in form order. */
+  formChoices(id: string): Observable<FormChoice[]> {
+    return this.http.get<FormChoice[]>(`${base}/${id}/form-choices`);
   }
 
   /** The form versions the project's submissions use, with the state of each definition. */
@@ -224,5 +264,15 @@ export class ProjectsService {
     const form = new FormData();
     form.append('file', file, file.name);
     return this.http.post<ImportPreview>(`${base}/${id}/sampling-frame/import`, form);
+  }
+
+  /** Prepares an import template for the chosen questions. */
+  samplingFrameTemplate(id: string, request: FrameTemplateRequest): Observable<SamplingFrameFile> {
+    return this.http.post<SamplingFrameFile>(`${base}/${id}/sampling-frame/template`, request);
+  }
+
+  /** Prepares the saved frame as a workbook in the template's layout. */
+  exportSamplingFrame(id: string): Observable<SamplingFrameFile> {
+    return this.http.post<SamplingFrameFile>(`${base}/${id}/sampling-frame/export`, null);
   }
 }
