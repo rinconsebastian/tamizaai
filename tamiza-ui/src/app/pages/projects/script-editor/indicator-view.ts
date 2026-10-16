@@ -1,8 +1,8 @@
-import { LOCALE_ID, Component, computed, inject, input, signal } from '@angular/core';
+import { LOCALE_ID, Component, computed, inject, input, output, signal } from '@angular/core';
 import { TranslocoDirective } from '@jsverse/transloco';
 import { QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
 import type { IndicatorMetadata, IndicatorTestView } from '../../../core/projects/pipeline.service';
-import { Alert, Badge, Input } from '../../../shared/ui';
+import { Alert, Badge, Button, Input } from '../../../shared/ui';
 import { AxisChart } from '../indicators/axis-chart';
 import { ValueFormatter, valueFormatter } from '../indicators/format';
 import { StatWidget } from '../indicators/stat-widget';
@@ -10,6 +10,20 @@ import { StatWidget } from '../indicators/stat-widget';
 export interface ViewWarning {
   key: string;
   params: Record<string, string | number>;
+}
+
+// The params of each warning that the assistant's API keeps (design D3); everything else, such as the largest value of a percent, never leaves the browser.
+const askedParams: Record<string, string[]> = {
+  noValue: ['measure'],
+  emptyValues: ['measure', 'count'],
+  dimensionAsMeasure: ['column'],
+  duplicateRows: ['count'],
+};
+
+/** The warning as a fix request names it: its key and only the params the API keeps. */
+export function askedWarning(warning: ViewWarning): ViewWarning {
+  const kept = askedParams[warning.key] ?? [];
+  return { key: warning.key, params: Object.fromEntries(Object.entries(warning.params).filter(([name]) => kept.includes(name))) };
 }
 
 // Columns whose names say they are labels of something, not figures to add up.
@@ -56,13 +70,18 @@ export function viewWarnings(facts: IndicatorTestView, format: ValueFormatter, i
  */
 @Component({
   selector: 'app-indicator-view',
-  imports: [TranslocoDirective, Alert, Badge, Input, AxisChart, StatWidget],
+  imports: [TranslocoDirective, Alert, Badge, Button, Input, AxisChart, StatWidget],
   template: `
     <section class="flex flex-col gap-3 rounded-base border border-default p-3" *transloco="let t" aria-labelledby="indicator-view-title" data-testid="indicator-view">
       <h3 id="indicator-view-title" class="font-medium text-heading">{{ t('scriptTests.view.title') }}</h3>
 
       @for (warning of warnings(); track warning.key + ':' + $index) {
-        <tmz-alert tone="warning" data-testid="view-warning">{{ t('scriptTests.view.warnings.' + warning.key, warning.params) }}</tmz-alert>
+        <tmz-alert tone="warning" data-testid="view-warning">
+          {{ t('scriptTests.view.warnings.' + warning.key, warning.params) }}
+          @if (canAsk()) {
+            <button tmzButton variant="secondary" size="sm" type="button" class="ms-2" (click)="ask.emit(warning)" data-testid="view-warning-ask">{{ t('scriptTests.askAssistant') }}</button>
+          }
+        </tmz-alert>
       }
 
       <dl class="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
@@ -140,6 +159,10 @@ export class IndicatorView {
   readonly facts = input.required<IndicatorTestView>();
   /** The metadata being edited: the format and unit the figures are written with. */
   readonly metadata = input.required<IndicatorMetadata>();
+  /** Whether each warning offers "Ask the assistant": the page decides, from the test, the text and the role. */
+  readonly canAsk = input(false);
+  /** The analyst chose "Ask the assistant" on a warning. */
+  readonly ask = output<ViewWarning>();
 
   private readonly locale = inject(LOCALE_ID);
   protected readonly chosenDimension = signal<string | null>(null);

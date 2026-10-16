@@ -1,5 +1,6 @@
-import { Component, signal, viewChild } from '@angular/core';
+import { Component, Injector, effect, runInInjectionContext, signal, viewChild } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { undo } from '@codemirror/commands';
 import { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { CodeEditor } from './code-editor';
@@ -142,6 +143,124 @@ describe('CodeEditor', () => {
 
       expect(event.defaultPrevented).toBe(false);
       expect(fixture.componentInstance.editor().text()).toBe('def clean(raw, ctx):\n    return raw\n');
+    });
+  });
+
+  describe('replacements and undo', () => {
+    const original = 'def clean(raw, ctx):\n    return raw\n';
+    const type = (view: EditorView, text: string) =>
+      view.dispatch({ changes: { from: view.state.doc.length, insert: text }, selection: { anchor: view.state.doc.length + text.length }, userEvent: 'input.type' });
+
+    it('undoes a replacement of the whole text as one step, and only that', async () => {
+      const { fixture, view } = await render();
+      const editor = fixture.componentInstance.editor();
+      type(view, '# typed before\n');
+
+      editor.replace('def clean(raw, ctx):\n    return raw.copy()\n');
+      type(view, '# typed after\n');
+      expect(editor.text()).toBe('def clean(raw, ctx):\n    return raw.copy()\n# typed after\n');
+
+      undo(view);
+      expect(editor.text()).toBe('def clean(raw, ctx):\n    return raw.copy()\n');
+      undo(view);
+      expect(editor.text()).toBe(`${original}# typed before\n`);
+    });
+
+    it('undoes a replacement made right after typing without taking the typing with it', async () => {
+      const { fixture, view } = await render();
+      const editor = fixture.componentInstance.editor();
+      type(view, '# typed\n');
+
+      editor.replace('print(1)\n');
+      undo(view);
+
+      expect(editor.text()).toBe(`${original}# typed\n`);
+    });
+
+    it('replaces a range, keeps the rest, and undoes it as one step', async () => {
+      const { fixture, view } = await render();
+      const editor = fixture.componentInstance.editor();
+      editor.replace('a = 1\n# %%\nb = 2\n# %%\nc = 3\n');
+      const from = 'a = 1\n'.length;
+      const to = from + '# %%\nb = 2'.length;
+
+      expect(editor.replaceRange(from, to, '# %% Rate\nb = 20')).toBe(true);
+
+      expect(editor.text()).toBe('a = 1\n# %% Rate\nb = 20\n# %%\nc = 3\n');
+      expect(fixture.componentInstance.edits.at(-1)).toBe('a = 1\n# %% Rate\nb = 20\n# %%\nc = 3\n');
+      undo(view);
+      expect(editor.text()).toBe('a = 1\n# %%\nb = 2\n# %%\nc = 3\n');
+    });
+
+    it('changes nothing and returns false when a range is replaced in a read-only editor', async () => {
+      const { fixture } = await render();
+      const host = fixture.componentInstance;
+      host.readonly.set(true);
+      fixture.detectChanges();
+      const edits = host.edits.length;
+
+      expect(host.editor().replaceRange(0, 3, 'xyz')).toBe(false);
+
+      expect(host.editor().text()).toBe(original);
+      expect(host.edits.length).toBe(edits);
+    });
+
+    it('undoes an insertion at the cursor as one step', async () => {
+      const { fixture, view } = await render();
+      const editor = fixture.componentInstance.editor();
+      type(view, 'x = 1\n');
+
+      editor.insertAtCursor('y = 2\n');
+      type(view, 'z = 3\n');
+      undo(view);
+      undo(view);
+
+      expect(editor.text()).toBe(`${original}x = 1\n`);
+    });
+  });
+
+  describe('cursor line', () => {
+    it('is the line of the cursor, starting at the first', async () => {
+      const { fixture } = await render();
+
+      expect(fixture.componentInstance.editor().cursorLine()).toBe(1);
+    });
+
+    it('follows a selection change without any typing', async () => {
+      const { fixture, view } = await render();
+      const editor = fixture.componentInstance.editor();
+      const edits = fixture.componentInstance.edits.length;
+
+      view.dispatch({ selection: { anchor: view.state.doc.line(2).from + 2 } });
+      expect(editor.cursorLine()).toBe(2);
+
+      view.dispatch({ selection: { anchor: 0 } });
+      expect(editor.cursorLine()).toBe(1);
+      expect(fixture.componentInstance.edits.length).toBe(edits);
+    });
+
+    it('changes with the text when lines are added above the cursor', async () => {
+      const { fixture, view } = await render();
+      const editor = fixture.componentInstance.editor();
+      view.dispatch({ selection: { anchor: view.state.doc.line(2).from } });
+
+      view.dispatch({ changes: { from: 0, insert: 'import pandas as pd\n\n' } });
+
+      expect(editor.cursorLine()).toBe(4);
+    });
+
+    it('can be read by an effect, which runs again when the cursor moves', async () => {
+      const { fixture, view } = await render();
+      const editor = fixture.componentInstance.editor();
+      const seen: number[] = [];
+      const effectRef = runInInjectionContext(TestBed.inject(Injector), () => effect(() => seen.push(editor.cursorLine())));
+      TestBed.tick();
+
+      view.dispatch({ selection: { anchor: view.state.doc.line(3).from } });
+      TestBed.tick();
+      effectRef.destroy();
+
+      expect(seen).toEqual([1, 3]);
     });
   });
 

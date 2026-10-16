@@ -1,6 +1,4 @@
 using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using Tamiza.Api.Auth;
 using Tamiza.Api.CleanData;
 using Tamiza.Api.Data;
@@ -45,45 +43,17 @@ public static class ScriptInputEndpoints
         return api;
     }
 
-    /// <summary>The source and the run step that publishes it, by the kind of script that reads it.</summary>
-    private static (string Source, string Step)? SourceOf(string? kind) => kind?.ToLowerInvariant() switch
-    {
-        "clean" => ("raw", "flatten"),
-        "output" or "indicator" => ("clean", "clean"),
-        _ => null,
-    };
-
     private static async Task<Results<Ok<ScriptInputs>, ValidationProblem, ProblemHttpResult>> GetAsync(
-        Guid projectId, string? kind, DataDashboard dashboard, IOptions<DataDashboardOptions> options, TamizaDbContext db, CancellationToken ct)
+        Guid projectId, string? kind, ScriptInputsReader reader, CancellationToken ct)
     {
-        if (SourceOf(kind) is not var (source, step))
+        if (ScriptInputsReader.SourceOf(kind) is null)
         {
             return Problems.Validation("kind", "Choose the script: clean, output or indicator.");
         }
 
-        // The schema name is the project id and one of two fixed words, never request text.
-        var schema = $"p_{projectId:N}_{source}";
         try
         {
-            var published = await dashboard.InTransactionAsync(projectId, options.Value.StatementTimeout, async (connection, transaction, _) =>
-            {
-                var tables = await TableCatalog.FindAllAsync(connection, transaction, schema, ct);
-                var latest = tables.Count == 0 ? null : await DataDashboard.LatestStepAsync(connection, transaction, projectId, step, ct);
-                return (tables, latest);
-            }, ct);
-
-            var references = (await db.ReferenceTables.AsNoTracking().Where(t => t.ProjectId == projectId).OrderBy(t => t.Name).ToListAsync(ct))
-                .Select(t => new InputReferenceTable(t.Name, t.Columns.Select(c => new InputColumn(c.Name, c.Type)).ToList()))
-                .ToList();
-            var questions = (await db.Projects.AsNoTracking().Where(p => p.Id == projectId).Select(p => p.FormFields).SingleAsync(ct))
-                .Select(f => new InputQuestion(f.Name, f.Xpath, f.Type, f.Label))
-                .ToList();
-
-            var (tablesByName, latest) = published;
-            var inputs = tablesByName
-                .Select(t => new InputTable(t.Key, latest is not null && latest.Rows.TryGetValue(t.Key, out var rows) ? rows : null, t.Value))
-                .ToList();
-            return TypedResults.Ok(new ScriptInputs(source, latest?.FinishedAt, latest?.RunId, inputs, references, questions));
+            return TypedResults.Ok(await reader.ReadAsync(projectId, kind!, ct));
         }
         catch (DataTimeoutException)
         {

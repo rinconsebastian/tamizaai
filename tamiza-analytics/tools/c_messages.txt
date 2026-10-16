@@ -1,0 +1,294 @@
+# Messages that come from C, Cython, C++ or Rust code, so no Python source holds them.
+#
+# message_words.py adds the words of every line of this file (letters only, lowercase, two or more) to the vocabulary
+# of the script assistant's masker. Write each message the way the library prints it, without the values it inserts:
+# a value is never a word to keep. Blank lines and lines that start with # are ignored. Add a line when a message seen
+# in a test result shows its words masked as an ellipsis, then regenerate message-words.txt (see the tool's docstring).
+
+# CPython: exceptions raised by the interpreter and the built-in types
+could not convert string to float
+invalid literal for int() with base
+int() argument must be a string, a bytes-like object or a real number, not
+float() argument must be a string or a real number, not
+cannot convert float NaN to integer
+cannot convert float infinity to integer
+object has no attribute
+object is not callable
+object is not iterable
+object is not subscriptable
+object does not support item assignment
+object of type has no len()
+unhashable type
+name is not defined
+cannot access local variable where it is not associated with a value
+division by zero
+float division by zero
+integer division or modulo by zero
+unsupported operand type(s) for
+bad operand type for unary
+can only concatenate str (not) to str
+must be str, not
+not supported between instances of
+list index out of range
+tuple index out of range
+string index out of range
+list assignment index out of range
+cannot unpack non-iterable object
+not enough values to unpack (expected, got)
+too many values to unpack (expected)
+takes positional arguments but were given
+missing required positional argument
+missing required keyword-only argument
+got an unexpected keyword argument
+got multiple values for argument
+maximum recursion depth exceeded
+No module named
+cannot import name from partially initialized module
+module has no attribute
+invalid syntax
+invalid syntax. Perhaps you forgot a comma?
+expected an indented block after
+unexpected indent
+unindent does not match any outer indentation level
+unterminated string literal (detected at line)
+unterminated triple-quoted string literal
+unexpected EOF while parsing
+was never closed
+unmatched
+closing parenthesis does not match opening parenthesis
+cannot assign to expression here. Maybe you meant instead of?
+invalid decimal literal
+leading zeros in decimal integer literals are not permitted
+positional argument follows keyword argument
+keyword argument repeated
+f-string: expecting
+'return' outside function
+'break' outside loop
+'await' outside function
+invalid escape sequence
+codec can't decode byte in position: invalid start byte
+codec can't encode character in position: ordinal not in range
+dictionary changed size during iteration
+set changed size during iteration
+I/O operation on closed file
+No such file or directory
+Permission denied
+Memory error
+Unable to allocate for an array with shape and data type
+SystemExit
+KeyboardInterrupt
+
+# NumPy
+operands could not be broadcast together with shapes
+setting an array element with a sequence
+index is out of bounds for axis with size
+too many indices for array
+shape mismatch: value array of shape could not be broadcast to indexing result of shape
+cannot reshape array of size into shape
+all the input array dimensions except for the concatenation axis must match exactly
+zero-dimensional arrays cannot be concatenated
+The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+invalid value encountered in
+divide by zero encountered in
+overflow encountered in
+Mean of empty slice
+Degrees of freedom <= 0 for slice
+could not convert string to float
+Cannot cast array data from dtype to dtype according to the rule 'safe'
+Cannot convert NA to integer
+no implementation found for on types that implement
+data type not understood
+Python int too large to convert to C long
+
+# pandas (Cython: tslibs, parsing, lib, hashtable, groupby, indexing)
+Unable to parse string
+Unknown datetime string format, unable to parse
+Unknown string format
+time data doesn't match format
+time data does not match format
+Out of bounds nanosecond timestamp
+Out of bounds timestamp
+Cannot convert non-finite values (NA or inf) to integer
+Cannot convert NA to integer
+cannot convert float NaN to integer
+Integer column has NA values in column
+Cannot mask with non-boolean array containing NA / NaN values
+Cannot index with multidimensional key
+cannot reindex on an axis with duplicate labels
+Length of values does not match length of index
+Length mismatch: Expected axis has elements, new values have elements
+Shape of passed values is, indices imply
+The truth value of a Series is ambiguous. Use a.empty, a.bool(), a.item(), a.any() or a.all()
+The truth value of a DataFrame is ambiguous
+Can only use .str accessor with string values
+Can only use .dt accessor with datetimelike values
+Cannot compare tz-naive and tz-aware datetime-like objects
+Cannot subtract tz-naive and tz-aware datetime-like objects
+Cannot localize tz-aware datetimes
+Cannot compare datetime64 and timedelta64
+Invalid comparison between dtype and
+Buffer dtype mismatch, expected but got
+Buffer has wrong number of dimensions
+Buffer overflow caught - possible malformed input file
+Error tokenizing data. C error: Expected fields in line, saw
+No columns to parse from file
+Passed header names mismatches usecols
+Columns must be same length as key
+Grouper for not 1-dimensional
+Unalignable boolean Series provided as indexer
+Series.name must be a hashable type
+cannot do slice indexing on with these indexers of type
+Cannot set a DataFrame with multiple columns to the single column
+A value is trying to be set on a copy of a slice from a DataFrame
+cannot insert, already exists
+Index contains duplicate entries, cannot reshape
+You are trying to merge on and columns. If you wish to proceed you should use pd.concat
+Reindexing only valid with uniquely valued Index objects
+unhashable type: 'dict'
+NaTType does not support
+Passing a negative integer is not supported
+
+# PyArrow
+Could not convert with type: tried to convert to int64
+Invalid: Failed to parse string: as a scalar of type
+Invalid: Integer value out of bounds
+Invalid: Float value was truncated converting to integer
+Invalid: Casting from timestamp to timestamp would lose data
+Invalid: Cannot locate timezone
+ArrowInvalid
+ArrowTypeError
+ArrowNotImplementedError
+ArrowKeyError
+ArrowIndexError
+ArrowMemoryError
+ArrowCapacityError
+ArrowSerializationError
+Expected bytes, got a object
+Expected integer, got string
+Field named not found in schema
+Schema at index was different
+Unsupported cast from to using function
+Function has no kernel matching input types
+
+# Polars (Rust)
+ColumnNotFoundError
+ComputeError
+SchemaError
+SchemaFieldNotFoundError
+ShapeError
+InvalidOperationError
+DuplicateError
+NoDataError
+OutOfBoundsError
+StringCacheMismatchError
+StructFieldNotFoundError
+PanicException
+not found
+unable to find column; valid columns
+cannot compare string with numeric type
+could not parse as dtype at column
+conversion from to failed in column for value(s)
+invalid series dtype: expected got
+lengths don't match
+cannot cast
+strict conversion
+duplicate column names found
+expected data type, got
+operation not supported for dtypes
+cannot compare
+unable to add a column of length to a DataFrame of height
+No such file or directory
+
+# DuckDB (C++)
+Conversion Error: Could not convert string to INT32
+Conversion Error: Type with value can't be cast because the value is out of range for the destination type
+Conversion Error: invalid timestamp field format
+Conversion Error: date field value out of range
+Binder Error: Referenced column not found in FROM clause! Candidate bindings
+Binder Error: Table does not have a column named
+Binder Error: column must appear in the GROUP BY clause or must be part of an aggregate function
+Binder Error: No function matches the given name and argument types. You might need to add explicit type casts
+Binder Error: Ambiguous reference to column name
+Catalog Error: Table with name does not exist! Did you mean
+Catalog Error: Scalar Function with name does not exist!
+Catalog Error: Table with name already exists!
+Parser Error: syntax error at or near
+Invalid Input Error: Failed to cast value
+Out of Range Error
+Constraint Error: Duplicate key violates primary key constraint
+IO Error: Could not open file
+Not implemented Error
+Dependency Error
+Invalid Error
+Out of Memory Error: could not allocate block of size
+Sequence Error
+Serialization Error
+Parameter Not Allowed Error
+Transaction Error
+Interrupt Error
+Fatal Error
+Internal Error
+Connection Error
+Python Object Error
+Python Conversion Error
+Missing Extension Error
+Conversion Exception
+Binder Exception
+Catalog Exception
+Parser Exception
+Invalid Input Exception
+Out of Range Exception
+Constraint Exception
+IO Exception
+Not Implemented Exception
+Serialization Exception
+Sequence Exception
+Transaction Exception
+Syntax Exception
+Interrupt Exception
+Fatal Exception
+Internal Exception
+Invalid Type Exception
+Outofmemory Exception
+Permission Exception
+Parameter Not Resolved Exception
+Parameter Not Allowed Exception
+
+# Shapely and GEOS
+TopologyException: found non-noded intersection between and
+IllegalArgumentException: Points of LinearRing do not form a closed linestring
+IllegalArgumentException: Invalid number of points in LinearRing found
+Too few points in geometry component
+GEOSException
+Self-intersection
+Ring Self-intersection
+Invalid Coordinate
+Input geometry is invalid
+Geometry is not valid
+Unable to read geometry
+Unsupported geometry type
+could not create geometry because of errors while reading input
+WKB reader
+WKT reader
+ParseException: Expected word but encountered number
+Unknown WKB type
+
+# GeoPandas / pyproj / pyogrio
+CRS mismatch between the CRS of left geometries and the CRS of right geometries
+Cannot transform naive geometries. Please set a crs on the object first
+The indices of the two GeoSeries are different
+Geometry column does not contain geometry
+Unable to determine CRS
+Invalid projection
+no geometry data set yet
+DataSourceError
+GeometryError
+SetupError
+Failed to read GeoJSON data
+Unable to open
+
+# openpyxl and zip files
+File is not a zip file
+BadZipFile
+Workbook contains no default style
+Worksheet does not exist

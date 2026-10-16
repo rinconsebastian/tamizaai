@@ -52,7 +52,7 @@ export function configureApp(extraProviders: Provider[] = []) {
       provideHttpClient(),
       provideHttpClientTesting(),
       provideVisibleElements(),
-      { provide: AuthService, useValue: { status: signal('authenticated'), login: vi.fn(), unavailableReason: signal(null) } },
+      { provide: AuthService, useValue: { status: signal('authenticated'), login: vi.fn(), unavailableReason: signal(null), subject: signal<string | null>('user-1') } },
       ...extraProviders,
     ],
   });

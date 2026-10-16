@@ -42,6 +42,9 @@ context: |
     claims jobs with `SELECT ... FOR UPDATE SKIP LOCKED`. No queue container in the MVP.
   - `analytics` reads and writes `db` directly.
   - `api` calls the KoboToolbox API v2 to synchronize.
+  - `api` calls the model provider the operator configures (any OpenAI-compatible
+    chat-completions server) when the AI assistant is enabled; only `api` talks to it,
+    and never `analytics`.
 
   ### 2.3 Result storage
 
@@ -81,7 +84,6 @@ context: |
 
   Do not propose or implement in the MVP:
 
-  - AI assistant.
   - Strong sandbox for user code.
   - Multi-tenant SaaS.
   - Semantic layer.

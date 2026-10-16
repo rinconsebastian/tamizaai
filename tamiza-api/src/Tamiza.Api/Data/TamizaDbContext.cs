@@ -37,6 +37,8 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
 
     public DbSet<SampleDownloadPart> SampleDownloadParts => Set<SampleDownloadPart>();
 
+    public DbSet<AssistantCall> AssistantCalls => Set<AssistantCall>();
+
     public DbSet<ReferenceTable> ReferenceTables => Set<ReferenceTable>();
 
     public DbSet<ReferenceTableContent> ReferenceTableContents => Set<ReferenceTableContent>();
@@ -294,6 +296,36 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             part.HasKey(p => new { p.DownloadId, p.Part });
             part.Property(p => p.Data).HasColumnType("bytea");
             part.HasOne<SampleDownload>().WithMany().HasForeignKey(p => p.DownloadId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AssistantCall>(call =>
+        {
+            call.ToTable("assistant_calls", table =>
+            {
+                table.HasCheckConstraint("ck_assistant_calls_kind", "kind IN ('clean', 'output', 'indicator')");
+                table.HasCheckConstraint("ck_assistant_calls_action", "action IN ('script', 'cell', 'fix')");
+                table.HasCheckConstraint("ck_assistant_calls_status", "status IN ('running', 'succeeded', 'failed', 'cancelled')");
+                table.HasCheckConstraint("ck_assistant_calls_outcome", "outcome IS NULL OR outcome IN ('script', 'cell', 'insert')");
+            });
+            call.HasKey(c => c.Id);
+            call.Property(c => c.Id).ValueGeneratedNever();
+            call.Property(c => c.Kind).HasConversion(LowercaseEnum<ScriptKind>()).HasMaxLength(16);
+            call.Property(c => c.Name).HasMaxLength(63);
+            call.Property(c => c.Action).HasConversion(LowercaseEnum<AssistantAction>()).HasMaxLength(16);
+            call.Property(c => c.Model).HasMaxLength(200);
+            call.Property(c => c.Context).HasJsonObjectColumn();
+            call.Property(c => c.Status).HasConversion(LowercaseEnum<AssistantCallStatus>()).HasMaxLength(16);
+            call.Property(c => c.ErrorCode).HasMaxLength(64);
+            call.Property(c => c.TokensEstimated).HasDefaultValue(false);
+            call.Property(c => c.Outcome).HasConversion(LowercaseEnum<AssistantOutcome>()).HasMaxLength(16);
+            call.Property(c => c.StartedAt).HasDefaultValueSql("now()");
+            // A user has at most one request in progress.
+            call.HasIndex(c => c.UserId).IsUnique().HasFilter("status = 'running'").HasDatabaseName("ix_assistant_calls_user_id_running");
+            // The daily budget sums a user's rows since the start of the UTC day.
+            call.HasIndex(c => new { c.UserId, c.StartedAt });
+            call.HasIndex(c => c.ProjectId);
+            call.HasOne<Project>().WithMany().HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            call.HasOne<User>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ReferenceTable>(reference =>

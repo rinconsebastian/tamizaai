@@ -42,6 +42,15 @@ const apiErrorCodes = [
   'data.exportTooLarge',
   'indicators.notPublished',
   'samplingFrame.none',
+  'assistant.disabled',
+  'assistant.misconfigured',
+  'assistant.unavailable',
+  'assistant.timeout',
+  'assistant.rateLimited',
+  'assistant.budget',
+  'assistant.busy',
+  'assistant.testStale',
+  'assistant.contextTooLarge',
 ];
 
 function lookup(root: unknown, path: string): unknown {
@@ -51,6 +60,11 @@ function lookup(root: unknown, path: string): unknown {
 describe('English translations', () => {
   it.each(apiErrorCodes)('have a message for the API error code %s', (code) => {
     expect(typeof lookup(en.errors.codes, code)).toBe('string');
+  });
+
+  it('have the assistant messages that name a time, for the codes that carry one', () => {
+    expect(en.errors.codes.assistant.rateLimitedIn).toContain('{{ seconds }}');
+    expect(en.errors.codes.assistant.budgetRenews).toContain('{{ when }}');
   });
 
   it('name every run trigger, status, step and step status', () => {

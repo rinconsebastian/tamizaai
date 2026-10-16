@@ -22,6 +22,23 @@ public static class Problems
     public static ProblemHttpResult Unavailable(string code, string detail) =>
         TypedResults.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "The request could not be completed in time.",
             detail: detail, extensions: new Dictionary<string, object?> { ["code"] = code });
+
+    /// <summary>
+    /// A Problem Details response with any status, the <c>code</c> the UI translates and any further machine-readable
+    /// <paramref name="extensions"/> (for example <c>retryAfter</c>). <see cref="Unavailable"/> fits only when the title "could not be
+    /// completed in time" does.
+    /// </summary>
+    public static ProblemHttpResult Status(
+        int status, string code, string title, string detail, IReadOnlyDictionary<string, object?>? extensions = null)
+    {
+        var all = new Dictionary<string, object?> { ["code"] = code };
+        foreach (var (name, value) in extensions ?? new Dictionary<string, object?>())
+        {
+            all[name] = value;
+        }
+
+        return TypedResults.Problem(statusCode: status, title: title, detail: detail, extensions: all);
+    }
 }
 
 /// <summary>Collects field errors keyed by camelCase path.</summary>

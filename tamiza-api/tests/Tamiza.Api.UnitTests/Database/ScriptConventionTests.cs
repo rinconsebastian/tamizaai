@@ -106,4 +106,30 @@ public sealed class ScriptConventionTests
         Assert.All(System.Text.RegularExpressions.Regex.Matches(sql, @"CREATE (?:UNIQUE )?INDEX (\w+)").Select(m => m.Groups[1].Value),
             name => Assert.StartsWith("ix_sample_downloads_", name));
     }
+
+    [Fact]
+    public void The_script_assistant_script_names_every_constraint_and_index()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0011_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0011_add_script_assistant.sql", resource);
+        foreach (var constraint in new[]
+                 {
+                     "pk_assistant_calls PRIMARY KEY", "ck_assistant_calls_kind CHECK", "ck_assistant_calls_action CHECK",
+                     "ck_assistant_calls_status CHECK", "ck_assistant_calls_outcome CHECK",
+                     "fk_assistant_calls_projects_project_id FOREIGN KEY", "fk_assistant_calls_users_user_id FOREIGN KEY",
+                 })
+        {
+            Assert.Contains($"CONSTRAINT {constraint}", sql);
+        }
+
+        // Every key, check and foreign key is introduced by a CONSTRAINT name; every index has an ix_ name.
+        Assert.Equal(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count,
+            System.Text.RegularExpressions.Regex.Matches(sql, @"CONSTRAINT (?:pk|fk|ck)_\w+ (?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count);
+        Assert.All(System.Text.RegularExpressions.Regex.Matches(sql, @"CREATE (?:UNIQUE )?INDEX (\w+)").Select(m => m.Groups[1].Value),
+            name => Assert.StartsWith("ix_assistant_calls_", name));
+        Assert.Contains("CREATE UNIQUE INDEX ix_assistant_calls_user_id_running ON tamiza.assistant_calls (user_id) WHERE status = 'running'", sql);
+    }
 }

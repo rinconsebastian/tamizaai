@@ -1,3 +1,4 @@
+using Tamiza.Api.Assistant;
 using Tamiza.Api.Auth;
 using Tamiza.Api.CleanData;
 using Tamiza.Api.Configuration;
@@ -26,6 +27,7 @@ builder.Services.AddTamizaPerformance();
 builder.Services.AddTamizaCleanData();
 builder.Services.AddTamizaIndicators();
 builder.Services.AddTamizaPipeline();
+builder.Services.AddTamizaAssistant();
 
 var app = builder.Build();
 
@@ -55,6 +57,7 @@ api.MapReferenceTableEndpoints();
 api.MapScriptTestEndpoints();
 api.MapSampleDownloadEndpoints();
 api.MapScriptInputEndpoints();
+api.MapAssistantEndpoints();
 
 if (!await app.MigrateDatabaseAsync())
 {

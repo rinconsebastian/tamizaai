@@ -38,6 +38,7 @@ It replaces today's manual flow: Kobo → Jupyter/pandas → indicators → Powe
 - `api` → `analytics`: through a job queue in PostgreSQL (table `runs`). The Python worker claims jobs with `SELECT ... FOR UPDATE SKIP LOCKED`. No queue container is added in the MVP.
 - `analytics` reads and writes `db` directly.
 - `api` calls the KoboToolbox API v2 to synchronize.
+- `api` calls the model provider the operator configures (any OpenAI-compatible chat-completions server) when the AI assistant is enabled; only `api` talks to it, and never `analytics`.
 
 ### 2.3 Result storage
 
@@ -67,7 +68,7 @@ Schema and table names are never built from user text without validation (allow 
 
 ## 4. Out of scope for the MVP
 
-AI assistant, strong sandbox for user code, multi-tenant SaaS, semantic layer, Word/Excel/PowerPoint templates, Power BI endpoint, S3 storage, dedicated message queue, visual block editor.
+Strong sandbox for user code, multi-tenant SaaS, semantic layer, Word/Excel/PowerPoint templates, Power BI endpoint, S3 storage, dedicated message queue, visual block editor.
 
 ---
 
@@ -273,6 +274,7 @@ Widgets sit on a 12-column grid that analysts and admins move and resize by drag
 - `script_tests`: id, project_id, requested_by, kind, code (the tested draft), sample_size, status, clean_version_id, queued_at, started_at, finished_at, error, stop_line (the line of the `# %%` marker the draft is run through, null for a whole test), steps (per-step logs, table previews, what the draft showed and, for an indicator, the facts of its table). Deleted 24 hours after they end.
 - `reference_tables`: id, project_id, name, file_name, columns (name, header, type), row_count, updated_by, updated_at. The rows are in `reference_table_contents` (one JSONB array per table), not in a per-project schema.
 - `dashboard_widgets`: id, project_id, chart_type (stat/bar/column/line/histogram/pie/map), title, config (the widget's query: indicator, measure or ratio, group column, filters, geometry column, histogram ranges), layout (x, y, w, h on the 12-column grid), created_by, created_at, updated_by, updated_at. One row per widget of the indicators dashboard.
+- `assistant_calls`: id, project_id, user_id, kind, name, action (script/cell/fix), test_id, model, prompt_kit, context (the size of each part of the context, what was left out and whether a test was attached; no text), status (running/succeeded/failed/cancelled), error_code, prompt_tokens, completion_tokens, total_tokens, tokens_estimated, outcome (how the analyst applied the proposal: script/cell/insert), started_at, finished_at. One row per request to the AI assistant; it holds no message, script or answer. The daily token budget per user adds up these rows.
 - `form_versions`: project_id, uid (a Kobo form version, `__version__`), status (pending/available/failed/not_found), fields and choices (the version's questions and choice lists, with labels in the default language), deployed_at, recorded_at, fetched_at, attempts, next_attempt_at, error. One row per version a project's submissions use; recorded when a submission with the version is stored, fetched from Kobo once.
 
 ---
@@ -308,6 +310,7 @@ Implement in this order, one change per line:
 7a. `split-indicator-scripts`: instead of one script 3 returning one `indicators` table, a project has any number of named indicator scripts, each returning one table published under its name in `p_<id>_indicators`, with the rows and columns its indicator needs (any numeric column as a measure, `value` by default; `numerator`/`denominator` optional for ratios of sums), metadata per indicator (label, description, unit, format), per-table publishing so one failing indicator leaves its previous table and the others publish, and widgets that plot one indicator table each. Clean cut: the single-table contract is dropped without migration, since no real data exists yet. Implemented.
 7b. `add-script-workbench`: script-editing ergonomics: a panel of the available tables and columns with their types, autocompletion of `ctx`, tables and columns in the editor, Tab indentation and basic linting, inline `ctx` reference and better templates, and stateless exploration cells on the sample test (`# %%` cells and `ctx.show(df, name)` previews re-run from scratch on a cached sample; no persistent kernel) with an "as the dashboard will see it" preview for indicator tables. Implemented.
 7c. `add-local-dev-kit`: "Download sample" in the Scripts section: the worker prepares, like a test and reusing its cached sample, a zip with the flattened tables (script 1's input), the saved script 1's result on them, the reference tables and `context.json`, kept an hour in the database and downloaded through a single-use link; the zip also holds the `tamiza_sdk` package, built from the database-free runner (`load_context`, `load_tables`, `check`), pinned requirements, a README and a starter notebook, to write scripts in Jupyter locally, check them as the server runs them and upload them. Implemented.
+7d. `add-script-assistant`: an optional AI assistant in the Scripts section, available only when the operator sets an OpenAI-compatible provider (base URL, model and key) for `api`: an Assistant tab, for analysts and admins, that drafts a whole script, rewrites the `# %%` cell at the cursor and fixes a failed sample test or a warning of an indicator's dashboard view, from the contract rules, the templates, the tables and columns with types and question labels, the choice lists, the saved script 1 and the draft. It sends no rows: from the analyst's own last test only its shape and its error and log lines, reduced to the script's frames and masked, with every word or number that is not a known name replaced by `…`; "Show what will be sent" and "Copy context" show the exact text. A proposal reaches the editor only when applied, as one undoable change, after the editor's checks (including a new import check for libraries the worker lacks) have marked it; the assistant never saves or tests. A daily token budget and one request at a time per user, usage records without text in `assistant_calls`, the conversation only in the browser session, and a `docs/operations.md` section with example providers and seven requests to check a provider. Implemented.
 
 Deferred with a reason: a Jupyter-like persistent kernel in the browser (it contradicts the per-step process isolation, the one-job worker and the 4 GB VPS target); a shared helper module across indicator scripts; widgets that compare several indicator tables.
 

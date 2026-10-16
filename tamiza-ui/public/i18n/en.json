@@ -103,6 +103,19 @@
       },
       "samplingFrame": {
         "none": "This project has no sampling frame yet."
+      },
+      "assistant": {
+        "disabled": "The assistant is not available in this installation.",
+        "misconfigured": "The assistant is misconfigured. Contact the administrator.",
+        "unavailable": "The assistant's provider could not be reached or failed while writing. Try again in a moment.",
+        "timeout": "The provider did not answer in time. Try again.",
+        "rateLimited": "The provider is limiting requests. Try again in a moment.",
+        "rateLimitedIn": "The provider is limiting requests. Try again in {{ seconds }} seconds.",
+        "budget": "You have used your daily allowance of assistant requests. It renews at midnight UTC.",
+        "budgetRenews": "You have used your daily allowance of assistant requests. It renews on {{ when }}.",
+        "busy": "A request of yours is already in progress. Wait for it to finish, or cancel it.",
+        "testStale": "The test no longer matches this script. Test again, then ask for the fix.",
+        "contextTooLarge": "The script is too large for the assistant."
       }
     }
   },
@@ -516,7 +529,9 @@
       "unknownReference": "The project has no reference table {{ name }}. Available: {{ available }}.",
       "noReference": "The project has no reference tables, so there is no {{ name }}. Upload one in Reference data.",
       "unknownTable": "There is no input table {{ name }}. Available: {{ available }}.",
-      "mixedIndentation": "This line is indented with tabs and spaces. Use four spaces."
+      "mixedIndentation": "This line is indented with tabs and spaces. Use four spaces.",
+      "unavailableImport": "{{ module }} is not available to scripts. The libraries are: {{ available }}, and Python's standard library.",
+      "neverImport": "Scripts receive their data from Tamiza and need neither files, processes nor the network, so {{ module }} is not needed."
     },
     "editor": {
       "keys": "Tab indents. Press Esc, then Tab, to leave the editor.",
@@ -647,7 +662,8 @@
     "sideTabs": {
       "inputs": "Tables",
       "reference": "Reference",
-      "versions": "Versions"
+      "versions": "Versions",
+      "assistant": "Assistant"
     },
     "inputs": {
       "nothingPublished": "The tables appear after the first run. You can write the script without them.",
@@ -671,7 +687,92 @@
     "editDetails": "Edit details",
     "moreActions": "More actions",
     "indicatorsMenu": "Indicators ({{ count }})",
-    "indicatorFilter": "Filter indicators"
+    "indicatorFilter": "Filter indicators",
+    "assistant": {
+      "model": "Model {{ model }} at {{ host }}.",
+      "disclosure": "Sent to the model: the tables and columns with their labels, the choice lists, the saved script 1, the text in the editor and the errors of your last test. No rows of data are sent.",
+      "showContext": "Show what will be sent",
+      "copyContext": "Copy context",
+      "contextCopied": "Context copied.",
+      "contextTitle": "What will be sent",
+      "contextIntro": "This is the exact text the next request sends. It holds no rows of data.",
+      "contextSize": "{{ size }} KB",
+      "contextOmitted": "Left out to fit the size limit:",
+      "close": "Close",
+      "roles": {
+        "user": "You",
+        "assistant": "Assistant"
+      },
+      "scopeLabel": "What do you want?",
+      "scopes": {
+        "script": "Script",
+        "cell": "This cell: {{ name }}",
+        "fix": "Fix the last test"
+      },
+      "cellUnnamed": "Cell {{ number }}",
+      "needsCell": "To rewrite one cell, put the cursor inside a cell. A cell starts at a line with # %%.",
+      "testAgain": "The test no longer matches the text in the editor. Test again before asking for a fix.",
+      "fixNote": "The last test of this script goes with the request: its steps, tables and columns, and its errors with values hidden. Never rows.",
+      "requestLabel": "Your request",
+      "placeholders": {
+        "script": "Describe the script, for example: share of households with piped water by municipality",
+        "cell": "Say what to change in this cell",
+        "fix": "Say what to fix"
+      },
+      "tooLong": "A request can be at most {{ max }} KB. This one is {{ size }} KB.",
+      "counter": "{{ size }} of {{ max }} KB",
+      "send": "Send",
+      "draftFromDetails": "Draft from the details",
+      "detailsRequest": {
+        "intro": "Write the script for the indicator \"{{ label }}\".",
+        "description": "Description: {{ description }}",
+        "unit": "Unit: {{ unit }}",
+        "format": "Format: {{ format }}"
+      },
+      "newConversation": "New conversation",
+      "writing": "Writing…",
+      "seconds": "{{ count }} s",
+      "pendingElsewhere": "A request for {{ script }} is in progress. Open that script to cancel it, or wait for the answer.",
+      "scriptLabels": {
+        "clean": "script 1",
+        "output": "script 2",
+        "indicator": "indicator {{ name }}"
+      },
+      "replaceEditedTitle": "Apply the proposed code?",
+      "replaceEditedMessage": "The text in the editor changed after the request was sent. The proposed code was written for the earlier text, and applying it can overwrite your edits. You can undo it with Ctrl+Z.",
+      "replaceEditedConfirm": "Apply",
+      "fixStep": "The last test failed in {{ step }}. Please fix the error.",
+      "fixWarning": {
+        "noRows": "The dashboard view warns that the table has no rows. Please fix the script so that it returns rows.",
+        "noValue": "The dashboard view warns that the table has no value column. Please fix the script so that it returns one.",
+        "ratioIncomplete": "The dashboard view warns that numerator and denominator must go together. Please fix the script so that it returns both or neither.",
+        "emptyValues": "The dashboard view warns that some rows have no value in the default measure. Please fix the script so that every row has one.",
+        "percentAboveOne": "The dashboard view warns that the format is percent but values of the default measure are above 1. Please fix the script so that the values are fractions.",
+        "dimensionAsMeasure": "The dashboard view warns that a column is a number, so it is offered as a measure and not as a dimension. Please fix the script so that it returns that column as text.",
+        "duplicateRows": "The dashboard view warns that several rows share the same values in every dimension. Please fix the script so that each combination appears once."
+      },
+      "viewingOlder": "The assistant works on the current text of the script, not on an older version. Go back to the current version to ask for something.",
+      "testExpired": "The test was no longer available, so this answer was given without it.",
+      "dismiss": "Dismiss",
+      "proposal": "Proposed code",
+      "blockNumber": "Block {{ number }}",
+      "oneLine": "1 line",
+      "lines": "{{ lines }} lines",
+      "definesContract": "Defines {{ signature }}.",
+      "noContract": "Does not define {{ signature }}.",
+      "marksTitle": "Checks on the result",
+      "offers": {
+        "script": "Replace script",
+        "cell": "Replace cell",
+        "insert": "Insert at cursor"
+      },
+      "notes": {
+        "notOneScript": "This answer is not one script, so each block can only be inserted at the cursor.",
+        "notOneCell": "This answer is not a single cell, so it can only be inserted at the cursor.",
+        "cutOff": "The answer was cut off, so the code can only be inserted at the cursor. Ask for a smaller change.",
+        "cellChanged": "The cell changed since the request, so the code can only be inserted at the cursor."
+      }
+    }
   },
   "runs": {
     "title": "Runs",
@@ -988,6 +1089,8 @@
     "sampleSizeRange": "Enter a whole number of submissions from {{ min }} to {{ max }}.",
     "title": "Test of {{ kind }} on {{ size }} submissions",
     "stale": "The editor has changed since this test. Test again to see the result of the current code.",
+    "staleAsk": "Test again before asking the assistant for a fix.",
+    "askAssistant": "Ask the assistant",
     "starting": "Starting…",
     "running": "Running…",
     "waitingForRun": "Waiting for a run to finish. The test starts right after it.",

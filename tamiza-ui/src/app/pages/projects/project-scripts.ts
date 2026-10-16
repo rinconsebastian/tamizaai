@@ -4,6 +4,7 @@ import { Component, ElementRef, computed, inject, signal, viewChild } from '@ang
 import { RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
+import { SystemConfigService } from '../../core/system-config';
 import {
   FixedScriptKind,
   IndicatorMetadata,
@@ -29,11 +30,15 @@ import { CodeEditor } from '../../shared/ui/code-editor';
 import { AddIndicatorData, AddIndicatorDialog, NewIndicator } from './add-indicator-dialog';
 import { IndicatorMetadataFields } from './indicator-metadata-fields';
 import { PipelineRuns } from './pipeline-runs';
+import { valueFormatter } from './indicators/format';
 import { ProjectContext } from './project-context';
 import { SampleDownloadPanel } from './sample-download-panel';
 import { ScriptTestPanel } from './script-test-panel';
 import { IndicatorMenu, IndicatorMenuItem } from './script-editor/indicator-menu';
 import { ResolvedProblem, scriptAssist } from './script-editor/script-assist';
+import { ASSISTANT_SESSION, ApplyRequest, FixTarget, cellReplacement, findCell } from './script-editor/assistant-state';
+import { AssistantSession } from './script-editor/assistant-session';
+import { askedWarning, viewWarnings } from './script-editor/indicator-view';
 import { ScriptInputsInfo, signatureOf } from './script-editor/script-analysis';
 import { ScriptSidePanel } from './script-editor/script-side-panel';
 import { TemplateMenu, TemplateOption } from './script-editor/template-menu';
@@ -81,6 +86,8 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
     ScriptTestPanel,
     TemplateMenu,
   ],
+  // The Assistant's state outlives its tab: one session per Scripts page, which also ends its request when the page is left.
+  providers: [AssistantSession, { provide: ASSISTANT_SESSION, useExisting: AssistantSession }],
   template: `
     <div class="flex flex-col gap-6" *transloco="let t">
       <div class="grid gap-6 lg:grid-cols-4">
@@ -282,7 +289,16 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
           </tmz-card>
 
           @if (test(); as test) {
-            <app-script-test-panel #testPanel [started]="test" [projectId]="projectId()" [draft]="draft()" [metadata]="indicatorName() ? shownMetadata() : null" />
+            <app-script-test-panel
+              #testPanel
+              [started]="test"
+              [projectId]="projectId()"
+              [draft]="draft()"
+              [metadata]="indicatorName() ? shownMetadata() : null"
+              [canAsk]="canAsk()"
+              (changed)="latestTest.set($event)"
+              (ask)="askAssistant($event)"
+            />
           }
 
           @if (sampleDownload(); as sample) {
@@ -299,9 +315,16 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
             [manageLink]="referenceLink()"
             [versions]="versions()"
             [viewingNumber]="viewing()?.number ?? null"
+            [canEdit]="canEdit()"
+            [projectId]="projectId()"
+            [scriptName]="indicatorName()"
+            [draft]="draft()"
+            [cursorLine]="cursorLine()"
+            [details]="indicatorName() ? meta() : null"
             (pick)="insertName($event)"
             (refresh)="reloadInputs()"
             (view)="view($event)"
+            (apply)="applyProposal($event)"
           />
         </div>
       </div>
@@ -318,9 +341,13 @@ export class ProjectScripts {
   private readonly confirmDialog = inject(ConfirmDialog);
   private readonly dialog = inject(Dialog);
   private readonly context = inject(ProjectContext);
+  private readonly assistant = inject(AssistantSession);
   private readonly editor = viewChild(CodeEditor);
   private readonly uploadInput = viewChild<ElementRef<HTMLInputElement>>('uploadInput');
   private readonly testPanel = viewChild('testPanel', { read: ElementRef });
+  private readonly sidePanel = viewChild(ScriptSidePanel);
+  private readonly sidePanelElement = viewChild(ScriptSidePanel, { read: ElementRef });
+  private readonly systemConfig = inject(SystemConfigService);
   protected readonly runs = viewChild(PipelineRuns);
 
   protected readonly kinds = fixedScriptKinds;
@@ -351,6 +378,10 @@ export class ProjectScripts {
   protected readonly testError = signal<string | null>(null);
   /** The latest test started from this page; the panel follows it until it ends. */
   protected readonly test = signal<ScriptTest | null>(null);
+  /** The latest test as the test panel last saw it, polled to its end: what a fix of the assistant refers to. */
+  protected readonly latestTest = signal<ScriptTest | null>(null);
+  /** The sentences "Ask the assistant" put in a request box, so asking again replaces them and never the analyst's own words. */
+  private readonly askedSentences = new Set<string>();
   protected readonly downloading = signal(false);
   /** The latest sample download requested from this page; the panel follows it until it is ready. */
   protected readonly sampleDownload = signal<SampleDownload | null>(null);
@@ -362,14 +393,24 @@ export class ProjectScripts {
   protected readonly problems = signal<ResolvedProblem[]>([]);
 
   protected readonly canEdit = computed(() => this.context.can('analyst'));
+  /** Whether the test result may offer "Ask the assistant": the deployment has it, the user can edit, no older version is on view and the test is the selected script's. */
+  protected readonly canAsk = computed(() => {
+    const test = this.test();
+    return this.systemConfig.assistantEnabled() && this.canEdit() && !this.viewing() && !!test && this.isSelected(test);
+  });
+  /** The line the editor's cursor is on, which follows the cursor without any typing; the Assistant's "This cell" scope reads it. */
+  protected readonly cursorLine = computed(() => this.editor()?.cursorLine() ?? 1);
   protected readonly inputs = computed(() => this.inputsBySource()[this.selected().kind === 'clean' ? 'raw' : 'clean'] ?? null);
+  /** What the editor's checks know about the tables the selected script receives; null until they have loaded. */
+  private readonly inputsInfo = computed<ScriptInputsInfo | null>(() => {
+    const inputs = this.inputs();
+    return inputs && { tables: inputs.tables, referenceTables: inputs.referenceTables, questions: inputs.questions };
+  });
   /** The editor's extensions: completion, checks, hover and cell actions; rebuilt when the script kind or the inputs change. */
   protected readonly assist = computed(() => {
-    const inputs = this.inputs();
-    const info: ScriptInputsInfo | null = inputs && { tables: inputs.tables, referenceTables: inputs.referenceTables, questions: inputs.questions };
     return scriptAssist({
       kind: this.selected().kind,
-      inputs: info,
+      inputs: this.inputsInfo(),
       translate: (key, params) => this.transloco.translate(key, params),
       canRun: this.canEdit() && !this.viewing(),
       runCell: (stopLine) => this.startTest(stopLine ?? undefined),
@@ -428,6 +469,13 @@ export class ProjectScripts {
   protected readonly shownMetadata = computed(() => (this.viewing() ? metadataOf(this.viewing()!) : this.meta()));
 
   constructor() {
+    this.assistant.connect({
+      projectId: () => this.projectId(),
+      script: this.selected,
+      draft: this.draft,
+      inputs: this.inputsInfo,
+      fixValid: (target) => this.fixValid(target),
+    });
     this.load();
     this.loadInputs();
   }
@@ -631,6 +679,7 @@ export class ProjectScripts {
       next: (test) => {
         this.testing.set(false);
         this.test.set(test);
+        this.latestTest.set(test);
         if (stopAtLine === undefined) {
           setTimeout(() => this.testPanel()?.nativeElement.scrollIntoView?.({ block: 'nearest' }));
         }
@@ -748,6 +797,103 @@ export class ProjectScripts {
       }
     }
     this.editor()?.replace(template.source);
+  }
+
+  /** Whether a test is of the selected script: the same kind and, for an indicator, the same name. */
+  private isSelected(test: ScriptTest): boolean {
+    const selected = this.selected();
+    return test.kind === selected.kind && (selected.kind !== 'indicator' || test.name === selected.name);
+  }
+
+  /**
+   * Whether a fix target still matches the page (design D11, "Fix target"): the latest test is the one asked about and the selected
+   * script's, ran the editor's text, no older version is on view and, for a warning, the dashboard view being edited still shows it.
+   */
+  private fixValid(target: FixTarget): boolean {
+    const test = this.latestTest();
+    if (!test || test.id !== target.testId || !this.isSelected(test) || this.viewing() || test.code !== this.draft()) {
+      return false;
+    }
+    const asked = target.warning;
+    if (!asked) {
+      return true;
+    }
+    const facts = test.steps.find((step) => step.step === 'indicator')?.dashboard;
+    const params = JSON.stringify(Object.entries(asked.params ?? {}).sort());
+    return (
+      !!facts &&
+      viewWarnings(facts, valueFormatter({ format: this.meta().format, unit: null }, 'en'), this.meta().format)
+        .map(askedWarning)
+        .some((warning) => warning.key === asked.key && JSON.stringify(Object.entries(warning.params).sort()) === params)
+    );
+  }
+
+  /**
+   * "Ask the assistant" on the failed step or on a warning of the dashboard view: the Assistant tab opens with the Fix scope for that
+   * test, the request box holds a sentence that names the step or the kind of warning, and the tab is scrolled into view and focused.
+   */
+  protected askAssistant(target: FixTarget): void {
+    const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
+    const selected = this.selected();
+    const sentence = target.warning
+      ? t(`scripts.assistant.fixWarning.${target.warning.key}`)
+      : t('scripts.assistant.fixStep', {
+          step: t(`scripts.assistant.scriptLabels.${selected.kind}`, selected.kind === 'indicator' ? { name: selected.name } : {}),
+        });
+    const typed = this.assistant.text();
+    // The sentence is the request. Words the analyst already typed stay before it; a sentence from an earlier ask is replaced.
+    this.assistant.setFixTarget(target);
+    this.assistant.setText(typed.trim() && !this.askedSentences.has(typed.trim()) ? `${typed.trimEnd()}\n\n${sentence}` : sentence);
+    this.askedSentences.add(sentence);
+    this.assistant.setScope('fix');
+    if (this.sidePanel()?.open('assistant', true)) {
+      setTimeout(() => this.sidePanelElement()?.nativeElement.scrollIntoView?.({ block: 'start' }));
+    }
+  }
+
+  /**
+   * Puts a block of the Assistant's proposal in the editor as one edit that undo reverts, after asking when the editor's text is not
+   * the text the request was sent with. Nothing is saved or tested. Afterwards the usage record learns how it was applied.
+   */
+  protected async applyProposal(request: ApplyRequest): Promise<void> {
+    const plan = this.assistant.applyPlan(request);
+    if (!plan || !this.canEdit() || this.viewing()) {
+      return;
+    }
+    if (this.draft() !== plan.sentDraft) {
+      const t = (key: string) => this.transloco.translate(key);
+      const confirmed = await this.confirmDialog.confirm({
+        title: t('scripts.assistant.replaceEditedTitle'),
+        message: t('scripts.assistant.replaceEditedMessage'),
+        confirmLabel: t('scripts.assistant.replaceEditedConfirm'),
+        cancelLabel: t('common.cancel'),
+        tone: 'danger',
+      });
+      if (!confirmed) {
+        return;
+      }
+    }
+    const editor = this.editor();
+    if (!editor || this.viewing()) {
+      return;
+    }
+    let applied = false;
+    if (plan.action === 'script') {
+      editor.replace(plan.code);
+      applied = true;
+    } else if (plan.action === 'cell') {
+      // The cell is found again by its text as sent, wherever it is now; the confirmation above may have let the text change.
+      const range = plan.cellText === null ? null : findCell(editor.text(), plan.cellText);
+      applied = range !== null && editor.replaceRange(range.from, range.to, cellReplacement(plan.code, range.text));
+      if (!applied) {
+        this.toasts.error(this.transloco.translate('scripts.assistant.notes.cellChanged'));
+      }
+    } else {
+      applied = editor.insertAtCursor(plan.code);
+    }
+    if (applied) {
+      this.assistant.recordOutcome(plan);
+    }
   }
 
   protected upload(event: Event): void {

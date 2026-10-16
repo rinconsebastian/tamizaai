@@ -1,21 +1,28 @@
 import { DatePipe } from '@angular/common';
-import { Component, input, output, signal } from '@angular/core';
+import { Component, Injector, afterNextRender, computed, inject, input, output, signal, viewChild } from '@angular/core';
 import { TranslocoDirective } from '@jsverse/transloco';
-import type { ScriptInputs, ScriptKind, ScriptVersionSummary } from '../../../core/projects/pipeline.service';
+import { SystemConfigService } from '../../../core/system-config';
+import type { IndicatorMetadata, ScriptInputs, ScriptKind, ScriptVersionSummary } from '../../../core/projects/pipeline.service';
 import { Badge, Card, dateTimeFormat } from '../../../shared/ui';
+import { ApplyRequest } from './assistant-state';
+import { AssistantPanel } from './assistant-panel';
 import { CtxReference } from './ctx-reference';
 import { ScriptInputsPanel } from './script-inputs-panel';
 
-type Tab = 'inputs' | 'reference' | 'versions';
+export type SideTab = 'inputs' | 'reference' | 'versions' | 'assistant';
 
-/** Beside the editor: the tables the script receives, the reference of its contract and `ctx`, and the script's versions. */
+/**
+ * Beside the editor: the tables the script receives, the reference of its contract and `ctx`, the script's versions and, when the
+ * deployment has the AI assistant and the user can edit, the Assistant. Only the shown tab exists: a hidden tab's component is
+ * destroyed, so what must outlive a tab lives in the page-scoped assistant session.
+ */
 @Component({
   selector: 'app-script-side-panel',
-  imports: [DatePipe, TranslocoDirective, Badge, Card, ScriptInputsPanel, CtxReference],
+  imports: [DatePipe, TranslocoDirective, Badge, Card, AssistantPanel, ScriptInputsPanel, CtxReference],
   template: `
     <tmz-card class="min-w-0" *transloco="let t" data-testid="side-panel">
       <div role="tablist" [attr.aria-label]="t('scripts.sidePanel')" class="mb-3 flex flex-wrap gap-x-1 border-b border-default">
-        @for (item of tabs; track item) {
+        @for (item of tabs(); track item) {
           <button
             type="button"
             role="tab"
@@ -24,7 +31,7 @@ type Tab = 'inputs' | 'reference' | 'versions';
             [attr.aria-selected]="tab() === item"
             [attr.aria-controls]="'side-panel-' + item"
             [id]="'side-tab-' + item"
-            (click)="tab.set(item)"
+            (click)="chosen.set(item)"
             [attr.data-testid]="'side-tab-' + item"
           >
             {{ t('scripts.sideTabs.' + item) }}
@@ -46,7 +53,7 @@ type Tab = 'inputs' | 'reference' | 'versions';
           @case ('reference') {
             <app-ctx-reference [kind]="kind()" />
           }
-          @default {
+          @case ('versions') {
             @if (versions().length === 0) {
               <p class="text-sm text-body">{{ t('scripts.noVersions') }}</p>
             } @else {
@@ -71,6 +78,18 @@ type Tab = 'inputs' | 'reference' | 'versions';
               </ol>
             }
           }
+          @case ('assistant') {
+            <app-assistant-panel
+              [projectId]="projectId()"
+              [kind]="kind()"
+              [scriptName]="scriptName()"
+              [draft]="draft()"
+              [cursorLine]="cursorLine()"
+              [details]="details()"
+              [viewing]="viewingNumber() !== null"
+              (apply)="apply.emit($event)"
+            />
+          }
         }
       </div>
     </tmz-card>
@@ -86,11 +105,53 @@ export class ScriptSidePanel {
   readonly versions = input<ScriptVersionSummary[]>([]);
   /** The number of the older version on view, if any. */
   readonly viewingNumber = input<number | null>(null);
+  /** Whether the user may edit scripts; the Assistant tab is for those who can. */
+  readonly canEdit = input(false);
+  readonly projectId = input('');
+  /** The selected indicator's name; null for script 1 and script 2. */
+  readonly scriptName = input<string | null>(null);
+  /** The editor's text, saved or not, for the Assistant. */
+  readonly draft = input('');
+  /** The 1-based line the editor's cursor is on, for the Assistant's "This cell" scope. */
+  readonly cursorLine = input(1);
+  /** The indicator's details as edited, for the Assistant; null for script 1 and script 2. */
+  readonly details = input<IndicatorMetadata | null>(null);
   readonly pick = output<string>();
   readonly refresh = output<void>();
   readonly view = output<ScriptVersionSummary>();
+  /** The analyst chose an action of the Assistant's proposal; the page puts the code in the editor. */
+  readonly apply = output<ApplyRequest>();
 
+  private readonly injector = inject(Injector);
+  private readonly config = inject(SystemConfigService);
+  private readonly assistant = viewChild(AssistantPanel);
   protected readonly dateTimeFormat = dateTimeFormat;
-  protected readonly tabs: Tab[] = ['inputs', 'reference', 'versions'];
-  protected readonly tab = signal<Tab>('inputs');
+  /** Tables, Reference and Versions, and after them Assistant when the deployment enables it and the user can edit. */
+  protected readonly tabs = computed<SideTab[]>(() =>
+    this.config.assistantEnabled() && this.canEdit() ? ['inputs', 'reference', 'versions', 'assistant'] : ['inputs', 'reference', 'versions'],
+  );
+  protected readonly chosen = signal<SideTab>('inputs');
+  /** The tab on view: the one chosen, or Tables while the chosen one is not available (the assistant was switched off, or the role lost). */
+  protected readonly tab = computed<SideTab>(() => (this.tabs().includes(this.chosen()) ? this.chosen() : 'inputs'));
+
+  /**
+   * Shows a tab on the page's request, even when it was requested before and the analyst has since chosen another one. With
+   * `focus`, the Assistant's request box gets the focus once the tab is shown. False when the tab is not available.
+   */
+  open(tab: SideTab, focus = false): boolean {
+    if (!this.tabs().includes(tab)) {
+      return false;
+    }
+    this.chosen.set(tab);
+    if (focus && tab === 'assistant') {
+      // Already on view: nothing re-renders, so a callback waiting for the next render could wait forever.
+      const shown = this.tab() === 'assistant' ? this.assistant() : undefined;
+      if (shown) {
+        shown.focusRequest();
+      } else {
+        afterNextRender(() => this.assistant()?.focusRequest(), { injector: this.injector });
+      }
+    }
+    return true;
+  }
 }

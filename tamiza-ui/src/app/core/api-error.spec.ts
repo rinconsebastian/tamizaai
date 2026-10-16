@@ -45,6 +45,28 @@ describe('ApiErrors', () => {
     expect(errors.parse(response(0, null)).message).toContain('could not reach the server');
   });
 
+  it('keeps the other members of the Problem Details as extensions', () => {
+    const parsed = errors.parse(
+      response(429, {
+        type: 'about:blank',
+        title: 'Too many requests',
+        status: 429,
+        code: 'assistant.rateLimited',
+        retryAfter: 30,
+        traceId: '00-abc',
+      }),
+    );
+
+    expect(parsed.extensions).toEqual({ retryAfter: 30 });
+    expect(parsed.code).toBe('assistant.rateLimited');
+  });
+
+  it('has no extensions for a plain failure or a network error', () => {
+    expect(errors.parse(response(409, { code: 'member.exists' })).extensions).toEqual({});
+    expect(errors.parse(response(0, null)).extensions).toEqual({});
+    expect(errors.parse(new Error('x')).extensions).toEqual({});
+  });
+
   it('raises a toast only when no field can show the error', () => {
     errors.report(response(400, { errors: { name: ['Enter a name.'] } }));
     expect(toasts.toasts()).toHaveLength(0);

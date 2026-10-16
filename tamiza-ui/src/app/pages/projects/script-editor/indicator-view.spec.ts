@@ -4,7 +4,7 @@ import { TranslocoTestingModule } from '@jsverse/transloco';
 import en from '../../../../../public/i18n/en.json';
 import type { IndicatorMetadata, IndicatorTestView } from '../../../core/projects/pipeline.service';
 import { valueFormatter } from '../indicators/format';
-import { IndicatorView, viewWarnings } from './indicator-view';
+import { IndicatorView, ViewWarning, askedWarning, viewWarnings } from './indicator-view';
 
 /** The facts of a rate by municipality over 12 municipalities: value, numerator and denominator, no problems. */
 function rate(overrides: Partial<IndicatorTestView> = {}): IndicatorTestView {
@@ -72,12 +72,24 @@ describe('viewWarnings', () => {
 
 @Component({
   imports: [IndicatorView],
-  template: `<app-indicator-view [facts]="facts()" [metadata]="metadata()" />`,
+  template: `<app-indicator-view [facts]="facts()" [metadata]="metadata()" [canAsk]="canAsk()" (ask)="asked.push($event)" />`,
 })
 class Host {
   readonly facts = signal<IndicatorTestView>(rate());
   readonly metadata = signal<IndicatorMetadata>(percent);
+  readonly canAsk = signal(false);
+  readonly asked: ViewWarning[] = [];
 }
+
+describe('askedWarning', () => {
+  it('keeps only the params the API keeps for each kind of warning', () => {
+    expect(askedWarning({ key: 'percentAboveOne', params: { max: 87.5, shown: '8,750%' } })).toEqual({ key: 'percentAboveOne', params: {} });
+    expect(askedWarning({ key: 'emptyValues', params: { count: 4, measure: 'value', extra: 'x' } })).toEqual({ key: 'emptyValues', params: { count: 4, measure: 'value' } });
+    expect(askedWarning({ key: 'dimensionAsMeasure', params: { column: 'year' } })).toEqual({ key: 'dimensionAsMeasure', params: { column: 'year' } });
+    expect(askedWarning({ key: 'duplicateRows', params: { count: 2 } })).toEqual({ key: 'duplicateRows', params: { count: 2 } });
+    expect(askedWarning({ key: 'noRows', params: {} })).toEqual({ key: 'noRows', params: {} });
+  });
+});
 
 describe('IndicatorView', () => {
   beforeEach(() =>
@@ -184,5 +196,21 @@ describe('IndicatorView', () => {
 
     expect(texts.some((text) => text!.includes('which shows as 4,520%'))).toBe(true);
     expect(texts.some((text) => text!.includes('year is a number') && text!.includes('Return it as text'))).toBe(true);
+  });
+
+  it('offers "Ask the assistant" on each warning only when it may, and reports the warning chosen', async () => {
+    const { fixture, q, host } = await render();
+    host.facts.set(rate({ measures: ['year', 'value'], ratio: false, defaultMeasureMax: 45.2 }));
+    fixture.detectChanges();
+    const buttons = () => [...fixture.nativeElement.querySelectorAll('[data-testid="view-warning-ask"]')] as HTMLButtonElement[];
+    expect(buttons()).toHaveLength(0);
+    expect(q('view-warning')).not.toBeNull();
+
+    host.canAsk.set(true);
+    fixture.detectChanges();
+    expect(buttons().map((b) => b.textContent!.trim())).toEqual(['Ask the assistant', 'Ask the assistant']);
+    buttons()[1].click();
+
+    expect(host.asked).toEqual([{ key: 'dimensionAsMeasure', params: { column: 'year' } }]);
   });
 });
