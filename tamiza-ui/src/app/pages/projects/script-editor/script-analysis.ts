@@ -1,6 +1,7 @@
 import { pythonLanguage } from '@codemirror/lang-python';
 import type { InputQuestion, InputReferenceTable, InputTable, ScriptKind } from '../../../core/projects/pipeline.service';
 import ctxMembers from './ctx-members.json';
+import pythonModules from './python-modules.json';
 
 /**
  * What the editor knows about a script without running it: its cells and the problems it can find from its syntax tree.
@@ -137,6 +138,11 @@ function contractFunction(tree: Tree, source: string, kind: ScriptKind): Node | 
   return null;
 }
 
+/** Whether the text defines the contract function of the kind at the top level (the assistant offers a whole-script replacement only then). */
+export function hasContract(source: string, kind: ScriptKind): boolean {
+  return contractFunction(parse(source), source, kind) !== null;
+}
+
 /** The names the script gave the contract function's two parameters; the contract's names when it has no such function. */
 export function parameterNames(tree: Tree, source: string, kind: ScriptKind): [string, string] {
   const fn = contractFunction(tree, source, kind);
@@ -230,7 +236,7 @@ export function check(source: string, tree: Tree, kind: ScriptKind, inputs: Scri
       problems.push(...bodyProblems(source, body, dataName, ctxName, inputs));
     }
   }
-  problems.push(...indentationProblems(source));
+  problems.push(...importProblems(source, tree), ...indentationProblems(source));
   return problems.sort((a, b) => a.from - b.from);
 }
 
@@ -372,6 +378,90 @@ export function tableAliases(tree: Tree, source: string, kind: ScriptKind): Map<
   };
   visit(body);
   return aliases;
+}
+
+// imports -------------------------------------------------------------------------------------------------------
+
+/** The libraries the worker provides to scripts, the modules a script never needs, and Python's standard library. */
+const libraries = new Set(pythonModules.libraries);
+const neverNeeded = new Set(pythonModules.never);
+const standardLibrary = new Set(pythonModules.stdlib);
+
+/** The modules named by an `import` statement, each with its root name and the span of its dotted path; relative imports have none. */
+function importedModules(statement: Node, source: string): { root: string; from: number; to: number }[] {
+  const first = statement.firstChild;
+  const modules: { root: string; from: number; to: number }[] = [];
+  if (first?.name === 'from') {
+    // `from a.b import c`: the module is the dotted path before `import`; a leading dot makes it relative.
+    const start = first.nextSibling;
+    if (start?.name !== 'VariableName') {
+      return modules;
+    }
+    let end = start;
+    for (let next = end.nextSibling; next?.name === '.' && next.nextSibling?.name === 'VariableName'; next = end.nextSibling) {
+      end = next.nextSibling!;
+    }
+    modules.push({ root: text(source, start), from: start.from, to: end.to });
+    return modules;
+  }
+  // `import a.b as c, d`: a module starts after `import` or a comma, and runs through its dots.
+  let expectModule = true;
+  let current: { root: string; from: number; to: number } | null = null;
+  for (let child = first?.nextSibling ?? null; child; child = child.nextSibling) {
+    if (child.name === ',') {
+      expectModule = true;
+      current = null;
+    } else if (expectModule && child.name === 'VariableName') {
+      current = { root: text(source, child), from: child.from, to: child.to };
+      modules.push(current);
+      expectModule = false;
+    } else if (current && child.name === '.') {
+      const name = child.nextSibling;
+      if (name?.name === 'VariableName') {
+        current.to = name.to;
+        child = name;
+      }
+    } else if (child.name === 'as') {
+      current = null;
+    }
+  }
+  return modules;
+}
+
+/**
+ * Imports of modules the worker does not have, and of modules a script never needs, at any level of the script, and calls
+ * of `__import__` (spec: Check of unavailable imports, Check of imports scripts never need). Warnings only.
+ */
+function importProblems(source: string, tree: Tree): Problem[] {
+  const problems: Problem[] = [];
+  tree.iterate({
+    enter(node) {
+      if (node.name === 'ImportStatement') {
+        for (const module of importedModules(node.node, source)) {
+          if (neverNeeded.has(module.root)) {
+            problems.push({ from: module.from, to: module.to, severity: 'warning', key: 'scripts.checks.neverImport', params: { module: module.root } });
+          } else if (!libraries.has(module.root) && !standardLibrary.has(module.root)) {
+            problems.push({
+              from: module.from,
+              to: module.to,
+              severity: 'warning',
+              key: 'scripts.checks.unavailableImport',
+              params: { module: module.root, available: list(pythonModules.libraries) },
+            });
+          }
+        }
+        return false;
+      }
+      if (node.name === 'CallExpression') {
+        const callee = node.node.firstChild;
+        if (callee?.name === 'VariableName' && text(source, callee) === '__import__') {
+          problems.push({ from: node.from, to: node.to, severity: 'warning', key: 'scripts.checks.neverImport', params: { module: '__import__' } });
+        }
+      }
+      return undefined;
+    },
+  });
+  return problems;
 }
 
 /** A line indented with both tabs and spaces, or with tabs when the rest of the script uses spaces (or the reverse). */

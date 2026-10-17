@@ -17,7 +17,8 @@ public sealed class SystemConfigTests(PostgresFixture postgres)
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal(["oidc", "version"], Keys(body.RootElement));
+        Assert.Equal(["assistant", "oidc", "version"], Keys(body.RootElement));
+        Assert.Equal(["enabled"], Keys(body.RootElement.GetProperty("assistant")));
         Assert.Equal(["authority", "clientId", "scope"], Keys(body.RootElement.GetProperty("oidc")));
         Assert.Equal(TestTokens.Issuer, body.RootElement.GetProperty("oidc").GetProperty("authority").GetString());
     }
@@ -32,6 +33,73 @@ public sealed class SystemConfigTests(PostgresFixture postgres)
         Assert.Equal("openid", first.GetProperty("scope").GetString());
         Assert.Equal("client-b", second.GetProperty("clientId").GetString());
         Assert.Equal("openid profile email", second.GetProperty("scope").GetString());
+    }
+
+    [Fact]
+    public async Task Config_says_the_assistant_is_off_without_its_variables()
+    {
+        var assistant = await GetAssistantAsync(new Dictionary<string, string?>());
+
+        Assert.False(assistant.GetProperty("enabled").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, false)]
+    public async Task Config_says_the_assistant_is_off_unless_all_three_variables_are_set(bool url, bool model, bool key)
+    {
+        var settings = new Dictionary<string, string?>();
+        if (url)
+        {
+            settings["TAMIZA_ASSISTANT_BASE_URL"] = "https://llm.provider.test/v1";
+        }
+
+        if (model)
+        {
+            settings["TAMIZA_ASSISTANT_MODEL"] = "secret-model-name";
+        }
+
+        if (key)
+        {
+            settings["TAMIZA_ASSISTANT_API_KEY"] = "sk-secret-key-value";
+        }
+
+        Assert.False((await GetAssistantAsync(settings)).GetProperty("enabled").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Config_reports_the_assistant_as_enabled_without_the_provider_the_model_or_the_key()
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["TAMIZA_ASSISTANT_BASE_URL"] = "https://llm.provider.test/v1",
+            ["TAMIZA_ASSISTANT_MODEL"] = "secret-model-name",
+            ["TAMIZA_ASSISTANT_API_KEY"] = "sk-secret-key-value",
+            ["TAMIZA_ASSISTANT_EXTRA_BODY"] = """{"reasoning_effort":"low"}""",
+        };
+        await using var factory = new TamizaApiFactory(await postgres.CreateDatabaseAsync(), settings);
+        using var client = factory.CreateClient();
+
+        var text = await client.GetStringAsync("/api/v1/system/config");
+
+        using var body = JsonDocument.Parse(text);
+        var assistant = body.RootElement.GetProperty("assistant");
+        Assert.True(assistant.GetProperty("enabled").GetBoolean());
+        Assert.Equal(["enabled"], Keys(assistant));
+        Assert.DoesNotContain("provider.test", text);
+        Assert.DoesNotContain("secret-model-name", text);
+        Assert.DoesNotContain("sk-secret-key-value", text);
+        Assert.DoesNotContain("reasoning_effort", text);
+    }
+
+    private async Task<JsonElement> GetAssistantAsync(Dictionary<string, string?> overrides)
+    {
+        await using var factory = new TamizaApiFactory(await postgres.CreateDatabaseAsync(), overrides);
+        using var client = factory.CreateClient();
+        using var body = JsonDocument.Parse(await client.GetStringAsync("/api/v1/system/config"));
+        return body.RootElement.GetProperty("assistant").Clone();
     }
 
     private async Task<JsonElement> GetOidcAsync(Dictionary<string, string?> overrides)

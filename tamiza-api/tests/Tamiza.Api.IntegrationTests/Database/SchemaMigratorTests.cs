@@ -464,6 +464,58 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
         Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.sample_download_parts"));
     }
 
+    [Fact]
+    public async Task Script_assistant_script_keeps_existing_data_and_adds_records_that_go_with_their_project()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(
+            connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql", "0004_add_pipeline_authoring.sql",
+            "0005_add_choice_labels.sql", "0006_add_performance_dashboard.sql", "0007_add_indicators_dashboard.sql", "0008_split_indicator_scripts.sql",
+            "0009_add_script_workbench.sql", "0010_add_local_dev_kit.sql");
+        const string project = "00000000-0000-0000-0000-0000000000aa";
+        const string user = "00000000-0000-0000-0000-000000000001";
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('{{user}}', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('{{project}}', 'Existing', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(), '{{user}}', now(), now());
+            INSERT INTO tamiza.script_tests (id, project_id, requested_by, kind, code, sample_size, status, queued_at)
+            VALUES ('00000000-0000-0000-0000-0000000000e1', '{{project}}', '{{user}}', 'clean', 'def clean(raw, ctx): return raw', 500, 'succeeded', now());
+            INSERT INTO tamiza.sample_downloads (id, project_id, requested_by, sample_size, status, queued_at)
+            VALUES ('00000000-0000-0000-0000-0000000000f1', '{{project}}', '{{user}}', 500, 'queued', now());
+            """);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        Assert.Contains("0011_add_script_assistant.sql", Scripts);
+        Assert.Equal(1L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.script_tests"));
+        Assert.Equal(1L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.sample_downloads"));
+        Assert.Equal(1L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.projects"));
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.assistant_calls"));
+
+        // A record defaults to not estimated and starts now; a user has one running request at a time, and a finished one does not count.
+        const string insert = """
+            INSERT INTO tamiza.assistant_calls (id, project_id, user_id, kind, action, model, prompt_kit, context, status)
+            VALUES (gen_random_uuid(), '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-000000000001',
+                    'indicator', 'fix', 'stub', 1, '{}', 'STATUS')
+            """;
+        await ExecuteAsync(connectionString, insert.Replace("STATUS", "running"));
+        await ExecuteAsync(connectionString, insert.Replace("STATUS", "succeeded"));
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.assistant_calls WHERE tokens_estimated"));
+        Assert.Equal(2L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.assistant_calls WHERE started_at <= now()"));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, insert.Replace("STATUS", "running")));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, insert.Replace("STATUS", "queued")));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, insert.Replace("STATUS", "succeeded").Replace("'fix'", "'review'")));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, insert.Replace("STATUS", "succeeded").Replace("'indicator'", "'indicators'")));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString,
+            "UPDATE tamiza.assistant_calls SET outcome = 'everything' WHERE status = 'succeeded'"));
+
+        // Deleting a project deletes its records.
+        await ExecuteAsync(connectionString, $"DELETE FROM tamiza.projects WHERE id = '{project}'");
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.assistant_calls"));
+    }
+
     /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>
     private static void ApplyScripts(string connectionString, params string[] names)
     {

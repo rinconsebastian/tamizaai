@@ -3,12 +3,16 @@ import { Injectable, inject } from '@angular/core';
 import { TranslocoService } from '@jsverse/transloco';
 import { ToastService } from '../shared/ui';
 
-/** An API failure ready to show: a message, the API's error code and field messages keyed by field path. */
+/**
+ * An API failure ready to show: a message, the API's error code, field messages keyed by field path and the other members
+ * of the Problem Details (for example `retryAfter` and `renewsAt`), for screens that format them.
+ */
 export interface ApiError {
   status: number;
   code: string | null;
   message: string;
   fieldErrors: Record<string, string>;
+  extensions: Record<string, unknown>;
 }
 
 interface ProblemBody {
@@ -16,7 +20,11 @@ interface ProblemBody {
   detail?: string;
   code?: string;
   errors?: Record<string, string[]>;
+  [extension: string]: unknown;
 }
+
+/** The members of Problem Details that `ApiError` carries in their own properties or that say nothing a screen could use. */
+const standardMembers = new Set(['type', 'title', 'status', 'detail', 'instance', 'code', 'errors', 'traceId']);
 
 @Injectable({ providedIn: 'root' })
 export class ApiErrors {
@@ -26,11 +34,11 @@ export class ApiErrors {
   /** Reads Problem Details: field errors go next to fields; a known `code` gets the translated message. */
   parse(error: unknown): ApiError {
     if (!(error instanceof HttpErrorResponse)) {
-      return { status: 0, code: null, message: this.t('errors.generic'), fieldErrors: {} };
+      return { status: 0, code: null, message: this.t('errors.generic'), fieldErrors: {}, extensions: {} };
     }
 
     if (error.status === 0) {
-      return { status: 0, code: null, message: this.t('errors.network'), fieldErrors: {} };
+      return { status: 0, code: null, message: this.t('errors.network'), fieldErrors: {}, extensions: {} };
     }
 
     const body: ProblemBody = typeof error.error === 'object' && error.error !== null ? error.error : {};
@@ -44,7 +52,8 @@ export class ApiErrors {
     const message =
       translated ??
       (Object.keys(fieldErrors).length ? this.t('errors.validation') : (body.detail ?? body.title ?? this.t('errors.generic')));
-    return { status: error.status, code, message, fieldErrors };
+    const extensions = Object.fromEntries(Object.entries(body).filter(([name]) => !standardMembers.has(name)));
+    return { status: error.status, code, message, fieldErrors, extensions };
   }
 
   /** Parses the error and, when no field can show it, raises a toast. */

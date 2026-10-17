@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { OidcSecurityService } from 'angular-auth-oidc-client';
 import { of, throwError } from 'rxjs';
 import { createOidcMock, OidcMock } from '../../../testing/oidc-mock';
+import { conversationKey } from '../projects/assistant-storage';
 import { simulateSecureContext } from '../../../testing/secure-context';
 import { AuthService, isSafeReturnUrl } from './auth.service';
 
@@ -97,6 +98,63 @@ describe('AuthService', () => {
 
     expect(oidc.logoff).toHaveBeenCalled();
     expect(oidc.authorize).not.toHaveBeenCalled();
+  });
+
+  describe('the assistant conversations kept in the tab', () => {
+    const own = conversationKey('user-1', 'p1', { kind: 'clean' });
+    const other = conversationKey('user-2', 'p1', { kind: 'clean' });
+    const signedInAs = (sub: string | null) => ({
+      checkAuth: () => of({ isAuthenticated: true, userData: sub === null ? null : { sub }, accessToken: 'a', idToken: 'i' }),
+    });
+
+    beforeEach(() => {
+      sessionStorage.setItem(own, '{}');
+      sessionStorage.setItem(other, '{}');
+      sessionStorage.setItem('0-tamiza-ui', 'oidc state');
+    });
+
+    it('removes the keys of other subjects after sign-in, and keeps those of the same person', async () => {
+      const auth = setup(signedInAs('user-1'));
+      await auth.initialize();
+
+      expect(auth.subject()).toBe('user-1');
+      expect(sessionStorage.getItem(own)).not.toBeNull();
+      expect(sessionStorage.getItem(other)).toBeNull();
+      expect(sessionStorage.getItem('0-tamiza-ui')).toBe('oidc state');
+    });
+
+    it('removes every conversation when the subject cannot be told', async () => {
+      const auth = setup(signedInAs(null));
+      await auth.initialize();
+
+      expect(auth.subject()).toBeNull();
+      expect(sessionStorage.getItem(own)).toBeNull();
+      expect(sessionStorage.getItem(other)).toBeNull();
+      expect(sessionStorage.getItem('0-tamiza-ui')).toBe('oidc state');
+    });
+
+    it('keeps them when nobody is signed in, so a session that expired can come back to its own', async () => {
+      const auth = setup({ checkAuth: () => of({ isAuthenticated: false, userData: null, accessToken: '', idToken: '' }) });
+      await auth.initialize();
+
+      expect(sessionStorage.getItem(own)).not.toBeNull();
+    });
+
+    it('removes them all on sign-out, before the provider is called, and leaves the OIDC library state in place', async () => {
+      const auth = setup(signedInAs('user-1'));
+      await auth.initialize();
+      let leftAtLogoff: string[] = [];
+      oidc.logoff.mockImplementation(() => {
+        leftAtLogoff = Object.keys(sessionStorage).sort();
+        return of(null);
+      });
+
+      auth.logout();
+
+      expect(leftAtLogoff).toEqual(['0-tamiza-ui']);
+      expect(Object.keys(sessionStorage)).toEqual(['0-tamiza-ui']);
+      expect(oidc.logoff).toHaveBeenCalled();
+    });
   });
 
   it.each([

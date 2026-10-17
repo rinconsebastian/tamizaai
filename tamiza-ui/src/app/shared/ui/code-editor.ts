@@ -1,5 +1,5 @@
-import { Component, ElementRef, OnDestroy, afterNextRender, effect, inject, input, output } from '@angular/core';
-import { indentLess, indentMore } from '@codemirror/commands';
+import { Component, ElementRef, OnDestroy, afterNextRender, effect, inject, input, output, signal } from '@angular/core';
+import { indentLess, indentMore, isolateHistory } from '@codemirror/commands';
 import { python } from '@codemirror/lang-python';
 import { indentUnit } from '@codemirror/language';
 import { Compartment, EditorSelection, EditorState, Extension, Prec, countColumn } from '@codemirror/state';
@@ -66,6 +66,13 @@ export class CodeEditor implements OnDestroy {
   readonly extensions = input<Extension[]>([]);
   readonly changed = output<string>();
 
+  private readonly line = signal(1);
+  /**
+   * The 1-based line the cursor is on. A signal, so what depends on it (the assistant's "This cell" scope) follows the cursor
+   * as it moves without any typing: it is set on every selection and document change.
+   */
+  readonly cursorLine = this.line.asReadonly();
+
   constructor() {
     afterNextRender(() => {
       this.view = new EditorView({
@@ -83,6 +90,9 @@ export class CodeEditor implements OnDestroy {
             this.editable.of(this.editableExtensions(this.readonly())),
             EditorView.contentAttributes.of({ 'aria-label': this.label() }),
             EditorView.updateListener.of((update) => {
+              if (update.selectionSet || update.docChanged) {
+                this.line.set(update.state.doc.lineAt(update.state.selection.main.head).number);
+              }
               if (update.docChanged) {
                 this.changed.emit(update.state.doc.toString());
               }
@@ -90,6 +100,7 @@ export class CodeEditor implements OnDestroy {
           ],
         }),
       });
+      this.line.set(this.view.state.doc.lineAt(this.view.state.selection.main.head).number);
     });
 
     // A new value from outside (another script or version) replaces the text; the editor's own edits do not loop.
@@ -115,10 +126,29 @@ export class CodeEditor implements OnDestroy {
     return this.view?.state.doc.toString() ?? this.value();
   }
 
-  /** Replaces the text as if typed, so `changed` fires (used by file upload and templates). */
+  /**
+   * Replaces the text as if typed, so `changed` fires (used by file upload, templates and the assistant). The edit is its own
+   * undo step: one Ctrl+Z brings back the text from before it, whatever was typed around it.
+   */
   replace(text: string): void {
     const view = this.view;
-    view?.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+    view?.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, annotations: isolateHistory.of('full'), userEvent: 'input.replace' });
+  }
+
+  /** Replaces the text between two offsets as one undo step. False, and nothing changes, when the editor is read-only. */
+  replaceRange(from: number, to: number, text: string): boolean {
+    const view = this.view;
+    if (!view || view.state.readOnly) {
+      return false;
+    }
+    const length = view.state.doc.length;
+    view.dispatch({
+      changes: { from: Math.max(0, Math.min(from, length)), to: Math.max(0, Math.min(to, length)), insert: text },
+      annotations: isolateHistory.of('full'),
+      userEvent: 'input.replace',
+      scrollIntoView: true,
+    });
+    return true;
   }
 
   /** Inserts text at the cursor, replacing the selection, and puts the cursor after it. False when the editor is read-only. */
@@ -127,7 +157,7 @@ export class CodeEditor implements OnDestroy {
     if (!view || view.state.readOnly) {
       return false;
     }
-    view.dispatch(view.state.replaceSelection(text), { scrollIntoView: true, userEvent: 'input.paste' });
+    view.dispatch(view.state.replaceSelection(text), { scrollIntoView: true, userEvent: 'input.paste', annotations: isolateHistory.of('full') });
     view.focus();
     return true;
   }
@@ -139,12 +169,6 @@ export class CodeEditor implements OnDestroy {
       view.dispatch({ selection: { anchor: Math.min(position, view.state.doc.length) }, scrollIntoView: true });
       view.focus();
     }
-  }
-
-  /** The 1-based line the cursor is on. */
-  cursorLine(): number {
-    const view = this.view;
-    return view ? view.state.doc.lineAt(view.state.selection.main.head).number : 1;
   }
 
   ngOnDestroy(): void {

@@ -150,6 +150,81 @@ describe('script analysis: checks', () => {
   });
 });
 
+describe('script analysis: imports', () => {
+  const body = 'def compute(cleaned, ctx):\n    return cleaned["main"]\n';
+  const marked = (source: string) => problems(source).filter((p) => p.key.endsWith('Import'));
+
+  it('marks a library the worker does not have, naming it and listing the libraries that are', () => {
+    const source = `from sklearn.linear_model import LinearRegression\n\n${body}`;
+
+    const [problem] = marked(source);
+
+    expect(problem).toMatchObject({ severity: 'warning', key: 'scripts.checks.unavailableImport', params: { module: 'sklearn' } });
+    expect(problem.params['available']).toBe('duckdb, geopandas, numpy, openpyxl, pandas, polars, pyarrow, shapely');
+    expect(source.slice(problem.from, problem.to)).toBe('sklearn.linear_model');
+    expect(marked(`import scipy.stats\nimport statsmodels.api as sm\n\n${body}`).map((p) => p.params['module'])).toEqual(['scipy', 'statsmodels']);
+  });
+
+  it('marks nothing for the available libraries and the standard library', () => {
+    const imports = 'import pandas as pd\nimport numpy as np\nimport geopandas\nimport shapely.geometry\nimport duckdb\nfrom datetime import date\n';
+
+    expect(marked(`${imports}\n${body}`)).toEqual([]);
+  });
+
+  it('marks nothing for the standard library modules scripts commonly use', () => {
+    expect(marked(`import re, math, json\nimport datetime\nimport unicodedata\n\n${body}`)).toEqual([]);
+  });
+
+  it('marks an import inside the contract function like one at the top', () => {
+    const source = 'def compute(cleaned, ctx):\n    import requests\n    return cleaned["main"]\n';
+
+    const [problem] = marked(source);
+
+    expect(problem).toMatchObject({ severity: 'warning', key: 'scripts.checks.unavailableImport', params: { module: 'requests' } });
+    expect(source.slice(problem.from, problem.to)).toBe('requests');
+  });
+
+  it('marks an import in a script that has no contract function', () => {
+    expect(keys('import requests\n')).toEqual(['scripts.checks.noContract', 'scripts.checks.unavailableImport']);
+  });
+
+  it('marks modules a script never needs, and their submodules', () => {
+    const source = `import subprocess\nfrom urllib.request import urlopen\nimport os.path\nimport os, pandas\nfrom http import client\n\n${body}`;
+
+    const found = marked(source);
+
+    expect(found.map((p) => p.key)).toEqual(Array(5).fill('scripts.checks.neverImport'));
+    expect(found.map((p) => p.params['module'])).toEqual(['subprocess', 'urllib', 'os', 'os', 'http']);
+    expect(found.every((p) => p.severity === 'warning')).toBe(true);
+  });
+
+  it('marks every module of one import statement on its own', () => {
+    const source = `import pandas as pd, scipy as sp, os\n\n${body}`;
+
+    expect(marked(source).map((p) => [p.key, source.slice(p.from, p.to)])).toEqual([
+      ['scripts.checks.unavailableImport', 'scipy'],
+      ['scripts.checks.neverImport', 'os'],
+    ]);
+  });
+
+  it('marks a call of __import__', () => {
+    const source = 'def compute(cleaned, ctx):\n    os = __import__("os")\n    return cleaned["main"]\n';
+
+    const [problem] = marked(source);
+
+    expect(problem).toMatchObject({ severity: 'warning', key: 'scripts.checks.neverImport' });
+    expect(source.slice(problem.from, problem.to)).toBe('__import__("os")');
+  });
+
+  it('does not mark relative imports or star imports of available modules', () => {
+    expect(marked(`from . import helpers\nfrom .helpers import x\nfrom pandas import *\n\n${body}`)).toEqual([]);
+  });
+
+  it('reports only the syntax error when the script cannot be read', () => {
+    expect(keys('import requests\ndef compute(cleaned, ctx)\n    return 1\n')).toEqual(['scripts.checks.syntax']);
+  });
+});
+
 describe('script analysis: table aliases', () => {
   it('finds the variables assigned from an input table, with or without a copy', () => {
     const source = [

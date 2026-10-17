@@ -10,6 +10,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The assistant's prompt kit: the rules, the templates of each script kind and the masking vocabulary (AssistantPrompts). -->
+    <EmbeddedResource Include="Assistant/Prompts/**;Assistant/Examples/**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\dbUp\Tamiza.DbUp.csproj" />
   </ItemGroup>
 

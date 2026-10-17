@@ -1,8 +1,11 @@
 # Claude Code
 .claude/
 
-# Environment and local development state (credentials, keys)
-.env
+# Environment and local development state (credentials, keys). Every .env* file is ignored, including
+# the ones named .envprod or .envstaging, so a provider key is not committed by accident; only the
+# documented example is kept. This does not untrack a file git already tracks.
+.env*
+!.env.example
 .local/
 
 # .NET

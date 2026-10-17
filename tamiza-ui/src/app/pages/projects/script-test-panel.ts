@@ -1,11 +1,12 @@
 import { DatePipe } from '@angular/common';
-import { Component, DestroyRef, computed, effect, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, input, output, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { IndicatorMetadata, PipelineService, RunStatus, SCRIPT_TEST_POLL_MS, ScriptTest, ShownPreview, TestStep, TestTable } from '../../core/projects/pipeline.service';
-import { Alert, Badge, Card, Input, Tone } from '../../shared/ui';
+import { Alert, Badge, Button, Card, Input, Tone } from '../../shared/ui';
 import { durationText } from './pipeline-runs.util';
-import { IndicatorView } from './script-editor/indicator-view';
+import { FixTarget } from './script-editor/assistant-state';
+import { IndicatorView, ViewWarning, askedWarning } from './script-editor/indicator-view';
 import { cellAt, cells } from './script-editor/script-analysis';
 import { TablePreview } from './table-preview';
 
@@ -20,7 +21,7 @@ const statusTones: Record<RunStatus | 'stopped', Tone> = {
 /** The result of a script test: its status while it waits or runs, then each step with its log and table previews. */
 @Component({
   selector: 'app-script-test-panel',
-  imports: [DatePipe, TranslocoDirective, Alert, Badge, Card, IndicatorView, Input, TablePreview],
+  imports: [DatePipe, TranslocoDirective, Alert, Badge, Button, Card, IndicatorView, Input, TablePreview],
   template: `
     <tmz-card *transloco="let t" data-testid="test-panel">
       @if (test(); as test) {
@@ -33,7 +34,12 @@ const statusTones: Record<RunStatus | 'stopped', Tone> = {
         </div>
 
         @if (stale()) {
-          <tmz-alert tone="warning" class="mb-3" data-testid="test-stale">{{ t('scriptTests.stale') }}</tmz-alert>
+          <tmz-alert tone="warning" class="mb-3" data-testid="test-stale">
+            {{ t('scriptTests.stale') }}
+            @if (canAsk()) {
+              {{ t('scriptTests.staleAsk') }}
+            }
+          </tmz-alert>
         }
         @if (test.status === 'queued' || test.status === 'running') {
           <p class="mb-3 text-sm text-body" role="status" data-testid="test-progress">{{ progress(test) }}</p>
@@ -68,6 +74,11 @@ const statusTones: Record<RunStatus | 'stopped', Tone> = {
               <div class="mt-3 flex min-w-0 flex-col gap-3">
                 @if (step.error) {
                   <pre class="max-h-60 overflow-auto rounded-base border border-danger-subtle bg-danger-soft p-3 text-xs whitespace-pre-wrap text-fg-danger-strong" data-testid="test-step-error">{{ step.error }}</pre>
+                  @if (askable() && step.status === 'failed' && step.step === test.kind) {
+                    <div>
+                      <button tmzButton variant="secondary" size="sm" type="button" (click)="ask.emit({ testId: test.id })" data-testid="test-step-ask">{{ t('scriptTests.askAssistant') }}</button>
+                    </div>
+                  }
                 }
                 @if (step.status === 'stopped') {
                   <p class="text-sm text-body" data-testid="test-stopped">{{ stoppedText(test, step) }}</p>
@@ -132,7 +143,7 @@ const statusTones: Record<RunStatus | 'stopped', Tone> = {
                 }
                 @if (step.dashboard; as facts) {
                   @if (metadata(); as indicator) {
-                    <app-indicator-view [facts]="facts" [metadata]="indicator" />
+                    <app-indicator-view [facts]="facts" [metadata]="indicator" [canAsk]="askable()" (ask)="askAboutWarning(test.id, $event)" />
                   }
                 }
                 @if (step.log) {
@@ -154,6 +165,15 @@ export class ScriptTestPanel {
   readonly draft = input.required<string>();
   /** The indicator's metadata as it is being edited, which the dashboard view of its table is written with. */
   readonly metadata = input<IndicatorMetadata | null>(null);
+  /**
+   * Whether "Ask the assistant" may be offered: the assistant is enabled, the user can edit, no older version is on view and the
+   * test is the selected script's. The panel adds that the editor's text is still the text the test ran.
+   */
+  readonly canAsk = input(false);
+  /** The polled test, after each refresh and when a new one starts, so the page knows the last test, its status and its code. */
+  readonly changed = output<ScriptTest>();
+  /** The analyst chose "Ask the assistant" on the failed step or on a warning of the dashboard view. */
+  readonly ask = output<FixTarget>();
 
   private readonly service = inject(PipelineService);
   private readonly errors = inject(ApiErrors);
@@ -166,6 +186,7 @@ export class ScriptTestPanel {
     const test = this.test();
     return !!test && test.code !== this.draft();
   });
+  protected readonly askable = computed(() => this.canAsk() && !this.stale());
   private readonly chosen = signal<Record<string, string>>({});
   private readonly chosenShown = signal<Record<string, number>>({});
 
@@ -174,7 +195,7 @@ export class ScriptTestPanel {
 
   constructor() {
     effect(() => {
-      this.test.set(this.started());
+      this.setTest(this.started());
       this.chosen.set({});
       this.chosenShown.set({});
     });
@@ -273,11 +294,21 @@ export class ScriptTestPanel {
     return test.error ?? this.transloco.translate('errors.generic');
   }
 
+  /** A warning of the dashboard view goes to the assistant with its key and the params the API keeps, never its figures. */
+  protected askAboutWarning(testId: string, warning: ViewWarning): void {
+    this.ask.emit({ testId, warning: askedWarning(warning) });
+  }
+
+  private setTest(test: ScriptTest): void {
+    this.test.set(test);
+    this.changed.emit(test);
+  }
+
   private refresh(testId: string): void {
     this.service.test(this.projectId(), testId).subscribe({
       next: (test) => {
         if (!this.destroyed && this.test()?.id === test.id) {
-          this.test.set(test);
+          this.setTest(test);
         }
       },
       error: (error) => this.errors.report(error),

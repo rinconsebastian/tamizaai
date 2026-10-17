@@ -244,11 +244,12 @@ Under the editor, one row holds **Save**, the **Sample size**, **Test on sample*
 
 The editor is for writing a script without leaving the page. It knows the tables your script receives, what `ctx` offers and what the contract asks for, and it tells you what it can before you run anything. None of this blocks saving or testing: a test and a run decide whether a script works.
 
-**The side panel.** Beside the editor (below it on a phone) there are three tabs.
+**The side panel.** Beside the editor (below it on a phone) there are three tabs, and four when the administrator has turned on the [assistant](#writing-with-the-assistant).
 
 - **Tables** lists what the selected script receives *as the last run published it*: the flattened tables for script 1, the clean tables for script 2 and the indicators, with each table's row count and each column's type and [question label](#question-labels), and when they were published. It also lists the project's [reference tables](#reference-data) with their columns (analysts and admins get a **Manage** link to them), and, in a collapsed group, the form's questions (a filter opens it). A script you saved after the last run does not change the list until the next run (a test shows the tables its draft really received). Before the first run the panel says so, and the editor works without it. **Filter** matches names and labels; the refresh button reads the tables again, which also happens when a run ends. Click a name to put it in the editor at the cursor as a quoted string (`"has_water"`); when you cannot edit (a viewer, or an old version on view) the click copies the name instead.
 - **Reference** lists the contract of the selected script, what it must return, cells and `ctx.show`, and every member of `ctx`, `ctx.form`, `ctx.log` and `ctx.reference` with a description and an example.
 - **Versions** lists the saved versions of the script, newest first. Click one to read it (read-only); analysts and admins can restore it.
+- **Assistant**, only if your administrator configured one, and only for analysts and admins: it drafts a script, rewrites a cell or fixes a failed test. See [Writing with the assistant](#writing-with-the-assistant).
 
 **Completion.** While you type, the editor offers the members of `ctx`, `ctx.form` and `ctx.log` after a dot (with their signatures), the questions of the form as the first argument of `ctx.form.label(` and `ctx.form.name(`, the input tables inside `cleaned["`, the reference tables inside `ctx.reference["`, and columns with their type and table inside the brackets after a table: `cleaned["main"]["`, `ctx.reference["population"]["` or a variable you assigned from a table (`main = cleaned["main"]` and then `main["`). Anywhere else in a subscript string it offers the columns of every input table. **Ctrl+Space** opens the list on demand. Hovering a member of `ctx` shows its signature and description.
 
@@ -269,9 +270,11 @@ The editor is for writing a script without leaving the page. It knows the tables
 - a member of `ctx`, `ctx.form` or `ctx.log` that does not exist (`ctx.refrence`);
 - a reference table the project does not have (`ctx.reference["populaton"]`), naming the ones it has;
 - an input table the published tables do not have (`cleaned["member"]`), unless the script adds that table itself (`raw["summary"] = ...`); nothing is marked while no tables are published;
+- an import, at any level of the script (also inside the contract function), of a module that is neither one of the [available libraries](#limits) nor part of the Python standard library (`from sklearn.linear_model import LinearRegression`), naming the module and listing the libraries that are available;
+- an import of `os`, `sys`, `subprocess`, `socket`, `shutil`, `ctypes`, `importlib`, `http` or `urllib`, or of a submodule of one of them, and any call of `__import__`: scripts receive their data from Tamiza and need neither files, processes nor the network;
 - indentation that mixes tabs and spaces.
 
-Column names are not checked, because scripts add and rename columns. Marks are hints.
+Column names are not checked, because scripts add and rename columns. Marks are hints, and the import marks are warnings like the others: they never block saving or testing.
 
 **Templates.** **Templates** opens a menu of starting points for the selected kind of script, each with a name and a one-line description:
 
@@ -341,6 +344,46 @@ When a test of an indicator succeeds, under its table the result shows **As the 
 - **Warnings.** The view warns about what usually surprises people on the dashboard: a table with no rows; no `value` column (it names the column widgets will plot instead); `numerator` without `denominator` or the reverse; empty values in the default measure; the format `percent` with a value above 1, showing what it would read as (a percent is a fraction: 0.42 reads `42%`); a numeric column named like a dimension (`year`, `month`, `code`, `id`, or ending in `_id` or `_code`), which widgets would offer as a measure, so return it as text; and rows that share the values of every dimension, which widgets add up.
 
 A warning is a hint about the table, not an error: the test still succeeded.
+
+## Writing with the assistant
+
+When your administrator has configured one (see [operations.md](operations.md#ai-assistant)), analysts and admins get a fourth tab in the side panel, **Assistant**. It writes pandas for you from what the editor already knows: the tables and columns your script receives, the form's choice lists, the contract and the `ctx` it offers. Without that configuration the tab does not exist and nothing leaves the server. Viewers never see it.
+
+The tab shows the explanation in plain text. The code it proposes goes into the editor only when you apply it. The assistant never saves a version and never starts a test: you read the code, test it on a sample and save it as you always do.
+
+**Three things to ask for.**
+
+- **Script.** Describe what you want, for example `share of households with piped water by municipality`, and it answers with a whole script of the selected kind. For an indicator, **Draft from the details** fills the request from the indicator's label, description, unit and format, as the fields hold them even if you have not saved them.
+- **This cell.** With the cursor inside a [`# %%` cell](#cells-and-ctxshow), it rewrites that cell only and sees the rest of the script as context. The scope names the cell it will rewrite; without a cell it asks you to put the cursor inside one.
+- **Fix the last test.** After a sample test fails, or when the dashboard view of an indicator warns about something, **Ask the assistant** next to the error or the warning opens the tab with a request for that fix. It is offered only for the script you tested, while the editor still holds the text that test ran, and never for an old version. The test that goes with the request is yours and lasts the 24 hours a test is kept.
+
+**Applying a proposal.** Under the explanation the tab lists the code blocks with their length, whether the script defines its function, and the marks the editor's [checks](#the-editor) raise on the result, such as an import that is not available. The marks do not stop you. The actions are **Replace script** (only for a complete script that defines its function), **Replace cell** (only for a single cell that starts with `# %%` and when that cell is still in the editor unchanged, wherever it now is) and **Insert at cursor**, which is always possible. An answer that was cut off, or that holds several blocks, can only be inserted. Each action is one edit: **Ctrl+Z** brings back the text you had. If you typed in the editor after sending the request, the tab asks before applying.
+
+**The conversation.** Each script has its own conversation, kept in your browser tab for the session and gone when you sign out or choose **New conversation**; the server keeps none. A request keeps running if you look at another tab or another script, and its answer waits in the script you asked it for. **Cancel** ends it. Only one request per person runs at a time, and each person has a daily budget of tokens set by the administrator.
+
+**Language.** Write the request in your language: the explanation comes back in it. The code, its identifiers, comments and log messages are always in English, and column and table names stay exactly as the form gave them.
+
+```text
+You:        Rate of households whose water_source is "Piped", by municipality.
+            Percent, with numerator and denominator.
+Assistant:  I count households per municipality and divide those that answer
+            "Piped" by all of them. [proposed code: 21 lines]
+            -> Replace script | Insert at cursor
+```
+
+### What the assistant can see
+
+Every request carries only this, and **Show what will be sent** displays the exact text before you send it (**Copy context** puts it on the clipboard, for example to use it elsewhere):
+
+- the rules of the contract and the libraries your script can and cannot use, and the templates of its kind;
+- the tables your script receives, with their row counts, columns, types and [question labels](#question-labels); the reference tables' columns and types; the form's questions and **the labels of its choices**, up to 50 per list. A choice list of people's names, such as the enumerators', is sent like any other;
+- the project's time zone and enumerator question, the indicator's details, **the saved script 1** and **the text in the editor**, both exactly as written. Constants you typed in them (a submission to drop, a name to correct) go with them;
+- your messages and the explanations of the earlier answers;
+- for a fix, the shape of your last test: its steps, tables and columns, the number of groups of each chart, and its error and log lines, reduced to the line and function of each frame of your script and to the lines that start with a log level, with **every word that is not a name of the form, a word of your script or a word of the libraries' own messages replaced by `…`**.
+
+It never carries rows of the sample or of a published table, the rows or text of a `ctx.show`, what your script printed, a value, total or group of a chart, or the rows of a reference table. If a name in your tables is itself a respondent's (a pivot made from names), it shows as `…` in the test facts, but it is a column name of the schema the model receives.
+
+Your administrator chooses the provider, and with it who processes this text. Ask them which one it is: the tab names the model and the host.
 
 ## Writing scripts on your computer
 
@@ -527,7 +570,7 @@ The log of each step holds your `ctx.log` messages and printed output, and for f
 ## Limits
 
 - Each script may run for **10 minutes** and use **1024 MB** of memory, unless the operator changed the limits (see [operations.md](operations.md)). A script that goes over is stopped and its step fails with a message naming the limit. Tests on a sample have the same limits.
-- Available libraries: **pandas 3.0, pyarrow 25, numpy 2.5, polars 1.44, duckdb 1.5, geopandas 1.2, openpyxl 3.1** and the Python 3.12 standard library. Scripts cannot install other packages; importing one that is not there fails with `ModuleNotFoundError`.
+- Available libraries: **pandas 3.0, pyarrow 25, numpy 2.5, polars 1.44, duckdb 1.5, geopandas 1.2, openpyxl 3.1** and the Python 3.12 standard library. **shapely 2.1** (the geometry package geopandas uses) is also there, installed with geopandas rather than pinned by Tamiza. scikit-learn, SciPy and statsmodels are **not** available. Scripts cannot install other packages; importing one that is not there fails with `ModuleNotFoundError`, and the editor warns about such an import before you test (see [Checks](#the-editor)).
 - Do not rely on network access: a future release removes it from the analytics service.
 - A script larger than 200 KB is rejected.
 

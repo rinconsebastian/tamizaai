@@ -1,3 +1,6 @@
+import { HttpClient } from '@angular/common/http';
+import { Injectable, computed, inject, signal } from '@angular/core';
+
 /** Public settings served by the API at `GET /api/v1/system/config`. */
 export interface SystemConfig {
   oidc: {
@@ -6,6 +9,30 @@ export interface SystemConfig {
     scope: string;
   };
   version: string;
+  /** Whether the deployment configured the AI script assistant; nothing else about it is public. */
+  assistant: {
+    enabled: boolean;
+  };
 }
 
 export const SYSTEM_CONFIG_URL = '/api/v1/system/config';
+
+/**
+ * The deployment's public settings that pages need after sign-in. The configuration is read once, when the service is first
+ * used; until it arrives, and when the request fails, every optional feature counts as off.
+ */
+@Injectable({ providedIn: 'root' })
+export class SystemConfigService {
+  private readonly http = inject(HttpClient);
+  private readonly config = signal<SystemConfig | null>(null);
+
+  /** Whether the AI script assistant is configured. False while the configuration loads and when it cannot be read. */
+  readonly assistantEnabled = computed(() => this.config()?.assistant?.enabled === true);
+
+  constructor() {
+    this.http.get<SystemConfig>(SYSTEM_CONFIG_URL).subscribe({
+      next: (config) => this.config.set(config),
+      error: () => this.config.set(null),
+    });
+  }
+}

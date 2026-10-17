@@ -1,9 +1,13 @@
+import { TestRequest } from '@angular/common/http/testing';
+import { Provider, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { Router } from '@angular/router';
 import { EditorView } from '@codemirror/view';
 import { vi } from 'vitest';
 import { Downloader } from '../../core/download.service';
+import { StoredConversation, conversationKey } from '../../core/projects/assistant-storage';
+import type { AssistantAnswer } from '../../core/projects/assistant.service';
 import {
   PIPELINE_POLL_MS,
   IndicatorScript,
@@ -16,6 +20,7 @@ import {
   SampleDownloadContents,
   ScriptInputs,
   ScriptList,
+  ScriptRef,
   ScriptTest,
   ShownPreview,
   ScriptVersionDetails,
@@ -23,6 +28,7 @@ import {
   TestStep,
 } from '../../core/projects/pipeline.service';
 import { ProjectRole } from '../../core/projects/projects.service';
+import { SYSTEM_CONFIG_URL, SystemConfigService } from '../../core/system-config';
 import { ToastService } from '../../shared/ui';
 import { CodeEditor } from '../../shared/ui/code-editor';
 import { pressKey, provideVisibleElements, tick } from '../../../testing/cdk';
@@ -140,6 +146,10 @@ interface Seed {
   runs?: RunPage;
   pollMs?: number;
   testPollMs?: number;
+  /** Whether the deployment's system configuration enables the assistant; absent means the configuration request is left unanswered. */
+  assistant?: boolean;
+  /** More providers, for example a stand-in for the assistant session. */
+  providers?: Provider[];
 }
 
 const downloader = { start: vi.fn() };
@@ -151,9 +161,15 @@ async function open(role: ProjectRole, seed: Seed = {}) {
     { provide: Downloader, useValue: downloader },
     ...(seed.pollMs ? [{ provide: PIPELINE_POLL_MS, useValue: seed.pollMs }] : []),
     ...(seed.testPollMs ? [{ provide: SCRIPT_TEST_POLL_MS, useValue: seed.testPollMs }] : []),
+    ...(seed.providers ?? []),
   ];
   const opened = await openProjectSection('scripts', role, {}, providers);
   const { http, harness } = opened;
+  if (seed.assistant !== undefined) {
+    http
+      .match(SYSTEM_CONFIG_URL)
+      .forEach((r) => r.flush({ oidc: { authority: 'https://kc.example.org', clientId: 'tamiza-ui', scope: 'openid' }, version: '0.1.0', assistant: { enabled: seed.assistant } }));
+  }
   http.expectOne((r) => r.url === runsUrl && r.method === 'GET').flush(seed.runs ?? { items: [run()], total: 1 });
   http
     .expectOne(scriptsUrl)
@@ -1408,6 +1424,29 @@ describe('ProjectScripts', () => {
     expect(save.request.body).toEqual({ code: 'def clean(raw, ctx):\n    x = (\n' });
   });
 
+  it('warns about an import the worker does not have and still saves the script as a new version', async () => {
+    const { root, http, harness, editor } = await open('analyst');
+    const code = 'import statsmodels.api as sm\n\n\ndef clean(raw, ctx):\n    return raw\n';
+
+    editor().replace(code);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await settle(harness);
+
+    const problems = byTestId(root, 'problems')!;
+    expect(problems.textContent).toContain('statsmodels is not available to scripts');
+    expect(problems.textContent).toContain('shapely');
+
+    byTestId<HTMLButtonElement>(root, 'save')!.click();
+    const save = http.expectOne((r) => r.url === `${scriptsUrl}/clean` && r.method === 'PUT');
+    expect(save.request.body).toEqual({ code });
+    save.flush(version(3, code));
+    await settle(harness);
+    http.expectOne(`${scriptsUrl}/clean/versions`).flush([summary(version(3)), summary(version(2)), summary(version(1))]);
+    await settle(harness);
+
+    expect(byTestId(root, 'script-clean')?.textContent).toContain('v3');
+  });
+
   it('tells the keys of the editor next to it', async () => {
     const { root } = await open('analyst');
 
@@ -2161,6 +2200,66 @@ describe('ProjectScripts', () => {
     });
   });
 
+  describe('the Assistant tab', () => {
+    const tabNames = (root: HTMLElement) => [...root.querySelectorAll('[role="tab"]')].map((tab) => textOf(tab));
+
+    it('is not there when the deployment has no assistant (Not configured)', async () => {
+      const opened = await open('analyst', { assistant: false });
+      expect(tabNames(opened.root)).toEqual(['Tables', 'Reference', 'Versions']);
+      expect(byTestId(opened.root, 'side-tab-assistant')).toBeNull();
+    });
+
+    it('is not there while the configuration has not arrived, or when it cannot be read', async () => {
+      const waiting = await open('analyst');
+      expect(tabNames(waiting.root)).toEqual(['Tables', 'Reference', 'Versions']);
+      TestBed.resetTestingModule();
+
+      const failed = await open('analyst');
+      failed.http.match(SYSTEM_CONFIG_URL).forEach((r) => r.flush(null, { status: 500, statusText: 'Server Error' }));
+      await settle(failed.harness);
+      expect(tabNames(failed.root)).toEqual(['Tables', 'Reference', 'Versions']);
+    });
+
+    it('is the fourth tab for an analyst (Analyst)', async () => {
+      const opened = await open('analyst', { assistant: true });
+      await settle(opened.harness);
+      expect(tabNames(opened.root)).toEqual(['Tables', 'Reference', 'Versions', 'Assistant']);
+    });
+
+    it('is not shown to a viewer, even when the deployment has the assistant (Viewer)', async () => {
+      const opened = await open('viewer', { assistant: true });
+      await settle(opened.harness);
+      expect(tabNames(opened.root)).toEqual(['Tables', 'Reference', 'Versions']);
+    });
+
+    it('keeps Versions working as its own tab with the assistant present', async () => {
+      const opened = await open('analyst', { assistant: true });
+      await openVersions(opened);
+      expect([...byTestId(opened.root, 'versions')!.querySelectorAll('li')]).toHaveLength(2);
+      expect(byTestId(opened.root, 'assistant-panel')).toBeNull();
+    });
+
+    it('shows the panel when the tab is chosen, and Tables again when the tab disappears while selected', async () => {
+      const assistantEnabled = signal(true);
+      const opened = await open('analyst', { providers: [{ provide: SystemConfigService, useValue: { assistantEnabled } }] });
+      await settle(opened.harness);
+      byTestId<HTMLButtonElement>(opened.root, 'side-tab-assistant')!.click();
+      await settle(opened.harness);
+      opened.http.expectOne(`/api/v1/projects/${projectId}/assistant`).flush({ model: 'm', host: 'h' });
+      await settle(opened.harness);
+      expect(byTestId(opened.root, 'assistant-panel')).not.toBeNull();
+      expect(byTestId(opened.root, 'side-tab-assistant')!.getAttribute('aria-selected')).toBe('true');
+
+      assistantEnabled.set(false);
+      await settle(opened.harness);
+
+      expect(tabNames(opened.root)).toEqual(['Tables', 'Reference', 'Versions']);
+      expect(byTestId(opened.root, 'assistant-panel')).toBeNull();
+      expect(byTestId(opened.root, 'side-tab-inputs')!.getAttribute('aria-selected')).toBe('true');
+      expect(byTestId(opened.root, 'inputs-panel')).not.toBeNull();
+    });
+  });
+
   describe('the sample download strip', () => {
     it('explains what the zip is while it is prepared', async () => {
       const opened = await open('analyst');
@@ -2177,6 +2276,903 @@ describe('ProjectScripts', () => {
       await settle(opened.harness);
       expect(byTestId(opened.root, 'download-tables')!.tagName).toBe('P');
       expect(byTestId(opened.root, 'download-tables')!.querySelectorAll('li')).toHaveLength(0);
+    });
+  });
+
+  describe('the Assistant session on the page', () => {
+    const assistantUrl = `/api/v1/projects/${projectId}/assistant`;
+    const completionsUrl = `${assistantUrl}/completions`;
+    const outcomeUrl = (callId: string) => `${assistantUrl}/calls/${callId}/outcome`;
+
+    /** A script of two cells: `Rate` holds the line `main["x"] = 1`, `Out` the line that returns. */
+    const cellScript = ['def clean(raw, ctx):', '    main = raw["main"]', '    # %% Rate', '    main["x"] = 1', '    # %% Out', '    return raw', ''].join('\n');
+    const rateCell = '    # %% Rate\n    main["x"] = 1';
+    const newRate = '    # %% Rate\n    main["x"] = 2';
+    const proposedScript = 'def clean(raw, ctx):\n    return raw  # proposed\n';
+    const savedWith = (code: string): ScriptList => ({ clean: { kind: 'clean', current: version(2, code) }, output: { kind: 'output', current: null }, indicators: [] });
+
+    beforeEach(() => sessionStorage.clear());
+    afterEach(() => sessionStorage.clear());
+
+    function answer(overrides: Partial<AssistantAnswer> = {}): AssistantAnswer {
+      return {
+        callId: 'c1',
+        explanation: 'Here is the script. [proposed code: 2 lines]',
+        blocks: [{ code: proposedScript, complete: true }],
+        truncated: false,
+        testExpired: false,
+        omitted: [],
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15, estimated: false },
+        ...overrides,
+      };
+    }
+
+    /** Opens the Scripts page of an analyst with the Assistant tab on view. */
+    async function openAssistant(seed: Seed = {}) {
+      const opened = await open('analyst', { assistant: true, ...seed });
+      await settle(opened.harness);
+      await showAssistantTab(opened);
+      return opened;
+    }
+
+    async function showAssistantTab(opened: Opened) {
+      byTestId<HTMLButtonElement>(opened.root, 'side-tab-assistant')!.click();
+      await settle(opened.harness);
+      opened.http.match(assistantUrl).forEach((r) => r.flush({ model: 'gemini-3.8-flash', host: 'generativelanguage.googleapis.com' }));
+      await settle(opened.harness);
+    }
+
+    async function showTab(opened: Opened, tab: 'inputs' | 'assistant') {
+      if (tab === 'assistant') {
+        await showAssistantTab(opened);
+      } else {
+        byTestId<HTMLButtonElement>(opened.root, `side-tab-${tab}`)!.click();
+        await settle(opened.harness);
+      }
+    }
+
+    /** Types a request and sends it; returns the request the page made. */
+    async function ask(opened: Opened, text: string) {
+      typeInto(byTestId<HTMLTextAreaElement>(opened.root, 'assistant-request') as unknown as HTMLInputElement, text);
+      await settle(opened.harness);
+      byTestId<HTMLButtonElement>(opened.root, 'assistant-send')!.click();
+      await settle(opened.harness);
+      return opened.http.expectOne(completionsUrl);
+    }
+
+    async function reply(opened: Opened, request: TestRequest, body: AssistantAnswer) {
+      request.flush(body);
+      await settle(opened.harness);
+    }
+
+    async function fail(opened: Opened, request: TestRequest, status: number, code: string) {
+      request.flush({ title: 'x', status, code }, { status, statusText: 'Failed' });
+      await settle(opened.harness);
+    }
+
+    async function chooseCell(opened: Opened, line = 'main["x"] = 1') {
+      opened.editor().goTo(opened.editor().text().indexOf(line));
+      await settle(opened.harness);
+      byTestId<HTMLButtonElement>(opened.root, 'assistant-scope-cell')!.click();
+      await settle(opened.harness);
+    }
+
+    const box = (opened: Opened) => byTestId<HTMLTextAreaElement>(opened.root, 'assistant-request')!;
+    const click = async (opened: Opened, id: string) => {
+      byTestId<HTMLButtonElement>(opened.root, id)!.click();
+      await settle(opened.harness);
+    };
+    const confirmApply = async (opened: Opened) => {
+      confirmDialog()!.click();
+      await tick();
+      await settle(opened.harness);
+    };
+    const outcomeOf = (opened: Opened, callId: string) => {
+      const request = opened.http.expectOne(outcomeUrl(callId));
+      expect(request.request.method).toBe('PUT');
+      request.flush(null, { status: 204, statusText: 'No Content' });
+      return request.request.body;
+    };
+
+    function undoInEditor() {
+      document.querySelector('.cm-content')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }));
+    }
+
+    /** Stores a conversation as an earlier page of the same tab would have left it. */
+    function keepConversation(script: ScriptRef, conversation: Partial<StoredConversation>) {
+      const entry = { v: 1, touched: 1, thread: [], text: '', scope: 'script', proposal: null, ...conversation };
+      sessionStorage.setItem(conversationKey('user-1', projectId, script), JSON.stringify(entry));
+    }
+
+    describe('applying a proposal', () => {
+      it('replaces the script as one edit that undo reverts, and records how (Apply and undo)', async () => {
+        const opened = await openAssistant();
+        const saved = opened.editor().text();
+        await reply(opened, await ask(opened, 'write the script'), answer());
+
+        await click(opened, 'assistant-apply-script-0');
+        expect(opened.editor().text()).toBe(proposedScript);
+        expect(outcomeOf(opened, 'c1')).toEqual({ applied: 'script' });
+
+        undoInEditor();
+        await settle(opened.harness);
+        expect(opened.editor().text()).toBe(saved);
+      });
+
+      it('leaves the script unsaved and the last test out of date, and saves and tests nothing (Not saved, not tested)', async () => {
+        const opened = await openAssistant();
+        await startTest(opened);
+        opened.http.expectOne((r) => r.url === testsUrl && r.method === 'POST').flush(scriptTest({ status: 'succeeded', steps: [flattenStep] }));
+        await settle(opened.harness);
+        expect(byTestId(opened.root, 'test-stale')).toBeNull();
+        expect(byTestId(opened.root, 'unsaved')).not.toBeNull();
+
+        await reply(opened, await ask(opened, 'write the script'), answer());
+        await click(opened, 'assistant-apply-script-0');
+        outcomeOf(opened, 'c1');
+
+        expect(byTestId(opened.root, 'unsaved')).not.toBeNull();
+        expect(byTestId(opened.root, 'test-stale')).not.toBeNull();
+        opened.http.expectNone((r) => r.method !== 'GET' && r.url !== outcomeUrl('c1'));
+      });
+
+      it('offers only insertion for code that does not define the contract function, and inserts it at the cursor (Partial proposal)', async () => {
+        const opened = await openAssistant();
+        const fragment = 'rate = 1\n';
+        await reply(opened, await ask(opened, 'compute the rate'), answer({ blocks: [{ code: fragment, complete: true }] }));
+
+        expect(byTestId(opened.root, 'assistant-apply-script-0')).toBeNull();
+        expect(textOf(byTestId(opened.root, 'assistant-block-summary'))).toContain('Does not define clean(raw, ctx)');
+        const saved = opened.editor().text();
+        opened.editor().goTo(0);
+        await click(opened, 'assistant-apply-insert-0');
+        expect(opened.editor().text()).toBe(fragment + saved);
+        expect(outcomeOf(opened, 'c1')).toEqual({ applied: 'insert' });
+      });
+
+      it('says an answer was cut off and offers its code only for insertion (Answer cut off)', async () => {
+        const opened = await openAssistant();
+        await reply(opened, await ask(opened, 'write it'), answer({ truncated: true, blocks: [{ code: 'def clean(raw, ctx):', complete: false }] }));
+
+        expect(byTestId(opened.root, 'assistant-note-cutOff')).not.toBeNull();
+        expect(byTestId(opened.root, 'assistant-apply-script-0')).toBeNull();
+        expect(byTestId(opened.root, 'assistant-apply-insert-0')).not.toBeNull();
+      });
+
+      it('offers each of several blocks only for insertion, with a note (Several blocks)', async () => {
+        const opened = await openAssistant();
+        await reply(
+          opened,
+          await ask(opened, 'write it'),
+          answer({
+            blocks: [
+              { code: proposedScript, complete: true },
+              { code: 'def clean(raw, ctx):\n    return raw  # second\n', complete: true },
+            ],
+          }),
+        );
+
+        expect(byTestId(opened.root, 'assistant-note-notOneScript')).not.toBeNull();
+        for (const block of [0, 1]) {
+          expect(byTestId(opened.root, `assistant-apply-script-${block}`)).toBeNull();
+          expect(byTestId(opened.root, `assistant-apply-insert-${block}`)).not.toBeNull();
+        }
+      });
+
+      it('asks for confirmation when the text changed while the answer was written, and applies only when confirmed (Edited while waiting)', async () => {
+        const opened = await openAssistant();
+        const request = await ask(opened, 'write the script');
+        opened.editor().replace(opened.editor().text() + '# typed while waiting\n');
+        await settle(opened.harness);
+        await reply(opened, request, answer());
+
+        await click(opened, 'assistant-apply-script-0');
+        expect(document.body.textContent).toContain('Apply the proposed code?');
+        expect(opened.editor().text()).toContain('# typed while waiting');
+        (document.querySelector('.cdk-overlay-container button[tmzButton]:not([data-testid="confirm"])') as HTMLButtonElement).click();
+        await tick();
+        await settle(opened.harness);
+        expect(opened.editor().text()).toContain('# typed while waiting');
+        opened.http.expectNone(outcomeUrl('c1'));
+
+        await click(opened, 'assistant-apply-script-0');
+        await confirmApply(opened);
+        expect(opened.editor().text()).toBe(proposedScript);
+        expect(outcomeOf(opened, 'c1')).toEqual({ applied: 'script' });
+      });
+
+      it('does not ask when the text is the one the request was sent with', async () => {
+        const opened = await openAssistant();
+        await reply(opened, await ask(opened, 'write the script'), answer());
+        await click(opened, 'assistant-apply-script-0');
+        expect(confirmDialog()).toBeNull();
+      });
+
+      it('shows the checks on the proposal, such as an unavailable import, and still lets it be applied (Proposal with an unavailable import)', async () => {
+        const opened = await openAssistant();
+        const withScipy = 'import scipy.stats\n\ndef clean(raw, ctx):\n    return raw\n';
+        await reply(opened, await ask(opened, 'test it'), answer({ blocks: [{ code: withScipy, complete: true }] }));
+
+        const marks = textOf(byTestId(opened.root, 'assistant-marks'));
+        expect(marks).toContain('scipy is not available to scripts');
+        expect(marks).toContain('Line 1');
+        await click(opened, 'assistant-apply-script-0');
+        expect(opened.editor().text()).toBe(withScipy);
+      });
+    });
+
+    describe('rewriting a cell', () => {
+      it('replaces only the cell at the cursor and records it (Rewrite a cell)', async () => {
+        const opened = await openAssistant({ scripts: savedWith(cellScript) });
+        await chooseCell(opened);
+        const request = await ask(opened, 'set it to two');
+        expect(request.request.body).toMatchObject({ action: 'cell', focus: { line: 3 }, draft: cellScript });
+        await reply(opened, request, answer({ blocks: [{ code: newRate, complete: true }] }));
+
+        expect(byTestId(opened.root, 'assistant-apply-cell-0')).not.toBeNull();
+        await click(opened, 'assistant-apply-cell-0');
+        expect(opened.editor().text()).toBe(cellScript.replace(rateCell, newRate));
+        expect(outcomeOf(opened, 'c1')).toEqual({ applied: 'cell' });
+
+        undoInEditor();
+        await settle(opened.harness);
+        expect(opened.editor().text()).toBe(cellScript);
+      });
+
+      it('offers only insertion when the answer to a cell request is not one cell (Answer that is not one cell)', async () => {
+        const opened = await openAssistant({ scripts: savedWith(cellScript) });
+        await chooseCell(opened);
+        const two = `${newRate}\n    # %% Other\n    main["y"] = 1`;
+        await reply(opened, await ask(opened, 'rewrite'), answer({ blocks: [{ code: two, complete: true }] }));
+
+        expect(byTestId(opened.root, 'assistant-note-notOneCell')).not.toBeNull();
+        expect(byTestId(opened.root, 'assistant-apply-cell-0')).toBeNull();
+        expect(byTestId(opened.root, 'assistant-apply-insert-0')).not.toBeNull();
+      });
+
+      it('withdraws Replace cell when the cell was edited while the answer was written (Cell edited while waiting)', async () => {
+        const opened = await openAssistant({ scripts: savedWith(cellScript) });
+        await chooseCell(opened);
+        const request = await ask(opened, 'rewrite');
+        opened.editor().replace(cellScript.replace('main["x"] = 1', 'main["x"] = 1  # edited'));
+        await settle(opened.harness);
+        await reply(opened, request, answer({ blocks: [{ code: newRate, complete: true }] }));
+
+        expect(byTestId(opened.root, 'assistant-note-cellChanged')).not.toBeNull();
+        expect(byTestId(opened.root, 'assistant-apply-cell-0')).toBeNull();
+        expect(byTestId(opened.root, 'assistant-apply-insert-0')).not.toBeNull();
+      });
+
+      it('withdraws Replace cell when the marker was removed while the answer was written', async () => {
+        const opened = await openAssistant({ scripts: savedWith(cellScript) });
+        await chooseCell(opened);
+        const request = await ask(opened, 'rewrite');
+        opened.editor().replace(cellScript.replace('    # %% Rate\n', ''));
+        await settle(opened.harness);
+        await reply(opened, request, answer({ blocks: [{ code: newRate, complete: true }] }));
+
+        expect(byTestId(opened.root, 'assistant-note-cellChanged')).not.toBeNull();
+        expect(byTestId(opened.root, 'assistant-apply-cell-0')).toBeNull();
+      });
+
+      it('still replaces the cell after a line was added above it (Line added above while waiting)', async () => {
+        const opened = await openAssistant({ scripts: savedWith(cellScript) });
+        await chooseCell(opened);
+        const request = await ask(opened, 'rewrite');
+        const withImport = 'import pandas as pd\n' + cellScript;
+        opened.editor().replace(withImport);
+        await settle(opened.harness);
+        await reply(opened, request, answer({ blocks: [{ code: newRate, complete: true }] }));
+
+        expect(byTestId(opened.root, 'assistant-apply-cell-0')).not.toBeNull();
+        await click(opened, 'assistant-apply-cell-0');
+        await confirmApply(opened);
+        expect(opened.editor().text()).toBe(withImport.replace(rateCell, newRate));
+      });
+    });
+
+    describe('while a request is being written', () => {
+      it('keeps writing while another side tab is shown, and offers the answer that arrived meanwhile (Another side tab while writing)', async () => {
+        const opened = await openAssistant();
+        const request = await ask(opened, 'write the script');
+        await showTab(opened, 'inputs');
+        expect(byTestId(opened.root, 'assistant-panel')).toBeNull();
+
+        await showTab(opened, 'assistant');
+        expect(byTestId(opened.root, 'assistant-writing')).not.toBeNull();
+        expect(textOf(byTestId(opened.root, 'assistant-turn-pending'))).toContain('write the script');
+
+        await showTab(opened, 'inputs');
+        await reply(opened, request, answer());
+        await showTab(opened, 'assistant');
+        expect(byTestId(opened.root, 'assistant-writing')).toBeNull();
+        expect(byTestId(opened.root, 'assistant-turn-assistant')).not.toBeNull();
+        expect(byTestId(opened.root, 'assistant-apply-script-0')).not.toBeNull();
+      });
+
+      it('keeps the typed request and the scope across side tabs (Typed request kept across side tabs)', async () => {
+        const opened = await openAssistant({ scripts: savedWith(cellScript) });
+        await chooseCell(opened);
+        typeInto(box(opened) as unknown as HTMLInputElement, 'look at the age column');
+        await settle(opened.harness);
+
+        await showTab(opened, 'inputs');
+        await showTab(opened, 'assistant');
+
+        expect(box(opened).value).toBe('look at the age column');
+        expect(byTestId(opened.root, 'assistant-scope-cell')!.getAttribute('aria-pressed')).toBe('true');
+      });
+
+      it('says a failure on the script it was sent for, and puts its text back, whichever side tab is shown (Failure while away)', async () => {
+        const opened = await openAssistant();
+        const request = await ask(opened, 'write the script');
+        await showTab(opened, 'inputs');
+        await fail(opened, request, 504, 'assistant.timeout');
+        await showTab(opened, 'assistant');
+
+        expect(textOf(byTestId(opened.root, 'assistant-failure-message'))).toContain('did not answer in time');
+        expect(box(opened).value).toBe('write the script');
+        expect(byTestId(opened.root, 'assistant-turn-user')).toBeNull();
+      });
+
+      it('writes the answer into the script it was sent for and shows the other script that a request is in progress (Another script while writing)', async () => {
+        const opened = await openAssistant();
+        const request = await ask(opened, 'write script one');
+        await click(opened, 'script-output');
+        opened.http.expectOne(`${scriptsUrl}/output/versions`).flush([]);
+        opened.http.expectOne((r) => r.url === inputsUrl && r.params.get('kind') === 'output').flush(scriptInputs({ source: 'clean' }));
+        await settle(opened.harness);
+
+        expect(textOf(byTestId(opened.root, 'assistant-pending-elsewhere'))).toContain('A request for script 1 is in progress');
+        expect(byTestId<HTMLButtonElement>(opened.root, 'assistant-send')!.disabled).toBe(true);
+        expect(box(opened).value).toBe('');
+
+        await reply(opened, request, answer());
+        expect(byTestId(opened.root, 'assistant-thread')).toBeNull();
+        expect(byTestId(opened.root, 'assistant-proposal')).toBeNull();
+
+        await click(opened, 'script-clean');
+        opened.http.expectOne(`${scriptsUrl}/clean/versions`).flush([]);
+        await settle(opened.harness);
+        expect(textOf(byTestId(opened.root, 'assistant-turn-user'))).toContain('write script one');
+        expect(byTestId(opened.root, 'assistant-apply-script-0')).not.toBeNull();
+      });
+
+      it('puts the text of a request that failed while another script is shown back in the first script only', async () => {
+        const opened = await openAssistant();
+        const request = await ask(opened, 'write script one');
+        await click(opened, 'script-output');
+        opened.http.expectOne(`${scriptsUrl}/output/versions`).flush([]);
+        opened.http.expectOne((r) => r.url === inputsUrl && r.params.get('kind') === 'output').flush(scriptInputs({ source: 'clean' }));
+        await settle(opened.harness);
+        typeInto(box(opened) as unknown as HTMLInputElement, 'script two text');
+        await settle(opened.harness);
+
+        await fail(opened, request, 504, 'assistant.timeout');
+        expect(box(opened).value).toBe('script two text');
+        expect(byTestId(opened.root, 'assistant-failure')).toBeNull();
+
+        await click(opened, 'script-clean');
+        opened.http.expectOne(`${scriptsUrl}/clean/versions`).flush([]);
+        await settle(opened.harness);
+        expect(box(opened).value).toBe('write script one');
+        expect(byTestId(opened.root, 'assistant-failure')).not.toBeNull();
+      });
+
+      it('cancels the request when the Scripts page is left (Leaving the Scripts page while writing)', async () => {
+        const opened = await openAssistant();
+        const request = await ask(opened, 'write the script');
+        expect(request.cancelled).toBe(false);
+
+        opened.harness.fixture.destroy();
+
+        expect(request.cancelled).toBe(true);
+      });
+
+      it('puts the text back and does not wait any more after Cancel', async () => {
+        const opened = await openAssistant();
+        const request = await ask(opened, 'write the script');
+        await click(opened, 'assistant-cancel');
+
+        expect(request.cancelled).toBe(true);
+        expect(byTestId(opened.root, 'assistant-writing')).toBeNull();
+        expect(box(opened).value).toBe('write the script');
+        expect(byTestId(opened.root, 'assistant-turn-user')).toBeNull();
+      });
+
+      it('does not offer a new conversation while the answer is written (New conversation while writing)', async () => {
+        const opened = await openAssistant();
+        await reply(opened, await ask(opened, 'first'), answer());
+        const request = await ask(opened, 'second');
+
+        expect(byTestId<HTMLButtonElement>(opened.root, 'assistant-new-conversation')!.disabled).toBe(true);
+        await reply(opened, request, answer({ callId: 'c2' }));
+        expect(byTestId<HTMLButtonElement>(opened.root, 'assistant-new-conversation')!.disabled).toBe(false);
+      });
+    });
+
+    describe('the turns of a request', () => {
+      it('adds nothing to the thread when a request fails, so the same message sent again appears once (Failed request)', async () => {
+        const opened = await openAssistant();
+        await fail(opened, await ask(opened, 'write the script'), 504, 'assistant.timeout');
+        expect(byTestId(opened.root, 'assistant-thread')).toBeNull();
+        expect(box(opened).value).toBe('write the script');
+
+        const again = await (async () => {
+          byTestId<HTMLButtonElement>(opened.root, 'assistant-send')!.click();
+          await settle(opened.harness);
+          return opened.http.expectOne(completionsUrl);
+        })();
+        expect(again.request.body.messages).toEqual([{ role: 'user', content: 'write the script' }]);
+        await reply(opened, again, answer());
+
+        expect(opened.root.querySelectorAll('[data-testid="assistant-turn-user"]')).toHaveLength(1);
+        expect(opened.root.querySelectorAll('[data-testid="assistant-turn-assistant"]')).toHaveLength(1);
+        expect(byTestId(opened.root, 'assistant-failure')).toBeNull();
+      });
+
+      it('sends the explanations of earlier answers, with the note in place of their code (Earlier answers)', async () => {
+        const opened = await openAssistant();
+        await reply(opened, await ask(opened, 'first'), answer({ callId: 'c1', explanation: 'First answer. [proposed code: 2 lines]' }));
+        await reply(opened, await ask(opened, 'second'), answer({ callId: 'c2', explanation: 'Second answer. [proposed code: 2 lines]' }));
+        const third = await ask(opened, 'third');
+
+        expect(third.request.body.messages).toEqual([
+          { role: 'user', content: 'first' },
+          { role: 'assistant', content: 'First answer. [proposed code: 2 lines]' },
+          { role: 'user', content: 'second' },
+          { role: 'assistant', content: 'Second answer. [proposed code: 2 lines]' },
+          { role: 'user', content: 'third' },
+        ]);
+      });
+
+      it('leaves out the oldest pairs of a long conversation and starts with a turn of the analyst (Long conversation)', async () => {
+        const turns: StoredConversation['thread'] = Array.from({ length: 50 }, (_, i) => ({ role: i % 2 === 0 ? 'user' : 'assistant', content: `turn ${i}` }));
+        keepConversation({ kind: 'clean' }, { thread: turns });
+        const opened = await openAssistant();
+        expect(opened.root.querySelectorAll('[data-testid="assistant-thread"] li')).toHaveLength(50);
+
+        const request = await ask(opened, 'one more');
+        const messages = request.request.body.messages as { role: string; content: string }[];
+
+        expect(messages).toHaveLength(39);
+        expect(messages[0]).toEqual({ role: 'user', content: 'turn 12' });
+        expect(messages.at(-1)).toEqual({ role: 'user', content: 'one more' });
+        expect(messages.map((m) => m.role)).toEqual(Array.from({ length: 39 }, (_, i) => (i % 2 === 0 ? 'user' : 'assistant')));
+
+        await reply(opened, request, answer());
+        expect(opened.root.querySelectorAll('[data-testid="assistant-thread"] li')).toHaveLength(52);
+      });
+
+      it('leaves out pairs until the turns fit in 64 KB', async () => {
+        const big = 'x'.repeat(15 * 1024);
+        const turns: StoredConversation['thread'] = Array.from({ length: 10 }, (_, i) => ({ role: i % 2 === 0 ? 'user' : 'assistant', content: `${i}${big}` }));
+        keepConversation({ kind: 'clean' }, { thread: turns });
+        const opened = await openAssistant();
+
+        const messages = (await ask(opened, 'next')).request.body.messages as { role: string; content: string }[];
+
+        expect(messages[0].role).toBe('user');
+        expect(new TextEncoder().encode(messages.map((m) => m.content).join('')).length).toBeLessThanOrEqual(64 * 1024);
+        expect(messages.length).toBeLessThan(11);
+        expect(messages.at(-1)!.content).toBe('next');
+      });
+
+      it('starts a new conversation without an earlier turn or a proposal (New conversation)', async () => {
+        const opened = await openAssistant();
+        await reply(opened, await ask(opened, 'first'), answer());
+        expect(byTestId(opened.root, 'assistant-proposal')).not.toBeNull();
+
+        await click(opened, 'assistant-new-conversation');
+        expect(byTestId(opened.root, 'assistant-thread')).toBeNull();
+        expect(byTestId(opened.root, 'assistant-proposal')).toBeNull();
+
+        const next = await ask(opened, 'second');
+        expect(next.request.body.messages).toEqual([{ role: 'user', content: 'second' }]);
+      });
+    });
+
+    describe('the conversation kept in the browser session', () => {
+      it('shows the conversation and its proposal again after a reload, and applies it as before (Reload)', async () => {
+        const first = await openAssistant();
+        await reply(first, await ask(first, 'write the script'), answer({ callId: 'c7' }));
+        TestBed.resetTestingModule();
+
+        const opened = await openAssistant();
+        expect(textOf(byTestId(opened.root, 'assistant-turn-user'))).toContain('write the script');
+        expect(textOf(byTestId(opened.root, 'assistant-turn-assistant'))).toContain('Here is the script.');
+        await click(opened, 'assistant-apply-script-0');
+
+        expect(confirmDialog()).toBeNull();
+        expect(opened.editor().text()).toBe(proposedScript);
+        expect(outcomeOf(opened, 'c7')).toEqual({ applied: 'script' });
+      });
+
+      it('asks before applying after a reload when the restored text is not the text the request was sent with', async () => {
+        const first = await openAssistant();
+        first.editor().replace(proposedScript + '# unsaved\n');
+        await settle(first.harness);
+        await reply(first, await ask(first, 'write the script'), answer({ callId: 'c8' }));
+        TestBed.resetTestingModule();
+
+        const opened = await openAssistant();
+        await click(opened, 'assistant-apply-script-0');
+        expect(document.body.textContent).toContain('Apply the proposed code?');
+        await confirmApply(opened);
+        expect(outcomeOf(opened, 'c8')).toEqual({ applied: 'script' });
+      });
+
+      it('finds the cell again after a reload, or withdraws Replace cell with a note when it is gone', async () => {
+        const first = await openAssistant({ scripts: savedWith(cellScript) });
+        await chooseCell(first);
+        await reply(first, await ask(first, 'rewrite'), answer({ callId: 'c9', blocks: [{ code: newRate, complete: true }] }));
+        TestBed.resetTestingModule();
+
+        const found = await openAssistant({ scripts: savedWith(cellScript) });
+        await click(found, 'assistant-apply-cell-0');
+        expect(found.editor().text()).toBe(cellScript.replace(rateCell, newRate));
+        expect(outcomeOf(found, 'c9')).toEqual({ applied: 'cell' });
+        TestBed.resetTestingModule();
+
+        const gone = await openAssistant({ scripts: savedWith(cellScript.replace('main["x"] = 1', 'main["x"] = 5')) });
+        expect(byTestId(gone.root, 'assistant-note-cellChanged')).not.toBeNull();
+        expect(byTestId(gone.root, 'assistant-apply-cell-0')).toBeNull();
+        expect(byTestId(gone.root, 'assistant-apply-insert-0')).not.toBeNull();
+      });
+
+      it('keeps the request box and the cell scope after a reload', async () => {
+        const first = await openAssistant({ scripts: savedWith(cellScript) });
+        await chooseCell(first);
+        typeInto(box(first) as unknown as HTMLInputElement, 'half written');
+        await settle(first.harness);
+        TestBed.resetTestingModule();
+
+        const opened = await openAssistant({ scripts: savedWith(cellScript) });
+        expect(box(opened).value).toBe('half written');
+        opened.editor().goTo(opened.editor().text().indexOf('main["x"] = 1'));
+        await settle(opened.harness);
+        expect(byTestId(opened.root, 'assistant-scope-cell')!.getAttribute('aria-pressed')).toBe('true');
+      });
+
+      it('keeps the text of a request still being written when the page is reloaded', async () => {
+        const first = await openAssistant();
+        await ask(first, 'write the script');
+        TestBed.resetTestingModule();
+
+        const opened = await openAssistant();
+        expect(box(opened).value).toBe('write the script');
+      });
+
+      it('keeps a conversation per script (Another script)', async () => {
+        const opened = await openAssistant();
+        await reply(opened, await ask(opened, 'about script one'), answer());
+
+        await click(opened, 'script-output');
+        opened.http.expectOne(`${scriptsUrl}/output/versions`).flush([]);
+        opened.http.expectOne((r) => r.url === inputsUrl && r.params.get('kind') === 'output').flush(scriptInputs({ source: 'clean' }));
+        await settle(opened.harness);
+        expect(byTestId(opened.root, 'assistant-thread')).toBeNull();
+        expect(byTestId(opened.root, 'assistant-proposal')).toBeNull();
+        await reply(opened, await ask(opened, 'about script two'), answer({ callId: 'c2', explanation: 'Two. [proposed code: 2 lines]' }));
+        expect(textOf(byTestId(opened.root, 'assistant-thread'))).not.toContain('about script one');
+
+        await click(opened, 'script-clean');
+        opened.http.expectOne(`${scriptsUrl}/clean/versions`).flush([]);
+        await settle(opened.harness);
+        expect(textOf(byTestId(opened.root, 'assistant-thread'))).toContain('about script one');
+        expect(textOf(byTestId(opened.root, 'assistant-thread'))).not.toContain('about script two');
+        expect([...Object.keys(sessionStorage)].filter((key) => key.startsWith('tamiza.assistant.')).sort()).toEqual([
+          `tamiza.assistant.user-1.${projectId}.clean`,
+          `tamiza.assistant.user-1.${projectId}.output`,
+        ]);
+      });
+
+      it('removes a conversation that was started anew from the stored keys', async () => {
+        const opened = await openAssistant();
+        await reply(opened, await ask(opened, 'first'), answer());
+        expect(sessionStorage.getItem(`tamiza.assistant.user-1.${projectId}.clean`)).not.toBeNull();
+
+        await click(opened, 'assistant-new-conversation');
+
+        expect(sessionStorage.getItem(`tamiza.assistant.user-1.${projectId}.clean`)).toBeNull();
+      });
+
+      it('keeps the conversation in memory when the store is full', async () => {
+        const opened = await openAssistant();
+        const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+          throw new DOMException('full', 'QuotaExceededError');
+        });
+        try {
+          await reply(opened, await ask(opened, 'write the script'), answer());
+          expect(textOf(byTestId(opened.root, 'assistant-turn-user'))).toContain('write the script');
+          expect(byTestId(opened.root, 'assistant-apply-script-0')).not.toBeNull();
+        } finally {
+          setItem.mockRestore();
+        }
+      });
+
+      it('leaves other keys of the tab, such as the sign-in library state, alone', async () => {
+        sessionStorage.setItem('0-tamiza-ui', '{"authnResult":"x"}');
+        const opened = await openAssistant();
+        await reply(opened, await ask(opened, 'write the script'), answer());
+
+        expect(sessionStorage.getItem('0-tamiza-ui')).toBe('{"authnResult":"x"}');
+      });
+    });
+
+    describe('fixing from the test result', () => {
+      const coverage = indicatorVersion('coverage', 1, { format: 'percent', unit: '' });
+      const other = indicatorVersion('other', 1, { format: 'percent', unit: '' });
+      const cleanStep: TestStep = { ...flattenStep, step: 'clean', tables: [], log: '' };
+      const failedStep = (step: TestStep['step'], error: string): TestStep => ({
+        ...flattenStep,
+        step,
+        status: 'failed',
+        tables: [],
+        error,
+        log: 'INFO Dropped 3 test submissions of Ana Gomez',
+      });
+      const keyError = "KeyError: 'water_source'\n\nTraceback (most recent call last):\n  File \"script.py\", line 4, in compute";
+      /** The facts of a dashboard view whose largest value is 87.5 and that holds 3 duplicate rows. */
+      const facts = {
+        measures: ['value'],
+        defaultMeasure: 'value',
+        ratio: false,
+        dimensions: ['municipality'],
+        defaultDimension: 'municipality',
+        geometry: [],
+        rows: 4,
+        defaultMeasureNulls: 0,
+        defaultMeasureMax: 87.5,
+        totals: { value: 120.5 },
+        duplicateRows: 3,
+        charts: { municipality: { values: 1, groups: [{ group: 'Cali', value: 87.5, numerator: null, denominator: null }] } },
+      };
+      const indicatorTest = (overrides: Partial<ScriptTest>): ScriptTest =>
+        scriptTest({ kind: 'indicator', name: 'coverage', code: draftCode, ...overrides });
+      const scrolled = vi.fn();
+      const askButtons = (root: HTMLElement) => [...root.querySelectorAll('[data-testid="test-step-ask"], [data-testid="view-warning-ask"]')];
+      const sentence = (step = 'indicator coverage') => `The last test failed in ${step}. Please fix the error.`;
+
+      beforeEach(() => {
+        scrolled.mockClear();
+        Element.prototype.scrollIntoView = scrolled;
+      });
+
+      /** Selects the indicator `coverage`, tests it and has the API answer with `test`; the Assistant tab stays on view. */
+      async function testedIndicator(test: Partial<ScriptTest>, scripts = withIndicators(coverage)) {
+        const opened = await openAssistant({ scripts });
+        await selectIndicator(opened, coverage);
+        opened.http.expectOne((r) => r.url === inputsUrl && r.params.get('kind') === 'indicator').flush(scriptInputs({ source: 'clean' }));
+        await settle(opened.harness);
+        opened.editor().replace(draftCode);
+        await settle(opened.harness);
+        await click(opened, 'test-on-sample');
+        opened.http.expectOne((r) => r.url === testsUrl && r.method === 'POST').flush(indicatorTest(test));
+        await settle(opened.harness);
+        return opened;
+      }
+
+      const failedIndicator = () => testedIndicator({ status: 'failed', errorCode: 'step.indicator', error: keyError, steps: [flattenStep, cleanStep, failedStep('indicator', keyError)] });
+      const warnedIndicator = () => testedIndicator({ status: 'succeeded', steps: [flattenStep, cleanStep, { ...flattenStep, step: 'indicator', tables: [], dashboard: facts }] });
+
+      it('opens the Assistant with the Fix scope for the failed step, scrolled into view with the focus on the box (Fix a failed test)', async () => {
+        const opened = await failedIndicator();
+        await showTab(opened, 'inputs');
+        scrolled.mockClear();
+
+        await click(opened, 'test-step-ask');
+        await tick();
+        await settle(opened.harness);
+
+        expect(byTestId(opened.root, 'side-tab-assistant')!.getAttribute('aria-selected')).toBe('true');
+        expect(byTestId(opened.root, 'assistant-scope-fix')!.getAttribute('aria-pressed')).toBe('true');
+        expect(box(opened).value).toBe(sentence());
+        expect(document.activeElement).toBe(box(opened));
+        expect(scrolled).toHaveBeenCalledTimes(1);
+        expect(scrolled.mock.contexts[0]).toBe(opened.root.querySelector('app-script-side-panel'));
+        expect(scrolled).toHaveBeenCalledWith({ block: 'start' });
+      });
+
+      it('sends the fixed sentence with the test, and nothing of the error or the log (Fix with nothing typed)', async () => {
+        const opened = await failedIndicator();
+        await click(opened, 'test-step-ask');
+
+        const request = await (async () => {
+          await click(opened, 'assistant-send');
+          return opened.http.expectOne(completionsUrl);
+        })();
+
+        expect(request.request.body).toMatchObject({ action: 'fix', testId: 't1', messages: [{ role: 'user', content: sentence() }] });
+        expect(request.request.body.warning).toBeUndefined();
+        const sent = JSON.stringify(request.request.body.messages);
+        expect(sent).not.toContain('KeyError');
+        expect(sent).not.toContain('water_source');
+        expect(sent).not.toContain('Ana');
+      });
+
+      it('offers the button on the failed step of script 1 for a test of script 1', async () => {
+        const opened = await openAssistant();
+        await startTest(opened);
+        opened.http
+          .expectOne((r) => r.url === testsUrl && r.method === 'POST')
+          .flush(scriptTest({ status: 'failed', errorCode: 'step.clean', error: keyError, steps: [flattenStep, failedStep('clean', keyError)] }));
+        await settle(opened.harness);
+
+        await click(opened, 'test-step-ask');
+
+        expect(box(opened).value).toBe(sentence('script 1'));
+        expect(byTestId(opened.root, 'assistant-scope-fix')!.getAttribute('aria-pressed')).toBe('true');
+      });
+
+      it('names the warning asked about and keeps its figures out of the request (Dashboard warning)', async () => {
+        const opened = await warnedIndicator();
+        expect(askButtons(opened.root)).toHaveLength(2);
+
+        (askButtons(opened.root)[0] as HTMLButtonElement).click();
+        await settle(opened.harness);
+        expect(box(opened).value).toContain('values of the default measure are above 1');
+        await click(opened, 'assistant-send');
+        const request = opened.http.expectOne(completionsUrl);
+
+        expect(request.request.body).toMatchObject({ action: 'fix', testId: 't1', warning: { key: 'percentAboveOne', params: {} } });
+        expect(JSON.stringify(request.request.body)).not.toContain('87.5');
+      });
+
+      it('keeps the counts a warning names and drops the rest', async () => {
+        const opened = await warnedIndicator();
+
+        (askButtons(opened.root)[1] as HTMLButtonElement).click();
+        await settle(opened.harness);
+        await click(opened, 'assistant-send');
+
+        expect(opened.http.expectOne(completionsUrl).request.body.warning).toEqual({ key: 'duplicateRows', params: { count: 3 } });
+      });
+
+      it('offers nothing on the saved script 1 step, because the indicator did not run (Saved script 1 failed)', async () => {
+        const opened = await testedIndicator({ status: 'failed', errorCode: 'step.clean', error: keyError, steps: [flattenStep, failedStep('clean', keyError)] });
+
+        expect(byTestId(opened.root, 'test-step-error')).not.toBeNull();
+        expect(askButtons(opened.root)).toHaveLength(0);
+      });
+
+      it('withdraws the buttons and says to test again when the text changed since the test (Text changed since the test)', async () => {
+        const failed = await failedIndicator();
+        expect(askButtons(failed.root)).toHaveLength(1);
+        failed.editor().replace(draftCode + '# edited\n');
+        await settle(failed.harness);
+        expect(askButtons(failed.root)).toHaveLength(0);
+        expect(textOf(byTestId(failed.root, 'test-stale'))).toContain('Test again before asking the assistant for a fix.');
+        TestBed.resetTestingModule();
+
+        const warned = await warnedIndicator();
+        expect(askButtons(warned.root)).toHaveLength(2);
+        warned.editor().replace(draftCode + '# edited\n');
+        await settle(warned.harness);
+        expect(askButtons(warned.root)).toHaveLength(0);
+      });
+
+      it('leaves the Fix scope and says to test again when the text is edited after asking (Edited after asking)', async () => {
+        const opened = await failedIndicator();
+        await click(opened, 'test-step-ask');
+        expect(byTestId(opened.root, 'assistant-scope-fix')).not.toBeNull();
+
+        opened.editor().replace(draftCode + '# edited\n');
+        await settle(opened.harness);
+
+        expect(byTestId(opened.root, 'assistant-scope-fix')).toBeNull();
+        expect(byTestId(opened.root, 'assistant-test-again')).not.toBeNull();
+        await click(opened, 'assistant-send');
+        expect(opened.http.expectOne(completionsUrl).request.body.action).toBe('script');
+      });
+
+      it('offers nothing for the test of another script while this one is selected (Test of another script)', async () => {
+        const two = await testedIndicator(
+          { status: 'failed', errorCode: 'step.indicator', error: keyError, steps: [flattenStep, cleanStep, failedStep('indicator', keyError)] },
+          withIndicators(coverage, other),
+        );
+        expect(askButtons(two.root)).toHaveLength(1);
+        await pickIndicator(two, 'other');
+        confirmDialog()!.click();
+        await tick();
+        await settle(two.harness);
+        two.http.expectOne(`${scriptsUrl}/indicators/other/versions`).flush([summary(other)]);
+        await settle(two.harness);
+
+        expect(byTestId(two.root, 'test-step-error')).not.toBeNull();
+        expect(askButtons(two.root)).toHaveLength(0);
+      });
+
+      it('offers nothing while an older version is on view (Ask while an older version is on view)', async () => {
+        const opened = await openAssistant();
+        await startTest(opened);
+        opened.http
+          .expectOne((r) => r.url === testsUrl && r.method === 'POST')
+          .flush(scriptTest({ status: 'failed', errorCode: 'step.clean', error: keyError, steps: [flattenStep, failedStep('clean', keyError)] }));
+        await settle(opened.harness);
+        expect(askButtons(opened.root)).toHaveLength(1);
+
+        await openVersions(opened);
+        await click(opened, 'version-1');
+        confirmDialog()!.click();
+        await tick();
+        await settle(opened.harness);
+        opened.http.expectOne(`${scriptsUrl}/clean/versions/1`).flush(version(1));
+        await settle(opened.harness);
+
+        expect(byTestId(opened.root, 'viewing-version')).not.toBeNull();
+        expect(askButtons(opened.root)).toHaveLength(0);
+      });
+
+      it('leaves the Fix scope when the details change so that the warning disappears (Details changed after asking)', async () => {
+        const opened = await warnedIndicator();
+        (askButtons(opened.root)[0] as HTMLButtonElement).click();
+        await settle(opened.harness);
+        expect(byTestId(opened.root, 'assistant-scope-fix')!.getAttribute('aria-pressed')).toBe('true');
+
+        await editDetails(opened);
+        typeInto(byTestId<HTMLSelectElement>(opened.root, 'meta-format')!, 'decimal');
+        await settle(opened.harness);
+
+        expect(askButtons(opened.root)).toHaveLength(1);
+        expect(byTestId(opened.root, 'assistant-scope-fix')).toBeNull();
+        expect(byTestId(opened.root, 'assistant-test-again')).not.toBeNull();
+      });
+
+      it('shows the Assistant again with the focus on its box after another tab was chosen (Asking again)', async () => {
+        const opened = await warnedIndicator();
+        (askButtons(opened.root)[0] as HTMLButtonElement).click();
+        await settle(opened.harness);
+        const first = box(opened).value;
+
+        await showTab(opened, 'inputs');
+        expect(byTestId(opened.root, 'assistant-panel')).toBeNull();
+        (askButtons(opened.root)[1] as HTMLButtonElement).click();
+        await tick();
+        await settle(opened.harness);
+        opened.http.match(assistantUrl).forEach((r) => r.flush({ model: 'm', host: 'h' }));
+        await settle(opened.harness);
+
+        expect(byTestId(opened.root, 'side-tab-assistant')!.getAttribute('aria-selected')).toBe('true');
+        expect(document.activeElement).toBe(box(opened));
+        expect(box(opened).value).not.toBe(first);
+        expect(box(opened).value).toContain('share the same values in every dimension');
+        expect(byTestId(opened.root, 'assistant-scope-fix')!.getAttribute('aria-pressed')).toBe('true');
+      });
+
+      it('focuses the box again when the Assistant is already on view', async () => {
+        const opened = await failedIndicator();
+        await click(opened, 'test-step-ask');
+        box(opened).blur();
+        expect(document.activeElement).not.toBe(box(opened));
+
+        await click(opened, 'test-step-ask');
+
+        expect(document.activeElement).toBe(box(opened));
+        expect(box(opened).value).toBe(sentence());
+      });
+
+      it('keeps what the analyst typed before the sentence, and replaces a sentence it put there earlier', async () => {
+        const opened = await failedIndicator();
+        typeInto(box(opened) as unknown as HTMLInputElement, 'it worked before the form changed');
+        await settle(opened.harness);
+
+        await click(opened, 'test-step-ask');
+        expect(box(opened).value).toBe(`it worked before the form changed\n\n${sentence()}`);
+      });
+
+      it('offers nothing when the deployment has no assistant', async () => {
+        const opened = await open('analyst', { assistant: false });
+        await startTest(opened);
+        opened.http
+          .expectOne((r) => r.url === testsUrl && r.method === 'POST')
+          .flush(scriptTest({ status: 'failed', errorCode: 'step.clean', error: keyError, steps: [flattenStep, failedStep('clean', keyError)] }));
+        await settle(opened.harness);
+
+        expect(byTestId(opened.root, 'test-step-error')).not.toBeNull();
+        expect(askButtons(opened.root)).toHaveLength(0);
+        expect(byTestId(opened.root, 'test-stale')).toBeNull();
+      });
     });
   });
 });

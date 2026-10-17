@@ -90,11 +90,21 @@ public static partial class ScriptTestEndpoints
     private static async Task<Results<Ok<ScriptTestDetails>, NotFound>> GetAsync(
         Guid projectId, Guid testId, TamizaDbContext db, ICurrentUser user, TimeProvider time, CancellationToken ct)
     {
-        var expired = time.GetUtcNow() - Lifetime;
-        var test = await db.ScriptTests.AsNoTracking()
-            .SingleOrDefaultAsync(t => t.Id == testId && t.ProjectId == projectId && t.RequestedBy == user.Id
-                                       && (t.FinishedAt == null || t.FinishedAt > expired), ct);
+        var test = await FindOwnAsync(db, projectId, testId, user.Id, time.GetUtcNow(), ct);
         return test is null ? TypedResults.NotFound() : TypedResults.Ok(await DetailsAsync(db, test, ct));
+    }
+
+    /// <summary>
+    /// The test <paramref name="testId"/> of the project when <paramref name="userId"/> requested it and it has not expired (it is
+    /// still running or ended within <see cref="Lifetime"/>); otherwise null, as for a test that never existed.
+    /// </summary>
+    internal static Task<ScriptTest?> FindOwnAsync(
+        TamizaDbContext db, Guid projectId, Guid testId, Guid userId, DateTimeOffset now, CancellationToken ct)
+    {
+        var expired = now - Lifetime;
+        return db.ScriptTests.AsNoTracking()
+            .SingleOrDefaultAsync(t => t.Id == testId && t.ProjectId == projectId && t.RequestedBy == userId
+                                       && (t.FinishedAt == null || t.FinishedAt > expired), ct);
     }
 
     /// <summary>Replaces the user's queued test in the project, if any, with a new one; a running test is never touched.</summary>
