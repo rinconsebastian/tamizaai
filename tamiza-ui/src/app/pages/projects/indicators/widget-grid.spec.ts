@@ -1,5 +1,8 @@
+import { TestBed } from '@angular/core/testing';
+import { vi } from 'vitest';
 import { settle } from '../../../../testing/project-harness';
 import { Layout } from '../../../core/projects/indicators.service';
+import { ChartTooltips } from '../../../shared/ui';
 import { Context, all, answerQueries, clearOverlay, indicatorsUrl, isPatch, open, overview, result, row, text, wait, widget } from './indicators-testing';
 import { layoutSaveDelayMs } from '../project-indicators';
 
@@ -225,6 +228,27 @@ describe('the widget grid', () => {
       expect(requests).toHaveLength(1);
       expect(requests[0].request.body).toEqual({ layout: { x: 0, y: 4, w: 6, h: 4 } });
       requests[0].flush(left);
+    }, 10000);
+
+    it('closes the tooltips of the page when a tile starts to move, and when it is resized', async () => {
+      const context = await open('analyst', [left], rows);
+      const closeAll = vi.spyOn(TestBed.inject(ChartTooltips), 'closeAll');
+
+      mouse('mousedown', handle(context, 'w1', 'move'), 100, 100);
+      mouse('mousemove', document, 120, 110);
+      mouse('mousemove', document, 140, 120);
+      mouse('mouseup', document, 140, 120);
+      await settle(context.harness);
+      expect(closeAll).toHaveBeenCalledTimes(1);
+
+      mouse('mousedown', handle(context, 'w1', 'resize'), 500, 300);
+      mouse('mousemove', document, 520, 310);
+      mouse('mousemove', document, 540, 320);
+      mouse('mouseup', document, 540, 320);
+      await settle(context.harness);
+      expect(closeAll).toHaveBeenCalledTimes(2);
+      await wait(layoutSaveDelayMs + 100);
+      patches(context).forEach((request) => request.flush(left));
     }, 10000);
 
     it('resizes the widget by the cells the corner handle travelled', async () => {

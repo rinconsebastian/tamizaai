@@ -4,8 +4,10 @@ import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { Observable, catchError, of, switchMap, tap } from 'rxjs';
 import { ApiErrors } from '../../../core/api-error';
+import { Basemaps } from '../../../core/basemaps.service';
 import { DataFilter } from '../../../core/projects/data.service';
 import {
+  BasemapKind,
   ChartType,
   IndicatorColumns,
   IndicatorEntry,
@@ -17,13 +19,18 @@ import {
   maxBuckets,
   maxFilters,
   maxTitleLength,
+  maxTooltipItems,
+  maxTooltipLabel,
   needsGroup,
+  TooltipFormat,
   WidgetSort,
+  WidgetTooltipItem,
+  basemapKinds,
 } from '../../../core/projects/indicators.service';
 import { Alert, Button, Disclosure, FormField, Input } from '../../../shared/ui';
 import { DataFilterDialog, DataFilterDialogData, DataFilterDialogResult } from '../data-filter-dialog';
 import { describeFilter, normalizeFilter } from '../data-view';
-import { WidgetView, queryFor } from './widget-view';
+import { WidgetView, savedConfig } from './widget-view';
 
 export interface WidgetDialogData {
   projectId: string;
@@ -47,7 +54,11 @@ function ownComparison(type: string): 'text' | 'number' | null {
 export const previewDelayMs = 400;
 
 type Mode = 'measure' | 'ratio';
-type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'groupBy' | 'geometryColumn' | 'buckets' | 'sort', string>>;
+type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'groupBy' | 'geometryColumn' | 'buckets' | 'sort' | 'tooltip' | 'basemap', string>>;
+/** What the server refused in one tooltip item. */
+type ItemProblems = Partial<Record<'column' | 'label' | 'format', string>>;
+
+const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent'];
 
 /**
  * Adds or edits a widget (design D6, D8): its chart type and title, its query (the indicator, a measure or a ratio of two numeric
@@ -197,6 +208,16 @@ type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'gr
               }
             </select>
           </tmz-form-field>
+          @if (basemapOptions().length) {
+            <tmz-form-field [label]="t('indicators.dialog.basemap')" fieldId="widgetBasemap" [error]="shown().basemap" [hint]="t('indicators.dialog.basemapHelp')">
+              <select tmzInput id="widgetBasemap" (change)="setBasemap($any($event.target).value)" data-testid="dialog-basemap">
+                <option value="" [selected]="!basemap()">{{ t('indicators.map.basemaps.none') }}</option>
+                @for (option of basemapOptions(); track option.kind) {
+                  <option [value]="option.kind" [selected]="option.kind === basemap()">{{ option.offered ? t('indicators.map.basemaps.' + option.kind) : t('indicators.dialog.basemapGone', { name: t('indicators.map.basemaps.' + option.kind) }) }}</option>
+                }
+              </select>
+            </tmz-form-field>
+          }
         }
 
         @if (chartType() === 'histogram') {
@@ -205,6 +226,67 @@ type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'gr
           </tmz-form-field>
         }
       </div>
+
+      @if (chartType() === 'map') {
+        <fieldset class="flex flex-col gap-3" data-testid="dialog-tooltip">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.tooltip.legend') }}</legend>
+          <p class="-mt-2 text-sm text-body">{{ t('indicators.dialog.tooltip.help', { max: maxTooltipItems }) }}</p>
+          @for (item of tooltip(); track $index; let i = $index; let first = $first; let last = $last) {
+            <div class="grid gap-2 rounded-base border border-default p-3 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto]" data-testid="tooltip-item">
+              <div class="min-w-0">
+                <select tmzInput [attr.id]="'tooltipColumn' + i" [attr.aria-label]="t('indicators.dialog.tooltip.column', { n: i + 1 })" (change)="setTooltipColumn(i, $any($event.target).value)" data-testid="tooltip-column">
+                  <option value="" [selected]="!item.column">{{ t('indicators.dialog.columnChoose') }}</option>
+                  @for (option of tooltipOptions(i); track option.name) {
+                    <option [value]="option.name" [selected]="option.name === item.column">{{ option.missing ? t('indicators.dialog.tooltip.missing', { column: option.name }) : option.name }}</option>
+                  }
+                </select>
+                @if (itemProblems()[i]?.column; as message) {
+                  <p class="mt-1 text-sm text-fg-danger-strong" data-testid="tooltip-error">{{ message }}</p>
+                }
+              </div>
+              <div class="min-w-0">
+                <input tmzInput [attr.id]="'tooltipLabel' + i" autocomplete="off" [attr.maxlength]="maxTooltipLabel" [attr.aria-label]="t('indicators.dialog.tooltip.label', { n: i + 1 })" [placeholder]="item.column || t('indicators.dialog.tooltip.labelHint')" [value]="item.label ?? ''" (input)="setTooltipLabel(i, $any($event.target).value)" data-testid="tooltip-label" />
+                @if (itemProblems()[i]?.label; as message) {
+                  <p class="mt-1 text-sm text-fg-danger-strong" data-testid="tooltip-error">{{ message }}</p>
+                }
+              </div>
+              <div class="flex items-start gap-1 sm:justify-end">
+                <button type="button" class="inline-flex min-h-10 min-w-10 items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary disabled:cursor-not-allowed disabled:opacity-40" [disabled]="first" [attr.aria-label]="t('indicators.dialog.tooltip.up', { n: i + 1 })" (click)="moveTooltip(i, -1)" data-testid="tooltip-up">
+                  <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6" /></svg>
+                </button>
+                <button type="button" class="inline-flex min-h-10 min-w-10 items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary disabled:cursor-not-allowed disabled:opacity-40" [disabled]="last" [attr.aria-label]="t('indicators.dialog.tooltip.down', { n: i + 1 })" (click)="moveTooltip(i, 1)" data-testid="tooltip-down">
+                  <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                </button>
+                <button type="button" class="inline-flex min-h-10 min-w-10 items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary" [attr.aria-label]="t('indicators.dialog.tooltip.remove', { n: i + 1 })" (click)="removeTooltip(i)" data-testid="tooltip-remove">
+                  <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                </button>
+              </div>
+              @if (isNumeric(item.column)) {
+                <div class="min-w-0 sm:col-span-2">
+                  <select tmzInput [attr.id]="'tooltipFormat' + i" [attr.aria-label]="t('indicators.dialog.tooltip.format', { n: i + 1 })" (change)="setTooltipFormat(i, $any($event.target).value)" data-testid="tooltip-format">
+                    <option value="" [selected]="!item.format">{{ t('indicators.dialog.tooltip.formatDefault') }}</option>
+                    @for (format of tooltipFormats; track format) {
+                      <option [value]="format" [selected]="format === item.format">{{ t('scripts.formats.' + format) }}</option>
+                    }
+                  </select>
+                  @if (itemProblems()[i]?.format; as message) {
+                    <p class="mt-1 text-sm text-fg-danger-strong" data-testid="tooltip-error">{{ message }}</p>
+                  }
+                </div>
+              }
+            </div>
+          }
+          @if (shown().tooltip; as message) {
+            <p class="text-sm text-fg-danger-strong" data-testid="tooltip-list-error">{{ message }}</p>
+          }
+          <div class="flex flex-wrap items-center gap-3">
+            <button tmzButton variant="secondary" type="button" [disabled]="tooltip().length >= maxTooltipItems" (click)="addTooltip()" data-testid="tooltip-add">{{ t('indicators.dialog.tooltip.add') }}</button>
+            @if (tooltip().length >= maxTooltipItems) {
+              <span class="text-sm text-body" data-testid="tooltip-full">{{ t('indicators.dialog.tooltip.full', { max: maxTooltipItems }) }}</span>
+            }
+          </div>
+        </fieldset>
+      }
 
       <tmz-disclosure [heading]="t('indicators.dialog.filtersCount', { count: filters().length })" [open]="startsWithFilters" data-testid="dialog-filters">
         @if (catalog()?.published) {
@@ -274,11 +356,15 @@ export class WidgetDialog {
   private readonly errors = inject(ApiErrors);
   private readonly dialog = inject(Dialog);
   private readonly transloco = inject(TranslocoService);
+  private readonly basemaps = inject(Basemaps);
 
   protected readonly chartTypes = chartTypes;
   protected readonly maxBuckets = maxBuckets;
   protected readonly maxFilters = maxFilters;
   protected readonly maxTitleLength = maxTitleLength;
+  protected readonly maxTooltipItems = maxTooltipItems;
+  protected readonly maxTooltipLabel = maxTooltipLabel;
+  protected readonly tooltipFormats = tooltipFormats;
   protected readonly previewDelayMs = previewDelayMs;
 
   private readonly start = this.data.widget?.config ?? emptyConfig();
@@ -304,6 +390,21 @@ export class WidgetDialog {
   protected readonly sortDirection = signal<'asc' | 'desc'>(this.start.sort?.direction ?? 'asc');
   /** What was chosen, or saved; what is sent also depends on the column's type (see `compareAs`). */
   protected readonly sortCompareAs = signal<'text' | 'number' | null>(this.start.sort?.compareAs ?? null);
+  /** The map's tooltip columns, as the form holds them: a blank column is an item not yet filled in. */
+  protected readonly tooltip = signal<WidgetTooltipItem[]>((this.start.tooltip ?? []).map((item) => ({ ...item })));
+  /** The saved basemap; a kind the deployment no longer offers stays as it is, unless the member changes it. */
+  protected readonly basemap = signal<BasemapKind | null>(this.start.basemap ?? null);
+
+  /**
+   * The basemaps to choose from: the kinds the deployment offers and, when the widget was saved with one it no longer offers, that
+   * kind too, marked, so saving the widget without changing it keeps it. Empty (no select at all) when the deployment offers none
+   * and the widget has none.
+   */
+  protected readonly basemapOptions = computed<{ kind: BasemapKind; offered: boolean }[]>(() => {
+    const offered = new Set((this.basemaps.list()?.basemaps ?? []).map((entry) => entry.kind));
+    const saved = this.basemap();
+    return basemapKinds.filter((kind) => offered.has(kind) || kind === saved).map((kind) => ({ kind, offered: offered.has(kind) }));
+  });
 
   /** The chosen indicator's published table; null while it loads, when none is chosen or when it cannot be read. */
   protected readonly catalog = signal<IndicatorColumns | null>(null);
@@ -314,6 +415,8 @@ export class WidgetDialog {
   protected readonly busy = signal(false);
   protected readonly error = signal<string | null>(null);
   private readonly serverFieldErrors = signal<Problems>({});
+  /** What the server refused in each tooltip item, by position. */
+  protected readonly itemProblems = signal<Record<number, ItemProblems>>({});
 
   protected readonly entry = computed(() => this.data.indicators.find((i) => i.name === this.indicator()) ?? null);
 
@@ -363,9 +466,10 @@ export class WidgetDialog {
     this.columnsWith(this.catalog()?.columns.filter((c) => c.type === 'text').map((c) => c.name) ?? [], [this.geometryColumn()]),
   );
 
-  private readonly draft = computed<WidgetConfig>(() => {
+  /** What the form holds, whole: the tooltip items with their labels and formats, and the basemap. */
+  private readonly formConfig = computed<WidgetConfig>(() => {
     const buckets = this.buckets().trim();
-    return queryFor(this.chartType(), {
+    return {
       indicator: this.indicator(),
       measure: this.mode() === 'measure' && this.measure() ? this.measure() : null,
       ratio: this.mode() === 'ratio' ? { numerator: this.numerator(), denominator: this.denominator() } : null,
@@ -374,8 +478,28 @@ export class WidgetDialog {
       geometryColumn: this.geometryColumn() || null,
       buckets: buckets === '' ? null : Number(buckets),
       sort: this.sortConfig(),
-    });
+      tooltip: this.tooltipItems(),
+      basemap: this.basemap(),
+    };
   });
+
+  /**
+   * What is saved and what the preview is given: the query, and for a map the whole tooltip items and the basemap. The preview's
+   * own re-query key leaves labels, formats and the basemap out, so editing them never queries again.
+   */
+  private readonly draft = computed<WidgetConfig>(() => savedConfig(this.chartType(), this.formConfig()));
+
+  /**
+   * The items to save. A format on a column the table now knows as text, a date or true/false is dropped (as `compareAs` is), so a
+   * format left from before a script changed the column never blocks saving; a column the table does not know keeps its own.
+   */
+  private tooltipItems(): WidgetTooltipItem[] {
+    return this.tooltip().map((item) => ({
+      column: item.column,
+      label: item.label?.trim() ? item.label : null,
+      format: this.typeOf(item.column) === null || this.isNumeric(item.column) ? item.format : null,
+    }));
+  }
 
   private sortConfig(): WidgetSort | null {
     const key = this.sortKey();
@@ -418,6 +542,9 @@ export class WidgetDialog {
     if (config.sort?.by === 'column' && !config.sort.column) {
       problems.sort = t('indicators.dialog.errors.sort');
     }
+    if (config.tooltip.some((item) => !item.column)) {
+      problems.tooltip = t('indicators.dialog.errors.tooltip');
+    }
     return problems;
   });
 
@@ -431,6 +558,7 @@ export class WidgetDialog {
   });
 
   constructor() {
+    this.basemaps.load();
     toObservable(this.indicator)
       .pipe(
         tap(() => this.catalog.set(null)),
@@ -485,6 +613,7 @@ export class WidgetDialog {
   protected setType(value: string): void {
     this.chartType.set(value as ChartType);
     this.serverFieldErrors.set({});
+    this.itemProblems.set({});
   }
 
   /**
@@ -509,6 +638,11 @@ export class WidgetDialog {
     }
   }
 
+  protected setBasemap(value: string): void {
+    this.basemap.set(basemapKinds.includes(value as BasemapKind) ? (value as BasemapKind) : null);
+    this.serverFieldErrors.update(({ basemap: _basemap, ...others }) => others);
+  }
+
   protected setMode(value: string): void {
     this.mode.set(value as Mode);
     this.serverFieldErrors.set({});
@@ -529,8 +663,77 @@ export class WidgetDialog {
     this.sortKey.set('');
     this.sortDirection.set('asc');
     this.sortCompareAs.set(null);
+    this.tooltip.set([]);
     this.fresh = true;
     this.serverFieldErrors.set({});
+    this.itemProblems.set({});
+  }
+
+  /** The type the table gives a column; null while the table loads, when it cannot be read and when the table has no such column. */
+  private typeOf(column: string): string | null {
+    return this.catalog()?.columns.find((c) => c.name === column)?.type ?? null;
+  }
+
+  /** Only a number takes a format. */
+  protected isNumeric(column: string): boolean {
+    const type = this.typeOf(column);
+    return type === 'integer' || type === 'decimal';
+  }
+
+  /**
+   * The columns item `index` can be: every column of the table except the geometry column and those the other items took, with the
+   * item's own column kept when the table no longer has it, marked so the form shows what is saved.
+   */
+  protected tooltipOptions(index: number): { name: string; missing: boolean }[] {
+    const items = this.tooltip();
+    const own = items[index]?.column ?? '';
+    const taken = new Set(items.filter((_, i) => i !== index).map((item) => item.column));
+    const names = (this.catalog()?.columns.map((c) => c.name) ?? []).filter((name) => name !== this.geometryColumn() && !taken.has(name));
+    const missing = !!own && !!this.catalog()?.published && !(this.catalog()?.columns ?? []).some((c) => c.name === own);
+    return [...(missing ? [{ name: own, missing: true }] : []), ...this.columnsWith(names, own && !missing ? [own] : []).map((name) => ({ name, missing: false }))];
+  }
+
+  protected addTooltip(): void {
+    if (this.tooltip().length < maxTooltipItems) {
+      this.tooltip.update((items) => [...items, { column: '', label: null, format: null }]);
+    }
+  }
+
+  protected removeTooltip(index: number): void {
+    this.tooltip.update((items) => items.filter((_, i) => i !== index));
+    this.itemProblems.set({});
+    this.serverFieldErrors.update(({ tooltip: _tooltip, ...others }) => others);
+  }
+
+  protected moveTooltip(index: number, by: -1 | 1): void {
+    this.tooltip.update((items) => {
+      const to = index + by;
+      if (to < 0 || to >= items.length) {
+        return items;
+      }
+      const moved = [...items];
+      [moved[index], moved[to]] = [moved[to], moved[index]];
+      return moved;
+    });
+    this.itemProblems.set({});
+  }
+
+  /** Another column is another type, so a format from the old one goes. */
+  protected setTooltipColumn(index: number, column: string): void {
+    this.updateTooltip(index, { column, format: null });
+  }
+
+  protected setTooltipLabel(index: number, label: string): void {
+    this.updateTooltip(index, { label: label === '' ? null : label });
+  }
+
+  protected setTooltipFormat(index: number, format: string): void {
+    this.updateTooltip(index, { format: tooltipFormats.includes(format as TooltipFormat) ? (format as TooltipFormat) : null });
+  }
+
+  private updateTooltip(index: number, change: Partial<WidgetTooltipItem>): void {
+    this.tooltip.update((items) => items.map((item, i) => (i === index ? { ...item, ...change } : item)));
+    this.itemProblems.update(({ [index]: _own, ...others }) => others);
   }
 
   protected removeFilter(column: string): void {
@@ -588,6 +791,7 @@ export class WidgetDialog {
   protected save(): void {
     this.submitted.set(true);
     this.serverFieldErrors.set({});
+    this.itemProblems.set({});
     this.error.set(null);
     if (Object.keys(this.problems()).length) {
       return;
@@ -601,21 +805,40 @@ export class WidgetDialog {
         this.busy.set(false);
         const parsed = this.errors.parse(failure);
         const fields: Problems = {};
+        const items: Record<number, ItemProblems> = {};
         for (const [path, message] of Object.entries(parsed.fieldErrors)) {
+          const item = this.itemFor(path);
+          if (item) {
+            items[item.index] = { ...items[item.index], [item.part]: items[item.index]?.[item.part] ?? message };
+            continue;
+          }
           const key = this.fieldFor(path);
           if (key && !fields[key]) {
             fields[key] = message;
           }
         }
         this.serverFieldErrors.set(fields);
-        const others = Object.entries(parsed.fieldErrors).filter(([path]) => !this.fieldFor(path));
+        this.itemProblems.set(items);
+        const others = Object.entries(parsed.fieldErrors).filter(([path]) => !this.itemFor(path) && !this.fieldFor(path));
         this.error.set(Object.keys(fields).length && !others.length ? null : others.length ? others.map(([, message]) => message).join(' ') : parsed.message);
       },
     });
   }
 
+  /** `config.tooltip[2].format`: the item and the part of it the server refused. An item with no part is refused as a whole (a null one). */
+  private itemFor(path: string): { index: number; part: keyof ItemProblems } | null {
+    const match = /tooltip\[(\d+)\](?:\.(\w+))?$/i.exec(path);
+    if (!match) {
+      return null;
+    }
+    const part = match[2]?.toLowerCase();
+    return { index: Number(match[1]), part: part === 'label' || part === 'format' ? part : 'column' };
+  }
+
   private fieldFor(path: string): keyof Problems | null {
     const name = path.toLowerCase();
+    if (name.includes('tooltip')) return 'tooltip';
+    if (name.includes('basemap')) return 'basemap';
     if (name.includes('title')) return 'title';
     if (name.includes('ratio')) return 'ratio';
     if (name.includes('measure')) return 'measure';

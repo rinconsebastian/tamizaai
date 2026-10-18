@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Tamiza.Api.CleanData;
 
 namespace Tamiza.Api.Indicators;
@@ -51,6 +52,38 @@ public sealed record WidgetSort(string? By, string? Column, string? CompareAs, s
     };
 }
 
+/// <summary>The values of <see cref="WidgetTooltipItem.Format"/>, stored as strings: the endpoints' JSON options have no enum converter for the stored config.</summary>
+public static class TooltipFormats
+{
+    public const string Count = "count";
+    public const string Decimal = "decimal";
+    public const string Percent = "percent";
+
+    public static readonly IReadOnlyList<string> All = [Count, Decimal, Percent];
+}
+
+/// <summary>The basemap kinds a map widget can save (<see cref="WidgetConfig.Basemap"/>); a kind, not a provider.</summary>
+public static class BasemapKinds
+{
+    public const string Streets = "streets";
+    public const string Satellite = "satellite";
+
+    public static readonly IReadOnlyList<string> All = [Streets, Satellite];
+}
+
+/// <summary>
+/// A column a map's tooltip shows. <paramref name="Label"/> replaces the column name when set; <paramref name="Format"/> is one of
+/// <see cref="TooltipFormats"/> for a numeric column, or null.
+/// </summary>
+public sealed record WidgetTooltipItem(string Column, string? Label = null, string? Format = null)
+{
+    public WidgetTooltipItem Normalize() => this with
+    {
+        Label = string.IsNullOrWhiteSpace(Label) ? null : Label.Trim(),
+        Format = string.IsNullOrWhiteSpace(Format) ? null : Format,
+    };
+}
+
 /// <summary>
 /// A widget's query as a request carries it: anything left out takes its default (<see cref="WidgetConfig"/>). It is the
 /// <c>config</c> of a widget and of the query endpoint's body.
@@ -63,6 +96,8 @@ public sealed record WidgetSort(string? By, string? Column, string? CompareAs, s
 /// <param name="GeometryColumn">The column of WKT text a map plots.</param>
 /// <param name="Buckets">Histogram only: the number of equal-width ranges, 10 when left out, at most 100.</param>
 /// <param name="Sort">Bar and column only: the order of the bars; left out, the group column's own order.</param>
+/// <param name="Tooltip">Map only: up to <see cref="WidgetConfig.MaxTooltipItems"/> columns of the table shown in each shape's tooltip, in order.</param>
+/// <param name="Basemap">Map only: <c>streets</c>, <c>satellite</c> or null for none. A kind, never checked against what the deployment offers.</param>
 public sealed record WidgetConfigInput(
     string? Indicator = null,
     string? Measure = null,
@@ -71,7 +106,9 @@ public sealed record WidgetConfigInput(
     IReadOnlyList<DataFilter>? Filters = null,
     string? GeometryColumn = null,
     int? Buckets = null,
-    WidgetSort? Sort = null)
+    WidgetSort? Sort = null,
+    IReadOnlyList<WidgetTooltipItem>? Tooltip = null,
+    string? Basemap = null)
 {
     public WidgetConfig Normalize() => new(
         Indicator ?? "",
@@ -81,7 +118,10 @@ public sealed record WidgetConfigInput(
         Filters ?? [],
         string.IsNullOrEmpty(GeometryColumn) ? null : GeometryColumn,
         Buckets,
-        Sort?.Normalize());
+        Sort?.Normalize(),
+        // A null item is kept so validation can name it.
+        Tooltip?.Select(item => item?.Normalize()!).ToList() ?? [],
+        string.IsNullOrEmpty(Basemap) ? null : Basemap);
 }
 
 /// <summary>A widget's query with its defaults applied. With no <see cref="Measure"/> and no <see cref="Ratio"/>, the table's default measure is plotted.</summary>
@@ -93,10 +133,24 @@ public sealed record WidgetConfig(
     IReadOnlyList<DataFilter> Filters,
     string? GeometryColumn,
     int? Buckets,
-    WidgetSort? Sort = null)
+    WidgetSort? Sort = null,
+    IReadOnlyList<WidgetTooltipItem>? Tooltip = null,
+    string? Basemap = null)
 {
     public const int DefaultBuckets = 10;
     public const int MaxBuckets = 100;
+
+    /// <summary>The most tooltip columns a map has.</summary>
+    public const int MaxTooltipItems = 5;
+
+    /// <summary>The longest tooltip label, in characters.</summary>
+    public const int MaxTooltipLabel = 80;
+
+    /// <summary>The longest tooltip text a query returns; longer text is cut and marked with an ellipsis.</summary>
+    public const int MaxTooltipText = 200;
+
+    /// <summary>The tooltip columns; a config stored before the field existed has none.</summary>
+    public IReadOnlyList<WidgetTooltipItem> Tooltip { get; init; } = Tooltip ?? [];
 }
 
 /// <param name="UpdatedAt">When the widget was last changed (ISO 8601).</param>
@@ -125,7 +179,14 @@ public sealed record IndicatorColumns(bool Published, IReadOnlyList<TableColumn>
 /// <summary>One plotted point: <see cref="Value"/> is the measure summed, or the ratio of sums, over the rows that share the group.</summary>
 /// <param name="Group">The group column's value as text; null for rows with no value in it and when the query has no group.</param>
 /// <param name="Geometry">The geometry column's text from one row of the group; null when none was requested or the row has none.</param>
-public sealed record IndicatorRow(string? Group, double Value, string? Geometry);
+/// <param name="Rows">Map only: how many rows of the table the group combines (those its query keeps); left out for every other widget.</param>
+/// <param name="Tooltip">Map only: one value per tooltip column, in order, as <see cref="IndicatorQueryResponse.TooltipTypes"/> types them: a number, text, true/false, or null for no value.</param>
+public sealed record IndicatorRow(
+    string? Group,
+    double Value,
+    string? Geometry,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Rows = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<object?>? Tooltip = null);
 
 /// <summary>What a widget's query names that the published table does not have.</summary>
 /// <param name="Indicator">True when the indicator has not published a table.</param>
@@ -136,7 +197,13 @@ public sealed record MissingReferences(bool Indicator, IReadOnlyList<string> Col
     public bool Any => Indicator || Columns.Count > 0;
 }
 
-public sealed record IndicatorQueryResponse(bool Published, IReadOnlyList<IndicatorRow> Rows, bool RowLimitReached, MissingReferences Missing);
+/// <param name="TooltipTypes">Map only: the type of each tooltip column, so the page formats the values without the catalog; left out for every other widget.</param>
+public sealed record IndicatorQueryResponse(
+    bool Published,
+    IReadOnlyList<IndicatorRow> Rows,
+    bool RowLimitReached,
+    MissingReferences Missing,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<DataColumnType>? TooltipTypes = null);
 
 /// <summary>The outcome of a query: the response, or the validation errors of the request.</summary>
 public sealed record IndicatorQueryOutcome(IndicatorQueryResponse? Response, IDictionary<string, string[]>? Errors);

@@ -369,4 +369,24 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
         var sort = schemas.GetProperty("WidgetSort").GetProperty("properties").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).ToArray();
         Assert.Equal(["by", "column", "compareAs", "direction"], sort);
     }
+
+    [Fact]
+    public async Task The_openapi_document_describes_the_tooltip_and_basemap_of_a_map()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        using var anonymous = h.Factory.CreateClient();
+
+        var document = await anonymous.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        var config = schemas.GetProperty("WidgetConfig").GetProperty("properties");
+        Assert.True(config.TryGetProperty("tooltip", out _));
+        Assert.True(config.TryGetProperty("basemap", out _));
+        var item = schemas.GetProperty("WidgetTooltipItem").GetProperty("properties").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(["column", "format", "label"], item);
+        var row = schemas.GetProperty("IndicatorRow").GetProperty("properties");
+        Assert.True(row.TryGetProperty("rows", out _));
+        Assert.True(row.TryGetProperty("tooltip", out _));
+        Assert.True(schemas.GetProperty("IndicatorQueryResponse").GetProperty("properties").TryGetProperty("tooltipTypes", out _));
+    }
 }

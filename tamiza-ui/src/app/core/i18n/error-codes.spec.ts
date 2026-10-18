@@ -51,6 +51,9 @@ const apiErrorCodes = [
   'assistant.busy',
   'assistant.testStale',
   'assistant.contextTooLarge',
+  'basemaps.unavailable',
+  'basemaps.upstream',
+  'basemaps.rateLimited',
 ];
 
 function lookup(root: unknown, path: string): unknown {

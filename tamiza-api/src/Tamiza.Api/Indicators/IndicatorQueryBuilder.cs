@@ -5,8 +5,9 @@ using Tamiza.Api.Http;
 namespace Tamiza.Api.Indicators;
 
 /// <summary>A widget query as SQL: identifiers from the catalog (quoted), every value a parameter.</summary>
-/// <param name="Sql">Selects <c>group, value, geometry</c> in that order.</param>
-public sealed record IndicatorSql(string Sql, IReadOnlyList<SqlParam> Parameters)
+/// <param name="Sql">Selects <c>group, value, geometry</c> in that order; a map query goes on with <c>count(*)</c> and one output per tooltip column.</param>
+/// <param name="TooltipTypes">Set for a map query: the type of each tooltip output, from the fifth column of <paramref name="Sql"/> on; null for every other query.</param>
+public sealed record IndicatorSql(string Sql, IReadOnlyList<SqlParam> Parameters, IReadOnlyList<DataColumnType>? TooltipTypes = null)
 {
     public const string LimitParameter = "limit";
 }
@@ -81,6 +82,23 @@ public static class IndicatorQueryBuilder
     /// </summary>
     private const string NumberShape = "^[[:space:]]*[-+]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][-+]?[0-9]+)?[[:space:]]*$";
 
+    /// <summary>
+    /// What a map's tooltip shows of one column over the rows of a group, as text so PostgreSQL does the work of its own types: a number
+    /// is summed; a date or timestamp is the earliest; true/false is false unless every row is true; text is the first in the column's
+    /// collation, an empty text counting as no value, cut one character past what the response keeps so the cut can be told.
+    /// </summary>
+    private static string TooltipOutput(TableColumn column)
+    {
+        var name = DataSources.Quote(column.Name);
+        return column.Type switch
+        {
+            DataColumnType.Integer or DataColumnType.Decimal => $"sum({name})::text",
+            DataColumnType.Date or DataColumnType.Timestamp => $"min({name})::text",
+            DataColumnType.Boolean => $"bool_and({name})",
+            _ => $"left(min(NULLIF({name}::text, '')), {WidgetConfig.MaxTooltipText + 1})",
+        };
+    }
+
     public static IndicatorQueryPlan Plan(
         WidgetConfig config, IReadOnlyList<TableColumn> columns, string timeZone, string from, int maxRows, bool perRow = false)
     {
@@ -117,6 +135,12 @@ public static class IndicatorQueryBuilder
         }
 
         Need(config.Sort?.Column);
+
+        // Tooltip columns come last, so a script change that removes several lists the widget's own columns first.
+        foreach (var item in config.Tooltip)
+        {
+            Need(item?.Column);
+        }
 
         if (config.Sort is { By: SortValues.ByColumn, Column: { } sortColumn } sortOrder
             && byName.TryGetValue(sortColumn, out var sortedColumn)
@@ -180,6 +204,12 @@ public static class IndicatorQueryBuilder
             geometry = rows ? $"{Q(config.GeometryColumn)}::text" : $"min({Q(config.GeometryColumn)}::text)";
         }
 
+        // A map (a grouped query that selects geometry) also returns how many rows each group combines and its tooltip columns,
+        // over the same rows the WHERE keeps (see TooltipOutput).
+        var isMap = grouped && config.GeometryColumn is not null;
+        var tooltip = isMap ? config.Tooltip.Where(item => item is not null).ToList() : [];
+        var extra = isMap ? ", count(*)" + string.Concat(tooltip.Select(item => ", " + TooltipOutput(byName[item.Column]))) : "";
+
         string sql;
         if (rows)
         {
@@ -197,7 +227,7 @@ public static class IndicatorQueryBuilder
             var orderBy = grouped ? OrderBy(config, byName, from, aggregate) : "";
             sql =
                 $"""
-                SELECT {group}, ({aggregate}), {geometry}
+                SELECT {group}, ({aggregate}), {geometry}{extra}
                 FROM {from}
                 WHERE {rowFilter}{filters}
                 {groupBy}
@@ -211,6 +241,7 @@ public static class IndicatorQueryBuilder
         {
             new(IndicatorSql.LimitParameter, NpgsqlDbType.Integer, maxRows + 1),
         };
-        return new IndicatorQueryPlan(new IndicatorSql(sql, parameters), missing, null);
+        return new IndicatorQueryPlan(
+            new IndicatorSql(sql, parameters, isMap ? tooltip.Select(item => byName[item.Column].Type).ToList() : null), missing, null);
     }
 }

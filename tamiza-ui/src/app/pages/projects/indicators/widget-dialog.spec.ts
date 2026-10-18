@@ -1,4 +1,6 @@
+import { MapStub, stubMap } from '../../../../testing/leaflet';
 import { settle, typeInto } from '../../../../testing/project-harness';
+import { BasemapList } from '../../../core/basemaps.service';
 import { IndicatorColumns, IndicatorEntry, Widget, WidgetConfig } from '../../../core/projects/indicators.service';
 import { valueSearchDelayMs } from '../data-filter-dialog';
 import {
@@ -20,6 +22,7 @@ import {
   wait,
   widget,
 } from './indicators-testing';
+import { loadLeaflet } from './map-engine';
 import { previewDelayMs } from './widget-dialog';
 
 const dialog = () => overlay().querySelector<HTMLElement>('[data-testid="widget-dialog"]')!;
@@ -372,7 +375,7 @@ describe('the widget dialog', () => {
       expect(request.request.body).toEqual({
         title: 'Attendance by round',
         chartType: 'line',
-        config: { indicator: 'coverage', measure: 'numerator', ratio: null, groupBy: 'round', filters: [], geometryColumn: null, buckets: null, sort: null },
+        config: { indicator: 'coverage', measure: 'numerator', ratio: null, groupBy: 'round', filters: [], geometryColumn: null, buckets: null, sort: null, tooltip: [], basemap: null },
       });
       request.flush(widget('w9', { title: 'Attendance by round', chartType: 'line' }), { status: 201, statusText: 'Created' });
       await settle(context.harness);
@@ -847,6 +850,415 @@ describe('the widget dialog', () => {
 
       expect(errorOf('widgetSortBy')).toBe("The table has no column 'visited_on'.");
       expect(field('dialog-error')).toBeNull();
+    });
+  });
+
+  describe('tooltip columns of a map', () => {
+    const survey = catalog({
+      columns: [
+        { name: 'block_code', type: 'text', label: null },
+        { name: 'address', type: 'text', label: null },
+        { name: 'sample_target', type: 'integer', label: null },
+        { name: 'achieved', type: 'integer', label: null },
+        { name: 'progress', type: 'decimal', label: null },
+        { name: 'last_visit', type: 'timestamp', label: null },
+        { name: 'value', type: 'decimal', label: null },
+        { name: 'geometry', type: 'text', label: 'Boundary' },
+      ],
+      numeric: ['value', 'sample_target', 'achieved', 'progress'],
+      defaults: { measure: 'value', groupBy: 'block_code' },
+    });
+    const items = () => fields('tooltip-item');
+    const columnSelects = () => fields('tooltip-column') as HTMLSelectElement[];
+    const columnsChosen = () => columnSelects().map((select) => select.value);
+
+    /** A new map over the survey table with its geometry chosen. */
+    async function newMap(columns = survey) {
+      const context = await openDialog({ columns });
+      await change(context, field('dialog-chart-type'), 'map');
+      await change(context, field('dialog-geometry'), 'geometry');
+      return context;
+    }
+
+    async function addItem(context: Context, column: string, label = '') {
+      await click(context, field('tooltip-add'));
+      const at = items().length - 1;
+      await change(context, columnSelects()[at], column);
+      if (label) {
+        await change(context, fields('tooltip-label')[at], label);
+      }
+    }
+
+    const existingMap = (tooltip: WidgetConfig['tooltip']) => widget('w1', { chartType: 'map', config: config({ geometryColumn: 'geometry', groupBy: 'block_code', tooltip }) });
+
+    it('is offered for a map and for no other chart type, with nothing in it to begin with', async () => {
+      const context = await openDialog({ columns: survey });
+      expect(fields('dialog-tooltip')).toHaveLength(0);
+
+      await change(context, field('dialog-chart-type'), 'map');
+
+      expect(fields('dialog-tooltip')).toHaveLength(1);
+      expect(items()).toHaveLength(0);
+      expect(text(field('dialog-tooltip').querySelector('legend'))).toBe('Tooltip columns');
+      await change(context, field('dialog-chart-type'), 'bar');
+      expect(fields('dialog-tooltip')).toHaveLength(0);
+    });
+
+    it('adds, reorders and removes columns', async () => {
+      const context = await newMap();
+      await addItem(context, 'address', 'Dirección');
+      await addItem(context, 'sample_target');
+      await addItem(context, 'achieved');
+      expect(columnsChosen()).toEqual(['address', 'sample_target', 'achieved']);
+
+      await click(context, fields('tooltip-down')[0]);
+      expect(columnsChosen()).toEqual(['sample_target', 'address', 'achieved']);
+      expect((fields('tooltip-label')[1] as HTMLInputElement).value).toBe('Dirección'); // the label moved with its column
+      await click(context, fields('tooltip-up')[2]);
+      expect(columnsChosen()).toEqual(['sample_target', 'achieved', 'address']);
+      expect((fields('tooltip-up')[0] as HTMLButtonElement).disabled).toBe(true);
+      expect((fields('tooltip-down')[2] as HTMLButtonElement).disabled).toBe(true);
+      await click(context, fields('tooltip-remove')[1]);
+
+      expect(columnsChosen()).toEqual(['sample_target', 'address']);
+    });
+
+    it('takes at most five, and says so', async () => {
+      const context = await newMap();
+      for (const column of ['address', 'sample_target', 'achieved', 'progress', 'last_visit']) {
+        await addItem(context, column);
+      }
+
+      expect(items()).toHaveLength(5);
+      expect(field<HTMLButtonElement>('tooltip-add').disabled).toBe(true);
+      expect(text(field('tooltip-full'))).toBe('A map takes at most 5 tooltip columns.');
+      await click(context, fields('tooltip-remove')[4]);
+      expect(field<HTMLButtonElement>('tooltip-add').disabled).toBe(false);
+    });
+
+    it('offers every column of the table except the geometry column, and a column once', async () => {
+      const context = await newMap();
+      await click(context, field('tooltip-add'));
+      await addItem(context, 'address');
+
+      expect(Array.from(columnSelects()[0].options).map((o) => o.value)).toEqual(['', 'block_code', 'sample_target', 'achieved', 'progress', 'last_visit', 'value']);
+      expect(Array.from(columnSelects()[1].options).map((o) => o.value)).toEqual(['', 'block_code', 'address', 'sample_target', 'achieved', 'progress', 'last_visit', 'value']);
+    });
+
+    it('offers a format for the numeric columns only', async () => {
+      const context = await newMap();
+      await addItem(context, 'address');
+      expect(fields('tooltip-format')).toHaveLength(0);
+
+      await addItem(context, 'last_visit');
+      expect(fields('tooltip-format')).toHaveLength(0);
+      await addItem(context, 'progress');
+
+      expect(fields('tooltip-format')).toHaveLength(1);
+      expect(Array.from((fields('tooltip-format')[0] as HTMLSelectElement).options).map((o) => text(o))).toEqual(['Default format', 'Count', 'Decimal', 'Percentage']);
+    });
+
+    it('keeps the label optional, and shows the column\'s name where the label would be', async () => {
+      const context = await newMap();
+      await addItem(context, 'sample_target');
+
+      expect((fields('tooltip-label')[0] as HTMLInputElement).placeholder).toBe('sample_target');
+      expect((fields('tooltip-label')[0] as HTMLInputElement).maxLength).toBe(80);
+    });
+
+    it('starts again when another indicator is chosen', async () => {
+      const context = await newMap();
+      await addItem(context, 'address');
+      expect(items()).toHaveLength(1);
+
+      await change(context, field('dialog-indicator'), 'target');
+      await answerColumns(context, survey);
+
+      expect(items()).toHaveLength(0);
+    });
+
+    it('sends the items as they are, with a blank label as none, and the basemap as none', async () => {
+      const context = await newMap();
+      await change(context, field('dialog-title'), 'Blocks');
+      await addItem(context, 'address', 'Dirección');
+      await addItem(context, 'sample_target');
+      await change(context, fields('tooltip-format')[0], 'count');
+      await click(context, field('dialog-save'));
+
+      const request = context.http.expectOne(isCreate);
+      expect(request.request.body.config.tooltip).toEqual([
+        { column: 'address', label: 'Dirección', format: null },
+        { column: 'sample_target', label: null, format: 'count' },
+      ]);
+      expect(request.request.body.config.basemap).toBeNull();
+      request.flush(widget('w9'), { status: 201, statusText: 'Created' });
+    });
+
+    it('does not save an item with no column chosen', async () => {
+      const context = await newMap();
+      await change(context, field('dialog-title'), 'Blocks');
+      await click(context, field('tooltip-add'));
+      await click(context, field('dialog-save'));
+
+      context.http.expectNone(isCreate);
+      expect(text(field('tooltip-list-error'))).toBe('Choose a column for every tooltip column, or remove the empty ones.');
+    });
+
+    it('saves no tooltip columns when a map is turned into another chart type', async () => {
+      const kept: WidgetConfig['tooltip'] = [{ column: 'address', label: 'Dirección', format: null }, { column: 'sample_target', label: null, format: 'count' }];
+      const context = await openDialog({ existing: existingMap(kept), columns: survey });
+      expect(columnsChosen()).toEqual(['address', 'sample_target']);
+
+      await change(context, field('dialog-chart-type'), 'bar');
+      await click(context, field('dialog-save'));
+
+      const patch = context.http.match(isPatch)[0];
+      expect(patch.request.body.chartType).toBe('bar');
+      expect(patch.request.body.config.tooltip).toEqual([]);
+      expect(patch.request.body.config.basemap).toBeNull();
+      patch.flush(widget('w1'));
+    });
+
+    it('brings the items back when the type goes back to map before saving', async () => {
+      const kept: WidgetConfig['tooltip'] = [{ column: 'address', label: 'Dirección', format: null }];
+      const context = await openDialog({ existing: existingMap(kept), columns: survey });
+
+      await change(context, field('dialog-chart-type'), 'bar');
+      await change(context, field('dialog-chart-type'), 'map');
+
+      expect(columnsChosen()).toEqual(['address']);
+    });
+
+    it('shows what the server refuses under the item it concerns', async () => {
+      const context = await newMap();
+      await change(context, field('dialog-title'), 'Blocks');
+      await addItem(context, 'address');
+      await addItem(context, 'sample_target');
+      await click(context, field('dialog-save'));
+
+      context.http.expectOne(isCreate).flush(
+        { title: 'x', errors: { 'config.tooltip[1].format': ['Only a number column can have a format.'], 'config.tooltip[0].label': ['A label takes at most 80 characters.'], 'config.tooltip': ['A map has at most 5 tooltip columns.'] } },
+        { status: 400, statusText: 'Bad Request' },
+      );
+      await settle(context.harness);
+
+      const shown = items().map((item) => Array.from(item.querySelectorAll('[data-testid="tooltip-error"]')).map(text));
+      expect(shown).toEqual([['A label takes at most 80 characters.'], ['Only a number column can have a format.']]);
+      expect(text(field('tooltip-list-error'))).toBe('A map has at most 5 tooltip columns.');
+      expect(field<HTMLButtonElement>('dialog-save').disabled).toBe(false);
+    });
+
+    it('shows a refused format under its item', async () => {
+      const context = await newMap();
+      await change(context, field('dialog-title'), 'Blocks');
+      await addItem(context, 'sample_target');
+      await click(context, field('dialog-save'));
+
+      context.http.expectOne(isCreate).flush({ title: 'x', errors: { 'config.tooltip[0].format': ['Only a number column can have a format.'] } }, { status: 400, statusText: 'Bad Request' });
+      await settle(context.harness);
+
+      expect(Array.from(items()[0].querySelectorAll('[data-testid="tooltip-error"]')).map(text)).toEqual(['Only a number column can have a format.']);
+    });
+
+    it('keeps a saved column the table no longer has, selected and marked', async () => {
+      const gone: WidgetConfig['tooltip'] = [{ column: 'old_address', label: 'Dirección', format: null }, { column: 'sample_target', label: null, format: null }];
+      await openDialog({ existing: existingMap(gone), columns: survey });
+
+      expect(columnsChosen()).toEqual(['old_address', 'sample_target']);
+      const marked = Array.from(columnSelects()[0].options).find((o) => o.value === 'old_address')!;
+      expect(text(marked)).toBe('old_address (not in the table)');
+      expect(marked.selected).toBe(true);
+      expect(Array.from(columnSelects()[1].options).some((o) => o.value === 'old_address')).toBe(false);
+    });
+
+    it('saves, after changing only the title, a format left on a column that has since become text', async () => {
+      const stale: WidgetConfig['tooltip'] = [{ column: 'address', label: null, format: 'percent' }];
+      const context = await openDialog({ existing: existingMap(stale), columns: survey });
+
+      await change(context, field('dialog-title'), 'Blocks, renamed');
+      await click(context, field('dialog-save'));
+
+      const patch = context.http.match(isPatch)[0];
+      expect(patch.request.body.title).toBe('Blocks, renamed');
+      expect(patch.request.body.config.tooltip).toEqual([{ column: 'address', label: null, format: null }]);
+      patch.flush(widget('w1'));
+    });
+
+    it('does not query again, or blank the preview, when a label or a format changes', async () => {
+      const kept: WidgetConfig['tooltip'] = [{ column: 'sample_target', label: null, format: null }];
+      const context = await openDialog({ existing: existingMap(kept), columns: survey });
+      await previewAnswer(context, result([row('0001', 1, 'POINT (-76.5 3.4)', { rows: 1, tooltip: [20] })], { tooltipTypes: ['integer'] }));
+
+      await change(context, fields('tooltip-label')[0], 'Meta muestral');
+      await change(context, fields('tooltip-format')[0], 'count');
+      await wait(previewDelayMs + 150);
+      await settle(context.harness);
+
+      expect(context.http.match(isQuery).filter((r) => !r.cancelled)).toHaveLength(0);
+      expect(fields('view-loading')).toHaveLength(0);
+    });
+
+    it('queries again, with the names alone, when a column is added', async () => {
+      const kept: WidgetConfig['tooltip'] = [{ column: 'sample_target', label: 'Meta', format: 'count' }];
+      const context = await openDialog({ existing: existingMap(kept), columns: survey });
+      await previewAnswer(context, result([row('0001', 1, 'POINT (-76.5 3.4)', { rows: 1, tooltip: [20] })], { tooltipTypes: ['integer'] }));
+
+      await addItem(context, 'address', 'Dirección');
+      const body = await previewAnswer(context, result([row('0001', 1, 'POINT (-76.5 3.4)', { rows: 1, tooltip: [20, 'Cra 5'] })], { tooltipTypes: ['integer', 'text'] }));
+
+      expect(body.config.tooltip).toEqual([{ column: 'sample_target', label: null, format: null }, { column: 'address', label: null, format: null }]);
+      expect(body.config.basemap).toBeNull();
+    });
+  });
+
+  describe('basemap of a map', () => {
+    const basemapsUrl = '/api/v1/basemaps';
+    const isBasemaps = (r: { url: string; method: string }) => r.method === 'GET' && r.url === basemapsUrl;
+    const none: BasemapList = { provider: 'none', basemaps: [] };
+    const google: BasemapList = {
+      provider: 'google',
+      basemaps: (['streets', 'satellite'] as const).map((kind) => ({
+        kind,
+        minZoom: 0,
+        maxZoom: 22,
+        tiles: `/api/v1/basemap-tiles/link-${kind}/{z}/{x}/{y}`,
+        linksExpireAt: '2026-10-17T15:15:00Z',
+        linksRefreshInSeconds: 1980,
+        attribution: { source: 'google' as const, text: null, url: null },
+      })),
+    };
+    const square = 'POLYGON ((-76.6 3.4, -76.59 3.4, -76.59 3.41, -76.6 3.41, -76.6 3.4))';
+    const existingMap = (basemap: WidgetConfig['basemap']) => widget('w1', { chartType: 'map', config: config({ geometryColumn: 'geometry', basemap }) });
+    const select = () => field<HTMLSelectElement>('dialog-basemap');
+    let stub: MapStub;
+
+    beforeAll(async () => {
+      const preload = stubMap();
+      await loadLeaflet();
+      preload.restore();
+    });
+    beforeEach(() => {
+      stub = stubMap({ width: 600, height: 400 });
+    });
+    afterEach(() => stub.restore());
+
+    async function answerList(context: Context, list: BasemapList) {
+      context.http.match(isBasemaps).forEach((request) => request.flush(list));
+      await settle(context.harness);
+    }
+
+    it('offers no basemap choice where the deployment offers none, and saves a new map with none', async () => {
+      const context = await openDialog();
+      await answerList(context, none);
+      await change(context, field('dialog-chart-type'), 'map');
+      await change(context, field('dialog-title'), 'Blocks');
+      await change(context, field('dialog-geometry'), 'geometry');
+
+      expect(fields('dialog-basemap')).toHaveLength(0);
+      await click(context, field('dialog-save'));
+
+      const request = context.http.expectOne(isCreate);
+      expect(request.request.body.config.basemap).toBeNull();
+      request.flush(widget('w9'), { status: 201, statusText: 'Created' });
+    });
+
+    it('offers none and the kinds the deployment offers, starting a new map on none', async () => {
+      const context = await openDialog();
+      await answerList(context, google);
+      await change(context, field('dialog-chart-type'), 'map');
+
+      expect(Array.from(select().options).map((o) => text(o))).toEqual(['None', 'Streets', 'Satellite']);
+      expect(select().value).toBe('');
+    });
+
+    it('shows a saved basemap the deployment no longer offers beside None, and keeps it when only the title changes', async () => {
+      const context = await openDialog({ existing: existingMap('streets') });
+      await answerList(context, none);
+
+      expect(Array.from(select().options).map((o) => [o.value, text(o)])).toEqual([['', 'None'], ['streets', 'Streets (no longer offered)']]);
+      expect(select().value).toBe('streets');
+      await change(context, field('dialog-title'), 'Blocks, renamed');
+      await click(context, field('dialog-save'));
+
+      const patch = context.http.match(isPatch)[0];
+      expect(patch.request.body.config.basemap).toBe('streets');
+      patch.flush(widget('w1'));
+    });
+
+    it('lets the analyst turn a basemap that is no longer offered off', async () => {
+      const context = await openDialog({ existing: existingMap('satellite') });
+      await answerList(context, { provider: 'osm', basemaps: [google.basemaps[0]] });
+      expect(Array.from(select().options).map((o) => text(o))).toEqual(['None', 'Streets', 'Satellite (no longer offered)']);
+
+      await change(context, select(), '');
+      await click(context, field('dialog-save'));
+
+      const patch = context.http.match(isPatch)[0];
+      expect(patch.request.body.config.basemap).toBeNull();
+      patch.flush(widget('w1'));
+    });
+
+    it('draws the preview over satellite imagery once the analyst picks it, without querying the indicator again', async () => {
+      const context = await openDialog({ existing: existingMap(null) });
+      await answerList(context, google);
+      await previewAnswer(context, result([row('Cali', 75, square)]));
+      for (let i = 0; i < 20 && !overlay().querySelector('.leaflet-container path'); i++) {
+        await wait(5);
+        await settle(context.harness);
+      }
+      const map = () => overlay().querySelector<HTMLElement>('[data-testid="map-container"]')!;
+      expect(map().getAttribute('data-basemap')).toBeNull();
+      expect(overlay().querySelectorAll('[data-testid="map-tile"]')).toHaveLength(0);
+
+      await change(context, select(), 'satellite');
+      expect(map().getAttribute('data-basemap')).toBe('satellite');
+      let credits = context.http.match((r) => r.url.startsWith(`${basemapsUrl}/satellite/credits`));
+      for (let i = 0; i < 20 && !credits.length; i++) {
+        await wait(5);
+        await settle(context.harness);
+        credits = context.http.match((r) => r.url.startsWith(`${basemapsUrl}/satellite/credits`));
+      }
+      expect(credits).toHaveLength(1);
+      expect(overlay().querySelectorAll('[data-testid="map-tile"]')).toHaveLength(0); // not before its credits
+      credits[0].flush({ text: 'Imagery ©2026 Maxar Technologies', maxZoom: 19 });
+      await settle(context.harness);
+      await wait(20);
+      await settle(context.harness);
+
+      expect(overlay().querySelectorAll('[data-testid="map-tile"]').length).toBeGreaterThan(0);
+      await wait(previewDelayMs + 150);
+      await settle(context.harness);
+      expect(context.http.match(isQuery).filter((r) => !r.cancelled)).toHaveLength(0);
+      expect(fields('view-loading')).toHaveLength(0);
+
+      await click(context, field('dialog-save'));
+      const patch = context.http.match(isPatch)[0];
+      expect(patch.request.body.config.basemap).toBe('satellite');
+      patch.flush(widget('w1'));
+    });
+
+    it('shows a refusal of the basemap next to its select', async () => {
+      const context = await openDialog({ existing: existingMap('streets') });
+      await answerList(context, google);
+      await click(context, field('dialog-save'));
+
+      context.http.match(isPatch)[0].flush({ title: 'x', errors: { 'config.basemap': ["The basemap must be 'streets' or 'satellite'."] } }, { status: 400, statusText: 'Bad Request' });
+      await settle(context.harness);
+
+      expect(errorOf('widgetBasemap')).toBe("The basemap must be 'streets' or 'satellite'.");
+    });
+
+    it('saves no basemap when a map is turned into another chart type', async () => {
+      const context = await openDialog({ existing: existingMap('streets') });
+      await answerList(context, google);
+
+      await change(context, field('dialog-chart-type'), 'bar');
+      expect(fields('dialog-basemap')).toHaveLength(0);
+      await click(context, field('dialog-save'));
+
+      const patch = context.http.match(isPatch)[0];
+      expect(patch.request.body.config.basemap).toBeNull();
+      patch.flush(widget('w1'));
     });
   });
 });

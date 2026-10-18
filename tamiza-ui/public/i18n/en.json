@@ -116,6 +116,11 @@
         "busy": "A request of yours is already in progress. Wait for it to finish, or cancel it.",
         "testStale": "The test no longer matches this script. Test again, then ask for the fix.",
         "contextTooLarge": "The script is too large for the assistant."
+      },
+      "basemaps": {
+        "unavailable": "The map provider cannot serve tiles right now (its quota may be used up). The map is shown without its basemap.",
+        "upstream": "The map provider answered with an error. The map is shown without its basemap.",
+        "rateLimited": "Too many map tiles were requested. Wait a moment and the basemap will load again."
       }
     }
   },
@@ -1404,6 +1409,41 @@
         "polygon": "Region",
         "point": "Point",
         "none": "Left out"
+      },
+      "roleDescription": "map",
+      "keyHelp": "Arrow keys move the map, plus and minus zoom, and 0 or Home shows all of it. Enter steps into the places on the map: the arrow keys then move from one to the next, Home and End go to the first and the last, and Escape returns to the map.",
+      "hintWheel": "Hold Ctrl and scroll to zoom",
+      "hintWheelMac": "Hold ⌘ and scroll to zoom",
+      "hintTouch": "Use two fingers to move the map",
+      "yes": "Yes",
+      "no": "No",
+      "combines": "Combines {{ count }} rows",
+      "controls": {
+        "label": "Map controls",
+        "zoomIn": "Zoom in",
+        "zoomOut": "Zoom out",
+        "showAll": "Show all",
+        "options": "Map options",
+        "basemap": "Basemap"
+      },
+      "basemaps": {
+        "none": "None",
+        "streets": "Streets",
+        "satellite": "Satellite"
+      },
+      "announce": {
+        "basemap": "Basemap: {{ name }}",
+        "none": "Basemap off"
+      },
+      "notes": {
+        "notDegrees": "The basemap cannot be shown: the coordinates are not degrees.",
+        "enlarge": "Enlarge the map to show the basemap",
+        "unavailable": "Basemap unavailable",
+        "loadFailed": "The map could not be loaded. Show it as a table instead."
+      },
+      "attribution": {
+        "label": "Map credits",
+        "logo": "Google Maps"
       }
     },
     "dialog": {
@@ -1460,9 +1500,28 @@
         "groupBy": "Choose the column to group by.",
         "sort": "Choose the column to order by.",
         "geometry": "Choose the geometry column of the map.",
-        "buckets": "Enter a whole number from 1 to {{ max }}, or leave it empty."
+        "buckets": "Enter a whole number from 1 to {{ max }}, or leave it empty.",
+        "tooltip": "Choose a column for every tooltip column, or remove the empty ones."
       },
-      "filtersCount": "Filters ({{ count }})"
+      "filtersCount": "Filters ({{ count }})",
+      "tooltip": {
+        "legend": "Tooltip columns",
+        "help": "Columns of the table shown when a place on the map is pointed at or tapped, after its group and value. Up to {{ max }}. Numbers are added up when several rows share a group; any other column shows its first value.",
+        "column": "Tooltip column {{ n }}",
+        "label": "Label of tooltip column {{ n }}",
+        "labelHint": "Label (optional)",
+        "format": "Format of tooltip column {{ n }}",
+        "formatDefault": "Default format",
+        "missing": "{{ column }} (not in the table)",
+        "up": "Move tooltip column {{ n }} up",
+        "down": "Move tooltip column {{ n }} down",
+        "remove": "Remove tooltip column {{ n }}",
+        "add": "Add tooltip column",
+        "full": "A map takes at most {{ max }} tooltip columns."
+      },
+      "basemap": "Basemap",
+      "basemapHelp": "Drawn under the shapes for every member. Anyone can switch it for their own screen without saving.",
+      "basemapGone": "{{ name }} (no longer offered)"
     }
   }
 }

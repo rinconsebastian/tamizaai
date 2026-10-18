@@ -54,6 +54,14 @@ public sealed class DataValuesTests
     }
 
     [Fact]
+    public void A_smaller_limit_cuts_at_that_limit_by_characters()
+    {
+        Assert.Equal((new string('a', 200), false), DataValues.Display(new string('a', 200), 200));
+        Assert.Equal((new string('a', 200), true), DataValues.Display(new string('a', 201), 200));
+        Assert.Equal((Emoji(200), true), DataValues.Display(Emoji(201), 200));
+    }
+
+    [Fact]
     public void A_cut_counts_characters_not_utf16_units_so_it_never_splits_a_pair()
     {
         var (text, cut) = DataValues.Display(Emoji(501));

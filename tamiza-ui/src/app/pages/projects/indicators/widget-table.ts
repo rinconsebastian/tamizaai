@@ -6,6 +6,8 @@ export interface TableModel {
   headers: string[];
   /** Cells are text, already written with the indicator's format; a missing value is null. */
   rows: (string | null)[][];
+  /** How each column's cells line up; numbers end, text starts. Without it the first column starts and the others end. */
+  align?: ('start' | 'end')[];
 }
 
 @Component({
@@ -17,7 +19,7 @@ export interface TableModel {
         <thead [class]="tableHead + ' sticky top-0'">
           <tr>
             @for (header of model().headers; track $index) {
-              <th scope="col" [class]="tableHeaderCell + ($index > 0 ? ' text-end' : '')">{{ header }}</th>
+              <th scope="col" [class]="tableHeaderCell + (endAligned($index) ? ' text-end' : '')">{{ header }}</th>
             }
           </tr>
         </thead>
@@ -28,7 +30,7 @@ export interface TableModel {
                 @if ($index === 0) {
                   <th scope="row" [class]="tableCell + ' max-w-xs break-words font-normal text-heading'">{{ cell }}</th>
                 } @else {
-                  <td [class]="tableCell + ' text-end tabular-nums'">{{ cell ?? '—' }}</td>
+                  <td [class]="tableCell + (endAligned($index) ? ' text-end tabular-nums' : '')">{{ cell ?? '—' }}</td>
                 }
               }
             </tr>
@@ -46,4 +48,8 @@ export class WidgetTable {
   protected readonly tableHeaderCell = tableHeaderCell;
   protected readonly tableRow = tableRow;
   protected readonly tableCell = tableCell;
+
+  protected endAligned(column: number): boolean {
+    return (this.model().align?.[column] ?? (column > 0 ? 'end' : 'start')) === 'end';
+  }
 }

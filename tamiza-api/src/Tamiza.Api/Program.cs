@@ -6,6 +6,7 @@ using Tamiza.Api.Data;
 using Tamiza.Api.Health;
 using Tamiza.Api.Indicators;
 using Tamiza.Api.Ingestion;
+using Tamiza.Api.Maps;
 using Tamiza.Api.Performance;
 using Tamiza.Api.Pipeline;
 using Tamiza.Api.Projects;
@@ -28,6 +29,7 @@ builder.Services.AddTamizaCleanData();
 builder.Services.AddTamizaIndicators();
 builder.Services.AddTamizaPipeline();
 builder.Services.AddTamizaAssistant();
+builder.Services.AddTamizaMaps();
 
 var app = builder.Build();
 
@@ -58,6 +60,7 @@ api.MapScriptTestEndpoints();
 api.MapSampleDownloadEndpoints();
 api.MapScriptInputEndpoints();
 api.MapAssistantEndpoints();
+api.MapMapEndpoints();
 
 if (!await app.MigrateDatabaseAsync())
 {

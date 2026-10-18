@@ -96,8 +96,9 @@ export function result(rows: QueryRow[], overrides: Partial<QueryResult> = {}): 
   return { published: true, rows, rowLimitReached: false, missing: { indicator: false, columns: [] }, ...overrides };
 }
 
-export function row(group: string | null, value: number, geometry: string | null = null): QueryRow {
-  return { group, value, geometry };
+/** A row of an answer; a map's carry how many table rows they combine (`rows`) and the values of the tooltip columns (`tooltip`). */
+export function row(group: string | null, value: number, geometry: string | null = null, extra: Pick<QueryRow, 'rows' | 'tooltip'> = {}): QueryRow {
+  return { group, value, geometry, ...extra };
 }
 
 export const text = (element: Element | null) => element?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
@@ -129,5 +130,5 @@ export async function answerQueries(context: Pick<Context, 'http' | 'harness'>, 
 }
 
 export const overlay = () => document.querySelector('.cdk-overlay-container') as HTMLElement;
-export const clearOverlay = () => document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = ''));
+export const clearOverlay = () => document.querySelectorAll('.cdk-overlay-container').forEach((c) => c.replaceChildren());
 export const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

@@ -49,8 +49,11 @@ public static partial class DataValues
         decimal.TryParse(postgres, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) ? number : postgres;
 
     /// <summary>The text to show: the value as it is when it has at most 500 characters, otherwise its first 500, and whether it was cut.</summary>
-    public static (string Text, bool Cut) Display(string fetched) =>
-        Length(fetched) > MaxDisplayLength ? (Truncate(fetched, MaxDisplayLength), true) : (fetched, false);
+    public static (string Text, bool Cut) Display(string fetched) => Display(fetched, MaxDisplayLength);
+
+    /// <summary>The text to show with a limit of <paramref name="max"/> characters: the value as it is when it fits, otherwise its first <paramref name="max"/>, and whether it was cut.</summary>
+    public static (string Text, bool Cut) Display(string fetched, int max) =>
+        Length(fetched) > max ? (Truncate(fetched, max), true) : (fetched, false);
 
     /// <summary>The characters of <paramref name="text"/> counted as PostgreSQL counts them: code points.</summary>
     public static int Length(string text) => text.EnumerateRunes().Count();

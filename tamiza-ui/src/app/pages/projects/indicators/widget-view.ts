@@ -31,7 +31,20 @@ export function queryFor(type: ChartType, config: WidgetConfig): WidgetConfig {
     geometryColumn: type === 'map' ? config.geometryColumn : null,
     buckets: type === 'histogram' ? config.buckets : null,
     sort: (type === 'bar' || type === 'column') && config.sort ? sortFor(config.sort) : null,
+    // The query needs the columns' names to fetch them; a label, a format and the basemap change nothing in the rows, so they stay out
+    // of it (and out of the re-query key), and editing them never blanks the preview.
+    // (A config from an API that predates the tooltip has neither field; it reads as none.)
+    tooltip: type === 'map' ? (config.tooltip ?? []).map((item) => ({ column: item.column, label: null, format: null })) : [],
+    basemap: null,
   };
+}
+
+/**
+ * What a widget is saved with, and what its preview is given: the query, plus (for a map) the whole tooltip items and the basemap.
+ * Any other chart type keeps neither, so changing a map into one saves no tooltip columns.
+ */
+export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig {
+  return { ...queryFor(type, config), tooltip: type === 'map' ? (config.tooltip ?? []) : [], basemap: type === 'map' ? (config.basemap ?? null) : null };
 }
 
 /**
@@ -90,7 +103,7 @@ export function queryFor(type: ChartType, config: WidgetConfig): WidgetConfig {
                       <app-pie-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [asTable]="asTable()" />
                     }
                     @case ('map') {
-                      <app-map-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [asTable]="asTable()" />
+                      <app-map-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [tooltipTypes]="result.tooltipTypes" [asTable]="asTable()" />
                     }
                     @default {
                       <app-axis-chart [kind]="axisKind()" [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [asTable]="asTable()" />

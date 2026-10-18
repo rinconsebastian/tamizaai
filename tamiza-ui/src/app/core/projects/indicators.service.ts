@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { DataColumn, DataExport, DataFilter, ExportFormat } from './data.service';
+import { DataColumn, DataColumnType, DataExport, DataFilter, DataValue, ExportFormat } from './data.service';
 import { IndicatorFormat } from './pipeline.service';
 
 // Mirrors Tamiza.Api/Indicators/*. A widget is one row of tamiza.dashboard_widgets: a title, a chart type, a query over the
@@ -22,6 +22,8 @@ export const maxBuckets = 100;
 export const defaultBuckets = 10;
 export const maxFilters = 50;
 export const maxTitleLength = 200;
+export const maxTooltipItems = 5;
+export const maxTooltipLabel = 80;
 
 /** A place on the grid, in grid units: `x + w` never passes the 12 columns. */
 export interface Layout {
@@ -49,6 +51,21 @@ export interface WidgetSort {
   direction: 'asc' | 'desc';
 }
 
+/** How a numeric tooltip column is written, as the indicator formats do; a column that is not a number takes none. */
+export type TooltipFormat = 'count' | 'decimal' | 'percent';
+
+/** A column of the table a map shows in its tooltip, in the order listed, with an optional label in place of the column's name. */
+export interface WidgetTooltipItem {
+  column: string;
+  label: string | null;
+  format: TooltipFormat | null;
+}
+
+/** Which background map a map widget draws under its shapes: a kind, not a provider, so a widget keeps its meaning when the operator changes provider. */
+export type BasemapKind = 'streets' | 'satellite';
+
+export const basemapKinds: readonly BasemapKind[] = ['streets', 'satellite'];
+
 /** A widget's query. At most one of `measure` and `ratio` is set; with neither, the table's default measure is plotted. */
 export interface WidgetConfig {
   indicator: string;
@@ -62,6 +79,10 @@ export interface WidgetConfig {
   buckets: number | null;
   /** Bar and column only; null is the group column's own order. */
   sort: WidgetSort | null;
+  /** Maps only: up to `maxTooltipItems` columns shown in the tooltip. A query sends their names only (see `queryFor`). */
+  tooltip: WidgetTooltipItem[];
+  /** Maps only; null draws none. Saved with the widget, never part of the query. */
+  basemap: BasemapKind | null;
 }
 
 export interface Widget {
@@ -106,6 +127,10 @@ export interface QueryRow {
   group: string | null;
   value: number;
   geometry: string | null;
+  /** Maps only: how many rows of the table the group combines. */
+  rows?: number;
+  /** Maps only: the value of each tooltip column, in the widget's order (see `QueryResult.tooltipTypes`). */
+  tooltip?: DataValue[];
 }
 
 export interface QueryResult {
@@ -114,6 +139,8 @@ export interface QueryResult {
   rowLimitReached: boolean;
   /** What the widget names that the published table lacks (design D8). */
   missing: { indicator: boolean; columns: string[] };
+  /** Maps only: the type of each tooltip column, so a value is written without asking the catalog. */
+  tooltipTypes?: DataColumnType[];
 }
 
 export interface WidgetDraft {
@@ -126,7 +153,7 @@ export interface WidgetDraft {
 export type WidgetPatch = Partial<Pick<Widget, 'title' | 'chartType' | 'config' | 'layout'>>;
 
 export function emptyConfig(indicator = ''): WidgetConfig {
-  return { indicator, measure: null, ratio: null, groupBy: null, filters: [], geometryColumn: null, buckets: null, sort: null };
+  return { indicator, measure: null, ratio: null, groupBy: null, filters: [], geometryColumn: null, buckets: null, sort: null, tooltip: [], basemap: null };
 }
 
 const base = '/api/v1/projects';
