@@ -36,7 +36,7 @@
     <router-outlet />
   </main>
 
-  <tmz-toast-region />
+  <tmz-toast-region [dismissLabel]="t('common.dismiss')" />
 
   <ng-template #drawer>
     <div class="flex h-full flex-col gap-6 overflow-y-auto border-s border-default bg-neutral-primary-soft p-4" data-testid="drawer">

@@ -1,12 +1,13 @@
-import { DOCUMENT, DatePipe } from '@angular/common';
+import { DOCUMENT } from '@angular/common';
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { ProjectDetails, ProjectsService } from '../../core/projects/projects.service';
-import { Alert, Badge, Button, Card, FormField, Input, ToastService, dateTimeFormat } from '../../shared/ui';
+import { Alert, Badge, Button, Card, FormField, Input, ToastService, DateTimePipe } from '../../shared/ui';
 import { ProjectContext } from './project-context';
+import { isSingular } from '../../core/i18n/plural';
 
 /** The names the browser knows, plus UTC (the default, which it does not list). The API judges the final choice. */
 function zoneNames(): string[] {
@@ -31,7 +32,7 @@ const metadataTypes = new Set(['start', 'end', 'today', 'deviceid', 'username', 
 
 @Component({
   selector: 'app-project-overview',
-  imports: [DatePipe, RouterLink, TranslocoDirective, Alert, Badge, Button, Card, FormField, Input],
+  imports: [DateTimePipe, RouterLink, TranslocoDirective, Alert, Badge, Button, Card, FormField, Input],
   template: `
     @if (project(); as project) {
       <div class="grid gap-6 lg:grid-cols-2" *transloco="let t">
@@ -46,7 +47,7 @@ const metadataTypes = new Set(['start', 'end', 'today', 'deviceid', 'username', 
           @if (project.unavailableFormVersions > 0) {
             <tmz-alert tone="warning" class="mt-5" data-testid="unavailable-versions">
               {{
-                project.unavailableFormVersions === 1
+                singular(project.unavailableFormVersions)
                   ? t('overview.unavailableVersionsOne')
                   : t('overview.unavailableVersions', { count: project.unavailableFormVersions })
               }}
@@ -60,7 +61,7 @@ const metadataTypes = new Set(['start', 'end', 'today', 'deviceid', 'username', 
             </tmz-alert>
           }
           <div class="mt-5 flex flex-wrap items-center gap-3">
-            <span class="text-sm text-body" data-testid="checked-at">{{ t('overview.checkedAt') }}: {{ project.formCheckedAt | date: dateTimeFormat }}</span>
+            <span class="text-sm text-body" data-testid="checked-at">{{ t('overview.checkedAt') }}: {{ project.formCheckedAt | dateTime }}</span>
             @if (context.can('analyst')) {
               <button tmzButton variant="secondary" size="sm" type="button" [disabled]="busy()" (click)="recheck()" data-testid="recheck">
                 {{ t('overview.recheck') }}
@@ -204,7 +205,6 @@ export class ProjectOverview {
   private readonly route = inject(ActivatedRoute);
   protected readonly context = inject(ProjectContext);
 
-  protected readonly dateTimeFormat = dateTimeFormat;
   protected readonly project = this.context.project;
   protected readonly busy = signal(false);
   protected readonly replacing = signal(false);
@@ -347,5 +347,10 @@ export class ProjectOverview {
         this.busy.set(false);
       },
     });
+  }
+
+  /** Whether a message about `count` things takes its singular form in the interface language. */
+  protected singular(count: number): boolean {
+    return isSingular(count, this.transloco.getActiveLang());
   }
 }

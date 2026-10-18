@@ -1,4 +1,4 @@
-import { DestroyRef, Injectable, Signal, WritableSignal, computed, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, LOCALE_ID, Signal, WritableSignal, computed, inject, signal } from '@angular/core';
 import { EditorState } from '@codemirror/state';
 import { TranslocoService } from '@jsverse/transloco';
 import { Subscription } from 'rxjs';
@@ -103,6 +103,7 @@ export class AssistantSession implements AssistantSessionState {
   private readonly service = inject(AssistantService);
   private readonly errors = inject(ApiErrors);
   private readonly transloco = inject(TranslocoService);
+  private readonly locale = inject(LOCALE_ID);
   private readonly storage = inject(AssistantStorage);
   private readonly auth = inject(AuthService);
 
@@ -324,6 +325,7 @@ export class AssistantSession implements AssistantSessionState {
       kind: host.script().kind,
       inputs: host.inputs(),
       translate: (key, params) => this.transloco.translate(key, params),
+      locale: this.locale,
       canRun: false,
       runCell: () => undefined,
       problems: () => undefined,

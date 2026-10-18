@@ -1,7 +1,6 @@
 import { Dialog } from '@angular/cdk/dialog';
 import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
-import { DatePipe, DecimalPipe } from '@angular/common';
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, LOCALE_ID, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
@@ -20,23 +19,10 @@ import {
   ExportFormat,
   pageSizes,
 } from '../../core/projects/data.service';
-import {
-  Alert,
-  Button,
-  Card,
-  Input,
-  Skeleton,
-  Table,
-  TableContainer,
-  ToastService,
-  dateTimeFormat,
-  tableCell,
-  tableHead,
-  tableHeaderCell,
-  tableRow,
-} from '../../shared/ui';
+import { Alert, ApiLang, Button, Card, Input, Skeleton, Table, TableContainer, ToastService, tableCell, tableHead, tableHeaderCell, tableRow, DateTimePipe, NumberPipe, numberText } from '../../shared/ui';
 import { DataFilterDialog, DataFilterDialogData, DataFilterDialogResult } from './data-filter-dialog';
 import { describeFilter, emptyQuery, normalizeFilter, parseView, sanitize, viewParams } from './data-view';
+import { countKey } from '../../core/i18n/plural';
 import { ProjectContext } from './project-context';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
@@ -49,14 +35,15 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
 @Component({
   selector: 'app-project-clean-data',
   imports: [
-    DatePipe,
-    DecimalPipe,
+    DateTimePipe,
+    NumberPipe,
     RouterLink,
     TranslocoDirective,
     CdkMenu,
     CdkMenuItem,
     CdkMenuTrigger,
     Alert,
+    ApiLang,
     Button,
     Card,
     Input,
@@ -68,7 +55,7 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
     <div class="flex flex-col gap-6" *transloco="let t" [attr.aria-busy]="!overview() || pageLoading()">
       @if (overview(); as overview) {
         @if (error(); as message) {
-          <tmz-alert tone="danger" data-testid="data-error">{{ message }}</tmz-alert>
+          <tmz-alert tone="danger" data-testid="data-error" [tmzApiLang]="message">{{ message }}</tmz-alert>
         }
 
         @if (overview.sources.length === 0) {
@@ -104,7 +91,7 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
                 <select tmzInput id="dataTable" (change)="selectTable($any($event.target).value)" data-testid="table-select">
                   @for (item of tables(); track item.name) {
                     <option [value]="item.name" [selected]="item.name === table()">
-                      {{ item.rowCount === null ? item.name : t('cleanData.tableOption', { name: item.name, count: (item.rowCount | number) }) }}
+                      {{ item.rowCount === null ? item.name : t(key('cleanData.tableOption', item.rowCount), { name: item.name, count: (item.rowCount | num) }) }}
                     </option>
                   }
                 </select>
@@ -114,7 +101,7 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
             <p class="text-sm text-body">
               @if (publishedAt(); as published) {
                 <span data-testid="published">
-                  {{ t('cleanData.published', { time: (published | date: dateTimeFormat) }) }}
+                  {{ t('cleanData.published', { time: (published | dateTime) }) }}
                   @if (runId(); as run) {
                     {{ t('cleanData.publishedRun', { run: shortId(run) }) }}
                   }
@@ -140,7 +127,7 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
           </ng-template>
 
           @if (republishedAt(); as time) {
-            <tmz-alert tone="brand" [announce]="true" data-testid="republished">{{ t('cleanData.republished', { time: (time | date: dateTimeFormat) }) }}</tmz-alert>
+            <tmz-alert tone="brand" [announce]="true" data-testid="republished">{{ t('cleanData.republished', { time: (time | dateTime) }) }}</tmz-alert>
           }
           @if (goneTable(); as gone) {
             <tmz-alert tone="warning" [announce]="true" data-testid="table-gone">
@@ -161,7 +148,7 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
             <div class="flex items-center justify-between gap-3">
               <p class="text-sm text-body" data-testid="row-count">
                 @if (page(); as page) {
-                  {{ query().filters.length ? t('cleanData.matching', { count: (page.total | number) }) : t('cleanData.total', { count: (page.total | number) }) }}
+                  {{ query().filters.length ? t(key('cleanData.matching', page.total), { count: (page.total | num) }) : t(key('cleanData.total', page.total), { count: (page.total | num) }) }}
                 }
               </p>
               <button
@@ -277,7 +264,7 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
                 </div>
                 <div class="flex items-center justify-between gap-3 sm:justify-end">
                   @if (page.total > 0) {
-                    <span data-testid="page-info" class="tabular-nums">{{ t('cleanData.paging.info', { from: (rangeStart(page) | number), to: (rangeEnd(page) | number), total: (page.total | number) }) }}</span>
+                    <span data-testid="page-info" class="tabular-nums">{{ t('cleanData.paging.info', { from: (rangeStart(page) | num), to: (rangeEnd(page) | num), total: (page.total | num) }) }}</span>
                   }
                   <div class="flex gap-2">
                     <button tmzButton variant="secondary" size="sm" type="button" [disabled]="page.page <= 1" (click)="goToPage(page.page - 1)" data-testid="previous-page">{{ t('cleanData.paging.previous') }}</button>
@@ -294,7 +281,7 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
       } @else if (!error()) {
         <tmz-card><div class="flex flex-col gap-3" aria-busy="true" data-testid="data-loading"><tmz-skeleton class="w-1/3" /><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div></tmz-card>
       } @else {
-        <tmz-alert tone="danger" data-testid="data-error">{{ error() }}</tmz-alert>
+        <tmz-alert tone="danger" data-testid="data-error" [tmzApiLang]="error()">{{ error() }}</tmz-alert>
       }
     </div>
   `,
@@ -304,6 +291,7 @@ export class ProjectCleanData {
   private readonly errors = inject(ApiErrors);
   private readonly toasts = inject(ToastService);
   private readonly transloco = inject(TranslocoService);
+  private readonly locale = inject(LOCALE_ID);
   private readonly dialog = inject(Dialog);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
@@ -312,7 +300,6 @@ export class ProjectCleanData {
 
   protected readonly pageSizes = pageSizes;
   protected readonly smallestPageSize = pageSizes[0];
-  protected readonly dateTimeFormat = dateTimeFormat;
   protected readonly tableHead = tableHead;
   protected readonly tableHeaderCell = tableHeaderCell;
   protected readonly tableRow = tableRow;
@@ -585,8 +572,8 @@ export class ProjectCleanData {
       next: (result) => {
         this.exporting.set(false);
         this.downloader.start(result.downloadUrl);
-        const ready = this.transloco.translate('cleanData.export.ready', { rows: result.rowCount });
-        this.toasts.success(result.cutCells > 0 ? `${ready} ${this.transloco.translate('cleanData.export.readyCut', { cut: result.cutCells })}` : ready);
+        const ready = this.transloco.translate(this.key('cleanData.export.ready', result.rowCount), { rows: numberText(result.rowCount, this.locale) });
+        this.toasts.success(result.cutCells > 0 ? `${ready} ${this.transloco.translate(this.key('cleanData.export.readyCut', result.cutCells), { cut: result.cutCells })}` : ready);
       },
       error: (failure) => {
         this.exporting.set(false);
@@ -596,6 +583,11 @@ export class ProjectCleanData {
   }
 
   // Presentation
+
+  /** The key of a count message: its singular form when `count` is 1. */
+  protected key(base: string, count: number): string {
+    return countKey(base, count, this.transloco.getActiveLang());
+  }
 
   protected columnOf(name: string): DataColumn | undefined {
     return this.page()?.columns.find((c) => c.name === name);

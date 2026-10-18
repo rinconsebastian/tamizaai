@@ -37,7 +37,7 @@ const inputs: ScriptInputsInfo = {
 };
 
 function options(overrides: Partial<AssistOptions> = {}): AssistOptions {
-  return { kind: 'indicator', inputs, translate, canRun: true, runCell: () => undefined, problems: () => undefined, ...overrides };
+  return { kind: 'indicator', inputs, translate, locale: 'en-US', canRun: true, runCell: () => undefined, problems: () => undefined, ...overrides };
 }
 
 function stateOf(doc: string, overrides: Partial<AssistOptions> = {}) {
@@ -89,6 +89,30 @@ describe('script assist: completion of tables and columns', () => {
 
     expect(found.map((o) => o.label)).toEqual(['main', 'members']);
     expect(found[0].detail).toBe('480 rows');
+  });
+
+  it('says one row in the singular', async () => {
+    const one: ScriptInputsInfo = { ...inputs, tables: [{ name: 'lone', rows: 1, columns: [] }] };
+    const found = await offered('def compute(cleaned, ctx):\n    cleaned["', { inputs: one });
+
+    expect(found[0].detail).toBe('1 row');
+  });
+
+  it('writes sizes, types and the kind of table in the language and locale it is given', async () => {
+    const spanish: Record<string, string> = {
+      'preview.types.integer': 'entero',
+      'scripts.completion.tableRows': '{{ count }} filas',
+      'scripts.completion.referenceTable': 'tabla de referencia',
+    };
+    const translateEs = (key: string, params: Record<string, unknown> = {}) =>
+      (spanish[key] ?? key).replace(/\{\{\s*(\w+)\s*\}\}/g, (_, name) => String(params[name] ?? ''));
+    const es = { translate: translateEs, locale: 'es-CO' };
+
+    expect((await offered('def compute(cleaned, ctx):\n    cleaned["', es))[1].detail).toBe('1.200 filas');
+    expect((await offered('def compute(cleaned, ctx):\n    ctx.reference["', es))[0].detail).toBe('tabla de referencia');
+    expect((await offered('def compute(cleaned, ctx):\n    members = cleaned["members"]\n    members["', es)).map((o) => o.detail)).toEqual([
+      'entero, members',
+    ]);
   });
 
   it('offers the columns of the table a variable was assigned from, each with its type and table', async () => {

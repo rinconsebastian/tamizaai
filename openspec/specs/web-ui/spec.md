@@ -33,7 +33,7 @@ Every signed-in screen SHALL show a top bar with the product name, the navigatio
 - **THEN** the menu opens on Enter and closes on Escape, returning focus to the button
 
 ### Requirement: Feedback on failed actions
-When an action fails, the UI SHALL show a message that explains why, using the error the API returned. Validation errors for a form field SHALL appear next to that field. The UI SHALL NOT fail silently.
+When an action fails, the UI SHALL show a message that explains why, using the error the API returned. Validation errors for a form field SHALL appear next to that field. The UI SHALL NOT fail silently. A message the API wrote SHALL be shown as received. A message the UI writes itself, such as the one for an API error code it knows or for a server it cannot reach, SHALL be in the interface language (see `interface-language`).
 
 #### Scenario: Field validation error
 - **WHEN** the API rejects a form because one field is invalid
@@ -42,6 +42,14 @@ When an action fails, the UI SHALL show a message that explains why, using the e
 #### Scenario: Request fails
 - **WHEN** the API responds with an error that is not tied to a field, or cannot be reached
 - **THEN** the UI shows a message describing the problem
+
+#### Scenario: Server unreachable in Spanish
+- **WHEN** a member with the Spanish UI saves a form while the API cannot be reached
+- **THEN** the UI says in Spanish that it could not reach the server
+
+#### Scenario: API message in the Spanish UI
+- **WHEN** a member with the Spanish UI acts on a widget that was just deleted and the API answers "Widget not found." without a code
+- **THEN** the UI shows "Widget not found."
 
 ### Requirement: Project navigation
 The project page SHALL offer these top-level sections to every member, in this order: the Performance and Clean data dashboards, the project's own dashboards in their order, and Settings, set apart at the end of the row. Settings SHALL group the configuration sections General, Submissions, Scripts, Reference data, Sampling frame, Members and, for admins only, Webhook, and SHALL open on General. Each section and dashboard SHALL keep its own address, so links and bookmarks keep working.
@@ -116,11 +124,27 @@ A project setting that is set once and rarely changed (synchronization and run s
 - **THEN** the inputs stay open and the message naming the allowed range appears next to the interval field
 
 ### Requirement: Date and time display
-Every date and time the UI shows SHALL be written to the minute, without seconds, in one format shared by every screen.
+Every date and time the UI shows SHALL be written to the minute, without seconds, in one format shared by every screen. The format SHALL name the month, and SHALL follow the order, clock and words of the interface's regional format (see `interface-language`).
 
 #### Scenario: Synchronization time
 - **WHEN** a synchronization finished at 22:00:01 on 2 October 2026
 - **THEN** the log shows it as the date and 22:00 (or 10:00 PM), without seconds
+
+#### Scenario: American English
+- **WHEN** the browser entry that chose English is `en-US` and the UI shows 21:30 on 1 September 2026
+- **THEN** it reads `Sep 1, 2026, 9:30 PM`
+
+#### Scenario: British English
+- **WHEN** the browser entry that chose English is `en-GB` and the UI shows the same moment
+- **THEN** it reads `1 Sept 2026, 21:30`
+
+#### Scenario: Colombian Spanish
+- **WHEN** the browser entry that chose Spanish is `es-CO` and the UI shows the same moment
+- **THEN** it reads `1 de sept de 2026, 9:30 p. m.`
+
+#### Scenario: Spanish from Spain
+- **WHEN** the browser entry that chose Spanish is `es-ES` and the UI shows the same moment
+- **THEN** it reads `1 sept 2026, 21:30`
 
 ### Requirement: Feedback while an action runs
 While an action the user started takes longer than a moment (preparing an export, a download, a test), the control that started it SHALL show that it is busy and SHALL NOT be usable again until the action ends; other controls of the same kind SHALL stay usable. When the action ends, the UI SHALL show exactly one message, a success or a failure. A notice the UI inserts into the page after an action, such as a dropped filter or republished tables, SHALL be announced to screen readers.

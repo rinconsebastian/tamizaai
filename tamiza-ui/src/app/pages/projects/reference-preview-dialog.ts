@@ -1,10 +1,10 @@
 import { DIALOG_DATA, DialogRef } from '@angular/cdk/dialog';
-import { DecimalPipe } from '@angular/common';
 import { Component, inject, signal } from '@angular/core';
-import { TranslocoDirective } from '@jsverse/transloco';
+import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
+import { countKey } from '../../core/i18n/plural';
 import { ReferenceService, ReferenceTablePreview } from '../../core/projects/reference.service';
-import { Button, Skeleton } from '../../shared/ui';
+import { Button, Skeleton, NumberPipe } from '../../shared/ui';
 import { TablePreview } from './table-preview';
 
 export interface ReferencePreviewData {
@@ -15,7 +15,7 @@ export interface ReferencePreviewData {
 /** A reference table's columns with their types and its first 100 rows. */
 @Component({
   selector: 'app-reference-preview-dialog',
-  imports: [DecimalPipe, TranslocoDirective, Button, Skeleton, TablePreview],
+  imports: [NumberPipe, TranslocoDirective, Button, Skeleton, TablePreview],
   template: `
     <div
       class="flex max-h-[calc(100vh-2rem)] w-[min(64rem,calc(100vw-2rem))] flex-col rounded-base border border-default bg-neutral-primary-soft shadow-sm"
@@ -26,7 +26,7 @@ export interface ReferencePreviewData {
           <code>{{ data.name }}</code>
           @if (preview(); as preview) {
             <span class="block text-sm font-normal text-body" data-testid="reference-preview-note">
-              {{ t('reference.previewNote', { shown: preview.rows.length, rows: (preview.table.rowCount | number), file: preview.table.fileName }) }}
+              {{ t(key('reference.previewNote', preview.table.rowCount), { shown: preview.rows.length, rows: (preview.table.rowCount | num), file: preview.table.fileName }) }}
             </span>
           }
         </h2>
@@ -47,8 +47,14 @@ export class ReferencePreviewDialog {
   protected readonly ref = inject<DialogRef<void>>(DialogRef);
   private readonly service = inject(ReferenceService);
   private readonly errors = inject(ApiErrors);
+  private readonly transloco = inject(TranslocoService);
 
   protected readonly preview = signal<ReferenceTablePreview | null>(null);
+
+  /** The key of a message about a count of rows: its singular form for one row. */
+  protected key(base: string, count: number): string {
+    return countKey(base, count, this.transloco.getActiveLang());
+  }
 
   /** The columns as scripts see them; a column whose header was renamed shows the file's original header beneath its name. */
   protected columns(preview: ReferenceTablePreview) {

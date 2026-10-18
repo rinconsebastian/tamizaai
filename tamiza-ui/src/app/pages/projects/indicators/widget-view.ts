@@ -6,7 +6,7 @@ import { TranslocoDirective } from '@jsverse/transloco';
 import { catchError, distinctUntilChanged, map, of, switchMap, tap, timer } from 'rxjs';
 import { ApiErrors } from '../../../core/api-error';
 import { ChartType, IndicatorEntry, IndicatorsService, QueryResult, WidgetConfig, WidgetSort } from '../../../core/projects/indicators.service';
-import { Alert, Button, Skeleton } from '../../../shared/ui';
+import { Alert, ApiLang, Button, Skeleton } from '../../../shared/ui';
 import { AxisChart } from './axis-chart';
 import { plainIndicator, valueFormatter } from './format';
 import { MapWidget } from './map-widget';
@@ -54,7 +54,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
  */
 @Component({
   selector: 'app-widget-view',
-  imports: [NgTemplateOutlet, RouterLink, TranslocoDirective, Alert, Button, Skeleton, AxisChart, MapWidget, PieWidget, StatWidget],
+  imports: [NgTemplateOutlet, RouterLink, TranslocoDirective, Alert, ApiLang, Button, Skeleton, AxisChart, MapWidget, PieWidget, StatWidget],
   template: `
     <div class="flex h-full min-h-0 flex-col gap-2" *transloco="let t" [attr.aria-busy]="state().kind === 'loading'">
       @switch (state().kind) {
@@ -69,7 +69,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
           <div class="flex flex-col gap-3" data-testid="view-loading"><tmz-skeleton class="w-1/3" /><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div>
         }
         @case ('error') {
-          <tmz-alert tone="danger" data-testid="view-error">{{ error() }}</tmz-alert>
+          <tmz-alert tone="danger" data-testid="view-error"><span [tmzApiLang]="error()">{{ error() }}</span></tmz-alert>
         }
         @case ('ready') {
           @if (result(); as result) {

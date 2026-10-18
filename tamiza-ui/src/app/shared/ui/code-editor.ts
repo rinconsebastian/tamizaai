@@ -57,11 +57,14 @@ export class CodeEditor implements OnDestroy {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly editable = new Compartment();
   private readonly extra = new Compartment();
+  private readonly translated = new Compartment();
   private view: EditorView | null = null;
 
   readonly value = input('');
   readonly readonly = input(false);
   readonly label = input('Python code');
+  /** The texts CodeMirror writes itself (search panel, folding, diagnostics), by their English phrase; English where not given. */
+  readonly phrases = input<Record<string, string>>({});
   /** Extensions added by the screen (completion, checks, cell actions); they can change while the editor lives. */
   readonly extensions = input<Extension[]>([]);
   readonly changed = output<string>();
@@ -86,6 +89,7 @@ export class CodeEditor implements OnDestroy {
             EditorState.tabSize.of(tabSize),
             indentUnit.of(' '.repeat(tabSize)),
             Prec.high(keymap.of([indentation])),
+            this.translated.of(EditorState.phrases.of(this.phrases())),
             this.extra.of(this.extensions()),
             this.editable.of(this.editableExtensions(this.readonly())),
             EditorView.contentAttributes.of({ 'aria-label': this.label() }),
@@ -114,6 +118,10 @@ export class CodeEditor implements OnDestroy {
     effect(() => {
       const extensions = this.extensions();
       this.view?.dispatch({ effects: this.extra.reconfigure(extensions) });
+    });
+    effect(() => {
+      const phrases = this.phrases();
+      this.view?.dispatch({ effects: this.translated.reconfigure(EditorState.phrases.of(phrases)) });
     });
     effect(() => {
       const readonly = this.readonly();

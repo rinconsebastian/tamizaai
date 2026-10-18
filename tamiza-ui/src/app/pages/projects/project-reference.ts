@@ -1,27 +1,10 @@
 import { Dialog } from '@angular/cdk/dialog';
-import { DatePipe, DecimalPipe } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { ReferenceService, ReferenceTable, ReferenceTableUpload } from '../../core/projects/reference.service';
-import {
-  Alert,
-  Button,
-  Card,
-  ConfirmDialog,
-  Disclosure,
-  DropdownMenu,
-  MenuItem,
-  Skeleton,
-  Table,
-  TableContainer,
-  ToastService,
-  dateTimeFormat,
-  tableCell,
-  tableHead,
-  tableHeaderCell,
-  tableRow,
-} from '../../shared/ui';
+import { Alert, Button, Card, ConfirmDialog, Disclosure, DropdownMenu, MenuItem, Skeleton, Table, TableContainer, ToastService, tableCell, tableHead, tableHeaderCell, tableRow, DateTimePipe, NumberPipe } from '../../shared/ui';
+import { countKey } from '../../core/i18n/plural';
 import { ProjectContext } from './project-context';
 import { ReferencePreviewData, ReferencePreviewDialog } from './reference-preview-dialog';
 import { ReferenceUploadData, ReferenceUploadDialog } from './reference-upload-dialog';
@@ -32,7 +15,7 @@ import { ReferenceUploadData, ReferenceUploadDialog } from './reference-upload-d
  */
 @Component({
   selector: 'app-project-reference',
-  imports: [DatePipe, DecimalPipe, TranslocoDirective, Alert, Button, Card, Disclosure, DropdownMenu, Skeleton, Table, TableContainer],
+  imports: [DateTimePipe, NumberPipe, TranslocoDirective, Alert, Button, Card, Disclosure, DropdownMenu, Skeleton, Table, TableContainer],
   template: `
     <section class="flex flex-col gap-4" *transloco="let t">
       <div class="flex items-center justify-between gap-3">
@@ -83,8 +66,8 @@ import { ReferenceUploadData, ReferenceUploadDialog } from './reference-upload-d
                   </div>
                 </div>
                 <p class="mt-1 break-words text-body">
-                  {{ table.fileName }} · {{ t('reference.size', { rows: (table.rowCount | number), columns: table.columns.length }) }} ·
-                  {{ t('reference.updated', { name: table.updatedBy.name, date: (table.updatedAt | date: dateTimeFormat) }) }}
+                  {{ table.fileName }} · {{ t('reference.size', { rows: t(key('reference.rowCount', table.rowCount), { count: (table.rowCount | num) }), columns: t(key('reference.columnCount', table.columns.length), { count: table.columns.length }) }) }} ·
+                  {{ t('reference.updated', { name: table.updatedBy.name, date: (table.updatedAt | dateTime) }) }}
                 </p>
               </li>
             }
@@ -105,8 +88,8 @@ import { ReferenceUploadData, ReferenceUploadDialog } from './reference-upload-d
                   <tr [class]="tableRow" [attr.data-testid]="'reference-row-' + table.name">
                     <td [class]="tableCell"><code class="text-heading">{{ table.name }}</code></td>
                     <td [class]="tableCell + ' max-w-xs break-all'">{{ table.fileName }}</td>
-                    <td [class]="tableCell + ' whitespace-nowrap'">{{ t('reference.size', { rows: (table.rowCount | number), columns: table.columns.length }) }}</td>
-                    <td [class]="tableCell">{{ t('reference.updated', { name: table.updatedBy.name, date: (table.updatedAt | date: dateTimeFormat) }) }}</td>
+                    <td [class]="tableCell + ' whitespace-nowrap'">{{ t('reference.size', { rows: t(key('reference.rowCount', table.rowCount), { count: (table.rowCount | num) }), columns: t(key('reference.columnCount', table.columns.length), { count: table.columns.length }) }) }}</td>
+                    <td [class]="tableCell">{{ t('reference.updated', { name: table.updatedBy.name, date: (table.updatedAt | dateTime) }) }}</td>
                     <td [class]="tableCell">
                       <span class="flex items-center justify-end gap-1">
                         <button tmzButton variant="secondary" size="sm" type="button" (click)="openPreview(table)" [attr.data-testid]="'reference-preview-' + table.name">
@@ -138,8 +121,12 @@ export class ProjectReference {
   private readonly dialog = inject(Dialog);
   private readonly context = inject(ProjectContext);
 
+  /** The key of a message about a count: its singular form for one. */
+  protected key(base: string, count: number): string {
+    return countKey(base, count, this.transloco.getActiveLang());
+  }
+
   protected readonly canEdit = computed(() => this.context.can('analyst'));
-  protected readonly dateTimeFormat = dateTimeFormat;
   protected readonly tableHead = tableHead;
   protected readonly tableHeaderCell = tableHeaderCell;
   protected readonly tableRow = tableRow;

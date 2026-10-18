@@ -1,0 +1,1668 @@
+{
+  "app": {
+    "name": "Tamiza",
+    "tagline": "De la encuesta al indicador"
+  },
+  "shell": {
+    "signOut": "Cerrar sesión",
+    "projects": "Proyectos",
+    "menu": "Menú",
+    "openMenu": "Abrir menú",
+    "closeMenu": "Cerrar menú"
+  },
+  "authUnavailable": {
+    "title": "El inicio de sesión no está disponible",
+    "unreachable": "No se pudo conectar con el servicio de autenticación. Intenta de nuevo en unos minutos o contacta a tu administrador si el problema continúa.",
+    "insecureContext": "El inicio de sesión requiere una conexión segura. Abre Tamiza por HTTPS (o en localhost) e intenta de nuevo.",
+    "retry": "Intentar de nuevo"
+  },
+  "notFound": {
+    "title": "Página no encontrada",
+    "body": "Esta página no existe o todavía no está disponible.",
+    "home": "Ir a la página de inicio"
+  },
+  "errors": {
+    "generic": "Algo salió mal. Intenta de nuevo.",
+    "network": "Tamiza no pudo conectarse con el servidor. Revisa tu conexión e intenta de nuevo.",
+    "validation": "Algunos campos requieren atención.",
+    "codes": {
+      "kobo": {
+        "invalid_url": "Escribe la dirección completa del servidor, por ejemplo https://kf.kobotoolbox.org.",
+        "https_required": "El servidor de Kobo debe usar HTTPS.",
+        "address_not_allowed": "La dirección de este servidor de Kobo apunta a una red privada o local, y esta instalación no lo permite.",
+        "unauthorized": "Kobo rechazó el token de la API, o el token no puede leer este formulario ni sus envíos.",
+        "form_not_found": "No se encontró ningún formulario con este asset UID en el servidor de Kobo.",
+        "unreachable": "No se pudo conectar con el servidor de Kobo. Revisa la dirección e intenta de nuevo.",
+        "unexpected_response": "El servidor de Kobo respondió de forma inesperada. Revisa la dirección e intenta de nuevo.",
+        "token_unreadable": "Ya no se puede leer el token de la API guardado. Un administrador del proyecto debe reemplazarlo.",
+        "version_not_found": "Kobo no tiene esa versión de este formulario.",
+        "rate_limited": "El servidor de Kobo está limitando las solicitudes de Tamiza. Tamiza lo intentará de nuevo más tarde."
+      },
+      "member": {
+        "exists": "Esta persona ya es miembro del proyecto."
+      },
+      "invitation": {
+        "exists": "Este correo ya tiene una invitación pendiente."
+      },
+      "project": {
+        "last_admin": "El proyecto necesita al menos un administrador. Primero haz administrador a otro miembro."
+      },
+      "sync": {
+        "in_progress": "Ya hay una sincronización de este proyecto en curso. Espera a que termine.",
+        "interrupted": "La sincronización se interrumpió porque el servidor se detuvo. La próxima se ejecuta con normalidad.",
+        "failed": "La sincronización falló por un error inesperado. Un administrador puede encontrar los detalles en el registro de la API."
+      },
+      "webhook": {
+        "unsupported_media_type": "Kobo transmitió el envío en formato XML. Edita el REST Service en Kobo y elige el tipo JSON.",
+        "invalid_submission": "Kobo transmitió un envío sin su _id ni su _uuid. Deja vacíos el subconjunto de campos y el contenedor personalizado del REST Service.",
+        "too_large": "El envío es más grande de lo que Tamiza acepta."
+      },
+      "run": {
+        "already_queued": "Ya hay una ejecución de este proyecto esperando para iniciar.",
+        "interrupted": "La ejecución se interrumpió porque el proceso de análisis se detuvo. La próxima ejecución continúa con normalidad."
+      },
+      "limit": {
+        "time": "Un script superó el límite de tiempo y se detuvo.",
+        "memory": "Un script superó el límite de memoria y se detuvo."
+      },
+      "step": {
+        "flatten": "Falló el aplanado de los envíos.",
+        "clean": "Falló el script 1 (limpieza):",
+        "output": "Falló el script 2 (salida):",
+        "indicator": "Falló un script de indicador:"
+      },
+      "script": {
+        "not_set": "No hay ningún script para eliminar."
+      },
+      "test": {
+        "interrupted": "La prueba se interrumpió porque el proceso de análisis se detuvo. Vuelve a probar."
+      },
+      "reference": {
+        "exists": "El proyecto ya tiene una tabla de referencia con este nombre. Reemplázala desde la lista o elige otro nombre.",
+        "limit": "El proyecto ya tiene 50 tablas de referencia. Elimina una antes de agregar otra."
+      },
+      "dashboard": {
+        "timeout": "El cálculo del tablero tardó demasiado y se detuvo. Prueba con un rango de fechas más corto o intenta de nuevo en unos minutos."
+      },
+      "data": {
+        "timeout": "La lectura de la tabla tardó demasiado y se detuvo. Agrega un filtro para leer menos filas o intenta de nuevo en un momento.",
+        "tableNotFound": "Esa tabla ya no está publicada. Es posible que una ejecución haya reemplazado las tablas.",
+        "columnNotFound": "La tabla ya no tiene esa columna. Es posible que una ejecución haya reemplazado la tabla.",
+        "exportBusy": "Se están preparando otras exportaciones. Intenta de nuevo en un momento.",
+        "xlsxTooManyRows": "Hay más filas coincidentes de las que caben en una hoja XLSX (1 048 575). Exporta a CSV o agrega un filtro.",
+        "exportTooLarge": "La exportación es más grande de lo que permite esta instalación. Agrega un filtro para exportar menos filas."
+      },
+      "indicators": {
+        "notPublished": "Este indicador todavía no ha publicado una tabla. Primero ejecuta los scripts."
+      },
+      "sampleDownload": {
+        "notReady": "La muestra todavía no está lista.",
+        "failed": "No se pudo preparar la muestra. Prepárala de nuevo.",
+        "incomplete": "La muestra guardada está incompleta. Prepárala de nuevo.",
+        "busy": "Se están preparando otros archivos. Intenta de nuevo en un momento."
+      },
+      "samplingFrame": {
+        "none": "Este proyecto todavía no tiene un marco muestral."
+      },
+      "assistant": {
+        "disabled": "El asistente no está disponible en esta instalación.",
+        "misconfigured": "El asistente está mal configurado. Contacta al administrador.",
+        "unavailable": "No se pudo conectar con el proveedor del asistente o falló mientras escribía. Intenta de nuevo en un momento.",
+        "timeout": "El proveedor no respondió a tiempo. Intenta de nuevo.",
+        "rateLimited": "El proveedor está limitando las solicitudes. Intenta de nuevo en un momento.",
+        "rateLimitedIn": "El proveedor está limitando las solicitudes. Intenta de nuevo en {{ seconds }} segundos.",
+        "rateLimitedInOne": "El proveedor está limitando las solicitudes. Intenta de nuevo en {{ seconds }} segundo.",
+        "budget": "Has usado tu cupo diario de solicitudes al asistente. Se renueva a medianoche UTC.",
+        "budgetRenews": "Has usado tu cupo diario de solicitudes al asistente. Se renueva el {{ when }}.",
+        "busy": "Ya tienes una solicitud en curso. Espera a que termine o cancélala.",
+        "testStale": "La prueba ya no corresponde a este script. Vuelve a probar y luego pide la corrección.",
+        "contextTooLarge": "El script es demasiado grande para el asistente."
+      },
+      "basemaps": {
+        "unavailable": "El proveedor del mapa no puede entregar mosaicos del mapa en este momento (es posible que se haya agotado su cuota). El mapa se muestra sin mapa base.",
+        "upstream": "El proveedor del mapa respondió con un error. El mapa se muestra sin mapa base.",
+        "rateLimited": "Se solicitaron demasiados mosaicos del mapa. Espera un momento y el mapa base se cargará de nuevo."
+      },
+      "dashboards": {
+        "notFound": "El tablero ya no existe.",
+        "limit": "Un proyecto puede tener como máximo 7 tableros. Elimina uno antes de agregar otro.",
+        "lastOne": "Un proyecto necesita al menos un tablero.",
+        "orderChanged": "Los tableros del proyecto han cambiado. Recarga e intenta de nuevo."
+      }
+    }
+  },
+  "common": {
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "dismiss": "Cerrar aviso",
+    "loading": "Cargando…"
+  },
+  "roles": {
+    "admin": "Administrador",
+    "analyst": "Analista",
+    "viewer": "Lector"
+  },
+  "projects": {
+    "title": "Proyectos",
+    "new": "Nuevo proyecto",
+    "emptyTitle": "Aún no hay proyectos",
+    "emptyBody": "Un proyecto vincula Tamiza con un formulario de KoboToolbox. Crea uno para empezar o pide a un administrador del proyecto que te invite.",
+    "createFirst": "Crear un proyecto"
+  },
+  "createProject": {
+    "title": "Nuevo proyecto",
+    "intro": "Conecta un formulario de KoboToolbox. Tamiza comprueba que el token pueda leer el formulario y sus envíos antes de guardar.",
+    "name": "Nombre del proyecto",
+    "server": "Servidor de Kobo",
+    "servers": {
+      "kf": "kf.kobotoolbox.org",
+      "eu": "eu.kobotoolbox.org",
+      "custom": "Otro servidor"
+    },
+    "serverUrl": "Dirección del servidor",
+    "serverUrlHint": "La dirección HTTPS completa de tu servidor de Kobo.",
+    "assetUid": "Asset UID del formulario",
+    "assetUidHint": "En Kobo, abre el formulario: es el código que sigue a /forms/ en la dirección, por ejemplo aBcD1234eFgH.",
+    "apiToken": "Token de la API de Kobo",
+    "apiTokenHint": "En Kobo: Configuración de la cuenta → Seguridad → Clave de API. Se guarda cifrado y no se vuelve a mostrar.",
+    "checking": "Comprobando la conexión con Kobo…",
+    "submit": "Crear proyecto",
+    "created": "Proyecto {{ name }} creado. Ahora conecta el webhook de Kobo."
+  },
+  "project": {
+    "sections": "Secciones del proyecto",
+    "notFoundTitle": "Proyecto no encontrado",
+    "notFoundBody": "No existe o no eres miembro de él.",
+    "tabs": {
+      "performance": "Desempeño",
+      "cleanData": "Datos limpios",
+      "overview": "General",
+      "data": "Envíos",
+      "scripts": "Scripts",
+      "reference": "Datos de referencia",
+      "members": "Miembros",
+      "samplingFrame": "Marco muestral",
+      "webhook": "Webhook",
+      "settings": "Configuración"
+    },
+    "settingsSections": "Secciones de configuración",
+    "tokenUnreadable": "Ya no se puede leer el token de la API de Kobo guardado.",
+    "tokenUnreadableToken": "Reemplazar el token",
+    "tokenUnreadableWebhook": "Regenerar el secreto del webhook"
+  },
+  "overview": {
+    "tokenUnreadable": "El token de la API de Kobo guardado ya no se puede leer (cambiaron las claves de cifrado). Reemplaza el token y genera de nuevo el secreto del webhook.",
+    "formTitle": "Formulario de Kobo",
+    "server": "Servidor",
+    "assetUid": "Asset UID",
+    "checkedAt": "Última revisión",
+    "recheck": "Revisar el formulario de nuevo",
+    "replaceToken": "Reemplazar token de la API",
+    "saveToken": "Guardar token",
+    "checkTitle": "Revisión del formulario",
+    "available": "Disponible",
+    "unavailable": "No disponible",
+    "missing": "Falta en el formulario: {{ fields }}",
+    "enumeratorField": "Pregunta del encuestador",
+    "enumeratorHint": "La pregunta que identifica quién recopiló cada envío.",
+    "noEnumerator": "Ninguna",
+    "settingsTitle": "Configuración del proyecto",
+    "rechecked": "Formulario revisado.",
+    "tokenReplaced": "Token de la API reemplazado.",
+    "enumeratorSaved": "Pregunta del encuestador guardada.",
+    "unavailableVersionsOne": "1 versión del formulario aún no tiene etiquetas. Sus respuestas usan las etiquetas del formulario actual hasta que Tamiza pueda leerla.",
+    "unavailableVersions": "{{ count }} versiones del formulario aún no tienen etiquetas. Sus respuestas usan las etiquetas del formulario actual hasta que Tamiza pueda leerlas.",
+    "unavailableVersionsAction": "Ver las versiones del formulario",
+    "hints": {
+      "defineSamplingFrame": "Define un marco muestral para ver la cobertura.",
+      "defineSamplingFrameViewer": "Pide a quien tenga el rol de Analista o Administrador que defina el marco muestral.",
+      "updateSamplingFrame": "El marco muestral usa campos que el formulario ya no tiene. Actualiza el marco o vuelve a poner esas preguntas en el formulario.",
+      "updateSamplingFrameViewer": "El marco muestral usa campos que el formulario ya no tiene. Pide a quien tenga el rol de Analista o Administrador que lo actualice.",
+      "selectEnumeratorField": "Elige la pregunta que identifica al encuestador.",
+      "selectEnumeratorFieldViewer": "Pide a quien tenga el rol de Administrador del proyecto que elija la pregunta que identifica al encuestador.",
+      "openFrame": "Abrir el marco muestral"
+    },
+    "timeZone": "Zona horaria",
+    "timeZoneHint": "El tablero cuenta cada día en esta zona horaria.",
+    "settingsSaved": "Configuración del proyecto guardada.",
+    "change": "Cambiar",
+    "useBrowserZone": "Usar la zona horaria de mi navegador ({{ zone }})",
+    "enumeratorUsername": "nombre de usuario (metadatos del formulario)",
+    "enumeratorGone": "{{ xpath }} — no está en el formulario actual; se usa el nombre de usuario cuando el formulario lo tiene",
+    "tokenUnreadableWebhook": "Abrir la configuración del webhook"
+  },
+  "metrics": {
+    "dailyEvolution": "Envíos por día",
+    "completionTime": "Tiempo de realización",
+    "perEnumerator": "Detalle por encuestador",
+    "coverage": "Cobertura del marco muestral"
+  },
+  "performance": {
+    "from": "Desde",
+    "to": "Hasta",
+    "clear": "Limpiar",
+    "refresh": "Actualizar",
+    "computedAt": "Calculado el {{ time }}",
+    "daysUtc": "Los días se cuentan en UTC.",
+    "daysUtcAction": "Define la zona horaria del proyecto.",
+    "daysZone": "Los días se cuentan en la zona horaria {{ zone }}.",
+    "seeOverview": "Revisa el formulario de nuevo en Configuración",
+    "sortBy": "Ordenar por",
+    "previous": "Anterior",
+    "next": "Siguiente",
+    "pageInfo": "{{ from }}–{{ to }} de {{ total }}",
+    "duration": {
+      "seconds": "{{ n }} s",
+      "minutes": "{{ n }} min",
+      "hours": "{{ h }} h {{ m }} min"
+    },
+    "submissions": {
+      "title": "Envíos",
+      "total": "Envíos",
+      "withoutTime": "Sin hora de recepción (no se cuentan en ningún día)",
+      "perDay": "Envíos por día",
+      "showTable": "Mostrar como tabla",
+      "showChart": "Mostrar como gráfico",
+      "day": "Día",
+      "count": "Envíos",
+      "peak": "Máximo en un día: {{ count }}",
+      "noDays": "No hay envíos con hora de recepción en este periodo.",
+      "chartLabel": "Gráfico de barras de envíos por día, del {{ first }} al {{ last }}: {{ total }} envíos en {{ days }} días, con un máximo de {{ peak }} en un día. La vista de tabla lista todos los días."
+    },
+    "completion": {
+      "title": "Tiempo de realización",
+      "median": "Mediana",
+      "mean": "Promedio sin valores atípicos",
+      "outliers": "Valores atípicos",
+      "unusable": "Duraciones no utilizables",
+      "fences": "Los valores atípicos son encuestas de menos de {{ lower }} min o de más de {{ upper }} min. Las duraciones que no se pueden usar (fin antes del inicio, u hora faltante o no válida) quedan fuera de todas las cifras.",
+      "noneUsable": "Ningún envío tiene una duración utilizable en este periodo.",
+      "unavailable": "El tiempo de realización necesita que el formulario registre cuándo empieza y termina cada encuesta. Falta en el formulario: {{ fields }}.",
+      "howTo": "En Kobo, activa los metadatos de inicio y fin del formulario, despliégalo otra vez y luego revisa el formulario de nuevo.",
+      "howToViewer": "En Kobo, activa los metadatos de inicio y fin del formulario y despliégalo de nuevo; después, quien tenga el rol de Analista o Administrador revisa el formulario de nuevo."
+    },
+    "enumerators": {
+      "title": "Encuestadores",
+      "empty": "No hay envíos en este periodo.",
+      "none": "Sin encuestador",
+      "name": "Encuestador",
+      "submissions": "Envíos",
+      "mean": "Tiempo promedio",
+      "outliers": "Valores atípicos",
+      "last": "Último envío",
+      "sortSubmissions": "Envíos, de más a menos",
+      "sortName": "Nombre, de A a Z",
+      "unavailable": "Tamiza no puede saber quién recopiló cada envío: el formulario no tiene un campo de nombre de usuario y no hay ninguna pregunta seleccionada como encuestador.",
+      "adminHow": "Quien tenga el rol de Administrador puede elegirla en la configuración del proyecto.",
+      "adminLink": "Seleccionar la pregunta del encuestador",
+      "askAdmin": "Pide a quien tenga el rol de Administrador del proyecto que seleccione la pregunta que identifica al encuestador.",
+      "cardSummary": "{{ submissions }} envíos · promedio {{ mean }} · atípicos {{ outliers }} · último {{ last }}",
+      "cardSummaryOne": "{{ submissions }} envío · promedio {{ mean }} · atípicos {{ outliers }} · último {{ last }}"
+    },
+    "coverage": {
+      "title": "Cobertura del marco muestral",
+      "none": "No hay un marco muestral definido para este proyecto.",
+      "noneEditor": "Define las combinaciones y las metas para seguir cómo las cubre el trabajo de campo.",
+      "noneViewer": "Quien tenga el rol de Analista o Administrador puede definirlo.",
+      "define": "Definir el marco muestral",
+      "warningsTitle": "Algunas dimensiones no se pueden contar",
+      "warning": {
+        "missingField": "La dimensión {{ name }} corresponde a {{ field }}, un campo que el formulario ya no tiene.",
+        "repeat": "La dimensión {{ name }} no se puede contar porque su pregunta ({{ field }}) se responde una vez por cada repetición.",
+        "multipleChoice": "La dimensión {{ name }} no se puede contar porque una respuesta a {{ field }} puede tener varias opciones."
+      },
+      "overall": "Avance general",
+      "overallHelp": "Las encuestas por encima de una meta no compensan que otra combinación se quede corta.",
+      "overallNone": "Ninguna combinación tiene una meta mayor que 0.",
+      "outside": "Fuera del marco",
+      "outsideHelp": "Envíos que no coinciden con ninguna combinación del marco o que dejan una dimensión vacía.",
+      "outsideTop": "Combinaciones más frecuentes fuera del marco",
+      "empty": "(vacío)",
+      "submissionsCount": "{{ count }} envíos",
+      "rowsTitle": "Metas y avance",
+      "noRows": "El marco muestral no tiene combinaciones.",
+      "target": "Meta",
+      "achieved": "Logrado",
+      "percent": "Avance",
+      "sortFrame": "Orden del marco",
+      "sortPercentAsc": "Avance, de menor a mayor",
+      "sortPercentDesc": "Avance, de mayor a menor"
+    },
+    "range": "Rango de fechas",
+    "headline": {
+      "median": "Mediana del tiempo de realización",
+      "unavailable": "No disponible",
+      "noFrame": "Sin marco muestral"
+    }
+  },
+  "data": {
+    "statusTitle": "Estado",
+    "submissions": "Envíos almacenados",
+    "deleted": "Eliminados en Kobo",
+    "lastWebhook": "Última entrega del webhook",
+    "noWebhook": "Aún no se ha recibido ninguna",
+    "lastSync": "Última sincronización",
+    "never": "Nunca",
+    "nextSync": "Próxima sincronización",
+    "nextReconcile": "Próxima verificación de eliminaciones",
+    "activeSync": "{{ kind }} en curso. Esta página se actualiza sola.",
+    "syncNow": "Sincronizar ahora",
+    "fullSync": "Resincronización completa",
+    "syncQueued": "Sincronización iniciada.",
+    "fullSyncQueued": "Resincronización completa iniciada.",
+    "fullSyncTitle": "¿Leer de nuevo todos los envíos?",
+    "fullSyncMessage": "Una resincronización completa lee de nuevo todos los envíos desde Kobo. Recoge las ediciones hechas en Kobo que el webhook no entregó y marca los envíos eliminados en Kobo. En formularios grandes puede tardar varios minutos.",
+    "scheduleTitle": "Programación",
+    "syncInterval": "Sincronizar cada (horas)",
+    "intervalHint": "Recoge los envíos que el webhook no entregó. De 1 a 168 horas.",
+    "reconcileInterval": "Verificar eliminaciones cada (horas)",
+    "reconcileHint": "Marca los envíos eliminados en Kobo. De 1 a 168 horas.",
+    "everyHours": "Cada {{ hours }} horas",
+    "scheduleSaved": "Programación guardada.",
+    "logTitle": "Registro de sincronización",
+    "logEmpty": "Aún no se ha ejecutado ninguna sincronización.",
+    "countsSummary": "{{ created }} nuevos, {{ updated }} actualizados, {{ deleted }} eliminados",
+    "requestedByName": "Iniciada por {{ name }}",
+    "columns": {
+      "started": "Inicio",
+      "kind": "Tipo",
+      "status": "Estado",
+      "changes": "Cambios"
+    },
+    "kind": {
+      "incremental": "Sincronización",
+      "full": "Resincronización completa",
+      "reconciliation": "Verificación de eliminaciones"
+    },
+    "trigger": {
+      "schedule": "Programada",
+      "manual": "Manual",
+      "initial": "Primera sincronización"
+    },
+    "status": {
+      "queued": "En cola",
+      "running": "En curso",
+      "succeeded": "Exitosa",
+      "failed": "Fallida"
+    },
+    "versions": {
+      "title": "Versiones del formulario",
+      "empty": "Aún no hay versiones del formulario. Aparecen a medida que llegan envíos. Las respuestas a preguntas de selección usan las etiquetas de la versión del formulario con la que se hizo su envío.",
+      "current": "Actual",
+      "notDeployed": "—",
+      "withoutVersion": "{{ count }} envíos no tienen versión del formulario. Sus respuestas usan las etiquetas del formulario actual.",
+      "withoutVersionOne": "1 envío no tiene versión del formulario. Sus respuestas usan las etiquetas del formulario actual.",
+      "nextAttempt": "Próximo intento:",
+      "copied": "Versión del formulario copiada.",
+      "copy": "Copiar el ID completo de la versión",
+      "retryHint": "Las respuestas hechas con una versión que Tamiza no pudo leer usan las etiquetas del formulario actual. Al revisar el formulario de nuevo se reintentan las versiones fallidas y las no encontradas.",
+      "columns": {
+        "version": "Versión",
+        "deployed": "Desplegada",
+        "submissions": "Envíos",
+        "labels": "Etiquetas"
+      },
+      "status": {
+        "available": "Etiquetas disponibles",
+        "pending": "Pendiente",
+        "failed": "Fallida",
+        "not_found": "No encontrada"
+      },
+      "retryHintViewer": "Las respuestas hechas con una versión que Tamiza no pudo leer usan las etiquetas del formulario actual. Pide a quien tenga el rol de Analista o Administrador que revise el formulario de nuevo; así se reintentan las versiones fallidas y las no encontradas."
+    },
+    "scheduleLine": "Sincroniza cada {{ sync }} horas · verifica eliminaciones cada {{ reconcile }} horas",
+    "runsAfterSync": "Los scripts se ejecutan después de cada sincronización con cambios",
+    "runsNotAfterSync": "Los scripts no se ejecutan después de una sincronización",
+    "runsEvery": "también se ejecutan cada {{ hours }} horas",
+    "runsEveryOne": "también se ejecutan cada {{ hours }} hora",
+    "editSchedules": "Editar programaciones",
+    "endedAt": "Finalizada el {{ time }}"
+  },
+  "scripts": {
+    "title": "Scripts",
+    "kinds": {
+      "clean": "1. Limpieza",
+      "output": "2. Salida",
+      "indicator": "Indicador"
+    },
+    "notSet": "sin definir",
+    "removedBadge": "eliminado",
+    "versionShort": "v{{ number }}",
+    "versionNumber": "Versión {{ number }}",
+    "editorLabel": "Código Python del script {{ kind }}",
+    "save": "Guardar",
+    "template": "Plantillas",
+    "templateReplaceTitle": "¿Reemplazar el código?",
+    "templateReplaceMessage": "El editor tiene cambios sin guardar y la plantilla los reemplaza. Ctrl+Z los recupera.",
+    "templateReplace": "Reemplazar",
+    "templates": {
+      "clean": {
+        "drop-test-submissions": {
+          "name": "Descartar envíos de prueba",
+          "description": "Elimina los envíos cuyo identificador empieza con un prefijo, y los duplicados."
+        },
+        "fix-types-and-recode": {
+          "name": "Corregir tipos y recodificar",
+          "description": "Convierte una columna de fechas y cambia el texto vacío por valores faltantes."
+        }
+      },
+      "output": {
+        "columns-for-the-dashboard": {
+          "name": "Columnas para el tablero",
+          "description": "Elige, ordena y renombra las columnas de la tabla principal."
+        },
+        "join-repeat-to-main": {
+          "name": "Unir un grupo de repetición a main",
+          "description": "Agrega a cada envío el número de filas que tiene en un grupo de repetición."
+        }
+      },
+      "indicator": {
+        "count-by-group": {
+          "name": "Conteo por grupo",
+          "description": "Cuántos envíos hay en cada grupo."
+        },
+        "rate-by-group": {
+          "name": "Tasa por grupo",
+          "description": "La proporción que cumple una condición en cada grupo, con numerador y denominador."
+        },
+        "monthly-series": {
+          "name": "Serie mensual",
+          "description": "Envíos por mes, para un gráfico de líneas."
+        }
+      }
+    },
+    "upload": "Subir .py",
+    "remove": "Eliminar script",
+    "unsaved": "Cambios sin guardar",
+    "saved": "Versión {{ number }} guardada. Se usa desde la próxima ejecución.",
+    "removed": "Script eliminado (versión {{ number }}). La próxima ejecución usa el comportamiento predeterminado.",
+    "restored": "Restaurado como versión {{ number }}.",
+    "tooLarge": "El script pesa más de 200 KB.",
+    "versionsTitle": "Versiones",
+    "noVersions": "Aún no hay versiones guardadas.",
+    "viewingVersion": "Estás viendo la versión {{ number }} de {{ author }}. Es de solo lectura.",
+    "backToCurrent": "Volver a la versión actual",
+    "restore": "Restaurar versión {{ number }}",
+    "removeTitle": "¿Eliminar este script?",
+    "removeMessage": {
+      "clean": "Desde la próxima ejecución, las tablas aplanadas se publican como datos limpios. Las versiones anteriores quedan en el historial.",
+      "output": "Desde la próxima ejecución, no se publican tablas de salida. Las versiones anteriores quedan en el historial.",
+      "indicator": "Desde la próxima ejecución, la tabla de este indicador deja de publicarse. Las versiones anteriores quedan en el historial."
+    },
+    "discardTitle": "¿Descartar los cambios sin guardar?",
+    "discardMessage": "Los cambios de este script no se han guardado.",
+    "discard": "Descartar",
+    "indicators": "Indicadores",
+    "addIndicator": "Agregar indicador",
+    "indicatorLimit": "El proyecto tiene el máximo de indicadores permitido ({{ max }}). Elimina uno para agregar otro.",
+    "noIndicators": "Este proyecto aún no tiene indicadores.",
+    "noIndicatorsEditor": "Este proyecto aún no tiene indicadores. Agrega uno para publicar una tabla en el tablero de indicadores.",
+    "newBadge": "nuevo",
+    "editorLabelIndicator": "Código Python del indicador {{ name }}",
+    "addTitle": "Agregar un indicador",
+    "addIntro": "Un indicador es un script que devuelve una tabla para el tablero. Su nombre no se puede cambiar después.",
+    "addConfirm": "Agregar indicador",
+    "labelRequired": "Escribe una etiqueta.",
+    "removedIndicator": "Indicador eliminado (versión {{ number }}). Su tabla deja de publicarse desde la próxima ejecución.",
+    "fields": {
+      "name": "Nombre",
+      "nameHint": "Letras minúsculas, dígitos y guiones bajos, empezando con una letra, hasta 63 caracteres. Por ejemplo piped_water_rate.",
+      "label": "Etiqueta",
+      "description": "Descripción (opcional)",
+      "unit": "Unidad (opcional)",
+      "unitHint": "Se muestra después del valor, como hogares. Para el formato de moneda, el código de la moneda, como COP.",
+      "format": "Formato"
+    },
+    "nameErrors": {
+      "required": "Escribe un nombre.",
+      "invalid": "Usa solo letras minúsculas, dígitos y guiones bajos, empezando con una letra, hasta 63 caracteres.",
+      "taken": "Este proyecto ya tiene un indicador con este nombre."
+    },
+    "formats": {
+      "count": "Conteo",
+      "decimal": "Decimal",
+      "percent": "Porcentaje",
+      "currency": "Moneda"
+    },
+    "formatHints": {
+      "count": "Un número entero con separadores de miles.",
+      "decimal": "Un número con dos decimales.",
+      "percent": "Una fracción mostrada como porcentaje: 0.42 se muestra como 42%.",
+      "currency": "Un número con dos decimales, en la moneda indicada como unidad."
+    },
+    "checks": {
+      "scriptNames": {
+        "clean": "Script 1",
+        "output": "Script 2",
+        "indicator": "Un script de indicador"
+      },
+      "syntax": "Error de sintaxis: Python no puede leer el código aquí.",
+      "noContract": "{{ script }} debe definir {{ signature }}.",
+      "parameters": "La función recibe dos parámetros: {{ signature }}.",
+      "unknownMember": "{{ object }} no tiene el miembro '{{ member }}'. Sus miembros: {{ members }}.",
+      "unknownReference": "El proyecto no tiene una tabla de referencia {{ name }}. Disponibles: {{ available }}.",
+      "noReference": "El proyecto no tiene tablas de referencia, así que no existe {{ name }}. Sube una en Datos de referencia.",
+      "unknownTable": "No existe la tabla de entrada {{ name }}. Disponibles: {{ available }}.",
+      "mixedIndentation": "Esta línea tiene sangría con tabuladores y espacios. Usa cuatro espacios.",
+      "unavailableImport": "{{ module }} no está disponible para los scripts. Las bibliotecas son: {{ available }}, y la biblioteca estándar de Python.",
+      "neverImport": "Los scripts reciben sus datos de Tamiza y no necesitan archivos, procesos ni red, así que {{ module }} no hace falta."
+    },
+    "completion": {
+      "tableRows": "{{ count }} filas",
+      "tableRowsOne": "{{ count }} fila",
+      "referenceTable": "tabla de referencia"
+    },
+    "editor": {
+      "keys": "Tab aplica sangría. Presiona Esc y luego Tab para salir del editor.",
+      "runCell": "Ejecutar celda",
+      "runCellNamed": "Ejecutar celda {{ name }}",
+      "problemsTitle": "Verificaciones",
+      "problemLine": "Línea {{ line }}",
+      "problemsHint": "Solo son sugerencias: guardar y probar nunca se bloquean.",
+      "keysRun": "Ctrl+Enter (Cmd+Enter en macOS) ejecuta la celda donde está el cursor."
+    },
+    "reference": {
+      "title": "Referencia",
+      "contractTitle": "El contrato de este script",
+      "returns": {
+        "clean": "Devuelve un diccionario de nombres de tabla a DataFrames. Los nombres de tabla usan letras minúsculas, dígitos y guiones bajos. Sin el script 1, las tablas aplanadas son los datos limpios.",
+        "output": "Devuelve un diccionario de nombres de tabla a DataFrames: las tablas que muestra el tablero de datos limpios. Sin el script 2, muestra las tablas limpias.",
+        "indicator": "Devuelve un DataFrame: las columnas por las que desglosar la cifra (dimensiones) y al menos una columna numérica. Por convención, value es lo que un widget grafica por defecto, y numerator y denominator permiten graficar una tasa como una razón de sumas."
+      },
+      "parameters": {
+        "clean": "raw: un diccionario con las tablas aplanadas, \"main\" y una por cada grupo de repetición. Las respuestas de selección son etiquetas de opción.",
+        "output": "cleaned: un diccionario con las tablas que devolvió el script 1 (o las tablas aplanadas).",
+        "indicator": "cleaned: un diccionario con las tablas que devolvió el script 1 (o las tablas aplanadas)."
+      },
+      "cellsTitle": "Celdas y ctx.show",
+      "cellsText": "Una línea que empieza con # %% inicia una celda. Ejecutar celda prueba el script desde el inicio y se detiene al final de esa celda, sin validar la salida. ctx.show(data, name) agrega una vista previa de un DataFrame, una Series o un valor al resultado de una prueba; en una ejecución no hace nada.",
+      "cellsExample": "def compute(cleaned, ctx):\n    # %% Load\n    main = cleaned[\"main\"]\n    ctx.show(main, \"main\")\n    # %% Count\n    return main.groupby(\"municipality\").size().rename(\"value\").reset_index()",
+      "ctxTitle": "ctx",
+      "example": "Ejemplo",
+      "tablesNote": "Las tablas de la pestaña Tablas son las que publicó la última ejecución. Un script guardado las cambia solo desde la próxima ejecución."
+    },
+    "ctx": {
+      "members": {
+        "root": {
+          "project_name": {
+            "description": "El nombre del proyecto.",
+            "example": "ctx.log.info(ctx.project_name)"
+          },
+          "form": {
+            "description": "El diccionario del formulario: preguntas, opciones y etiquetas del formulario actual.",
+            "example": "ctx.form.questions"
+          },
+          "log": {
+            "description": "Un logger de Python. Sus mensajes aparecen en el registro del paso.",
+            "example": "ctx.log.info(\"%d rows\", len(main))"
+          },
+          "reference": {
+            "description": "Las tablas de referencia del proyecto por nombre, como DataFrames.",
+            "example": "ctx.reference[\"population\"]"
+          },
+          "show": {
+            "description": "Muestra un DataFrame, una Series o cualquier valor en el resultado de una prueba con muestra, tal como está en esta llamada, y lo devuelve sin cambios. En una ejecución no hace nada.",
+            "example": "main = ctx.show(main, \"main\")"
+          }
+        },
+        "form": {
+          "questions": {
+            "description": "DataFrame de las preguntas del formulario: name, path, type, label y list_name.",
+            "example": "ctx.form.questions[[\"name\", \"label\"]]"
+          },
+          "choices": {
+            "description": "DataFrame de las listas de opciones del formulario actual: list_name, name y label.",
+            "example": "ctx.form.choices.query(\"list_name == 'municipalities'\")"
+          },
+          "columns": {
+            "description": "DataFrame de las columnas aplanadas que contienen respuestas: table, column, path y label.",
+            "example": "ctx.form.columns.query(\"table == 'main'\")"
+          },
+          "label": {
+            "description": "La etiqueta del código de una opción en el formulario actual, por nombre o ruta de la pregunta, o None.",
+            "example": "ctx.form.label(\"municipality\", \"cali\")"
+          },
+          "name": {
+            "description": "El código que representa una etiqueta, por nombre o ruta de la pregunta. También busca en versiones anteriores del formulario. None si es desconocido o ambiguo.",
+            "example": "ctx.form.name(\"municipality\", \"Cali\")"
+          },
+          "column_label": {
+            "description": "La etiqueta de la pregunta de una columna de las tablas aplanadas, o None.",
+            "example": "ctx.form.column_label(\"main\", \"age\")"
+          }
+        },
+        "log": {
+          "debug": {
+            "description": "Escribe un mensaje de depuración en el registro del paso.",
+            "example": "ctx.log.debug(\"columns: %s\", list(main.columns))"
+          },
+          "info": {
+            "description": "Escribe un mensaje informativo en el registro del paso.",
+            "example": "ctx.log.info(\"Removed %d rows\", removed)"
+          },
+          "warning": {
+            "description": "Escribe una advertencia en el registro del paso.",
+            "example": "ctx.log.warning(\"%d rows have no age\", missing)"
+          },
+          "error": {
+            "description": "Escribe un mensaje de error en el registro del paso. El paso continúa.",
+            "example": "ctx.log.error(\"Unexpected value: %s\", value)"
+          },
+          "exception": {
+            "description": "Escribe un mensaje de error con el traceback actual; úsalo dentro de un bloque except.",
+            "example": "ctx.log.exception(\"Could not convert the date\")"
+          },
+          "critical": {
+            "description": "Escribe un mensaje crítico en el registro del paso.",
+            "example": "ctx.log.critical(\"No rows left\")"
+          }
+        },
+        "reference": {
+          "get": {
+            "description": "Una tabla de referencia por nombre, o el valor predeterminado si el proyecto no tiene ninguna con ese nombre.",
+            "example": "ctx.reference.get(\"population\")"
+          },
+          "items": {
+            "description": "Los nombres de las tablas de referencia con sus DataFrames.",
+            "example": "for name, table in ctx.reference.items(): ..."
+          },
+          "keys": {
+            "description": "Los nombres de las tablas de referencia del proyecto.",
+            "example": "list(ctx.reference.keys())"
+          },
+          "values": {
+            "description": "Las tablas de referencia como DataFrames.",
+            "example": "[len(t) for t in ctx.reference.values()]"
+          }
+        }
+      }
+    },
+    "sidePanel": "Tablas y referencia",
+    "sideTabs": {
+      "inputs": "Tablas",
+      "reference": "Referencia",
+      "versions": "Versiones",
+      "assistant": "Asistente"
+    },
+    "inputs": {
+      "nothingPublished": "Las tablas aparecen después de la primera ejecución. Puedes escribir el script sin ellas.",
+      "refresh": "Actualizar",
+      "filterLabel": "Filtrar tablas, columnas y preguntas",
+      "filterPlaceholder": "Filtrar por nombre o etiqueta",
+      "insertHint": "Haz clic en un nombre para insertarlo en el cursor.",
+      "copyHint": "Haz clic en un nombre para copiarlo.",
+      "tables": "Tablas",
+      "referenceTables": "Tablas de referencia",
+      "questions": "Preguntas",
+      "rows": "{{ count }} filas",
+      "rowsOne": "{{ count }} fila",
+      "noMatch": "Nada coincide con el filtro.",
+      "loadError": "No se pudieron cargar las tablas.",
+      "copied": "Se copió {{ name }}.",
+      "title": "Tablas",
+      "rawPublished": "Tablas aplanadas · publicadas {{ when }}",
+      "cleanPublished": "Tablas limpias · publicadas {{ when }}",
+      "manage": "Administrar"
+    },
+    "editDetails": "Editar detalles",
+    "moreActions": "Más acciones",
+    "indicatorsMenu": "Indicadores ({{ count }})",
+    "indicatorFilter": "Filtrar indicadores",
+    "assistant": {
+      "model": "Modelo {{ model }} en {{ host }}.",
+      "disclosure": "Se envía al modelo: las tablas y columnas con sus etiquetas, las listas de opciones, el script 1 guardado, el texto del editor y los errores de tu última prueba. No se envía ninguna fila de datos.",
+      "showContext": "Mostrar lo que se enviará",
+      "copyContext": "Copiar contexto",
+      "contextCopied": "Contexto copiado.",
+      "contextTitle": "Lo que se enviará",
+      "contextIntro": "Este es el texto exacto que enviará la próxima solicitud. No contiene filas de datos.",
+      "contextSize": "{{ size }} KB",
+      "contextOmitted": "Omitido para ajustarse al límite de tamaño:",
+      "close": "Cerrar",
+      "roles": {
+        "user": "Tú",
+        "assistant": "Asistente"
+      },
+      "scopeLabel": "¿Qué necesitas?",
+      "scopes": {
+        "script": "Script",
+        "cell": "Esta celda: {{ name }}",
+        "fix": "Corregir la última prueba"
+      },
+      "cellUnnamed": "Celda {{ number }}",
+      "needsCell": "Para reescribir una celda, pon el cursor dentro de una celda. Una celda empieza en una línea con # %%.",
+      "testAgain": "La prueba ya no coincide con el texto del editor. Prueba de nuevo antes de pedir una corrección.",
+      "fixNote": "La última prueba de este script se envía con la solicitud: sus pasos, tablas y columnas, y sus errores con los valores ocultos. Nunca filas.",
+      "requestLabel": "Tu solicitud",
+      "placeholders": {
+        "script": "Describe el script, por ejemplo: proporción de hogares con agua por tubería por municipio",
+        "cell": "Indica qué cambiar en esta celda",
+        "fix": "Indica qué corregir"
+      },
+      "tooLong": "Una solicitud puede tener como máximo {{ max }} KB. Esta tiene {{ size }} KB.",
+      "counter": "{{ size }} de {{ max }} KB",
+      "send": "Enviar",
+      "draftFromDetails": "Crear borrador desde los detalles",
+      "detailsRequest": {
+        "intro": "Escribe el script para el indicador \"{{ label }}\".",
+        "description": "Descripción: {{ description }}",
+        "unit": "Unidad: {{ unit }}",
+        "format": "Formato: {{ format }}"
+      },
+      "newConversation": "Nueva conversación",
+      "writing": "Escribiendo…",
+      "seconds": "{{ count }} s",
+      "pendingElsewhere": "Hay una solicitud en curso para {{ script }}. Abre ese script para cancelarla o espera la respuesta.",
+      "scriptLabels": {
+        "clean": "el script 1",
+        "output": "el script 2",
+        "indicator": "el indicador {{ name }}"
+      },
+      "replaceEditedTitle": "¿Aplicar el código propuesto?",
+      "replaceEditedMessage": "El texto del editor cambió después de enviar la solicitud. El código propuesto se escribió para el texto anterior y, al aplicarlo, puede sobrescribir tus cambios. Puedes deshacerlo con Ctrl+Z.",
+      "replaceEditedConfirm": "Aplicar",
+      "fixStep": "La última prueba falló en {{ step }}. Corrige el error.",
+      "fixWarning": {
+        "noRows": "La vista del tablero advierte que la tabla no tiene filas. Corrige el script para que devuelva filas.",
+        "noValue": "La vista del tablero advierte que la tabla no tiene una columna de valor. Corrige el script para que devuelva una.",
+        "ratioIncomplete": "La vista del tablero advierte que el numerador y el denominador deben ir juntos. Corrige el script para que devuelva ambos o ninguno.",
+        "emptyValues": "La vista del tablero advierte que algunas filas no tienen valor en la medida predeterminada. Corrige el script para que todas las filas lo tengan.",
+        "percentAboveOne": "La vista del tablero advierte que el formato es porcentaje, pero hay valores de la medida predeterminada mayores que 1. Corrige el script para que los valores sean fracciones.",
+        "dimensionAsMeasure": "La vista del tablero advierte que una columna es numérica, por lo que se ofrece como medida y no como dimensión. Corrige el script para que devuelva esa columna como texto.",
+        "duplicateRows": "La vista del tablero advierte que varias filas comparten los mismos valores en todas las dimensiones. Corrige el script para que cada combinación aparezca una sola vez."
+      },
+      "viewingOlder": "El asistente trabaja sobre el texto actual del script, no sobre una versión anterior. Vuelve a la versión actual para hacer una solicitud.",
+      "testExpired": "La prueba ya no estaba disponible, así que esta respuesta se dio sin ella.",
+      "dismiss": "Cerrar aviso",
+      "proposal": "Código propuesto",
+      "blockNumber": "Bloque {{ number }}",
+      "oneLine": "1 línea",
+      "lines": "{{ lines }} líneas",
+      "definesContract": "Define {{ signature }}.",
+      "noContract": "No define {{ signature }}.",
+      "marksTitle": "Verificaciones del resultado",
+      "offers": {
+        "script": "Reemplazar script",
+        "cell": "Reemplazar celda",
+        "insert": "Insertar en el cursor"
+      },
+      "notes": {
+        "notOneScript": "Esta respuesta no es un solo script, así que cada bloque solo se puede insertar en el cursor.",
+        "notOneCell": "Esta respuesta no es una sola celda, así que solo se puede insertar en el cursor.",
+        "cutOff": "La respuesta se cortó, así que el código solo se puede insertar en el cursor. Pide un cambio más pequeño.",
+        "cellChanged": "La celda cambió desde la solicitud, así que el código solo se puede insertar en el cursor."
+      }
+    }
+  },
+  "runs": {
+    "title": "Ejecuciones",
+    "runNow": "Ejecutar ahora",
+    "started": "Ejecución en cola. Empieza en unos segundos.",
+    "empty": "Aún no hay ejecuciones. Una ejecución empieza tras una sincronización con datos nuevos, según el horario o con Ejecutar ahora.",
+    "details": "Detalles",
+    "detailsTitle": "Detalles de la ejecución",
+    "close": "Cerrar",
+    "rows": "{{ input }} filas de entrada, {{ output }} de salida",
+    "tables": "Tablas:",
+    "columns": {
+      "started": "Inicio",
+      "status": "Estado",
+      "steps": "Pasos",
+      "duration": "Duración"
+    },
+    "triggers": {
+      "manual": "Manual",
+      "sync": "Tras sincronización",
+      "schedule": "Programada"
+    },
+    "status": {
+      "queued": "En cola",
+      "running": "En ejecución",
+      "succeeded": "Exitosa",
+      "failed": "Fallida"
+    },
+    "steps": {
+      "flatten": "Aplanado",
+      "clean": "Limpieza",
+      "output": "Salida",
+      "indicator": "Indicador"
+    },
+    "stepStatus": {
+      "succeeded": "Exitoso",
+      "failed": "Fallido",
+      "skipped": "Omitido",
+      "stopped": "Detenido en una celda"
+    },
+    "referenceTitle": "Datos de referencia usados",
+    "referenceTable": "({{ rows }} filas, actualizada {{ updated }})",
+    "referenceTableOne": "({{ rows }} fila, actualizada {{ updated }})",
+    "noReference": "Esta ejecución no usó tablas de referencia.",
+    "indicatorsSummary": "Indicadores {{ done }}/{{ total }}",
+    "indicatorCount": "{{ count }} indicadores",
+    "indicatorCountOne": "1 indicador",
+    "allSucceeded": "Todo correcto",
+    "scriptNames": {
+      "clean": "Script 1",
+      "output": "Script 2"
+    },
+    "noneYet": "Aún no hay ejecuciones.",
+    "stepFailed": "Error en {{ step }}"
+  },
+  "pipeline": {
+    "settingsTitle": "Cuándo se ejecutan los scripts",
+    "runAfterSync": "Ejecutar después de cada sincronización que traiga envíos nuevos, modificados o eliminados",
+    "interval": "Ejecutar también cada (horas)",
+    "intervalHint": "De 1 a 168 horas. Déjalo vacío para no programar.",
+    "noSchedule": "Sin programación",
+    "yes": "Sí",
+    "no": "No",
+    "nextRun": "Próxima ejecución programada: {{ time }}",
+    "settingsSaved": "Configuración de ejecución guardada."
+  },
+  "webhook": {
+    "title": "Configuración del webhook",
+    "intro": "Ingresa estos valores en los REST Services del formulario en Kobo, que enviará cada envío nuevo en cuanto llegue.",
+    "secretUnreadable": "El secreto del webhook ya no se puede leer. Regéneralo y actualiza Kobo.",
+    "url": "URL del endpoint",
+    "username": "Usuario",
+    "secret": "Secreto",
+    "hide": "Ocultar",
+    "show": "Mostrar",
+    "copy": "Copiar",
+    "regenerate": "Regenerar secreto",
+    "stepsTitle": "Configúralo en Kobo",
+    "steps": {
+      "open": "Abre el formulario en KoboToolbox.",
+      "restServices": "Ve a Settings → REST Services.",
+      "register": "Elige Register a new service y ponle un nombre.",
+      "url": "Pega la URL del endpoint.",
+      "type": "Deja JSON como tipo. Deja vacíos el subconjunto de campos y el contenedor personalizado.",
+      "auth": "En Security elige Basic Authorization y pega el usuario y el secreto (Kobo lo llama contraseña).",
+      "save": "Guarda el servicio."
+    },
+    "copied": "Copiado al portapapeles.",
+    "copyFailed": "No se pudo copiar. Selecciona el texto y cópialo manualmente.",
+    "regenerateTitle": "¿Regenerar el secreto del webhook?",
+    "regenerateMessage": "Kobo dejará de poder enviar envíos hasta que actualices el secreto en su REST Service.",
+    "regenerated": "Se generó un secreto nuevo. Actualízalo en Kobo.",
+    "lastDelivery": "Última entrega recibida: {{ time }}",
+    "noDelivery": "Aún no se recibe ninguna entrega. Cuando guardes el REST Service en Kobo, los envíos nuevos aparecerán en segundos.",
+    "adminsOnly": "Solo quienes tienen el rol Administrador en el proyecto pueden ver la configuración del webhook.",
+    "hidden": "Oculto",
+    "seeSubmissions": "Ver Envíos",
+    "loadFailed": "No se pudo cargar la configuración del webhook. Recarga la página para intentar de nuevo."
+  },
+  "members": {
+    "inviteTitle": "Agregar un miembro",
+    "email": "Correo",
+    "role": "Rol",
+    "invite": "Agregar",
+    "title": "Miembros",
+    "actionsFor": "Acciones para {{ name }}",
+    "name": "Nombre",
+    "actions": "Acciones",
+    "pendingTitle": "Invitaciones pendientes",
+    "pendingRole": "Invitación como {{ role }}",
+    "revoke": "Revocar",
+    "makeRole": {
+      "admin": "Cambiar a Administrador",
+      "analyst": "Cambiar a Analista",
+      "viewer": "Cambiar a Lector"
+    },
+    "remove": "Eliminar del proyecto",
+    "added": "{{ email }} ahora es miembro.",
+    "invited": "Invitación guardada. {{ email }} pasa a ser miembro en su primer inicio de sesión con ese correo verificado.",
+    "removeTitle": "¿Eliminar a {{ name }}?",
+    "removeMessage": "Perderá el acceso a este proyecto de inmediato.",
+    "revokeTitle": "¿Revocar la invitación para {{ email }}?",
+    "revokeMessage": "Iniciar sesión con este correo ya no agregará esa cuenta al proyecto.",
+    "add": "Agregar miembro",
+    "emailHint": "El correo con el que inicia sesión. Tamiza no envía correos: avísale por otro medio.",
+    "you": "Tú",
+    "removeSelfTitle": "¿Eliminarte del proyecto?",
+    "removeSelfMessage": "Perderás el acceso a este proyecto de inmediato."
+  },
+  "frame": {
+    "target": "Meta",
+    "emptyViewer": "Aún no se ha definido un marco muestral para este proyecto.",
+    "importTitle": "Importar desde un archivo",
+    "importIntro": "Sube un archivo CSV o XLSX con una columna por dimensión y una columna de meta. Revisas las filas y eliges la pregunta de cada columna antes de guardar nada.",
+    "previewErrors": "Corrige estas filas en el archivo e impórtalo de nuevo:",
+    "rowError": "Fila {{ row }}: {{ message }}",
+    "mapField": "Campo del formulario para “{{ name }}”",
+    "chooseField": "Elige un campo del formulario",
+    "applyImport": "Cargar en el editor",
+    "dimensionsIntro": "Cada dimensión corresponde a una pregunta del formulario, por ejemplo municipio o sexo. Sus valores son los códigos de las opciones que guarda el formulario (como 05001), no sus etiquetas.",
+    "dimensionName": "Nombre",
+    "dimensionField": "Campo del formulario",
+    "remove": "Eliminar",
+    "addDimension": "Agregar dimensión",
+    "targetsTitle": "Metas",
+    "unnamed": "(sin nombre)",
+    "actions": "Acciones",
+    "cellLabel": "{{ name }}, fila {{ row }}",
+    "targetLabel": "Meta, fila {{ row }}",
+    "removeRow": "Eliminar fila {{ row }}",
+    "addRow": "Agregar fila",
+    "previous": "Anterior",
+    "next": "Siguiente",
+    "pageInfo": "Filas {{ from }}–{{ to }} de {{ total }}",
+    "addDimensionFirst": "Agrega una dimensión para empezar a escribir metas.",
+    "save": "Guardar marco muestral",
+    "saved": "Marco muestral guardado.",
+    "importApplied": "Las filas importadas están en el editor. Revísalas y guarda.",
+    "chooseFile": "Elegir un archivo",
+    "noFile": "Ningún archivo elegido",
+    "title": "Marco muestral",
+    "edit": "Editar",
+    "import": "Importar desde archivo",
+    "editorTitle": "Dimensiones y metas",
+    "summary": "{{ dimensions }} · {{ combinations }} · guardado {{ date }}",
+    "dimensionsOne": "{{ count }} dimensión",
+    "dimensionsMany": "{{ count }} dimensiones",
+    "combinationsOne": "{{ count }} combinación",
+    "combinationsMany": "{{ count }} combinaciones",
+    "removeDimension": "Eliminar dimensión {{ n }}",
+    "noRows": "Aún no hay filas. Agrega una fila para la primera combinación y su meta.",
+    "moreErrors": "y {{ count }} más.",
+    "discardTitle": "¿Descartar tus cambios?",
+    "discardMessage": "Los cambios en el marco muestral no se han guardado.",
+    "discard": "Descartar",
+    "issue": {
+      "repeat": "— en un grupo repetido",
+      "multiple": "— selección múltiple"
+    },
+    "warning": {
+      "repeat": "La cobertura no puede contar esta pregunta: se responde una vez por cada repetición.",
+      "multiple": "La cobertura no puede contar esta pregunta: una respuesta puede tener varias opciones."
+    },
+    "guide": {
+      "heading": "Cómo organizar un archivo",
+      "intro": "Una columna por dimensión y una columna de meta, con una fila por cada combinación de valores. Por ejemplo:",
+      "example": "Ejemplo de un archivo de marco muestral",
+      "columns": "Pon a cada columna de dimensión el nombre que quieras y llénala con los códigos de las opciones que guarda el formulario (como 05001), no con sus etiquetas.",
+      "target": "La columna llamada target contiene las encuestas previstas para cada fila: un número entero de 0 a {{ max }}.",
+      "rows": "Escribe cada combinación de valores en su propia fila, y solo una vez.",
+      "emptyTarget": "Una fila cuya meta está vacía se deja fuera, así que las filas que no planeas pueden quedarse en el archivo. Una meta de 0 conserva la fila.",
+      "notes": "Las columnas cuyo nombre empieza con # son notas, como las etiquetas junto a los códigos. No se leen.",
+      "text": "Deja códigos como 05001 en formato de texto, o la hoja de cálculo elimina el cero inicial.",
+      "formats": "Guarda el archivo como XLSX (solo se lee la primera hoja) o como CSV en UTF-8, separado por comas o punto y coma.",
+      "limits": "Máximo {{ questions }} dimensiones, {{ rows }} filas y {{ size }} MB.",
+      "templateLink": "Obtén una plantilla con los códigos de tu formulario"
+    },
+    "preview": {
+      "summaryOne": "{{ count }} fila encontrada, con {{ dimensions }}.",
+      "summaryMany": "{{ count }} filas encontradas, con {{ dimensions }}.",
+      "rowsWithoutTargetOne": "{{ count }} fila sin meta se deja fuera.",
+      "rowsWithoutTargetMany": "{{ count }} filas sin meta se dejan fuera.",
+      "ignoredOne": "{{ count }} columna no se lee.",
+      "ignoredMany": "{{ count }} columnas no se leen.",
+      "rowRange": "Fila que se deja fuera: {{ ranges }}",
+      "rowRanges": "Filas que se dejan fuera: {{ ranges }}",
+      "moreRowsOne": "y {{ count }} fila más",
+      "moreRowsMany": "y {{ count }} filas más",
+      "ignoredNote": "{{ column }} · {{ name }}",
+      "ignoredUnnamed": "{{ column }} · valores bajo una columna sin nombre",
+      "reading": "Leyendo el archivo…",
+      "mappingConflict": "Marco guardado: {{ saved }} · Pregunta del formulario: {{ form }}"
+    },
+    "picker": {
+      "title": "Elegir preguntas",
+      "intro": "Elige las preguntas que definen los grupos de tu muestra. Cada combinación de sus valores se convierte en una fila.",
+      "search": "Buscar preguntas",
+      "selectedCount": "{{ count }} de {{ max }}",
+      "group": {
+        "choices": "Preguntas con opciones",
+        "typed": "Preguntas cuyos valores escribes tú",
+        "disabled": "La cobertura no puede contar estas"
+      },
+      "choicesOne": "{{ count }} opción",
+      "choicesMany": "{{ count }} opciones",
+      "editChoices": "Opciones: {{ chosen }} de {{ total }}",
+      "values": "Valores, uno por línea",
+      "valueTooLong": "Un valor tiene más de {{ max }} caracteres.",
+      "noChoice": "Elige al menos una opción.",
+      "targetName": "Su nombre está reservado para la columna de meta. Asígnala en el editor con otro nombre.",
+      "back": "Preguntas",
+      "choicesTitle": "Opciones de {{ question }}",
+      "searchChoices": "Buscar opciones",
+      "selectAll": "Seleccionar todo",
+      "clearAll": "Deseleccionar todo",
+      "selectShown": "Seleccionar las {{ count }} mostradas",
+      "clearShown": "Deseleccionar las {{ count }} mostradas",
+      "chosen": "{{ chosen }} de {{ total }} elegidas",
+      "tip": "Elige solo las opciones que muestreas, como los municipios que visitas. Cuando una pregunta acota a otra (un departamento y sus municipios), elige solo la más detallada.",
+      "noneChosen": "Elige al menos una pregunta.",
+      "countOne": "{{ count }} fila",
+      "countMany": "{{ count }} filas",
+      "formula": "{{ formula }} = {{ rows }}",
+      "tooMany": "Estas opciones generan {{ count }} filas; un marco muestral admite como máximo {{ max }}. Elige menos opciones o preguntas.",
+      "repeatedHeader": "Dos preguntas se llamarían '{{ name }}' en el archivo. Elige solo una de ellas.",
+      "loadFailed": "No se pudieron cargar las preguntas del formulario.",
+      "retry": "Intentar de nuevo",
+      "createRows": "Crear las filas aquí"
+    },
+    "template": {
+      "download": "Descargar plantilla de Excel",
+      "downloading": "Preparando la plantilla…",
+      "downloadedOne": "Plantilla descargada con {{ count }} fila. Llena la columna de meta y luego impórtala aquí.",
+      "downloadedMany": "Plantilla descargada con {{ count }} filas. Llena la columna de meta y luego impórtala aquí."
+    },
+    "errorCountOne": "{{ count }} problema por corregir antes de guardar.",
+    "errorCountMany": "{{ count }} problemas por corregir antes de guardar.",
+    "errorCountFirstOne": "{{ count }} problema por corregir antes de guardar, en la fila {{ row }}.",
+    "errorCountFirstMany": "{{ count }} problemas por corregir antes de guardar, el primero en la fila {{ row }}.",
+    "loadFailed": "No se pudo cargar el marco muestral.",
+    "retry": "Reintentar",
+    "start": {
+      "heading": "Planea tu muestra",
+      "intro": "El marco muestral enumera los grupos de tu muestra, como municipio y sexo, y las encuestas que necesita cada uno. El tablero de desempeño mide la cobertura frente a él.",
+      "questions": "Elegir preguntas",
+      "import": "Importar un archivo",
+      "type": "Escribirlo aquí"
+    },
+    "download": {
+      "action": "Descargar",
+      "downloading": "Preparando…",
+      "ready": "Marco muestral descargado."
+    },
+    "editor": {
+      "createRows": "Crear filas desde preguntas",
+      "removeEmpty": "Eliminar filas sin meta ({{ count }})",
+      "replaceTitle": "¿Reemplazar las filas?",
+      "replace": "Reemplazar filas",
+      "replaceRows": "Las {{ count }} filas del editor se reemplazarán por las filas generadas a partir de las preguntas.",
+      "replaceRowsOne": "{{ count }} fila del editor se reemplazará por las filas generadas a partir de las preguntas.",
+      "targetsNotKept": "Las preguntas cambiaron, por lo que no se conservarán las metas actuales.",
+      "lostDimensions": "Estas dimensiones no se pueden generar a partir de preguntas y no se conservarán: {{ names }}.",
+      "notChoicesOne": "{{ count }} fila tiene valores que no son opciones de su pregunta y no se conservará.",
+      "notChoicesMany": "{{ count }} filas tienen valores que no son opciones de su pregunta y no se conservarán.",
+      "rowsCreated": "Las filas están en el editor. Llena las metas y guarda."
+    }
+  },
+  "sampleDownloads": {
+    "start": "Descargar muestra",
+    "hint": "Descargar muestra prepara un zip con una muestra de los datos del proyecto, del tamaño indicado arriba, y un paquete pequeño para probar scripts en tu propio equipo, en Jupyter o en cualquier editor de Python.",
+    "title": "Muestra para tu equipo",
+    "starting": "Iniciando…",
+    "running": "Preparando la muestra…",
+    "waitingForRun": "Esperando a que termine una ejecución. La muestra se prepara justo después.",
+    "waitingForTest": "Esperando a que termine una prueba. La muestra se prepara justo después.",
+    "waitingForDownload": "Esperando a que se prepare otra muestra.",
+    "ready": "La muestra contiene {{ submissions }} envíos (pediste {{ requested }}).",
+    "readyOne": "La muestra contiene {{ submissions }} envío (pediste {{ requested }}).",
+    "noScript1": "Sin script 1: las tablas limpias son las aplanadas",
+    "tableRows": "{{ name }} ({{ rows }} filas)",
+    "tableRowsOne": "{{ name }} ({{ rows }} fila)",
+    "script1Failed": "El script 1 (versión {{ version }}) falló con esta muestra: {{ error }}. El zip contiene solo las tablas aplanadas. Corrige el script 1 y vuelve a descargar para obtener sus tablas limpias.",
+    "size": "Tamaño: {{ size }}.",
+    "until": "Disponible hasta {{ time }}.",
+    "download": "Descargar .zip",
+    "notice": "Este archivo contiene los envíos del proyecto. Guárdalo con el mismo cuidado que los datos de la encuesta y elimínalo cuando ya no lo necesites.",
+    "expired": "Esta descarga ya no está disponible. Prepara una nueva.",
+    "again": "Preparar de nuevo",
+    "rawLine": "Aplanadas: {{ tables }}",
+    "cleanLine": "Limpias v{{ version }}: {{ tables }}",
+    "referenceLine": "Referencia: {{ tables }}",
+    "noReferenceLine": "Referencia: ninguna"
+  },
+  "scriptTests": {
+    "sampleSize": "Tamaño de la muestra",
+    "start": "Probar con muestra",
+    "hint": "Las pruebas y las muestras usan el código del editor, guardado o no. No se guarda ni se publica nada.",
+    "sampleSizeRange": "Escribe un número entero de envíos entre {{ min }} y {{ max }}.",
+    "title": "Prueba de {{ kind }} con {{ size }} envíos",
+    "titleOne": "Prueba de {{ kind }} con {{ size }} envío",
+    "stale": "El editor cambió desde esta prueba. Prueba de nuevo para ver el resultado del código actual.",
+    "staleAsk": "Prueba de nuevo antes de pedir una corrección al asistente.",
+    "askAssistant": "Consultar al asistente",
+    "starting": "Iniciando…",
+    "running": "Ejecutando…",
+    "waitingForRun": "Esperando a que termine una ejecución. La prueba empieza justo después.",
+    "waitingForTest": "Esperando a que termine otra prueba.",
+    "waitingForDownload": "Esperando a que se prepare la descarga de una muestra. La prueba empieza justo después.",
+    "savedClean": "Limpieza (versión guardada {{ number }})",
+    "draft": "{{ kind }} (borrador)",
+    "table": "Tabla",
+    "tableOption": "{{ name }} ({{ rows }} filas)",
+    "tableOptionOne": "{{ name }} ({{ rows }} fila)",
+    "previewRows": "Se muestran las primeras {{ shown }} de {{ rows }} filas.",
+    "previewRowsOne": "Se muestra {{ shown }} de {{ rows }} fila.",
+    "previewTrimmed": "Primeras {{ shown }} de {{ rows }} filas: se muestran menos para mantener la vista previa por debajo de 1 MB.",
+    "noPreview": "{{ rows }} filas. Solo se previsualizan las primeras 20 tablas de un paso.",
+    "noPreviewOne": "{{ rows }} fila. Solo se previsualizan las primeras 20 tablas de un paso.",
+    "indicator": "indicador {{ name }}",
+    "shownTitle": "Mostrado por el script",
+    "shownLine": "línea {{ line }}",
+    "shownTable": "{{ name }}, línea {{ line }}: primeras {{ shown }} de {{ rows }} filas.",
+    "shownTableOne": "{{ name }}, línea {{ line }}: {{ shown }} de {{ rows }} fila.",
+    "shownText": "{{ name }}, línea {{ line }}.",
+    "stoppedAt": "Se ejecutó hasta la celda {{ name }} y se detuvo en la línea {{ line }}, donde empieza la siguiente celda. La salida no se validó.",
+    "cellNumber": "{{ number }}",
+    "succeededThroughCell": "El script se ejecutó hasta el final de la celda sin errores. No se validó, guardó ni publicó nada.",
+    "reused": "Reutilizado",
+    "reusedHint": "El resultado vino de una prueba anterior con las mismas entradas.",
+    "view": {
+      "title": "Como lo verá el tablero",
+      "measures": "Medidas",
+      "defaultMeasure": "{{ measure }} se grafica por defecto.",
+      "ratio": "Tasa",
+      "ratioYes": "numerator / denominator se puede graficar como razón de sumas.",
+      "ratioNo": "No se puede calcular una razón: requiere numerator y denominator.",
+      "dimensions": "Dimensiones",
+      "geometry": "Columnas de geometría",
+      "none": "ninguna",
+      "chartBy": "Graficar por",
+      "plot": "Graficar",
+      "plotRatio": "Razón entre numerator y denominator",
+      "tooMany": "{{ dimension }} tiene más de {{ max }} valores, así que aparece en la lista pero no se grafica.",
+      "warnings": {
+        "noRows": "La tabla no tiene filas, así que todos los widgets estarán vacíos.",
+        "noValue": "No hay una columna value. Los widgets grafican {{ measure }} por defecto; da el nombre value a una columna para elegir otra.",
+        "ratioIncomplete": "numerator y denominator van juntas: con solo una de ellas, los widgets no pueden graficar una tasa.",
+        "emptyValues": "{{ count }} filas no tienen valor en {{ measure }}; los widgets las excluyen de las sumas.",
+        "emptyValuesOne": "{{ count }} fila no tiene valor en {{ measure }}; los widgets la excluyen de las sumas.",
+        "percentAboveOne": "El formato es percent y el valor máximo es {{ max }}, que se muestra como {{ shown }}. Un porcentaje es una fracción: 0.42 se muestra como 42%.",
+        "dimensionAsMeasure": "{{ column }} es un número, así que los widgets la ofrecen como medida, no como dimensión para desglosar las cifras. Devuélvela como texto para usarla como dimensión.",
+        "duplicateRows": "{{ count }} filas comparten los mismos valores en todas las dimensiones, así que los widgets las suman."
+      }
+    }
+  },
+  "codeEditor": {
+    "phrases": {
+      "findField": "Buscar",
+      "replaceField": "Reemplazar",
+      "next": "siguiente",
+      "previous": "anterior",
+      "all": "todo",
+      "matchCase": "coincidir mayúsculas",
+      "regexp": "expresión regular",
+      "byWord": "palabra completa",
+      "replaceButton": "reemplazar",
+      "replaceAll": "reemplazar todo",
+      "close": "cerrar",
+      "goToLine": "Ir a la línea",
+      "go": "ir",
+      "currentMatch": "coincidencia actual",
+      "onLine": "en la línea",
+      "replacedMatches": "$ coincidencias reemplazadas",
+      "replacedMatchOnLine": "coincidencia reemplazada en la línea $",
+      "foldedCode": "código plegado",
+      "to": "a",
+      "unfold": "desplegar",
+      "foldedLines": "Líneas plegadas",
+      "unfoldedLines": "Líneas desplegadas",
+      "foldLine": "Plegar línea",
+      "unfoldLine": "Desplegar línea",
+      "diagnostics": "Diagnósticos",
+      "noDiagnostics": "Sin diagnósticos",
+      "completions": "Sugerencias",
+      "controlCharacter": "Carácter de control",
+      "selectionDeleted": "Selección eliminada"
+    }
+  },
+  "preview": {
+    "cut": "(cortado a 500 caracteres)",
+    "types": {
+      "integer": "entero",
+      "decimal": "decimal",
+      "boolean": "booleano",
+      "date": "fecha",
+      "timestamp": "marca de tiempo",
+      "text": "texto"
+    }
+  },
+  "reference": {
+    "title": "Datos de referencia",
+    "add": "Subir tabla",
+    "emptyEditor": "Aún no hay tablas de referencia. Sube un archivo CSV o XLSX; los scripts lo leen con ctx.reference[\"name\"] desde la próxima ejecución.",
+    "emptyViewer": "Este proyecto no tiene tablas de referencia.",
+    "size": "{{ rows }}, {{ columns }}",
+    "rowCount": "{{ count }} filas",
+    "rowCountOne": "{{ count }} fila",
+    "columnCount": "{{ count }} columnas",
+    "columnCountOne": "{{ count }} columna",
+    "updated": "Actualizada por {{ name }}, {{ date }}",
+    "preview": "Vista previa",
+    "replace": "Reemplazar",
+    "delete": "Eliminar",
+    "columns": {
+      "name": "Nombre",
+      "file": "Archivo",
+      "size": "Tamaño",
+      "updated": "Actualizada",
+      "actions": "Acciones"
+    },
+    "uploadTitle": "Subir una tabla de referencia",
+    "uploadIntro": "CSV (UTF-8, coma o punto y coma) o XLSX (primera hoja), hasta 10 MB. La primera fila no vacía es el encabezado; los tipos de columna se detectan a partir de los valores.",
+    "chooseFile": "Elegir archivo",
+    "name": "Nombre de la tabla",
+    "nameHint": "Letras minúsculas, dígitos y guiones bajos, empezando con una letra. Los scripts lo usan en ctx.reference.",
+    "upload": "Subir",
+    "fileRequired": "Elige un archivo CSV o XLSX.",
+    "fileTooLarge": "El archivo supera los 10 MB.",
+    "uploaded": "Tabla de referencia {{ name }} subida. Los scripts pueden leerla desde la próxima ejecución.",
+    "replaced": "Tabla de referencia {{ name }} reemplazada. Los scripts leen las filas nuevas desde la próxima ejecución.",
+    "deleted": "Tabla de referencia {{ name }} eliminada.",
+    "emptyHeader": "(encabezado vacío)",
+    "replaceTitle": "Reemplazar {{ name }}",
+    "deleteTitle": "¿Eliminar {{ name }}?",
+    "deleteMessage": "Los scripts que leen ctx.reference[\"{{ name }}\"] fallan desde la próxima ejecución.",
+    "previewNote": "Primeras {{ shown }} de {{ rows }} filas, de {{ file }}.",
+    "previewNoteOne": "Primera fila ({{ shown }} de {{ rows }}), de {{ file }}.",
+    "actionsFor": "Acciones para {{ name }}",
+    "renamedSummary": "Se cambió el nombre de las columnas de {{ name }} para los scripts ({{ count }}).",
+    "renamedList": "Columnas con nombre cambiado",
+    "dismiss": "Cerrar aviso",
+    "replaceIntro": "Elige el archivo que reemplaza a {{ name }}: sus filas y columnas pasan a ser las del archivo. Las ejecuciones que ya comenzaron conservan las filas actuales."
+  },
+  "cleanData": {
+    "sourceLabel": "Origen",
+    "source": {
+      "output": "Tablas de salida",
+      "clean": "Tablas limpias"
+    },
+    "tableLabel": "Tabla",
+    "tableOption": "{{ name }} ({{ count }} filas)",
+    "tableOptionOne": "{{ name }} ({{ count }} fila)",
+    "published": "Publicado el {{ time }}",
+    "publishedRun": "por la ejecución {{ run }}",
+    "runsLink": "Ver las ejecuciones",
+    "zone": "Horas en {{ zone }}.",
+    "republished": "Las tablas se volvieron a publicar el {{ time }}. Estás viendo las filas nuevas.",
+    "dropped": {
+      "title": "Una parte de esta vista ya no se aplica",
+      "filter": "Se quitó el filtro de {{ name }}.",
+      "sort": "Se quitó el orden por {{ name }}."
+    },
+    "tableGone": "La tabla {{ name }} ya no está publicada. Se muestra {{ next }} en su lugar.",
+    "tableGoneNone": "La tabla {{ name }} ya no está publicada.",
+    "empty": {
+      "title": "Aún no hay tablas publicadas",
+      "body": "Las tablas aparecen aquí cuando una ejecución las publica.",
+      "editor": "Escribe los scripts y ejecútalos para publicar las tablas.",
+      "editorLink": "Abrir los scripts",
+      "viewer": "Alguien con rol de Analista o Administrador tiene que ejecutar primero los scripts del proyecto."
+    },
+    "emptyTable": "Esta tabla no tiene filas.",
+    "noMatch": "Ninguna fila cumple los filtros.",
+    "clearFilters": "Limpiar filtros",
+    "matching": "{{ count }} filas coincidentes",
+    "matchingOne": "{{ count }} fila coincidente",
+    "total": "{{ count }} filas",
+    "totalOne": "{{ count }} fila",
+    "emptyCell": "vacío",
+    "true": "verdadero",
+    "false": "falso",
+    "sort": {
+      "by": "Ordenar por {{ name }}",
+      "none": "sin orden",
+      "ascending": "orden ascendente",
+      "descending": "orden descendente"
+    },
+    "filter": {
+      "open": "Filtrar {{ name }}",
+      "active": "Filtro en {{ name }}, activo",
+      "title": "Filtrar {{ name }}",
+      "operation": "Condición",
+      "ops": {
+        "contains": "contiene",
+        "equals": "es exactamente",
+        "in": "es uno de",
+        "range": "está entre",
+        "empty": "está vacío",
+        "notEmpty": "no está vacío"
+      },
+      "value": "Texto",
+      "min": "Desde",
+      "max": "Hasta",
+      "days": "Días en {{ zone }}; el último día está incluido.",
+      "search": "Buscar valores",
+      "values": "Valores",
+      "selected": "Seleccionados: {{ count }}",
+      "loadingValues": "Cargando valores…",
+      "noValues": "No hay valores para mostrar.",
+      "valuesHelp": "Se muestran los {{ count }} valores más frecuentes; usa la búsqueda para encontrar otros.",
+      "emptyText": "(texto vacío)",
+      "apply": "Aplicar",
+      "checking": "Comprobando…",
+      "remove": "Eliminar filtro",
+      "needValue": "Escribe un valor.",
+      "needValues": "Elige al menos un valor.",
+      "needRange": "Escribe un mínimo, un máximo o ambos."
+    },
+    "chip": {
+      "contains": "{{ name }} contiene “{{ value }}”",
+      "equals": "{{ name }} es “{{ value }}”",
+      "in": "{{ name }} es uno de {{ count }} valores",
+      "rangeBoth": "{{ name }} de {{ min }} a {{ max }}",
+      "rangeMin": "{{ name }} desde {{ min }}",
+      "rangeMax": "{{ name }} hasta {{ max }}",
+      "empty": "{{ name }} está vacío",
+      "notEmpty": "{{ name }} no está vacío",
+      "edit": "Editar el filtro de {{ name }}",
+      "remove": "Eliminar el filtro de {{ name }}"
+    },
+    "paging": {
+      "label": "Páginas",
+      "previous": "Anterior",
+      "next": "Siguiente",
+      "info": "{{ from }}–{{ to }} de {{ total }}",
+      "size": "Filas por página"
+    },
+    "export": {
+      "button": "Exportar",
+      "help": "Exporta todas las filas que cumplen los filtros, en el orden actual.",
+      "csv": "Archivo CSV",
+      "xlsx": "Archivo de Excel (XLSX)",
+      "preparing": "Preparando la exportación…",
+      "ready": "Exportación lista: {{ rows }} filas. La descarga comienza ahora.",
+      "readyOne": "Exportación lista: {{ rows }} fila. La descarga comienza ahora.",
+      "readyCut": "{{ cut }} celdas superaban el límite de Excel y se recortaron.",
+      "readyCutOne": "{{ cut }} celda superaba el límite de Excel y se recortó."
+    }
+  },
+  "indicators": {
+    "empty": {
+      "title": "Aún no hay indicadores publicados",
+      "body": "Cada indicador publica su propia tabla después de una ejecución de los scripts.",
+      "editor": "Agrega un indicador en la página de scripts y ejecuta los scripts para publicar su tabla. Los widgets que agregues se conservan y se dibujan cuando su indicador se publique.",
+      "editorLink": "Abrir los scripts",
+      "viewer": "Un analista o administrador debe agregar los indicadores y ejecutar primero los scripts del proyecto.",
+      "widgets": "Ya hay {{ count }} widgets configurados; se dibujan cuando se publiquen sus indicadores.",
+      "widgetsOne": "Ya hay {{ count }} widget configurado; se dibuja cuando se publique su indicador."
+    },
+    "list": {
+      "title": "Indicadores ({{ count }})",
+      "indicator": "Indicador",
+      "format": "Formato",
+      "status": "Estado",
+      "rows": "Filas",
+      "published": "Publicado",
+      "notPublished": "Aún sin publicar",
+      "summary": "· publicados: {{ count }}",
+      "rowCount": "{{ count }} filas",
+      "rowCountOne": "{{ count }} fila"
+    },
+    "published": "Publicado {{ time }}",
+    "publishedRun": "por la ejecución {{ run }}",
+    "count": "{{ count }} de {{ max }} widgets en este tablero",
+    "showTables": "Mostrar todo como tablas",
+    "showCharts": "Mostrar todo como gráficos",
+    "add": "Agregar widget",
+    "limit": "Este tablero tiene el máximo de widgets que admite ({{ count }}). Elimina uno o muévelo a otro tablero para agregar otro.",
+    "added": "Widget {{ title }} agregado.",
+    "saved": "Widget {{ title }} guardado.",
+    "moved": "Widget {{ title }} movido a {{ name }}.",
+    "noWidgets": {
+      "title": "Aún no hay widgets en este tablero",
+      "editor": "Agrega un widget para graficar un indicador publicado en este tablero: una cifra, un gráfico o un mapa.",
+      "viewer": "Un analista o administrador puede agregar widgets a este tablero, o mover aquí algunos de otro tablero."
+    },
+    "export": {
+      "button": "Exportar",
+      "help": "Exporta toda la tabla publicada de este indicador.",
+      "csv": "Archivo CSV",
+      "xlsx": "Archivo de Excel (XLSX)",
+      "preparing": "Preparando la exportación…",
+      "ready": "Exportación lista: {{ rows }} filas. La descarga comienza ahora.",
+      "readyOne": "Exportación lista: {{ rows }} fila. La descarga comienza ahora.",
+      "label": "Exportar {{ label }}"
+    },
+    "remove": {
+      "title": "¿Eliminar {{ title }}?",
+      "message": "El widget se elimina de este tablero para todos los miembros del proyecto.",
+      "confirm": "Eliminar widget",
+      "done": "Widget {{ title }} eliminado."
+    },
+    "chartTypes": {
+      "stat": "Cifra destacada",
+      "bar": "Gráfico de barras",
+      "column": "Gráfico de columnas",
+      "line": "Gráfico de líneas",
+      "histogram": "Histograma",
+      "pie": "Gráfico circular",
+      "map": "Mapa"
+    },
+    "grid": {
+      "move": "Mover {{ title }}",
+      "resize": "Cambiar tamaño de {{ title }}",
+      "edit": "Editar {{ title }}",
+      "remove": "Eliminar {{ title }}",
+      "help": "Las teclas de flecha mueven el widget una celda. Mantén presionada la tecla Mayús, o usa el control de tamaño, para cambiar su tamaño.",
+      "status": "{{ title }}: columna {{ column }}, fila {{ row }}, {{ width }} de ancho, {{ height }} de alto.",
+      "showTable": "Mostrar {{ title }} como tabla",
+      "actionsFor": "Acciones de {{ title }}",
+      "editItem": "Editar widget",
+      "removeItem": "Eliminar widget"
+    },
+    "widget": {
+      "notPublished": "{{ label }} aún no se ha publicado.",
+      "scriptsLink": "Abrir los scripts",
+      "rowLimit": "Solo se muestran las primeras {{ count }} filas: la consulta coincide con más. Agrega un filtro para reducirlas.",
+      "empty": "Ninguna fila coincide con la consulta de este widget.",
+      "showTable": "Mostrar como tabla",
+      "showChart": "Mostrar como gráfico"
+    },
+    "missing": {
+      "title": "Este widget no se puede dibujar",
+      "columns": "La tabla publicada ya no tiene las columnas: {{ names }}.",
+      "help": "Un cambio en el script las eliminó. Edita el widget para elegir otras, o restáuralas en el script."
+    },
+    "chart": {
+      "noGroup": "(ninguno)",
+      "caption": "{{ what }} por {{ group }}",
+      "captionHistogram": "Filas por rango de {{ what }}, en {{ buckets }} rangos",
+      "range": "Rango",
+      "rowsOf": "Filas de {{ what }}",
+      "rowCount": "{{ count }} filas",
+      "rowCountOne": "{{ count }} fila",
+      "summaryEmpty": "Gráfico de {{ what }}: sin datos.",
+      "summary": {
+        "bar": "Gráfico de barras de {{ what }} por {{ group }}: {{ count }} grupos, de {{ min }} a {{ max }}. Más alto: {{ top }}.",
+        "barOne": "Gráfico de barras de {{ what }} por {{ group }}: {{ count }} grupo, de {{ min }} a {{ max }}. Más alto: {{ top }}.",
+        "column": "Gráfico de columnas de {{ what }} por {{ group }}: {{ count }} grupos, de {{ min }} a {{ max }}. Más alto: {{ top }}.",
+        "columnOne": "Gráfico de columnas de {{ what }} por {{ group }}: {{ count }} grupo, de {{ min }} a {{ max }}. Más alto: {{ top }}.",
+        "line": "Gráfico de líneas de {{ what }} por {{ group }}: {{ count }} puntos, de {{ min }} a {{ max }}. Más alto: {{ top }}.",
+        "lineOne": "Gráfico de líneas de {{ what }} por {{ group }}: {{ count }} punto, de {{ min }} a {{ max }}. Más alto: {{ top }}.",
+        "histogram": "Histograma de {{ what }}: {{ count }} rangos, el más lleno tiene {{ max }} filas ({{ top }}).",
+        "histogramOne": "Histograma de {{ what }}: {{ count }} rango, el más lleno tiene {{ max }} filas ({{ top }}).",
+        "pie": "Gráfico circular de {{ what }} por {{ group }}: {{ count }} sectores. Mayor: {{ top }}, {{ share }}.",
+        "pieOne": "Gráfico circular de {{ what }} por {{ group }}: {{ count }} sector. Mayor: {{ top }}, {{ share }}."
+      }
+    },
+    "pie": {
+      "other": "Otros",
+      "share": "Proporción",
+      "skipped": "{{ count }} grupos con valor cero o negativo no se dibujan; la tabla los muestra.",
+      "skippedOne": "{{ count }} grupo con valor cero o negativo no se dibuja; la tabla lo muestra."
+    },
+    "map": {
+      "caption": "{{ what }} por {{ group }}",
+      "leftOut": "{{ count }} filas omitidas: falta su geometría o no se puede leer.",
+      "leftOutOne": "{{ count }} fila omitida: falta su geometría o no se puede leer.",
+      "nothing": "Ninguna fila tiene una geometría que se pueda dibujar.",
+      "summary": "Mapa de {{ what }}: {{ count }} lugares dibujados, de {{ min }} a {{ max }}; omitidos: {{ left }}.",
+      "summaryOne": "Mapa de {{ what }}: {{ count }} lugar dibujado, de {{ min }} a {{ max }}; omitidos: {{ left }}.",
+      "geometry": "Geometría",
+      "kind": {
+        "polygon": "Región",
+        "point": "Punto",
+        "none": "Omitida"
+      },
+      "roleDescription": "mapa",
+      "keyHelp": "Las flechas mueven el mapa, más y menos acercan o alejan, y 0 o Inicio lo muestra completo. Enter entra a los lugares del mapa: las flechas pasan de uno al siguiente, Inicio y Fin van al primero y al último, y Escape vuelve al mapa.",
+      "hintWheel": "Mantén Ctrl y desplázate para acercar o alejar",
+      "hintWheelMac": "Mantén ⌘ y desplázate para acercar o alejar",
+      "hintTouch": "Usa dos dedos para mover el mapa",
+      "yes": "Sí",
+      "no": "No",
+      "combines": "Combina {{ count }} filas",
+      "controls": {
+        "label": "Controles del mapa",
+        "zoomIn": "Acercar",
+        "zoomOut": "Alejar",
+        "showAll": "Mostrar todo",
+        "options": "Opciones del mapa",
+        "basemap": "Mapa base"
+      },
+      "basemaps": {
+        "none": "Ninguno",
+        "streets": "Calles",
+        "satellite": "Satélite"
+      },
+      "announce": {
+        "basemap": "Mapa base: {{ name }}",
+        "none": "Mapa base desactivado"
+      },
+      "notes": {
+        "notDegrees": "No se puede mostrar el mapa base: las coordenadas no están en grados.",
+        "enlarge": "Agranda el mapa para mostrar el mapa base",
+        "unavailable": "Mapa base no disponible",
+        "loadFailed": "No se pudo cargar el mapa. Muéstralo como tabla."
+      },
+      "attribution": {
+        "label": "Créditos del mapa",
+        "logo": "Google Maps"
+      }
+    },
+    "dialog": {
+      "addTitle": "Agregar un widget",
+      "editTitle": "Editar widget",
+      "chartType": "Tipo de gráfico",
+      "title": "Título",
+      "dashboard": "Tablero",
+      "dashboardHelp": "Otro tablero coloca el widget debajo de sus propios widgets.",
+      "indicator": "Indicador",
+      "indicatorChoose": "Elige un indicador",
+      "notPublished": "aún sin publicar",
+      "formatNote": "Los valores se muestran como: {{ format }}.",
+      "formatNoteUnit": "Los valores se muestran como: {{ format }}, con la unidad {{ unit }}.",
+      "unpublished": "{{ label }} aún no se ha publicado, así que no se pueden listar sus columnas. Ejecuta primero los scripts.",
+      "plot": "Graficar",
+      "modeMeasure": "Una medida",
+      "modeRatio": "Una razón entre dos columnas",
+      "measure": "Medida",
+      "measureDefault": "Predeterminada ({{ column }})",
+      "measureDefaultUnknown": "Medida predeterminada",
+      "numerator": "Numerador",
+      "denominator": "Denominador",
+      "ratioHelp": "Grafica la suma del numerador dividida entre la suma del denominador, como una tasa.",
+      "columnChoose": "Elige una columna",
+      "groupBy": "Agrupar por",
+      "groupByNone": "(ninguno)",
+      "groupByOptional": "Opcional. Sin este campo, un histograma cuenta cada fila.",
+      "geometry": "Columna de geometría",
+      "sortBy": "Ordenar barras por",
+      "sortDefault": "Orden predeterminado",
+      "sortValue": "Valor graficado",
+      "sortDirection": "Dirección",
+      "sortAsc": "Ascendente",
+      "sortDesc": "Descendente",
+      "sortCompareAs": "Comparar como",
+      "sortCompareText": "Texto (10 antes de 2)",
+      "sortCompareNumber": "Número (2 antes de 10)",
+      "sortCompareAsNumberHelp": "Los valores que no son números van al final.",
+      "geometryHelp": "Una columna de texto con WKT: POINT, POLYGON o MULTIPOLYGON.",
+      "buckets": "Rangos",
+      "bucketsHelp": "En cuántos rangos de igual ancho se cuentan las filas, hasta {{ max }}. 10 si se deja vacío.",
+      "filters": "Filtros",
+      "filterColumn": "Columna",
+      "addFilter": "Agregar filtro",
+      "filtersFull": "Un widget admite como máximo {{ count }} filtros.",
+      "filtersUnpublished": "Podrás agregar filtros cuando se publique el indicador.",
+      "preview": "Vista previa",
+      "previewIncomplete": "Completa el formulario para ver una vista previa.",
+      "saving": "Guardando…",
+      "errors": {
+        "title": "Escribe un título.",
+        "titleLong": "El título admite como máximo {{ max }} caracteres.",
+        "indicator": "Elige un indicador.",
+        "ratio": "Elige el numerador y el denominador.",
+        "groupBy": "Elige la columna por la que agrupar.",
+        "sort": "Elige la columna por la que ordenar.",
+        "geometry": "Elige la columna de geometría del mapa.",
+        "buckets": "Escribe un número entero de 1 a {{ max }}, o déjalo vacío.",
+        "tooltip": "Elige una columna para cada columna de información emergente, o elimina las vacías."
+      },
+      "filtersCount": "Filtros ({{ count }})",
+      "tooltip": {
+        "legend": "Columnas de información emergente",
+        "help": "Columnas de la tabla que se muestran al señalar o tocar un lugar del mapa, después de su grupo y su valor. Hasta {{ max }}. Los números se suman cuando varias filas comparten un grupo; cualquier otra columna muestra su primer valor.",
+        "column": "Columna de información emergente {{ n }}",
+        "label": "Etiqueta de la columna de información emergente {{ n }}",
+        "labelHint": "Etiqueta (opcional)",
+        "format": "Formato de la columna de información emergente {{ n }}",
+        "formatDefault": "Formato predeterminado",
+        "missing": "{{ column }} (no está en la tabla)",
+        "up": "Subir la columna de información emergente {{ n }}",
+        "down": "Bajar la columna de información emergente {{ n }}",
+        "remove": "Eliminar la columna de información emergente {{ n }}",
+        "add": "Agregar columna de información emergente",
+        "full": "Un mapa admite como máximo {{ max }} columnas de información emergente."
+      },
+      "basemap": "Mapa base",
+      "basemapHelp": "Se dibuja debajo de las formas para todos los miembros. Cualquier persona puede cambiarlo en su propia pantalla sin guardar.",
+      "basemapGone": "{{ name }} (ya no se ofrece)"
+    }
+  },
+  "dashboards": {
+    "scrollStart": "Mostrar pestañas anteriores",
+    "scrollEnd": "Mostrar más pestañas",
+    "add": "Nuevo tablero",
+    "actions": "Acciones del tablero",
+    "limitHint": "El proyecto tiene el máximo de tableros que admite ({{ max }}).",
+    "menu": {
+      "rename": "Cambiar nombre",
+      "duplicate": "Duplicar",
+      "moveLeft": "Mover a la izquierda",
+      "moveRight": "Mover a la derecha",
+      "remove": "Eliminar"
+    },
+    "unavailable": {
+      "limit": "Un proyecto puede tener como máximo {{ max }} tableros.",
+      "lastOne": "Un proyecto necesita al menos un tablero.",
+      "first": "Ya es el primer tablero.",
+      "last": "Ya es el último tablero.",
+      "moving": "Se está guardando el nuevo orden."
+    },
+    "nameDialog": {
+      "title": {
+        "add": "Nuevo tablero",
+        "rename": "Cambiar nombre de {{ name }}",
+        "duplicate": "Duplicar {{ name }}"
+      },
+      "name": "Nombre",
+      "hint": "Hasta {{ max }} caracteres, distinto del nombre de los demás tableros del proyecto.",
+      "confirm": {
+        "add": "Agregar tablero",
+        "rename": "Cambiar nombre",
+        "duplicate": "Duplicar"
+      },
+      "saving": "Guardando…",
+      "copy": " (copia)",
+      "copyN": " (copia {{ n }})",
+      "errors": {
+        "required": "Escribe un nombre.",
+        "long": "El nombre puede tener como máximo {{ max }} caracteres."
+      }
+    },
+    "renamed": "Nombre cambiado a \"{{ name }}\".",
+    "moved": "{{ name }} pasó a la posición {{ position }} de {{ count }}",
+    "remove": {
+      "title": "Eliminar tablero",
+      "message": "¿Eliminar {{ name }} y sus {{ count }} widgets? Esta acción no se puede deshacer.",
+      "messageOne": "¿Eliminar {{ name }} y su widget? Esta acción no se puede deshacer.",
+      "messageNone": "¿Eliminar {{ name }}? No tiene widgets. Esta acción no se puede deshacer.",
+      "confirm": "Eliminar tablero",
+      "done": "\"{{ name }}\" y sus {{ count }} widgets se eliminaron.",
+      "doneOne": "\"{{ name }}\" y su widget se eliminaron.",
+      "doneNone": "\"{{ name }}\" se eliminó."
+    },
+    "notice": {
+      "missing": "El tablero que abriste no existe. Se muestra {{ name }} en su lugar.",
+      "removed": "\"{{ removed }}\" ya no existe. Se muestra {{ name }} en su lugar.",
+      "dismiss": "Cerrar aviso"
+    }
+  }
+}

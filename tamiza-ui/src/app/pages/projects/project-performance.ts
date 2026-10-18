@@ -1,25 +1,11 @@
-import { DatePipe, DecimalPipe } from '@angular/common';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { Subscription } from 'rxjs';
 import { ApiErrors } from '../../core/api-error';
+import { countKey } from '../../core/i18n/plural';
 import { CoverageRow, EnumeratorRow, PerformanceDashboard, PerformanceService } from '../../core/projects/performance.service';
-import {
-  Alert,
-  Button,
-  Card,
-  FormField,
-  Input,
-  Skeleton,
-  Table,
-  TableContainer,
-  dateTimeFormat,
-  tableCell,
-  tableHead,
-  tableHeaderCell,
-  tableRow,
-} from '../../shared/ui';
+import { Alert, ApiLang, Button, Card, FormField, Input, Skeleton, Table, TableContainer, tableCell, tableHead, tableHeaderCell, tableRow, DateTimePipe, NumberPipe, PctPipe } from '../../shared/ui';
 import { ProjectContext } from './project-context';
 
 const pageSize = 50;
@@ -33,7 +19,7 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
 
 @Component({
   selector: 'app-project-performance',
-  imports: [DatePipe, DecimalPipe, RouterLink, TranslocoDirective, Alert, Button, Card, FormField, Input, Skeleton, Table, TableContainer],
+  imports: [DateTimePipe, NumberPipe, PctPipe, RouterLink, TranslocoDirective, Alert, ApiLang, Button, Card, FormField, Input, Skeleton, Table, TableContainer],
   template: `
     <div class="flex flex-col gap-6" *transloco="let t" [attr.aria-busy]="loading()">
       <div class="flex flex-col gap-3">
@@ -54,7 +40,7 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
         </form>
         @if (data(); as data) {
           <p class="text-sm text-body">
-            <span data-testid="computed-at">{{ t('performance.computedAt', { time: (data.computedAt | date: dateTimeFormat) }) }}</span>
+            <span data-testid="computed-at">{{ t('performance.computedAt', { time: (data.computedAt | dateTime) }) }}</span>
             ·
             @if (data.timeZone === 'UTC') {
               <span data-testid="days-zone">
@@ -71,7 +57,7 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
       </div>
 
       @if (error(); as message) {
-        <tmz-alert tone="danger" data-testid="performance-error">{{ message }}</tmz-alert>
+        <tmz-alert tone="danger" data-testid="performance-error" [tmzApiLang]="message">{{ message }}</tmz-alert>
       }
 
       @if (data(); as data) {
@@ -80,7 +66,7 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
           <dl class="grid grid-cols-3 divide-x divide-default">
             <div class="min-w-0 pe-3">
               <dt class="text-sm text-body">{{ t('performance.submissions.total') }}</dt>
-              <dd class="text-lg font-semibold text-heading tabular-nums sm:text-2xl" data-testid="total">{{ data.submissions.total | number }}</dd>
+              <dd class="text-lg font-semibold text-heading tabular-nums sm:text-2xl" data-testid="total">{{ data.submissions.total | num }}</dd>
             </div>
             <div class="min-w-0 px-3">
               <dt class="text-sm text-body">{{ t('performance.headline.median') }}</dt>
@@ -97,7 +83,7 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                 <dd class="text-lg font-semibold text-heading sm:text-2xl" data-testid="overall-unavailable">—</dd>
                 <dd class="text-xs text-body">{{ t('performance.headline.noFrame') }}</dd>
               } @else if (data.coverage.overallPercent !== null) {
-                <dd class="text-lg font-semibold text-heading tabular-nums sm:text-2xl" data-testid="overall-percent">{{ data.coverage.overallPercent | number: '1.0-1' }}%</dd>
+                <dd class="text-lg font-semibold text-heading tabular-nums sm:text-2xl" data-testid="overall-percent">{{ data.coverage.overallPercent / 100 | pct: '1.0-1' }}</dd>
                 <dd class="mt-1 h-2 w-full rounded-full bg-neutral-quaternary" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="cap(data.coverage.overallPercent)" [attr.aria-label]="t('performance.coverage.overall')">
                   <div class="h-2 rounded-full bg-brand" [style.width.%]="cap(data.coverage.overallPercent)" data-testid="overall-bar"></div>
                 </dd>
@@ -130,7 +116,7 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                       @for (day of data.submissions.days; track day.day) {
                         <tr [class]="tableRow">
                           <td [class]="tableCell + ' tabular-nums'">{{ day.day }}</td>
-                          <td [class]="tableCell + ' text-end tabular-nums'">{{ day.count | number }}</td>
+                          <td [class]="tableCell + ' text-end tabular-nums'">{{ day.count | num }}</td>
                         </tr>
                       }
                     </tbody>
@@ -138,7 +124,7 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                 </tmz-table-container>
               } @else {
                 <div class="mt-3" data-testid="days-chart">
-                  <p class="mb-1 text-xs text-body">{{ t('performance.submissions.peak', { count: (chart().peak | number) }) }}</p>
+                  <p class="mb-1 text-xs text-body">{{ t('performance.submissions.peak', { count: (chart().peak | num) }) }}</p>
                   <div class="border-b border-default">
                     <svg
                       role="img"
@@ -164,7 +150,7 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
               <p class="text-sm text-body" data-testid="days-empty">{{ t('performance.submissions.noDays') }}</p>
             }
             <p class="mt-4 text-sm text-body">
-              {{ t('performance.submissions.withoutTime') }}: <span class="font-medium text-heading tabular-nums" data-testid="without-time">{{ data.submissions.withoutReceptionTime | number }}</span>
+              {{ t('performance.submissions.withoutTime') }}: <span class="font-medium text-heading tabular-nums" data-testid="without-time">{{ data.submissions.withoutReceptionTime | num }}</span>
             </p>
           </tmz-card>
 
@@ -180,16 +166,16 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                   <p class="text-sm text-body" data-testid="no-usable">{{ t('performance.completion.noneUsable') }}</p>
                 }
                 <p class="mt-3 text-sm text-body" data-testid="completion-counts">
-                  {{ t('performance.completion.outliers') }}: <span class="font-medium text-heading tabular-nums" data-testid="outliers">{{ time.outliers ?? 0 | number }}</span>
+                  {{ t('performance.completion.outliers') }}: <span class="font-medium text-heading tabular-nums" data-testid="outliers">{{ time.outliers ?? 0 | num }}</span>
                   ·
-                  {{ t('performance.completion.unusable') }}: <span class="font-medium text-heading tabular-nums" data-testid="unusable">{{ time.unusableDurations ?? 0 | number }}</span>
+                  {{ t('performance.completion.unusable') }}: <span class="font-medium text-heading tabular-nums" data-testid="unusable">{{ time.unusableDurations ?? 0 | num }}</span>
                 </p>
                 @if (time.lowerFenceSeconds !== null && time.upperFenceSeconds !== null) {
                   <p class="mt-2 text-xs text-body" data-testid="fences">
                     {{
                       t('performance.completion.fences', {
-                        lower: (fenceMinutes(time.lowerFenceSeconds) | number: '1.0-1'),
-                        upper: (fenceMinutes(time.upperFenceSeconds) | number: '1.0-1')
+                        lower: (fenceMinutes(time.lowerFenceSeconds) | num: '1.0-1'),
+                        upper: (fenceMinutes(time.upperFenceSeconds) | num: '1.0-1')
                       })
                     }}
                   </p>
@@ -237,11 +223,11 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                     </p>
                     <p class="mt-1 text-body">
                       {{
-                        t('performance.enumerators.cardSummary', {
-                          submissions: (row.submissions | number),
+                        t(key('performance.enumerators.cardSummary', row.submissions), {
+                          submissions: (row.submissions | num),
                           mean: duration(row.meanSeconds),
-                          outliers: (row.outliers | number),
-                          last: row.lastSubmissionAt ? (row.lastSubmissionAt | date: 'mediumDate') : '—'
+                          outliers: (row.outliers | num),
+                          last: row.lastSubmissionAt ? (row.lastSubmissionAt | dateTime: 'date') : '—'
                         })
                       }}
                     </p>
@@ -269,10 +255,10 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                             <em>{{ t('performance.enumerators.none') }}</em>
                           }
                         </td>
-                        <td [class]="tableCell + ' text-end tabular-nums'">{{ row.submissions | number }}</td>
+                        <td [class]="tableCell + ' text-end tabular-nums'">{{ row.submissions | num }}</td>
                         <td [class]="tableCell + ' whitespace-nowrap text-end'">{{ duration(row.meanSeconds) }}</td>
-                        <td [class]="tableCell + ' text-end tabular-nums'">{{ row.outliers | number }}</td>
-                        <td [class]="tableCell + ' whitespace-nowrap'">{{ row.lastSubmissionAt ? (row.lastSubmissionAt | date: dateTimeFormat) : '—' }}</td>
+                        <td [class]="tableCell + ' text-end tabular-nums'">{{ row.outliers | num }}</td>
+                        <td [class]="tableCell + ' whitespace-nowrap'">{{ row.lastSubmissionAt ? (row.lastSubmissionAt | dateTime) : '—' }}</td>
                       </tr>
                     }
                   </tbody>
@@ -333,7 +319,7 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                 <li data-testid="overall-help">{{ t('performance.coverage.overallHelp') }}</li>
                 <li data-testid="outside">
                   {{ t('performance.coverage.outside') }}:
-                  <span class="text-sm font-medium text-heading tabular-nums" data-testid="outside-count">{{ coverage.outsideFrame | number }}</span>.
+                  <span class="text-sm font-medium text-heading tabular-nums" data-testid="outside-count">{{ coverage.outsideFrame | num }}</span>.
                   {{ t('performance.coverage.outsideHelp') }}
                 </li>
               </ul>
@@ -366,9 +352,9 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                       </p>
                       <p class="mt-1 text-body tabular-nums">
                         <span class="sr-only">{{ t('performance.coverage.achieved') }} / {{ t('performance.coverage.target') }}:</span>
-                        {{ row.achieved | number }} / {{ row.target | number }}
+                        {{ row.achieved | num }} / {{ row.target | num }}
                         @if (row.percent !== null) {
-                          · <span class="font-medium text-heading">{{ row.percent | number: '1.0-1' }}%</span>
+                          · <span class="font-medium text-heading">{{ row.percent / 100 | pct: '1.0-1' }}</span>
                         }
                       </p>
                       @if (row.percent !== null) {
@@ -402,11 +388,11 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                               }
                             </td>
                           }
-                          <td [class]="tableCell + ' text-end tabular-nums'">{{ row.target | number }}</td>
-                          <td [class]="tableCell + ' text-end tabular-nums'">{{ row.achieved | number }}</td>
+                          <td [class]="tableCell + ' text-end tabular-nums'">{{ row.target | num }}</td>
+                          <td [class]="tableCell + ' text-end tabular-nums'">{{ row.achieved | num }}</td>
                           <td [class]="tableCell">
                             @if (row.percent !== null) {
-                              <span class="tabular-nums text-heading" data-testid="row-percent">{{ row.percent | number: '1.0-1' }}%</span>
+                              <span class="tabular-nums text-heading" data-testid="row-percent">{{ row.percent / 100 | pct: '1.0-1' }}</span>
                               <div class="mt-1 h-2 w-full rounded-full bg-neutral-quaternary" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="cap(row.percent)" [attr.aria-label]="t('performance.coverage.percent')">
                                 <div class="h-2 rounded-full bg-brand" [style.width.%]="cap(row.percent)" data-testid="row-bar"></div>
                               </div>
@@ -457,7 +443,7 @@ type CoverageSort = 'frame' | 'percentAsc' | 'percentDesc';
                               }
                             </td>
                           }
-                          <td [class]="tableCell + ' text-end tabular-nums'">{{ combination.submissions | number }}</td>
+                          <td [class]="tableCell + ' text-end tabular-nums'">{{ combination.submissions | num }}</td>
                         </tr>
                       }
                     </tbody>
@@ -489,8 +475,12 @@ export class ProjectPerformance {
   private readonly transloco = inject(TranslocoService);
   protected readonly context = inject(ProjectContext);
 
+  /** The key of a message about a count: the singular form when the count is 1. */
+  protected key(base: string, count: number): string {
+    return countKey(base, count, this.transloco.getActiveLang());
+  }
+
   protected readonly pageSize = pageSize;
-  protected readonly dateTimeFormat = dateTimeFormat;
   protected readonly chartHeight = chartHeight;
   protected readonly tableHead = tableHead;
   protected readonly tableHeaderCell = tableHeaderCell;

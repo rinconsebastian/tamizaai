@@ -23,6 +23,15 @@ const threeDashboards = {
   ],
 };
 
+describe('ProjectPage tabs in Spanish', () => {
+  it('names the permanent tabs in Spanish and shows the dashboards as they were named (Project sections in Spanish)', async () => {
+    const { root } = await openProjectSection('overview', 'viewer', twoDashboards, [], 'es');
+
+    expect(tabs(root)).toEqual(['Desempeño', 'Datos limpios', 'Indicators', 'Field', 'Configuración']);
+    expect(plainOptions(root)).toEqual(['Desempeño', 'Datos limpios', 'Indicators', 'Field']);
+  });
+});
+
 describe('ProjectPage tabs', () => {
   it.each<ProjectRole>(['viewer', 'analyst', 'admin'])(
     'shows Performance, Clean data, the project\'s dashboards and Settings for a %s, nothing else (Viewer at desktop width)',

@@ -85,6 +85,13 @@ describe('ProjectData', () => {
     expect(byTestId(root, 'schedule-edit')).toBeNull();
   });
 
+  it('writes an hourly script schedule in the singular', async () => {
+    const { root } = await open('viewer', status(), undefined, undefined, undefined, { ...runs, runIntervalHours: 1 });
+
+    expect(text(byTestId(root, 'runs-line'))).toContain('also run every 1 hour');
+    expect(text(byTestId(root, 'runs-line'))).not.toContain('1 hours');
+  });
+
   it('lets analysts start a sync, then disables the actions while it is active', async () => {
     const { root, http, harness } = await open('analyst');
     expect(byTestId(root, 'schedule-form')).toBeNull();
@@ -230,6 +237,8 @@ describe('ProjectData', () => {
       'Kobo rejected the API token, or the token cannot read this form and its submissions.',
       'A message from the API.',
     ]);
+    // Only the text the worker stored is English; the one translated from its code follows the interface language.
+    expect([...table.querySelectorAll('[data-testid="log-error"]')].map((e) => e.getAttribute('lang'))).toEqual([null, 'en']);
     expect(table.textContent).toContain('Full resync');
     expect(table.textContent).toContain('Deletion check');
     expect(table.textContent).toContain('Ada');
@@ -363,6 +372,22 @@ describe('ProjectData', () => {
       expect(notFound.textContent).toContain('Not found');
       expect(byTestId(notFound, 'version-error')?.textContent).toContain('Kobo has no such version of this form.');
       expect(byTestId(notFound, 'version-next-attempt')).toBeNull();
+    });
+
+    it('marks the stored reason of a version as English only when it is shown raw', async () => {
+      const list: FormVersionList = {
+        withoutVersion: 0,
+        versions: [
+          version({ uid: 'vFailedFailedFailedFa2', status: 'failed', errorCode: 'kobo.unreachable', error: 'The Kobo server could not be reached.', deployedAt: null }),
+          version({ uid: 'vOtherOtherOtherOther5', status: 'failed', errorCode: 'kobo.something_new', error: 'A message from the worker.', deployedAt: null }),
+        ],
+      };
+      const { root } = await open('viewer', status(), undefined, undefined, list);
+      const table = byTestId(root, 'versions-table')!;
+
+      const errors = [...table.querySelectorAll('[data-testid="version-error"]')];
+      expect(errors.map((e) => e.textContent?.trim())).toEqual(['The Kobo server could not be reached. Check the address and try again.', 'A message from the worker.']);
+      expect(errors.map((e) => e.getAttribute('lang'))).toEqual([null, 'en']);
     });
 
     it('lists the versions as cards for phones too', async () => {

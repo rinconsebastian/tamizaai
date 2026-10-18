@@ -319,6 +319,13 @@ describe('map widget', () => {
       expect(text(byTestId(context.root, 'map-left-out'))).toBe('3 rows left out: their geometry is missing or cannot be read.');
     });
 
+    it('counts a single left-out row in the singular', async () => {
+      const context = await show([row('Cali', 90, square(0, 0)), row('Leticia', 30, null)]);
+
+      expect(text(byTestId(context.root, 'map-left-out'))).toBe('1 row left out: its geometry is missing or cannot be read.');
+      expect(container(context).getAttribute('aria-label')).toBe('Map of Coverage: 1 place drawn, from 90 to 90; 1 left out.');
+    });
+
     it('does not let a left-out row move the legend range', async () => {
       const context = await show(rows);
 

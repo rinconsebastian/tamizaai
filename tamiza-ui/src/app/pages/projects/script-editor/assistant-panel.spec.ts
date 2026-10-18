@@ -557,6 +557,18 @@ describe('AssistantPanel', () => {
       expect(byTestId(root, 'assistant-proposal')).toBeNull();
     });
 
+    it("marks the API's own text as English", async () => {
+      await show(failureOf(500, { detail: 'The model returned nothing.' }));
+
+      expect(byTestId(root, 'assistant-failure-message')!.getAttribute('lang')).toBe('en');
+    });
+
+    it("leaves the text the UI wrote for a code as the page's language", async () => {
+      await show(failureOf(504, { code: 'assistant.timeout' }));
+
+      expect(byTestId(root, 'assistant-failure-message')!.hasAttribute('lang')).toBe(false);
+    });
+
     it('says the provider did not answer in time (Timeout)', async () => {
       expect(await show(failureOf(504, { code: 'assistant.timeout' }))).toBe('The provider did not answer in time. Try again.');
     });
@@ -565,6 +577,10 @@ describe('AssistantPanel', () => {
       expect(await show(failureOf(429, { code: 'assistant.rateLimited', retryAfter: 30 }))).toBe(
         'The provider is limiting requests. Try again in 30 seconds.',
       );
+    });
+
+    it('says "1 second" in the singular when the provider asks to retry in a second (Rate limit)', async () => {
+      expect(await show(failureOf(429, { code: 'assistant.rateLimited', retryAfter: 0.4 }))).toBe('The provider is limiting requests. Try again in 1 second.');
     });
 
     it('does not name a time when the provider gave none', async () => {
@@ -669,6 +685,10 @@ describe('AssistantPanel', () => {
       expect(textOf(byTestId(dialog as HTMLElement, 'context-text'))).toBe('<rules>…</rules> <schema>main: 480 rows</schema>');
       expect(textOf(byTestId(dialog as HTMLElement, 'context-summary'))).toContain('2.0 KB');
       expect(textOf(byTestId(dialog as HTMLElement, 'context-omitted'))).toContain('choice lists: 14 of 22 left out');
+      // What the API assembled is English whatever the interface language; the words around it are the UI's.
+      expect(byTestId(dialog as HTMLElement, 'context-text')!.getAttribute('lang')).toBe('en');
+      expect(dialog.querySelector('[data-testid="context-omitted"] li')!.getAttribute('lang')).toBe('en');
+      expect(dialog.querySelector('[data-testid="context-omitted"] p')!.hasAttribute('lang')).toBe(false);
       expect(session.send).not.toHaveBeenCalled();
     });
 
@@ -696,6 +716,8 @@ describe('AssistantPanel', () => {
       await settle();
 
       expect(textOf(document.querySelector('[data-testid="context-error"]'))).toBe('The script is too large for the assistant.');
+      // Translated from its code: the UI wrote it.
+      expect(document.querySelector('[data-testid="context-error"] [lang]')).toBeNull();
     });
 
     it('closes the dialog', async () => {

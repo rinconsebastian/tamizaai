@@ -65,7 +65,7 @@ context: |
   - Technical product name: `tamiza` (repository, Docker images `tamiza-ui`, `tamiza-api`,
     `tamiza-analytics`, .NET namespace `Tamiza.*`, Python package `tamiza`).
   - Everything in English, with no exceptions: code, identifiers, database objects, API
-    names, script contracts, the UI (ready for i18n) and documentation (OpenSpec
+    names, script contracts, the UI (English source text, translated to Spanish) and documentation (OpenSpec
     artifacts, specs, READMEs, docs/).
   - UI built with Tailwind CSS 4 and Flowbite component designs (MIT), implemented as our own
     Angular components with Angular CDK for behavior; Flowbite's JavaScript is not used.

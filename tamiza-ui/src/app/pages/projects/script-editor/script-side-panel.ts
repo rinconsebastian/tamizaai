@@ -1,9 +1,8 @@
-import { DatePipe } from '@angular/common';
 import { Component, Injector, afterNextRender, computed, inject, input, output, signal, viewChild } from '@angular/core';
 import { TranslocoDirective } from '@jsverse/transloco';
 import { SystemConfigService } from '../../../core/system-config';
 import type { IndicatorMetadata, ScriptInputs, ScriptKind, ScriptVersionSummary } from '../../../core/projects/pipeline.service';
-import { Badge, Card, dateTimeFormat } from '../../../shared/ui';
+import { Badge, Card, DateTimePipe } from '../../../shared/ui';
 import { ApplyRequest } from './assistant-state';
 import { AssistantPanel } from './assistant-panel';
 import { CtxReference } from './ctx-reference';
@@ -18,7 +17,7 @@ export type SideTab = 'inputs' | 'reference' | 'versions' | 'assistant';
  */
 @Component({
   selector: 'app-script-side-panel',
-  imports: [DatePipe, TranslocoDirective, Badge, Card, AssistantPanel, ScriptInputsPanel, CtxReference],
+  imports: [DateTimePipe, TranslocoDirective, Badge, Card, AssistantPanel, ScriptInputsPanel, CtxReference],
   template: `
     <tmz-card class="min-w-0" *transloco="let t" data-testid="side-panel">
       <div role="tablist" [attr.aria-label]="t('scripts.sidePanel')" class="mb-3 flex flex-wrap gap-x-1 border-b border-default">
@@ -71,7 +70,7 @@ export type SideTab = 'inputs' | 'reference' | 'versions' | 'assistant';
                       @if (version.removed) {
                         <tmz-badge tone="warning" class="ms-1">{{ t('scripts.removedBadge') }}</tmz-badge>
                       }
-                      <span class="block text-body">{{ version.author.name }} · {{ version.createdAt | date: dateTimeFormat }}</span>
+                      <span class="block text-body">{{ version.author.name }} · {{ version.createdAt | dateTime }}</span>
                     </button>
                   </li>
                 }
@@ -125,7 +124,6 @@ export class ScriptSidePanel {
   private readonly injector = inject(Injector);
   private readonly config = inject(SystemConfigService);
   private readonly assistant = viewChild(AssistantPanel);
-  protected readonly dateTimeFormat = dateTimeFormat;
   /** Tables, Reference and Versions, and after them Assistant when the deployment enables it and the user can edit. */
   protected readonly tabs = computed<SideTab[]>(() =>
     this.config.assistantEnabled() && this.canEdit() ? ['inputs', 'reference', 'versions', 'assistant'] : ['inputs', 'reference', 'versions'],

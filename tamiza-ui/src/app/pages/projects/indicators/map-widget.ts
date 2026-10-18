@@ -11,6 +11,7 @@ import { BasemapChoice, MapControls } from './map-controls';
 import { EngineView, MapEngine, MapEvents, MapPoint, ShapeInput, TileHooks } from './map-engine';
 import { kindOf } from './map-geometry';
 import { TooltipContext, tooltipContent, tooltipLabel, tooltipSpeech, tooltipValues } from './map-tooltip';
+import { countKey } from '../../../core/i18n/plural';
 import { Geometry, parseWkt, positionsOf } from './wkt';
 import { TableModel, WidgetTable } from './widget-table';
 
@@ -134,7 +135,7 @@ let helpIds = 0;
           </div>
         }
         @if (leftOut() > 0) {
-          <p class="shrink-0 text-xs text-fg-warning" data-testid="map-left-out">{{ t('indicators.map.leftOut', { count: leftOut() }) }}</p>
+          <p class="shrink-0 text-xs text-fg-warning" data-testid="map-left-out">{{ t(key('indicators.map.leftOut', leftOut()), { count: leftOut() }) }}</p>
         }
         @if (!drawn().length) {
           <p class="shrink-0 text-sm text-body" data-testid="map-nothing">{{ t('indicators.map.nothing') }}</p>
@@ -488,9 +489,13 @@ export class MapWidget {
     return sequentialColor(step);
   }
 
+  protected key(base: string, count: number): string {
+    return countKey(base, count, this.transloco.getActiveLang());
+  }
+
   protected summary(t: Translate): string {
     const { min, max } = this.range();
-    return t('indicators.map.summary', {
+    return t(this.key('indicators.map.summary', this.drawn().length), {
       what: this.what(),
       count: this.drawn().length,
       min: this.format()(min),

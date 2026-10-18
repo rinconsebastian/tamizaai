@@ -1,4 +1,5 @@
-import { Component, Injectable, inject, signal } from '@angular/core';
+import { Component, Injectable, inject, input, signal } from '@angular/core';
+import { ApiLang } from './api-text';
 
 export type ToastTone = 'success' | 'danger' | 'info';
 
@@ -39,6 +40,7 @@ export class ToastService {
 /** Flowbite toast markup in a polite live region, so screen readers announce messages without moving focus. */
 @Component({
   selector: 'tmz-toast-region',
+  imports: [ApiLang],
   template: `
     <!-- Phones: below the navbar, so toasts never cover the actions at the bottom of a form. -->
     <div aria-live="polite" class="fixed top-16 inset-x-4 sm:top-auto sm:bottom-4 sm:inset-x-auto sm:end-4 z-50 flex flex-col gap-3 sm:w-96">
@@ -58,11 +60,11 @@ export class ToastService {
             [class.bg-success]="toast.tone === 'success'"
             [class.bg-brand]="toast.tone === 'info'"
           ></span>
-          <p class="flex-1 text-sm">{{ toast.message }}</p>
+          <p class="flex-1 text-sm" [tmzApiLang]="toast.message">{{ toast.message }}</p>
           <button
             type="button"
             class="-m-1.5 p-1.5 rounded-base text-body hover:text-heading hover:bg-neutral-secondary-medium min-h-8 min-w-8"
-            [attr.aria-label]="dismissLabel"
+            [attr.aria-label]="dismissLabel()"
             (click)="toasts.dismiss(toast.id)"
           >
             <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -76,5 +78,6 @@ export class ToastService {
 })
 export class ToastRegion {
   protected readonly toasts = inject(ToastService);
-  protected readonly dismissLabel = 'Dismiss';
+  /** The accessible name of the button that closes a toast; this component has no translations of its own, so the shell gives it. */
+  readonly dismissLabel = input('Dismiss');
 }

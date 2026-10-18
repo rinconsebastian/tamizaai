@@ -3,7 +3,7 @@ import { Component, inject, signal } from '@angular/core';
 import { TranslocoDirective } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { InviteResult, ProjectRole, ProjectsService } from '../../core/projects/projects.service';
-import { Alert, Button, FormField, Input } from '../../shared/ui';
+import { Alert, ApiLang, Button, FormField, Input } from '../../shared/ui';
 
 export interface AddMemberData {
   projectId: string;
@@ -23,7 +23,7 @@ const roles: ProjectRole[] = ['admin', 'analyst', 'viewer'];
  */
 @Component({
   selector: 'app-add-member-dialog',
-  imports: [TranslocoDirective, Alert, Button, FormField, Input],
+  imports: [TranslocoDirective, Alert, ApiLang, Button, FormField, Input],
   template: `
     <form
       class="w-[min(30rem,calc(100vw-2rem))] rounded-base border border-default bg-neutral-primary-soft p-4 shadow-sm md:p-6"
@@ -46,7 +46,7 @@ const roles: ProjectRole[] = ['admin', 'analyst', 'viewer'];
       </tmz-form-field>
 
       @if (error(); as message) {
-        <tmz-alert tone="danger" class="mt-4" data-testid="invite-error">{{ message }}</tmz-alert>
+        <tmz-alert tone="danger" class="mt-4" [tmzApiLang]="message" data-testid="invite-error">{{ message }}</tmz-alert>
       }
 
       <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">

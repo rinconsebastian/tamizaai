@@ -1,31 +1,17 @@
 import { Dialog } from '@angular/cdk/dialog';
-import { DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
+import { NgTemplateOutlet } from '@angular/common';
 import { Component, LOCALE_ID, computed, inject, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { Downloader } from '../../core/download.service';
 import { FormField, ProjectsService, SamplingFrame, SamplingFrameInput } from '../../core/projects/projects.service';
-import {
-  Alert,
-  Button,
-  Card,
-  ConfirmDialog,
-  Disclosure,
-  Skeleton,
-  Table,
-  TableContainer,
-  ToastService,
-  dateTimeFormat,
-  tableCell,
-  tableHead,
-  tableHeaderCell,
-  tableRow,
-} from '../../shared/ui';
+import { Alert, ApiLang, Button, Card, ConfirmDialog, Disclosure, Skeleton, Table, TableContainer, ToastService, tableCell, tableHead, tableHeaderCell, tableRow, DateTimePipe, numberText } from '../../shared/ui';
 import { FrameFileGuide } from './frame-file-guide';
 import { FrameQuestionsData, FrameQuestionsDialog, FrameQuestionsResult, FrameRowsFromQuestions } from './frame-questions-dialog';
-import { ImportFrameData, ImportFrameDialog, ImportFrameResult, ImportedFrame } from './import-frame-dialog';
+import { AroundDetail, ImportFrameData, ImportFrameDialog, ImportFrameResult, ImportedFrame, aroundDetail, detailMark } from './import-frame-dialog';
 import { ProjectContext } from './project-context';
 import { choiceList, choiceLists, chosenCodes, fieldIssue, frameFields, maxFrameQuestions, templateIssue, trimCode } from './sampling-frame-fields';
+import { countKey, isSingular, pluralKey } from '../../core/i18n/plural';
 
 interface EditableDimension {
   name: string;
@@ -51,7 +37,7 @@ const fullScreenOnPhones = { maxWidth: '100vw', maxHeight: '100dvh' };
  */
 @Component({
   selector: 'app-project-sampling-frame',
-  imports: [DatePipe, NgTemplateOutlet, TranslocoDirective, Alert, Button, Card, Disclosure, FrameFileGuide, Skeleton, Table, TableContainer],
+  imports: [DateTimePipe, NgTemplateOutlet, TranslocoDirective, Alert, ApiLang, Button, Card, Disclosure, FrameFileGuide, Skeleton, Table, TableContainer],
   template: `
     <section *transloco="let t">
       <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -89,13 +75,13 @@ const fullScreenOnPhones = { maxWidth: '100vw', maxHeight: '100dvh' };
         <div aria-busy="true" class="flex flex-col gap-3" data-testid="frame-loading"><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div>
       } @else if (loadError(); as message) {
         <tmz-alert tone="danger" [heading]="t('frame.loadFailed')" data-testid="frame-load-failed">
-          {{ message }}
+          <span [tmzApiLang]="message">{{ message }}</span>
           <div class="mt-3"><button tmzButton variant="secondary" size="sm" type="button" (click)="loadFrame()" data-testid="frame-retry">{{ t('frame.retry') }}</button></div>
         </tmz-alert>
       } @else if (!editing()) {
         @if (frame(); as saved) {
           <p class="mb-3 text-sm text-body" data-testid="frame-summary">
-            {{ t('frame.summary', { dimensions: count('dimensions', saved.dimensions.length), combinations: count('combinations', saved.targets.length), date: (saved.updatedAt | date: dateTimeFormat) }) }}
+            {{ t('frame.summary', { dimensions: count('dimensions', saved.dimensions.length), combinations: count('combinations', saved.targets.length), date: (saved.updatedAt | dateTime) }) }}
           </p>
           <tmz-table-container>
             <table tmzTable data-testid="frame-table">
@@ -141,10 +127,10 @@ const fullScreenOnPhones = { maxWidth: '100vw', maxHeight: '100dvh' };
           <h3 class="text-base font-medium text-heading">{{ t('frame.editorTitle') }}</h3>
           <p class="mt-1 text-sm text-body">{{ t('frame.dimensionsIntro') }}</p>
           @if (errors()['dimensions']; as message) {
-            <tmz-alert tone="danger" class="mt-4">{{ message }}</tmz-alert>
+            <tmz-alert tone="danger" class="mt-4" [tmzApiLang]="message">{{ message }}</tmz-alert>
           }
           @if (errors()['targets']; as message) {
-            <tmz-alert tone="danger" class="mt-4">{{ message }}</tmz-alert>
+            <tmz-alert tone="danger" class="mt-4" [tmzApiLang]="message">{{ message }}</tmz-alert>
           }
 
           <ul class="mt-4 flex flex-col gap-4">
@@ -154,7 +140,7 @@ const fullScreenOnPhones = { maxWidth: '100vw', maxHeight: '100dvh' };
                   <label class="mb-1 block text-sm font-medium text-heading" [attr.for]="'dimension-name-' + i">{{ t('frame.dimensionName') }}</label>
                   <input [id]="'dimension-name-' + i" [class]="cellClass('dimensions[' + i + '].name')" [value]="dimension.name" (input)="setDimension(i, 'name', $any($event.target).value)" />
                   @if (errors()['dimensions[' + i + '].name']; as message) {
-                    <p class="mt-1 text-sm text-fg-danger-strong">{{ message }}</p>
+                    <p class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message">{{ message }}</p>
                   }
                 </div>
                 <div>
@@ -166,7 +152,7 @@ const fullScreenOnPhones = { maxWidth: '100vw', maxHeight: '100dvh' };
                     }
                   </select>
                   @if (errors()['dimensions[' + i + '].field']; as message) {
-                    <p class="mt-1 text-sm text-fg-danger-strong">{{ message }}</p>
+                    <p class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message">{{ message }}</p>
                   } @else if (warning(dimension.field); as message) {
                     <p class="mt-1 text-sm text-body" [attr.data-testid]="'dimension-warning-' + i">{{ message }}</p>
                   }
@@ -215,7 +201,8 @@ const fullScreenOnPhones = { maxWidth: '100vw', maxHeight: '100dvh' };
                         </td>
                       </tr>
                       @if (rowError(row.index); as message) {
-                        <tr><td [attr.colspan]="dimensions().length + 3" class="px-4 pb-3 text-sm text-fg-danger-strong">{{ t('frame.rowError', { row: row.index + 1, message }) }}</td></tr>
+                        @let around = rowErrorAround(row.index + 1);
+                        <tr><td [attr.colspan]="dimensions().length + 3" class="px-4 pb-3 text-sm text-fg-danger-strong">{{ around.before }}<span [tmzApiLang]="message">{{ message }}</span>{{ around.after }}</td></tr>
                       }
                     }
                   </tbody>
@@ -261,13 +248,12 @@ export class ProjectSamplingFrame {
   private readonly dialog = inject(Dialog);
   private readonly confirmDialog = inject(ConfirmDialog);
   private readonly downloader = inject(Downloader);
-  private readonly decimal = new DecimalPipe(inject(LOCALE_ID));
+  private readonly locale = inject(LOCALE_ID);
 
   protected readonly tableHead = tableHead;
   protected readonly tableHeaderCell = tableHeaderCell;
   protected readonly tableRow = tableRow;
   protected readonly tableCell = tableCell;
-  protected readonly dateTimeFormat = dateTimeFormat;
   protected readonly pageSize = pageSize;
   protected readonly maxDimensions = maxFrameQuestions;
 
@@ -345,16 +331,16 @@ export class ProjectSamplingFrame {
   }
 
   protected count(kind: 'dimensions' | 'combinations', n: number): string {
-    return this.transloco.translate(`frame.${kind}${n === 1 ? 'One' : 'Many'}`, { count: this.decimal.transform(n) });
+    return this.transloco.translate(pluralKey(`frame.${kind}`, n, this.transloco.getActiveLang()), { count: numberText(n, this.locale) });
   }
 
   protected format(value: number): string {
-    return this.decimal.transform(value) ?? String(value);
+    return numberText(value, this.locale) ?? String(value);
   }
 
   protected errorCountText(count: number): string {
     const first = this.firstErrorRow();
-    const plural = count === 1 ? 'One' : 'Many';
+    const plural = isSingular(count, this.transloco.getActiveLang()) ? 'One' : 'Many';
     return first === null
       ? this.transloco.translate(`frame.errorCount${plural}`, { count: this.format(count) })
       : this.transloco.translate(`frame.errorCountFirst${plural}`, { count: this.format(count), row: this.format(first + 1) });
@@ -377,6 +363,11 @@ export class ProjectSamplingFrame {
 
   protected cellClass(path: string): string {
     return `${cellInput} ${this.errors()[path] ? 'border-danger-subtle bg-danger-soft' : 'border-default-medium'}`;
+  }
+
+  /** "Row 3: " and what follows the row's message, which sits between them. */
+  protected rowErrorAround(row: number): AroundDetail {
+    return aroundDetail(this.transloco.translate('frame.rowError', { row, message: detailMark }));
   }
 
   protected rowError(index: number): string | null {
@@ -583,7 +574,7 @@ export class ProjectSamplingFrame {
     const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
     const snapshot = this.context.formFields() ?? [];
     const lists = choiceLists(this.context.formChoices());
-    const parts = [t('frame.editor.replaceRows', { count: this.format(this.rows().length) })];
+    const parts = [t(countKey('frame.editor.replaceRows', this.rows().length, this.transloco.getActiveLang()), { count: this.format(this.rows().length) })];
     if (!sameQuestions) {
       parts.push(t('frame.editor.targetsNotKept'));
     }
@@ -605,7 +596,7 @@ export class ProjectSamplingFrame {
       columnChoices.some((list, i) => list !== null && trimCode(row.values[i] ?? '') !== '' && !chosenCodes(list, [row.values[i]]).length),
     ).length;
     if (notChoices) {
-      parts.push(t(notChoices === 1 ? 'frame.editor.notChoicesOne' : 'frame.editor.notChoicesMany', { count: this.format(notChoices) }));
+      parts.push(t(isSingular(notChoices, this.transloco.getActiveLang()) ? 'frame.editor.notChoicesOne' : 'frame.editor.notChoicesMany', { count: this.format(notChoices) }));
     }
 
     return this.confirmDialog.confirm({

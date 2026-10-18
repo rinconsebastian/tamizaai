@@ -29,7 +29,7 @@ import {
   basemapKinds,
 } from '../../../core/projects/indicators.service';
 import { DashboardEntry } from '../../../core/projects/projects.service';
-import { Alert, Button, Disclosure, FormField, Input } from '../../../shared/ui';
+import { Alert, ApiLang, Button, Disclosure, FormField, Input, markApiText } from '../../../shared/ui';
 import { DataFilterDialog, DataFilterDialogData, DataFilterDialogResult } from '../data-filter-dialog';
 import { describeFilter, normalizeFilter } from '../data-view';
 import { WidgetView, savedConfig } from './widget-view';
@@ -82,7 +82,7 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
  */
 @Component({
   selector: 'app-widget-dialog',
-  imports: [TranslocoDirective, Alert, Button, Disclosure, FormField, Input, WidgetView],
+  imports: [TranslocoDirective, Alert, ApiLang, Button, Disclosure, FormField, Input, WidgetView],
   template: `
     <form
       class="flex h-dvh w-screen flex-col gap-4 overflow-y-auto bg-neutral-primary-soft p-4 md:h-auto md:max-h-[calc(100dvh-2rem)] md:w-[min(46rem,calc(100vw-2rem))] lg:w-[min(64rem,calc(100vw-2rem))] md:rounded-base md:border md:border-default md:p-6 md:shadow-sm"
@@ -268,13 +268,13 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
                   }
                 </select>
                 @if (itemProblems()[i]?.column; as message) {
-                  <p class="mt-1 text-sm text-fg-danger-strong" data-testid="tooltip-error">{{ message }}</p>
+                  <p class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="tooltip-error">{{ message }}</p>
                 }
               </div>
               <div class="min-w-0">
                 <input tmzInput [attr.id]="'tooltipLabel' + i" autocomplete="off" [attr.maxlength]="maxTooltipLabel" [attr.aria-label]="t('indicators.dialog.tooltip.label', { n: i + 1 })" [placeholder]="item.column || t('indicators.dialog.tooltip.labelHint')" [value]="item.label ?? ''" (input)="setTooltipLabel(i, $any($event.target).value)" data-testid="tooltip-label" />
                 @if (itemProblems()[i]?.label; as message) {
-                  <p class="mt-1 text-sm text-fg-danger-strong" data-testid="tooltip-error">{{ message }}</p>
+                  <p class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="tooltip-error">{{ message }}</p>
                 }
               </div>
               <div class="flex items-start gap-1 sm:justify-end">
@@ -297,14 +297,14 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
                     }
                   </select>
                   @if (itemProblems()[i]?.format; as message) {
-                    <p class="mt-1 text-sm text-fg-danger-strong" data-testid="tooltip-error">{{ message }}</p>
+                    <p class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="tooltip-error">{{ message }}</p>
                   }
                 </div>
               }
             </div>
           }
           @if (shown().tooltip; as message) {
-            <p class="text-sm text-fg-danger-strong" data-testid="tooltip-list-error">{{ message }}</p>
+            <p class="text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="tooltip-list-error">{{ message }}</p>
           }
           <div class="flex flex-wrap items-center gap-3">
             <button tmzButton variant="secondary" type="button" [disabled]="tooltip().length >= maxTooltipItems" (click)="addTooltip()" data-testid="tooltip-add">{{ t('indicators.dialog.tooltip.add') }}</button>
@@ -366,7 +366,7 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
       </div>
 
       @if (error(); as message) {
-        <tmz-alert tone="danger" data-testid="dialog-error">{{ message }}</tmz-alert>
+        <tmz-alert tone="danger" data-testid="dialog-error"><span [tmzApiLang]="message">{{ message }}</span></tmz-alert>
       }
 
       <div class="mt-2 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -907,7 +907,7 @@ export class WidgetDialog {
         this.serverFieldErrors.set(fields);
         this.itemProblems.set(items);
         const others = Object.entries(parsed.fieldErrors).filter(([path]) => !this.itemFor(path) && !this.fieldFor(path));
-        this.error.set(Object.keys(fields).length && !others.length ? null : others.length ? others.map(([, message]) => message).join(' ') : parsed.message);
+        this.error.set(Object.keys(fields).length && !others.length ? null : others.length ? markApiText(others.map(([, message]) => message).join(' ')) : parsed.message);
         if (fields.dashboardId) {
           // The dashboard chosen was removed meanwhile, or is full: the project is read again, so a removed one leaves the select
           // and the tab row (design D9).

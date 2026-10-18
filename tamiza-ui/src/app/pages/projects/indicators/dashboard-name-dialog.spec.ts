@@ -6,6 +6,7 @@ import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import { DashboardEntry } from '../../../core/projects/projects.service';
 import { pressKey, provideVisibleElements, tick } from '../../../../testing/cdk';
+import { InterfaceLanguage } from '../../../core/i18n/interface-language';
 import { translocoTesting } from '../../../../testing/transloco-testing';
 import { DashboardNameAction, DashboardNameData, DashboardNameDialog, DashboardNameResult } from './dashboard-name-dialog';
 
@@ -21,9 +22,14 @@ const health: DashboardEntry = { id: 'd2', name: 'Health' };
 describe('DashboardNameDialog', () => {
   afterEach(() => document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = '')));
 
-  async function open(action: DashboardNameAction, dashboard: DashboardEntry | null = null, dashboards: DashboardEntry[] = [housing, health]) {
+  async function open(
+    action: DashboardNameAction,
+    dashboard: DashboardEntry | null = null,
+    dashboards: DashboardEntry[] = [housing, health],
+    lang: InterfaceLanguage = 'en',
+  ) {
     TestBed.configureTestingModule({
-      imports: [translocoTesting()],
+      imports: [translocoTesting(lang)],
       providers: [provideHttpClient(), provideHttpClientTesting(), provideVisibleElements()],
     });
     const http = TestBed.inject(HttpTestingController);
@@ -135,6 +141,7 @@ describe('DashboardNameDialog', () => {
     await dialog.settle();
 
     expect(dialog.dialogError()).toBe('A project can have at most 7 dashboards. Remove one before adding another.');
+    expect(dialog.get('dashboard-name-error')!.querySelector('[lang]')).toBeNull(); // translated from its code: the UI wrote it
     expect(dialog.fieldError()).toBeNull();
     expect(dialog.refused).toHaveBeenCalledTimes(1);
     expect(dialog.isClosed()).toBe(false);
@@ -150,6 +157,7 @@ describe('DashboardNameDialog', () => {
     await dialog.settle();
 
     expect(dialog.dialogError()).toBe(message);
+    expect(dialog.get('dashboard-name-error')!.querySelector('[lang="en"]')).not.toBeNull(); // written by the API
     expect(dialog.fieldError()).toBeNull();
     expect(dialog.isClosed()).toBe(false);
   });
@@ -179,6 +187,12 @@ describe('DashboardNameDialog', () => {
   });
 
   describe('the name proposed for a copy', () => {
+    it('ends with " (copia)" in the Spanish UI (Name proposed for a duplicate)', async () => {
+      const dialog = await open('duplicate', housing, [housing, health], 'es');
+
+      expect(dialog.input().value).toBe('Housing (copia)');
+    });
+
     it('is the name followed by " (copy)", and can be changed before saving (Proposed name)', async () => {
       const dialog = await open('duplicate', housing);
       expect(dialog.root()!.querySelector('h2')!.textContent!.trim()).toBe('Duplicate Housing');

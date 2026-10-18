@@ -1,6 +1,5 @@
 import { Dialog } from '@angular/cdk/dialog';
-import { DatePipe } from '@angular/common';
-import { Component, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, LOCALE_ID, computed, inject, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
@@ -25,7 +24,7 @@ import {
   maxSampleSize,
   minSampleSize,
 } from '../../core/projects/pipeline.service';
-import { Alert, Badge, Button, Card, ConfirmDialog, DropdownMenu, FormField, Input, MenuItem, Skeleton, ToastService, Tone, dateTimeFormat } from '../../shared/ui';
+import { Alert, ApiLang, Badge, Button, Card, ConfirmDialog, DropdownMenu, FormField, Input, MenuItem, Skeleton, ToastService, Tone, DateTimePipe, numberText } from '../../shared/ui';
 import { CodeEditor } from '../../shared/ui/code-editor';
 import { AddIndicatorData, AddIndicatorDialog, NewIndicator } from './add-indicator-dialog';
 import { IndicatorMetadataFields } from './indicator-metadata-fields';
@@ -36,6 +35,7 @@ import { SampleDownloadPanel } from './sample-download-panel';
 import { ScriptTestPanel } from './script-test-panel';
 import { IndicatorMenu, IndicatorMenuItem } from './script-editor/indicator-menu';
 import { ResolvedProblem, scriptAssist } from './script-editor/script-assist';
+import { codeEditorPhrases } from '../../core/i18n/code-editor-phrases';
 import { ASSISTANT_SESSION, ApplyRequest, FixTarget, cellReplacement, findCell } from './script-editor/assistant-state';
 import { AssistantSession } from './script-editor/assistant-session';
 import { askedWarning, viewWarnings } from './script-editor/indicator-view';
@@ -66,10 +66,11 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
 @Component({
   selector: 'app-project-scripts',
   imports: [
-    DatePipe,
+    DateTimePipe,
     RouterLink,
     TranslocoDirective,
     Alert,
+    ApiLang,
     Badge,
     Button,
     Card,
@@ -134,7 +135,7 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
             <div class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-default pb-4 text-sm text-body" data-testid="last-run">
               @if (latestRun(); as run) {
                 <tmz-badge [tone]="runTone(run.status)" data-testid="last-run-status">{{ t('runs.status.' + run.status) }}</tmz-badge>
-                <span data-testid="last-run-time">{{ (run.startedAt ?? run.queuedAt) | date: dateTimeFormat }}</span>
+                <span data-testid="last-run-time">{{ (run.startedAt ?? run.queuedAt) | dateTime }}</span>
                 @if (failedStep(run, t); as failed) {
                   <span class="text-fg-danger-strong" data-testid="last-run-failed">{{ failed }}</span>
                 }
@@ -206,6 +207,7 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
                 [readonly]="!canEdit() || !!viewing()"
                 [label]="indicatorName() ? t('scripts.editorLabelIndicator', { name: indicatorName() }) : t('scripts.editorLabel', { kind: t('scripts.kinds.' + selected().kind) })"
                 [extensions]="assist()"
+                [phrases]="phrases"
                 (changed)="onEdit($event)"
               />
               <p class="mt-1 text-xs text-body" data-testid="editor-keys">
@@ -239,7 +241,7 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
                 </section>
               }
               @if (saveError(); as message) {
-                <p class="mt-2 text-sm text-fg-danger-strong" data-testid="save-error">{{ message }}</p>
+                <p class="mt-2 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="save-error">{{ message }}</p>
               }
 
               @if (viewing(); as version) {
@@ -338,6 +340,7 @@ export class ProjectScripts {
   private readonly errors = inject(ApiErrors);
   private readonly toasts = inject(ToastService);
   private readonly transloco = inject(TranslocoService);
+  private readonly locale = inject(LOCALE_ID);
   private readonly confirmDialog = inject(ConfirmDialog);
   private readonly dialog = inject(Dialog);
   private readonly context = inject(ProjectContext);
@@ -351,7 +354,6 @@ export class ProjectScripts {
   protected readonly runs = viewChild(PipelineRuns);
 
   protected readonly kinds = fixedScriptKinds;
-  protected readonly dateTimeFormat = dateTimeFormat;
   /** The newest run, for the strip under the picker; the runs list below reports it. */
   protected readonly latestRun = signal<RunSummary | null>(null);
   protected readonly runsLoaded = signal(false);
@@ -412,11 +414,14 @@ export class ProjectScripts {
       kind: this.selected().kind,
       inputs: this.inputsInfo(),
       translate: (key, params) => this.transloco.translate(key, params),
+      locale: this.locale,
       canRun: this.canEdit() && !this.viewing(),
       runCell: (stopLine) => this.startTest(stopLine ?? undefined),
       problems: (found) => this.problems.set(found),
     });
   });
+  /** The texts CodeMirror writes itself (search panel, folding, diagnostics) in the interface language. */
+  protected readonly phrases = codeEditorPhrases((key) => this.transloco.translate(key));
   protected readonly indicators = computed(() => this.scripts()?.indicators ?? []);
   /** The indicators of the menu: one being added (its script not saved yet) comes first, with its label from the dialog. */
   protected readonly indicatorItems = computed<IndicatorMenuItem[]>(() => {
@@ -697,7 +702,7 @@ export class ProjectScripts {
     const size = Number(this.sampleSize());
     this.testError.set(null);
     if (!Number.isInteger(size) || size < minSampleSize || size > maxSampleSize) {
-      this.testError.set(this.transloco.translate('scriptTests.sampleSizeRange', { min: minSampleSize, max: maxSampleSize.toLocaleString('en') }));
+      this.testError.set(this.transloco.translate('scriptTests.sampleSizeRange', { min: minSampleSize, max: numberText(maxSampleSize, this.locale) }));
       return null;
     }
     return size;
@@ -819,6 +824,7 @@ export class ProjectScripts {
       return true;
     }
     const facts = test.steps.find((step) => step.step === 'indicator')?.dashboard;
+    // Only warning keys are compared: the formatted numbers are dropped, so the locale given to the formatter does not matter.
     const params = JSON.stringify(Object.entries(asked.params ?? {}).sort());
     return (
       !!facts &&

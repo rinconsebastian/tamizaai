@@ -1,14 +1,16 @@
 import { Component, contentChild, effect, input } from '@angular/core';
+import { ApiLang } from './api-text';
 import { Input } from './input';
 
 /** Label, control and error text. The error is announced through aria-describedby on the control. */
 @Component({
   selector: 'tmz-form-field',
+  imports: [ApiLang],
   template: `
     <label [attr.for]="fieldId()" class="block mb-2 text-sm font-medium text-heading">{{ label() }}</label>
     <ng-content />
     @if (error(); as error) {
-      <p [id]="fieldId() + '-error'" class="mt-2 text-sm text-fg-danger-strong" data-testid="field-error">{{ error }}</p>
+      <p [id]="fieldId() + '-error'" class="mt-2 text-sm text-fg-danger-strong" data-testid="field-error" [tmzApiLang]="error">{{ error }}</p>
     } @else if (hint()) {
       <p class="mt-2 text-sm text-body">{{ hint() }}</p>
     }

@@ -1,5 +1,6 @@
 import { LOCALE_ID, Component, computed, inject, input, output, signal } from '@angular/core';
-import { TranslocoDirective } from '@jsverse/transloco';
+import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
+import { countKey } from '../../../core/i18n/plural';
 import { QueryRow, WidgetConfig, emptyConfig } from '../../../core/projects/indicators.service';
 import type { IndicatorMetadata, IndicatorTestView } from '../../../core/projects/pipeline.service';
 import { Alert, Badge, Button, Input } from '../../../shared/ui';
@@ -77,7 +78,7 @@ export function viewWarnings(facts: IndicatorTestView, format: ValueFormatter, i
 
       @for (warning of warnings(); track warning.key + ':' + $index) {
         <tmz-alert tone="warning" data-testid="view-warning">
-          {{ t('scriptTests.view.warnings.' + warning.key, warning.params) }}
+          {{ t(warningKey(warning), warning.params) }}
           @if (canAsk()) {
             <button tmzButton variant="secondary" size="sm" type="button" class="ms-2" (click)="ask.emit(warning)" data-testid="view-warning-ask">{{ t('scriptTests.askAssistant') }}</button>
           }
@@ -165,12 +166,19 @@ export class IndicatorView {
   readonly ask = output<ViewWarning>();
 
   private readonly locale = inject(LOCALE_ID);
+  private readonly transloco = inject(TranslocoService);
   protected readonly chosenDimension = signal<string | null>(null);
   protected readonly chosenPlot = signal<'measure' | 'ratio'>('measure');
 
   protected readonly format = computed(() => valueFormatter({ format: this.metadata().format, unit: this.metadata().unit.trim() || null }, this.locale));
   protected readonly label = computed(() => this.metadata().label.trim() || this.facts().defaultMeasure || '');
   protected readonly warnings = computed(() => viewWarnings(this.facts(), this.format(), this.metadata().format));
+
+  /** The translation key of a warning's text: the empty-values warning has a singular form for one row. */
+  protected warningKey(warning: ViewWarning): string {
+    const key = 'scriptTests.view.warnings.' + warning.key;
+    return warning.key === 'emptyValues' ? countKey(key, Number(warning.params['count']), this.transloco.getActiveLang()) : key;
+  }
 
   /** The dimensions a bar chart can be drawn by: those with at most 50 values. */
   protected readonly chartable = computed(() => Object.entries(this.facts().charts).filter(([, chart]) => chart.groups !== null).map(([name]) => name));

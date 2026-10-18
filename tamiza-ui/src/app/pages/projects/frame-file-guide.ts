@@ -1,8 +1,7 @@
-import { DecimalPipe } from '@angular/common';
 import { Component, LOCALE_ID, computed, inject, input, output } from '@angular/core';
 import { TranslocoDirective } from '@jsverse/transloco';
 import { FormChoice, FormField } from '../../core/projects/projects.service';
-import { Table, TableContainer, tableCell, tableHead, tableHeaderCell, tableRow } from '../../shared/ui';
+import { Table, TableContainer, tableCell, tableHead, tableHeaderCell, tableRow, numberText } from '../../shared/ui';
 import {
   choiceList,
   choiceLists,
@@ -83,7 +82,7 @@ const fixedExample: GuideExample = {
   `,
 })
 export class FrameFileGuide {
-  private readonly decimal = new DecimalPipe(inject(LOCALE_ID));
+  private readonly locale = inject(LOCALE_ID);
 
   /** The form's fields, unfiltered, so the example's column is named as a template would name it. */
   readonly fields = input<FormField[] | null>(null);
@@ -123,6 +122,6 @@ export class FrameFileGuide {
   });
 
   protected format(value: number): string {
-    return this.decimal.transform(value) ?? String(value);
+    return numberText(value, this.locale) ?? String(value);
   }
 }

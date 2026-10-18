@@ -28,6 +28,26 @@ describe('OIDC configuration', () => {
     });
   });
 
+  it('asks the identity provider for the interface language', () => {
+    const origin = 'https://tamiza.example.org';
+
+    expect(buildOpenIdConfiguration(systemConfig, origin, 'es').customParamsAuthRequest).toEqual({ ui_locales: 'es' });
+    expect(buildOpenIdConfiguration(systemConfig, origin, 'en').customParamsAuthRequest).toEqual({ ui_locales: 'en' });
+    expect(buildOpenIdConfiguration(systemConfig, origin).customParamsAuthRequest).toEqual({ ui_locales: 'en' });
+  });
+
+  it('carries the language into the settings it loads', async () => {
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    const loader = createStsConfigLoader(TestBed.inject(HttpClient), 'es');
+    const http = TestBed.inject(HttpTestingController);
+
+    const configs = firstValueFrom(loader.loadConfigs());
+    http.expectOne('/api/v1/system/config').flush(systemConfig);
+
+    const [config] = await configs;
+    expect(config.customParamsAuthRequest).toEqual({ ui_locales: 'es' });
+  });
+
   it('loads the settings from the API at runtime', async () => {
     TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
     const loader = createStsConfigLoader(TestBed.inject(HttpClient));

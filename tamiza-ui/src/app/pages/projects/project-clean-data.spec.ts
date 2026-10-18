@@ -2,7 +2,9 @@ import { TestRequest } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { vi } from 'vitest';
+import es from '../../../../public/i18n/es.json';
 import { Downloader } from '../../core/download.service';
+import { InterfaceLanguage } from '../../core/i18n/interface-language';
 import { DataColumn, DataExport, DataFilter, DataOverview, DataPage } from '../../core/projects/data.service';
 import { ProjectRole } from '../../core/projects/projects.service';
 import { ToastService } from '../../shared/ui';
@@ -70,9 +72,9 @@ const downloader = { start: vi.fn() };
 
 async function open(
   role: ProjectRole,
-  options: { section?: string; overview?: DataOverview; first?: DataPage | null } = {},
+  options: { section?: string; overview?: DataOverview; first?: DataPage | null; lang?: InterfaceLanguage } = {},
 ) {
-  const context = await openProjectSection(options.section ?? 'clean-data', role, {}, [{ provide: Downloader, useValue: downloader }]);
+  const context = await openProjectSection(options.section ?? 'clean-data', role, {}, [{ provide: Downloader, useValue: downloader }], options.lang);
   context.http.expectOne(isOverview).flush(options.overview ?? overview());
   await settle(context.harness);
   if (options.first !== null && (options.overview ?? overview()).sources.length) {
@@ -135,6 +137,14 @@ describe('ProjectCleanData', () => {
 
       const options = Array.from(root.querySelectorAll('[data-testid="table-select"] option')).map((o) => text(o));
       expect(options).toEqual(['persons (4,830 rows)', 'households (1,200 rows)']);
+    });
+
+    it('uses the singular for a table with one row', async () => {
+      const single = overview({ sources: [{ source: 'output', publishedAt: '2026-10-02T12:00:00Z', runId: 'abcdef12-0000-0000-0000-000000000001', tables: [{ name: 'persons', rowCount: 1 }, { name: 'households', rowCount: 1200 }] }] });
+      const { root } = await open('viewer', { overview: single });
+
+      const options = Array.from(root.querySelectorAll('[data-testid="table-select"] option')).map((o) => text(o));
+      expect(options).toEqual(['persons (1 row)', 'households (1,200 rows)']);
     });
 
     it('shows the clean tables without a switch when the project has no script 2', async () => {
@@ -258,6 +268,12 @@ describe('ProjectCleanData', () => {
       const { root } = await open('viewer', { first: page({ total: 4830 }) });
 
       expect(text(byTestId(root, 'row-count'))).toBe('4,830 rows');
+    });
+
+    it('uses the singular for one row', async () => {
+      const { root } = await open('viewer', { first: page({ total: 1, rows: [['Ana', 31, 10.5, true, '2026-09-01', '2026-09-01T21:30:00-05:00']] }) });
+
+      expect(text(byTestId(root, 'row-count'))).toBe('1 row');
     });
 
     it('says when a table has no rows', async () => {
@@ -400,7 +416,7 @@ describe('ProjectCleanData', () => {
       context.http.expectNone(isQuery); // the checked page is used; it is not asked for again
       expect(overlay().querySelector('[data-testid="filter-dialog"]')).toBeNull();
       expect(text(byTestId(context.root, 'filter-chip'))).toBe('name contains “well”');
-      expect(text(byTestId(context.root, 'row-count'))).toBe('1 matching rows');
+      expect(text(byTestId(context.root, 'row-count'))).toBe('1 matching row');
       expect(text(context.root.querySelector('[data-testid="data-row"]'))).toContain('Eve WELL');
       expect(address()).toMatch(/[?&]f=[A-Za-z0-9_-]+/);
     });
@@ -538,8 +554,21 @@ describe('ProjectCleanData', () => {
       await settle(context.harness);
 
       expect(text(byTestId(dialog, 'field-error'))).toContain('minimum is greater than the maximum');
+      expect(byTestId(dialog, 'field-error')?.getAttribute('lang')).toBe('en');
       expect(overlay().querySelector('[data-testid="filter-dialog"]')).not.toBeNull();
       expect(byTestId(context.root, 'filter-chip')).toBeNull();
+    });
+
+    it('marks the alert of the filter dialog as English when the API wrote its message', async () => {
+      const context = await open('viewer');
+      const dialog = await openDialog(context, 1);
+      typeInto(byTestId<HTMLInputElement>(dialog, 'filter-min')!, '5');
+      await click(context, byTestId(dialog, 'filter-apply'));
+
+      context.http.expectOne(isQuery).flush({ title: 'The filter cannot be checked right now.' }, { status: 500, statusText: 'Server Error' });
+      await settle(context.harness);
+
+      expect(byTestId(dialog, 'filter-error')?.getAttribute('lang')).toBe('en');
     });
 
     it('edits and removes a filter from its chip and clears them all', async () => {
@@ -775,6 +804,18 @@ describe('ProjectCleanData', () => {
 
       expect(text(byTestId(context.root, 'data-error'))).toContain('took too long');
       expect(byTestId(context.root, 'data-table')).not.toBeNull();
+      expect(byTestId(context.root, 'data-error')?.getAttribute('lang')).toBeNull();
+    });
+
+    it('marks a message the API wrote as English', async () => {
+      const context = await open('viewer');
+      await click(context, headerButtons(context.root, 'sort-button')[0]);
+
+      context.http.expectOne(isQuery).flush({ title: 'The table cannot be read right now.' }, { status: 500, statusText: 'Server Error' });
+      await settle(context.harness);
+
+      expect(text(byTestId(context.root, 'data-error'))).toContain('The table cannot be read right now.');
+      expect(byTestId(context.root, 'data-error')?.getAttribute('lang')).toBe('en');
     });
   });
 
@@ -842,6 +883,32 @@ describe('ProjectCleanData', () => {
       await settle(context.harness);
 
       expect(TestBed.inject(ToastService).toasts().at(-1)?.message).toContain('3 cells were longer than Excel allows and were cut.');
+    });
+
+    it('uses the singular for a file with one row and one cut cell', async () => {
+      const context = await open('viewer');
+
+      await chooseFormat(context, 'export-xlsx');
+      context.http.expectOne(isExport).flush(exported({ rowCount: 1, cutCells: 1 }));
+      await settle(context.harness);
+
+      const message = TestBed.inject(ToastService).toasts().at(-1)?.message;
+      expect(message).toContain('Export ready: 1 row. The download starts now.');
+      expect(message).toContain('1 cell was longer than Excel allows and was cut.');
+    });
+
+    it('uses the singular in Spanish for a file with one row and one cut cell (One row)', async () => {
+      const context = await open('viewer', { lang: 'es' });
+
+      await chooseFormat(context, 'export-xlsx');
+      context.http.expectOne(isExport).flush(exported({ rowCount: 1, cutCells: 1 }));
+      await settle(context.harness);
+
+      const message = TestBed.inject(ToastService).toasts().at(-1)?.message;
+      expect(message).toContain(es.cleanData.export.readyOne.replace('{{ rows }}', '1'));
+      expect(message).toContain(es.cleanData.export.readyCutOne.replace('{{ cut }}', '1'));
+      expect(message).not.toContain('1 filas');
+      expect(message).not.toContain('Export ready');
     });
 
     it.each([

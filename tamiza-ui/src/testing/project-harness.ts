@@ -9,7 +9,8 @@ import { routes } from '../app/app.routes';
 import { AuthService } from '../app/core/auth/auth.service';
 import { FormField, ProjectDetails, ProjectRole } from '../app/core/projects/projects.service';
 import { provideVisibleElements, tick } from './cdk';
-import { translocoTesting } from './transloco-testing';
+import { InterfaceLanguage } from '../app/core/i18n/interface-language';
+import { localeTesting, translocoTesting } from './transloco-testing';
 
 export const projectId = 'p1';
 
@@ -45,10 +46,14 @@ export const formFields: FormField[] = [
   { name: 'enumerator', xpath: 'enumerator', type: 'text', label: 'Enumerator' },
 ];
 
-export function configureApp(extraProviders: Provider[] = []) {
+/** The browser entry that chose each language in a spec: Colombian Spanish, American English. */
+const localeOf: Record<InterfaceLanguage, string> = { en: 'en-US', es: 'es-CO' };
+
+export function configureApp(extraProviders: Provider[] = [], lang: InterfaceLanguage = 'en') {
   TestBed.configureTestingModule({
-    imports: [translocoTesting()],
+    imports: [translocoTesting(lang)],
     providers: [
+      localeTesting(localeOf[lang]),
       provideRouter(routes, withComponentInputBinding()),
       provideHttpClient(),
       provideHttpClientTesting(),
@@ -66,8 +71,9 @@ export async function openProjectSection(
   role: ProjectRole,
   overrides: Partial<ProjectDetails> = {},
   providers: Provider[] = [],
+  lang: InterfaceLanguage = 'en',
 ) {
-  const http = configureApp(providers);
+  const http = configureApp(providers, lang);
   const harness = await RouterTestingHarness.create();
   const navigation = harness.navigateByUrl(`/projects/${projectId}/${section}`);
   await settle(harness);

@@ -105,6 +105,17 @@ describe('ProjectPerformance', () => {
       expect(text(byTestId(root, 'computed-at'))).toMatch(/^Computed at .*2026/);
     });
 
+    it('marks a message the API wrote as English, and leaves the translated one alone', async () => {
+      const { http, harness, root } = await openProjectSection('performance', 'analyst');
+      http.expectOne(isPerformance).flush({ title: 'The figures are unavailable.' }, { status: 500, statusText: 'Server Error' });
+      await settle(harness);
+      expect(byTestId(root, 'performance-error')?.getAttribute('lang')).toBe('en');
+
+      (await pressRefresh(root, harness, http)).flush({ code: 'dashboard.timeout', title: 'Timeout' }, { status: 503, statusText: 'Service Unavailable' });
+      await settle(harness);
+      expect(byTestId(root, 'performance-error')?.getAttribute('lang')).toBeNull();
+    });
+
     it('shows the timeout message and no figures, and Refresh tries again', async () => {
       const { http, harness, root } = await openProjectSection('performance', 'analyst');
       http.expectOne(isPerformance).flush({ code: 'dashboard.timeout', title: 'Timeout' }, { status: 503, statusText: 'Service Unavailable' });
@@ -701,6 +712,13 @@ describe('ProjectPerformance', () => {
       const card = root.querySelector('[data-testid="enumerator-card"]')!;
       expect(card.querySelectorAll('p')).toHaveLength(2);
       expect(text(card.querySelectorAll('p')[1])).toBe('8 submissions · mean 1 h 05 min · outliers 1 · last Sep 3, 2026');
+    });
+
+    it('writes the summary of an enumerator with one submission in the singular', async () => {
+      const { root } = await open('viewer');
+      const summaries = [...root.querySelectorAll('[data-testid="enumerator-card"]')].map((card) => text(card.querySelectorAll('p')[1]));
+      expect(summaries).toContain('1 submission · mean — · outliers 0 · last —');
+      expect(summaries.some((summary) => summary.startsWith('5 submissions · '))).toBe(true);
     });
   });
 });

@@ -177,6 +177,8 @@ describe('ProjectSamplingFrame', () => {
       const failure = byTestId(root, 'frame-load-failed')!;
       expect(failure.textContent).toContain('The sampling frame could not be loaded.');
       expect(failure.textContent).toContain('The database is not available.');
+      expect(failure.querySelector('[lang="en"]')!.textContent).toBe('The database is not available.');
+      expect(failure.querySelector('p')!.hasAttribute('lang')).toBe(false); // the heading is the UI's
       for (const id of ['frame-start', 'add-dimension', 'open-import', 'download-frame', 'edit-frame', 'frame-empty']) {
         expect(byTestId(root, id)).toBeNull();
       }
@@ -234,6 +236,9 @@ describe('ProjectSamplingFrame', () => {
       await settle(harness);
 
       expect(byTestId(root, 'targets-grid')!.textContent).toContain('Row 1: The target must be a whole number');
+      const rowMessage = byTestId(root, 'targets-grid')!.querySelector('td[colspan] [lang="en"]')!;
+      expect(rowMessage.textContent).toBe('The target must be a whole number from 0 to 1,000,000.');
+      expect(rowMessage.parentElement!.textContent).toBe('Row 1: The target must be a whole number from 0 to 1,000,000.');
       expect(byTestId(root, 'error-count')!.textContent).toContain('1 problem to fix before saving, in row 1.');
       expect(byTestId(root, 'save-frame')).not.toBeNull();
     });
@@ -435,6 +440,9 @@ describe('ProjectSamplingFrame', () => {
       await settle(harness);
 
       expect(byTestId(overlay(), 'import-errors')!.textContent).toContain('Row 7: The target must be a whole number');
+      const firstError = byTestId(overlay(), 'import-errors')!.querySelector('li')!;
+      expect(firstError.textContent).toBe('Row 7: The target must be a whole number from 0 to 1,000,000.');
+      expect(firstError.querySelector('[lang="en"]')!.textContent).toBe('The target must be a whole number from 0 to 1,000,000.');
       expect(byTestId(overlay(), 'import-errors')!.querySelectorAll('li').length).toBe(20);
       expect(byTestId(overlay(), 'import-errors-more')!.textContent).toContain('and 5 more.');
       expect(byTestId(overlay(), 'apply-import')).toBeNull();
@@ -451,6 +459,7 @@ describe('ProjectSamplingFrame', () => {
       http.expectOne(`${url}/import`).flush({ errors: { file: ['The file needs a target column.'] } }, { status: 400, statusText: 'Bad Request' });
       await settle(harness);
       expect(byTestId(overlay(), 'import-error')!.textContent).toContain('The file needs a target column.');
+      expect(byTestId(overlay(), 'import-error')!.getAttribute('lang')).toBe('en');
 
       await chooseFile(overlay(), harness);
       http.expectOne(`${url}/import`).flush({ errors: { file: ['The file is larger than 5 MB or has more than 10,000 rows.'] } }, { status: 400, statusText: 'Bad Request' });
@@ -718,6 +727,7 @@ describe('ProjectSamplingFrame', () => {
       await click(context, 'create-rows');
 
       expect(document.getElementById('tmz-confirm-message')!.textContent).not.toContain('targets will not be kept');
+      expect(document.getElementById('tmz-confirm-message')!.textContent).toContain("The editor's 1 row will be replaced");
       confirmButton()!.click();
       await settle(context.harness);
 
@@ -804,6 +814,7 @@ describe('ProjectSamplingFrame', () => {
       expect(document.getElementById('tmz-confirm-message')!.textContent).toContain(
         '1 row has values that are not choices of their question and will not be kept.',
       );
+      expect(document.getElementById('tmz-confirm-message')!.textContent).toContain("The editor's 2 rows will be replaced");
       cancelConfirm();
       await settle(context.harness);
       expect(grid(context.root)).toEqual([

@@ -1,12 +1,11 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { DIALOG_DATA, DialogRef } from '@angular/cdk/dialog';
-import { DecimalPipe } from '@angular/common';
 import { Component, LOCALE_ID, Signal, computed, effect, inject, signal, untracked } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { Downloader } from '../../core/download.service';
 import { FormChoice, FormField, FrameTemplateRequest, ProjectsService } from '../../core/projects/projects.service';
-import { Alert, Button, Input, Skeleton, ToastService } from '../../shared/ui';
+import { Alert, ApiLang, Button, Input, Skeleton, ToastService, numberText } from '../../shared/ui';
 import {
   FrameChoice,
   TemplateIssue,
@@ -25,6 +24,7 @@ import {
   templateHeaders,
   templateIssue,
 } from './sampling-frame-fields';
+import { isSingular } from '../../core/i18n/plural';
 
 export interface FrameQuestionsData {
   projectId: string;
@@ -67,7 +67,7 @@ interface Column extends Question {
  */
 @Component({
   selector: 'app-frame-questions-dialog',
-  imports: [TranslocoDirective, Alert, Button, Input, Skeleton],
+  imports: [TranslocoDirective, Alert, ApiLang, Button, Input, Skeleton],
   template: `
     <div
       class="flex h-dvh w-screen flex-col bg-neutral-primary-soft md:h-auto md:max-h-[calc(100dvh-2rem)] md:w-[min(44rem,calc(100vw-2rem))] md:rounded-base md:border md:border-default md:shadow-sm"
@@ -207,7 +207,7 @@ interface Column extends Question {
           <p class="mt-1 text-sm text-fg-danger-strong" data-testid="picker-problem">{{ message }}</p>
         }
         @if (requestError(); as message) {
-          <tmz-alert tone="danger" class="mt-3" data-testid="template-error">{{ message }}</tmz-alert>
+          <tmz-alert tone="danger" class="mt-3" [tmzApiLang]="message" data-testid="template-error">{{ message }}</tmz-alert>
         }
         <div class="mt-3 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <button tmzButton variant="secondary" type="button" (click)="ref.close()">{{ t('common.cancel') }}</button>
@@ -228,7 +228,7 @@ export class FrameQuestionsDialog {
   private readonly downloader = inject(Downloader);
   private readonly toasts = inject(ToastService);
   private readonly transloco = inject(TranslocoService);
-  private readonly decimal = new DecimalPipe(inject(LOCALE_ID));
+  private readonly locale = inject(LOCALE_ID);
 
   protected readonly maxQuestions = maxFrameQuestions;
   protected readonly maxValueLength = maxValueLength;
@@ -302,7 +302,7 @@ export class FrameQuestionsDialog {
       return this.transloco.translate('frame.picker.noneChosen');
     }
     const lengths = this.columns().map((c) => c.values.length).filter((n) => n > 0);
-    const rows = this.transloco.translate(this.count() === 1 ? 'frame.picker.countOne' : 'frame.picker.countMany', { count: this.format(this.count()) });
+    const rows = this.transloco.translate(isSingular(this.count(), this.transloco.getActiveLang()) ? 'frame.picker.countOne' : 'frame.picker.countMany', { count: this.format(this.count()) });
     return lengths.length > 1 ? this.transloco.translate('frame.picker.formula', { formula: lengths.map((n) => this.format(n)).join(' × '), rows }) : rows;
   });
 
@@ -390,7 +390,7 @@ export class FrameQuestionsDialog {
     }
     if (question.list) {
       const n = question.list.length;
-      parts.push(this.transloco.translate(n === 1 ? 'frame.picker.choicesOne' : 'frame.picker.choicesMany', { count: this.format(n) }));
+      parts.push(this.transloco.translate(isSingular(n, this.transloco.getActiveLang()) ? 'frame.picker.choicesOne' : 'frame.picker.choicesMany', { count: this.format(n) }));
     }
     return parts.join(' · ');
   }
@@ -400,7 +400,7 @@ export class FrameQuestionsDialog {
   }
 
   protected format(value: number): string {
-    return this.decimal.transform(value) ?? String(value);
+    return numberText(value, this.locale) ?? String(value);
   }
 
   protected download(): void {
@@ -417,7 +417,7 @@ export class FrameQuestionsDialog {
         this.downloader.start(file.downloadUrl);
         this.ref.close({ kind: 'downloaded' });
         this.toasts.success(
-          this.transloco.translate(file.rowCount === 1 ? 'frame.template.downloadedOne' : 'frame.template.downloadedMany', { count: this.format(file.rowCount) }),
+          this.transloco.translate(isSingular(file.rowCount, this.transloco.getActiveLang()) ? 'frame.template.downloadedOne' : 'frame.template.downloadedMany', { count: this.format(file.rowCount) }),
         );
       },
       error: (error) => {

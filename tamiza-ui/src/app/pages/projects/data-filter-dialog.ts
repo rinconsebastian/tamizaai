@@ -5,7 +5,7 @@ import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { Observable, Subject, catchError, debounceTime, distinctUntilChanged, merge, of, switchMap, tap } from 'rxjs';
 import { ApiErrors } from '../../core/api-error';
 import { DataColumn, DataFilter, FilterOp } from '../../core/projects/data.service';
-import { Alert, Button, FormField, Input } from '../../shared/ui';
+import { Alert, ApiLang, Button, FormField, Input } from '../../shared/ui';
 import { operationsFor } from './data-view';
 
 export interface DataFilterDialogData {
@@ -30,7 +30,7 @@ export const valueSearchDelayMs = 300;
 /** Chooses the condition and values of one column's filter. Full screen on phones, a panel from `md` up. */
 @Component({
   selector: 'app-data-filter-dialog',
-  imports: [TranslocoDirective, Alert, Button, FormField, Input],
+  imports: [TranslocoDirective, Alert, ApiLang, Button, FormField, Input],
   template: `
     <form
       class="flex h-dvh w-screen flex-col overflow-y-auto bg-neutral-primary-soft p-4 md:h-auto md:max-h-[calc(100dvh-2rem)] md:w-[min(34rem,calc(100vw-2rem))] md:rounded-base md:border md:border-default md:p-6 md:shadow-sm"
@@ -101,7 +101,7 @@ export const valueSearchDelayMs = 300;
             </ul>
             <p class="mt-2 text-sm text-body" data-testid="filter-selected">{{ t('cleanData.filter.selected', { count: selected().length }) }}</p>
             @if (fieldError(); as message) {
-              <p class="mt-1 text-sm text-fg-danger-strong" data-testid="field-error">{{ message }}</p>
+              <p class="mt-1 text-sm text-fg-danger-strong" data-testid="field-error" [tmzApiLang]="message">{{ message }}</p>
             }
           </fieldset>
         }
@@ -121,7 +121,7 @@ export const valueSearchDelayMs = 300;
       }
 
       @if (error(); as message) {
-        <tmz-alert tone="danger" class="mt-4" data-testid="filter-error">{{ message }}</tmz-alert>
+        <tmz-alert tone="danger" class="mt-4" data-testid="filter-error" [tmzApiLang]="message">{{ message }}</tmz-alert>
       }
 
       <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">

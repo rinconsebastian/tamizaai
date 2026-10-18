@@ -1,7 +1,7 @@
 import { Dialog } from '@angular/cdk/dialog';
 import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
-import { DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
-import { Component, DestroyRef, ElementRef, Injector, afterNextRender, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
+import { Component, DestroyRef, ElementRef, Injector, LOCALE_ID, afterNextRender, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
@@ -11,12 +11,13 @@ import { Downloader } from '../../core/download.service';
 import { ExportFormat } from '../../core/projects/data.service';
 import { IndicatorEntry, IndicatorsOverview, IndicatorsService, Layout, Widget, maxDashboards } from '../../core/projects/indicators.service';
 import { DashboardEntry } from '../../core/projects/projects.service';
-import { Alert, Badge, Button, Card, ConfirmDialog, Disclosure, DropdownMenu, MenuItem, Skeleton, ToastService, dateTimeFormat } from '../../shared/ui';
+import { Alert, ApiLang, Badge, Button, Card, ConfirmDialog, Disclosure, DropdownMenu, MenuItem, Skeleton, ToastService, DateTimePipe, NumberPipe, numberText } from '../../shared/ui';
 import { DashboardNameAction, DashboardNameData, DashboardNameDialog, DashboardNameResult } from './indicators/dashboard-name-dialog';
 import { Placed } from './indicators/grid-layout';
 import { WidgetDialog, WidgetDialogData, WidgetDialogResult } from './indicators/widget-dialog';
 import { WidgetGrid } from './indicators/widget-grid';
 import { ProjectContext } from './project-context';
+import { countKey, isSingular } from '../../core/i18n/plural';
 
 /** Wait this long after a drag or resize ends before saving the layout, so a run of keystrokes or drags is one request. */
 export const layoutSaveDelayMs = 400;
@@ -32,8 +33,8 @@ export const layoutSaveDelayMs = 400;
 @Component({
   selector: 'app-project-indicators',
   imports: [
-    DatePipe,
-    DecimalPipe,
+    DateTimePipe,
+    NumberPipe,
     NgTemplateOutlet,
     RouterLink,
     TranslocoDirective,
@@ -41,6 +42,7 @@ export const layoutSaveDelayMs = 400;
     CdkMenuItem,
     CdkMenuTrigger,
     Alert,
+    ApiLang,
     Badge,
     Button,
     Card,
@@ -84,7 +86,7 @@ export const layoutSaveDelayMs = 400;
         <!-- Not itself a live region: the header's announces the same text once. -->
         <tmz-alert tone="warning" data-testid="dashboard-notice">
           <div class="flex items-start justify-between gap-3">
-            <p class="min-w-0 break-words" data-testid="dashboard-notice-text">{{ notice.text }}</p>
+            <p class="min-w-0 break-words" [tmzApiLang]="notice.text" data-testid="dashboard-notice-text">{{ notice.text }}</p>
             <button tmzButton variant="ghost" size="sm" type="button" class="shrink-0" (click)="dismissNotice()" data-testid="dashboard-notice-dismiss">{{ t('dashboards.notice.dismiss') }}</button>
           </div>
         </tmz-alert>
@@ -93,7 +95,7 @@ export const layoutSaveDelayMs = 400;
       @if (loading()) {
         <tmz-card><div class="flex flex-col gap-3" aria-busy="true" data-testid="indicators-loading"><tmz-skeleton class="w-1/3" /><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div></tmz-card>
       } @else if (error(); as message) {
-        <tmz-alert tone="danger" data-testid="indicators-error">{{ message }}</tmz-alert>
+        <tmz-alert tone="danger" data-testid="indicators-error"><span [tmzApiLang]="message">{{ message }}</span></tmz-alert>
       } @else if (overview(); as overview) {
         <!-- The indicators, one line each: shown inside the empty state while nothing has published, behind a disclosure after the widgets otherwise. -->
         <ng-template #inventory>
@@ -110,13 +112,13 @@ export const layoutSaveDelayMs = 400;
                 @if (indicator.published) {
                   <tmz-badge tone="success" [attr.title]="indicator.runId ? t('indicators.publishedRun', { run: indicator.runId.slice(0, 8) }) : null">{{ t('indicators.list.published') }}</tmz-badge>
                   <span class="whitespace-nowrap text-xs text-body" data-testid="indicator-published">
-                    {{ t('indicators.published', { time: (indicator.publishedAt | date: dateTimeFormat) }) }}
+                    {{ t('indicators.published', { time: (indicator.publishedAt | dateTime) }) }}
                   </span>
                 } @else {
                   <tmz-badge tone="neutral" data-testid="indicator-unpublished">{{ t('indicators.list.notPublished') }}</tmz-badge>
                 }
                 <span class="min-w-16 whitespace-nowrap text-end tabular-nums text-body">
-                  {{ indicator.rows === null ? '—' : t('indicators.list.rowCount', { count: (indicator.rows | number) }) }}
+                  {{ indicator.rows === null ? '—' : t(key('indicators.list.rowCount', indicator.rows), { count: (indicator.rows | num) }) }}
                 </span>
                 @if (indicator.published) {
                   <button
@@ -157,7 +159,7 @@ export const layoutSaveDelayMs = 400;
               <p class="mt-2 text-sm text-body" data-testid="indicators-empty-viewer">{{ t('indicators.empty.viewer') }}</p>
             }
             @if (widgets().length) {
-              <p class="mt-4 text-sm text-body" data-testid="indicators-empty-widgets">{{ t('indicators.empty.widgets', { count: widgets().length }) }}</p>
+              <p class="mt-4 text-sm text-body" data-testid="indicators-empty-widgets">{{ t(key('indicators.empty.widgets', widgets().length), { count: widgets().length }) }}</p>
             }
             @if (overview.indicators.length) {
               <div class="mt-4 border-t border-default pt-2" data-testid="indicator-table-card">
@@ -240,6 +242,7 @@ export class ProjectIndicators {
   private readonly errors = inject(ApiErrors);
   private readonly toasts = inject(ToastService);
   private readonly transloco = inject(TranslocoService);
+  private readonly locale = inject(LOCALE_ID);
   private readonly dialog = inject(Dialog);
   private readonly confirm = inject(ConfirmDialog);
   private readonly downloader = inject(Downloader);
@@ -318,7 +321,6 @@ export class ProjectIndicators {
   protected readonly exporting = signal<string | null>(null);
   protected readonly allTables = signal(false);
 
-  protected readonly dateTimeFormat = dateTimeFormat;
 
   /** True once any indicator has a published table; until then the page explains how an indicator publishes. */
   protected readonly anyPublished = computed(() => !!this.overview()?.indicators.some((i: IndicatorEntry) => i.published));
@@ -426,6 +428,11 @@ export class ProjectIndicators {
     }
     this.context.notice.set({ dashboardId: first.id, text: this.transloco.translate('dashboards.notice.missing', { name: first.name }) });
     void this.router.navigate(['/projects', this.projectId, 'dashboards', first.id], { replaceUrl: true });
+  }
+
+  /** The key of a count message: its singular form when `count` is 1. */
+  protected key(base: string, count: number): string {
+    return countKey(base, count, this.transloco.getActiveLang());
   }
 
   protected dismissNotice(): void {
@@ -754,7 +761,7 @@ export class ProjectIndicators {
   private async confirmRemoval(dashboard: DashboardEntry, count: number): Promise<void> {
     const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
     const params = { name: dashboard.name, count };
-    const amount = count === 0 ? 'None' : count === 1 ? 'One' : '';
+    const amount = count === 0 ? 'None' : isSingular(count, this.transloco.getActiveLang()) ? 'One' : '';
     const confirmed = await this.confirm.confirm({
       title: t('dashboards.remove.title'),
       message: t(`dashboards.remove.message${amount}`, params),
@@ -939,8 +946,8 @@ export class ProjectIndicators {
       next: (result) => {
         this.exporting.set(null);
         this.downloader.start(result.downloadUrl);
-        const ready = this.transloco.translate('indicators.export.ready', { rows: result.rowCount });
-        this.toasts.success(result.cutCells > 0 ? `${ready} ${this.transloco.translate('cleanData.export.readyCut', { cut: result.cutCells })}` : ready);
+        const ready = this.transloco.translate(this.key('indicators.export.ready', result.rowCount), { rows: numberText(result.rowCount, this.locale) });
+        this.toasts.success(result.cutCells > 0 ? `${ready} ${this.transloco.translate(this.key('cleanData.export.readyCut', result.cutCells), { cut: result.cutCells })}` : ready);
       },
       error: (failure) => {
         this.exporting.set(null);

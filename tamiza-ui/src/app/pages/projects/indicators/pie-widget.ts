@@ -1,4 +1,3 @@
-import { PercentPipe } from '@angular/common';
 import { LOCALE_ID, Component, ElementRef, computed, inject, input, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
@@ -6,6 +5,8 @@ import { observeSize, pivot } from './chart-data';
 import { seriesColor, seriesCount, slicePath } from './chart-scales';
 import { ValueFormatter, plotted } from './format';
 import { TableModel, WidgetTable } from './widget-table';
+import { PctPipe } from '../../../shared/ui';
+import { countKey } from '../../../core/i18n/plural';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
@@ -25,7 +26,7 @@ interface Slice {
  */
 @Component({
   selector: 'app-pie-widget',
-  imports: [PercentPipe, TranslocoDirective, WidgetTable],
+  imports: [PctPipe, TranslocoDirective, WidgetTable],
   template: `
     <ng-container *transloco="let t">
       <p class="shrink-0 text-xs text-body" data-testid="chart-caption">{{ t('indicators.chart.caption', { what: what(), group: config().groupBy }) }}</p>
@@ -54,13 +55,13 @@ interface Slice {
             <li class="flex items-center gap-1.5 py-0.5" data-testid="legend-item">
               <span aria-hidden="true" class="inline-block size-2.5 shrink-0 rounded-sm" [style.background]="slice.color"></span>
               <span class="min-w-0 flex-1 break-all">{{ slice.name }}</span>
-              <span class="tabular-nums">{{ format()(slice.value) }} · {{ slice.share | percent: '1.0-1' }}</span>
+              <span class="tabular-nums">{{ format()(slice.value) }} · {{ slice.share | pct: '1.0-1' }}</span>
             </li>
           }
         </ul>
         </div>
         @if (notDrawn() > 0) {
-          <p class="shrink-0 text-xs text-body" data-testid="pie-skipped">{{ t('indicators.pie.skipped', { count: notDrawn() }) }}</p>
+          <p class="shrink-0 text-xs text-body" data-testid="pie-skipped">{{ t(key('indicators.pie.skipped', notDrawn()), { count: notDrawn() }) }}</p>
         }
       }
     </ng-container>
@@ -124,12 +125,16 @@ export class PieWidget {
     return `${slice.name}: ${this.format()(slice.value)} (${new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }).format(slice.share)})`;
   }
 
+  protected key(base: string, count: number): string {
+    return countKey(base, count, this.transloco.getActiveLang());
+  }
+
   protected summary(t: Translate): string {
     const slices = this.slices();
     if (!slices.length) {
       return t('indicators.chart.summaryEmpty', { what: this.what() });
     }
-    return t('indicators.chart.summary.pie', {
+    return t(countKey('indicators.chart.summary.pie', slices.length, this.transloco.getActiveLang()), {
       what: this.what(),
       group: this.config().groupBy,
       count: slices.length,
