@@ -33,6 +33,7 @@ export function details(role: ProjectRole, overrides: Partial<ProjectDetails> = 
     createdAt: '2026-10-01T12:00:00Z',
     unavailableFormVersions: 0,
     timeZone: 'UTC',
+    dashboards: [{ id: 'd1', name: 'Indicators' }],
     ...overrides,
   };
 }

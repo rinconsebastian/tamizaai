@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { FormChoice } from '../../core/projects/projects.service';
+import { DashboardEntry, FormChoice, ProjectDetails } from '../../core/projects/projects.service';
 import { details, projectId } from '../../../testing/project-harness';
 import { ProjectContext } from './project-context';
 
@@ -72,5 +72,74 @@ describe('ProjectContext', () => {
     http.expectOne(url).flush(choices);
 
     expect(context.formChoices()).toEqual(choices);
+  });
+
+  describe('the dashboards', () => {
+    const detailsUrl = `/api/v1/projects/${projectId}`;
+    const three: DashboardEntry[] = [
+      { id: 'd1', name: 'Housing' },
+      { id: 'd2', name: 'Health' },
+      { id: 'd3', name: 'Field' },
+    ];
+
+    it('lists the project\'s dashboards from its details, none before they are read', () => {
+      TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), ProjectContext] });
+      const context = TestBed.inject(ProjectContext);
+      expect(context.dashboards()).toEqual([]);
+      expect(context.notice()).toBeNull();
+
+      context.update(details('viewer', { dashboards: three }));
+
+      expect(context.dashboards()).toEqual(three);
+    });
+
+    it('replaces the list in the details themselves, keeping the rest of them', () => {
+      const { context, http } = setup();
+      const before = context.project()!;
+
+      context.setDashboards([three[1], three[0]]);
+
+      expect(context.dashboards()).toEqual([three[1], three[0]]);
+      expect(context.project()).toEqual({ ...before, dashboards: [three[1], three[0]] });
+      http.expectNone(detailsUrl);
+    });
+
+    it('reads the details again, applies them, then emits them to the subscriber', () => {
+      const { context, http } = setup();
+      const fresh = details('analyst', { name: 'Renamed', dashboards: three });
+      const seen: { emitted: ProjectDetails; applied: DashboardEntry[] }[] = [];
+
+      context.reload().subscribe((project) => seen.push({ emitted: project, applied: context.dashboards() }));
+      const request = http.expectOne(detailsUrl);
+      expect(request.request.method).toBe('GET');
+      expect(seen).toEqual([]);
+      request.flush(fresh);
+
+      expect(seen).toEqual([{ emitted: fresh, applied: three }]);
+      expect(context.project()).toEqual(fresh);
+      http.verify();
+    });
+
+    it('lets the subscriber know a reload failed, and keeps the details shown', () => {
+      const { context, http } = setup();
+      const before = context.project();
+      let failed = false;
+
+      context.reload().subscribe({ error: () => (failed = true) });
+      http.expectOne(detailsUrl).flush(null, { status: 500, statusText: 'Server Error' });
+
+      expect(failed).toBe(true);
+      expect(context.project()).toBe(before);
+    });
+
+    it('still refreshes the details with no one waiting for them', () => {
+      const { context, http } = setup();
+
+      context.refresh();
+      http.expectOne(detailsUrl).flush(details('analyst', { dashboards: three }));
+
+      expect(context.dashboards()).toEqual(three);
+      http.verify();
+    });
   });
 });

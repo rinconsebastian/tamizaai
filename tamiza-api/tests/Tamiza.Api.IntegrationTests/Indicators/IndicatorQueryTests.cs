@@ -607,7 +607,7 @@ public sealed class IndicatorQueryTests(PostgresFixture postgres)
     public async Task Another_projects_table_is_never_read()
     {
         await using var h = await WithCoverageAsync();
-        var other = await h.AddOtherProjectAsync();
+        var (other, _) = await h.AddOtherProjectAsync();
 
         var response = await h.Admin.PostAsJsonAsync(
             IndicatorsHarness.UrlOf(other) + "/query", new { config = new { indicator = "coverage", groupBy = "municipality" } });

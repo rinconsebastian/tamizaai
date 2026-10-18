@@ -7,6 +7,7 @@ using Tamiza.Api.Auth;
 using Tamiza.Api.Configuration;
 using Tamiza.Api.Data;
 using Tamiza.Api.Http;
+using Tamiza.Api.Indicators;
 using Tamiza.Api.Ingestion;
 using Tamiza.Api.Kobo;
 
@@ -122,10 +123,15 @@ public static partial class ProjectEndpoints
         }
 
         db.ProjectMembers.Add(new ProjectMember { ProjectId = project.Id, UserId = user.Id, Role = ProjectRole.Admin, CreatedAt = now });
+        // A project always has a dashboard of its own, from the start (design D7).
+        var dashboard = DashboardEndpoints.FirstDashboard(project.Id, user, now);
+        db.Dashboards.Add(dashboard);
         await db.SaveChangesAsync(ct);
         ingestion.Wake();
 
-        var details = ToDetails(project, ProjectRole.Admin, tokenUnreadable: false, unavailableFormVersions: 0, frameDimensions: null);
+        var details = ToDetails(
+            project, ProjectRole.Admin, tokenUnreadable: false, unavailableFormVersions: 0, frameDimensions: null,
+            [new DashboardEntry(dashboard.Id, dashboard.Name)]);
         var webhook = new WebhookSettings(WebhookUrl(options.Value, project.Id), WebhookSecret.Username, webhookSecret, false);
         return TypedResults.Created($"/api/v1/projects/{project.Id}", new CreatedProject(details, webhook));
     }
@@ -309,10 +315,12 @@ public static partial class ProjectEndpoints
             tokenUnreadable ?? !secrets.TryUnprotect(project.EncryptedApiToken, out _),
             await versions.CountUnavailableAsync(project.Id, ct),
             // Only the dimensions: the check needs the fields they map to, not the frame's thousands of targets.
-            await db.SamplingFrames.AsNoTracking().Where(f => f.ProjectId == project.Id).Select(f => f.Dimensions).SingleOrDefaultAsync(ct));
+            await db.SamplingFrames.AsNoTracking().Where(f => f.ProjectId == project.Id).Select(f => f.Dimensions).SingleOrDefaultAsync(ct),
+            await DashboardEndpoints.EntriesAsync(db, project.Id, ct));
 
     private static ProjectDetails ToDetails(
-        Project project, ProjectRole role, bool tokenUnreadable, int unavailableFormVersions, IReadOnlyList<SamplingDimension>? frameDimensions) => new(
+        Project project, ProjectRole role, bool tokenUnreadable, int unavailableFormVersions, IReadOnlyList<SamplingDimension>? frameDimensions,
+        IReadOnlyList<DashboardEntry> dashboards) => new(
         project.Id,
         project.Name,
         project.KoboServerUrl,
@@ -325,5 +333,6 @@ public static partial class ProjectEndpoints
         tokenUnreadable,
         project.CreatedAt,
         unavailableFormVersions,
-        project.TimeZone);
+        project.TimeZone,
+        dashboards);
 }

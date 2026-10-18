@@ -53,6 +53,7 @@ api.MapIngestionEndpoints();
 api.MapPerformanceEndpoints();
 api.MapDataEndpoints();
 api.MapIndicatorEndpoints();
+api.MapDashboardEndpoints();
 api.MapScriptEndpoints();
 api.MapRunEndpoints();
 api.MapReferenceTableEndpoints();

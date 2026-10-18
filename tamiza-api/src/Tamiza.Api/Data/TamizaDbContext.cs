@@ -45,6 +45,8 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
 
     public DbSet<FormVersion> FormVersions => Set<FormVersion>();
 
+    public DbSet<Dashboard> Dashboards => Set<Dashboard>();
+
     public DbSet<DashboardWidget> DashboardWidgets => Set<DashboardWidget>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -364,6 +366,22 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             version.HasOne<Project>().WithMany().HasForeignKey(v => v.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<Dashboard>(dashboard =>
+        {
+            dashboard.ToTable("dashboards", table => table.HasCheckConstraint("ck_dashboards_position", "position >= 0"));
+            dashboard.HasKey(d => d.Id);
+            dashboard.Property(d => d.Id).HasDefaultValueSql("gen_random_uuid()");
+            dashboard.Property(d => d.Name).HasColumnType("text");
+            dashboard.Property(d => d.NormalizedName).HasColumnType("text");
+            dashboard.Property(d => d.CreatedAt).HasDefaultValueSql("now()");
+            dashboard.Property(d => d.UpdatedAt).HasDefaultValueSql("now()");
+            // One name per project whatever its case; also serves the lookups by project, so the project has no index of its own.
+            dashboard.HasIndex(d => new { d.ProjectId, d.NormalizedName }).IsUnique();
+            dashboard.HasOne<Project>().WithMany().HasForeignKey(d => d.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            dashboard.HasOne<User>().WithMany().HasForeignKey(d => d.CreatedBy).OnDelete(DeleteBehavior.Restrict);
+            dashboard.HasOne<User>().WithMany().HasForeignKey(d => d.UpdatedBy).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<DashboardWidget>(widget =>
         {
             widget.ToTable("dashboard_widgets", table => table.HasCheckConstraint(
@@ -377,7 +395,10 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             widget.Property(w => w.CreatedAt).HasDefaultValueSql("now()");
             widget.Property(w => w.UpdatedAt).HasDefaultValueSql("now()");
             widget.HasIndex(w => w.ProjectId);
+            widget.HasIndex(w => w.DashboardId);
             widget.HasOne<Project>().WithMany().HasForeignKey(w => w.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            // Removing a dashboard removes its widgets; a project's deletion cascades to both tables in one statement.
+            widget.HasOne<Dashboard>().WithMany().HasForeignKey(w => w.DashboardId).OnDelete(DeleteBehavior.Cascade);
             widget.HasOne<User>().WithMany().HasForeignKey(w => w.CreatedBy).OnDelete(DeleteBehavior.Restrict);
             widget.HasOne<User>().WithMany().HasForeignKey(w => w.UpdatedBy).OnDelete(DeleteBehavior.Restrict);
         });

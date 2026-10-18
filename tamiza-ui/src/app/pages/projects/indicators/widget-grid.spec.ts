@@ -3,7 +3,7 @@ import { vi } from 'vitest';
 import { settle } from '../../../../testing/project-harness';
 import { Layout } from '../../../core/projects/indicators.service';
 import { ChartTooltips } from '../../../shared/ui';
-import { Context, all, answerQueries, clearOverlay, indicatorsUrl, isPatch, open, overview, result, row, text, wait, widget } from './indicators-testing';
+import { Context, all, answerLoad, answerQueries, clearOverlay, isPatch, open, result, row, text, wait, widget, widgetUrl } from './indicators-testing';
 import { layoutSaveDelayMs } from '../project-indicators';
 
 const rows = result([row('Cali', 75)]);
@@ -139,7 +139,7 @@ describe('the widget grid', () => {
       await wait(layoutSaveDelayMs + 100);
       const requests = patches(context);
       expect(requests).toHaveLength(1);
-      expect(requests[0].request.url).toBe(`${indicatorsUrl}/widgets/w1`);
+      expect(requests[0].request.url).toBe(widgetUrl('w1'));
       expect(requests[0].request.body).toEqual({ layout: { x: 0, y: 3, w: 6, h: 4 } });
       requests[0].flush(widget('w1', { layout: { x: 0, y: 3, w: 6, h: 4 } }));
       await settle(context.harness);
@@ -195,9 +195,7 @@ describe('the widget grid', () => {
       patches(context)[0].flush({ title: 'x' }, { status: 403, statusText: 'Forbidden' });
       await settle(context.harness);
 
-      const reload = context.http.expectOne((r) => r.method === 'GET' && r.url === indicatorsUrl);
-      reload.flush(overview([left, right]));
-      await settle(context.harness);
+      await answerLoad(context, [left, right]); // the overview and the dashboard, read again
       await answerQueries(context, rows);
       expect(place(context, 'w1')).toEqual({ column: '1 / span 6', row: '1 / span 4' });
     }, 10000);

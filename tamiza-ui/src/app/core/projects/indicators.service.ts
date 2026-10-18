@@ -3,9 +3,11 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { DataColumn, DataColumnType, DataExport, DataFilter, DataValue, ExportFormat } from './data.service';
 import { IndicatorFormat } from './pipeline.service';
+import { DashboardEntry } from './projects.service';
 
 // Mirrors Tamiza.Api/Indicators/*. A widget is one row of tamiza.dashboard_widgets: a title, a chart type, a query over the
-// table one indicator script published (config) and a place on the 12-column grid (layout).
+// table one indicator script published (config) and a place on the 12-column grid (layout). It belongs to one of the project's
+// own dashboards (tamiza.dashboards), each a grid of its own.
 
 export type ChartType = 'stat' | 'bar' | 'column' | 'line' | 'histogram' | 'pie' | 'map';
 
@@ -22,6 +24,10 @@ export const maxBuckets = 100;
 export const defaultBuckets = 10;
 export const maxFilters = 50;
 export const maxTitleLength = 200;
+/** A dashboard's name, once trimmed (`DashboardValidation.MaxNameLength`). */
+export const maxDashboardNameLength = 40;
+/** The most dashboards a project can hold (`IndicatorDashboardOptions.MaxDashboards`), until the overview says so. */
+export const maxDashboards = 7;
 export const maxTooltipItems = 5;
 export const maxTooltipLabel = 80;
 
@@ -87,6 +93,8 @@ export interface WidgetConfig {
 
 export interface Widget {
   id: string;
+  /** The dashboard the widget is on. */
+  dashboardId: string;
   title: string;
   chartType: ChartType;
   config: WidgetConfig;
@@ -107,10 +115,15 @@ export interface IndicatorEntry {
   rows: number | null;
 }
 
+/** What every dashboard of the project shows: the indicators, and the limits (`maxWidgets` counts the widgets of one dashboard). */
 export interface IndicatorsOverview {
   indicators: IndicatorEntry[];
+  limits: { maxWidgets: number; maxQueryRows: number; maxDashboards: number };
+}
+
+/** One of the project's dashboards with its widgets, ordered top to bottom then left to right. */
+export interface Dashboard extends DashboardEntry {
   widgets: Widget[];
-  limits: { maxWidgets: number; maxQueryRows: number };
 }
 
 /** The columns of an indicator's published table; `published` is false (and `columns` empty) while it has none. */
@@ -150,7 +163,8 @@ export interface WidgetDraft {
   layout?: Layout;
 }
 
-export type WidgetPatch = Partial<Pick<Widget, 'title' | 'chartType' | 'config' | 'layout'>>;
+/** A `dashboardId` other than the widget's moves it there, below that dashboard's widgets; a layout sent with it is ignored. */
+export type WidgetPatch = Partial<Pick<Widget, 'title' | 'chartType' | 'config' | 'layout' | 'dashboardId'>>;
 
 export function emptyConfig(indicator = ''): WidgetConfig {
   return { indicator, measure: null, ratio: null, groupBy: null, filters: [], geometryColumn: null, buckets: null, sort: null, tooltip: [], basemap: null };
@@ -175,25 +189,72 @@ export class IndicatorsService {
     return this.http.post<QueryResult>(`${this.url(projectId)}/query`, chartType ? { config, chartType } : { config });
   }
 
-  create(projectId: string, draft: WidgetDraft): Observable<Widget> {
-    return this.http.post<Widget>(`${this.url(projectId)}/widgets`, draft);
-  }
-
-  /** Partial: a move sends only the layout. */
-  update(projectId: string, widgetId: string, patch: WidgetPatch): Observable<Widget> {
-    return this.http.patch<Widget>(`${this.url(projectId)}/widgets/${widgetId}`, patch);
-  }
-
-  remove(projectId: string, widgetId: string): Observable<void> {
-    return this.http.delete<void>(`${this.url(projectId)}/widgets/${widgetId}`);
-  }
-
   /** Prepares a file with the whole published table of one indicator; the result has the single-use link that downloads it. */
   export(projectId: string, indicator: string, format: ExportFormat): Observable<DataExport> {
     return this.http.post<DataExport>(`${this.url(projectId)}/${encodeURIComponent(indicator)}/exports`, { format });
   }
 
+  // Dashboards. A dashboard the project no longer has is a 404 with the code `dashboards.notFound`, on its own routes and its widgets'.
+
+  dashboard(projectId: string, dashboardId: string): Observable<Dashboard> {
+    return this.http.get<Dashboard>(this.dashboardUrl(projectId, dashboardId));
+  }
+
+  /** Placed after the project's other dashboards. */
+  addDashboard(projectId: string, name: string): Observable<DashboardEntry> {
+    return this.http.post<DashboardEntry>(this.dashboardsUrl(projectId), { name });
+  }
+
+  renameDashboard(projectId: string, dashboardId: string, name: string): Observable<DashboardEntry> {
+    return this.http.patch<DashboardEntry>(this.dashboardUrl(projectId, dashboardId), { name });
+  }
+
+  /** Removes the dashboard with its widgets; the project's only dashboard is refused (`dashboards.lastOne`). */
+  removeDashboard(projectId: string, dashboardId: string): Observable<void> {
+    return this.http.delete<void>(this.dashboardUrl(projectId, dashboardId));
+  }
+
+  /**
+   * Puts the dashboards in the order of `dashboardIds` and answers the new list. `expectedIds` is the order the page shows: when the
+   * project's order differs, nothing changes and the answer is a 409 `dashboards.orderChanged`.
+   */
+  reorderDashboards(projectId: string, expectedIds: string[], dashboardIds: string[]): Observable<DashboardEntry[]> {
+    return this.http.put<DashboardEntry[]>(`${this.dashboardsUrl(projectId)}/order`, { expectedIds, dashboardIds });
+  }
+
+  /** Copies the dashboard and its widgets under a new name, right after the original. */
+  duplicateDashboard(projectId: string, dashboardId: string, name: string): Observable<DashboardEntry> {
+    return this.http.post<DashboardEntry>(`${this.dashboardUrl(projectId, dashboardId)}/copies`, { name });
+  }
+
+  // Widgets, on the dashboard they belong to.
+
+  create(projectId: string, dashboardId: string, draft: WidgetDraft): Observable<Widget> {
+    return this.http.post<Widget>(this.widgetsUrl(projectId, dashboardId), draft);
+  }
+
+  /** Partial: a drag sends only the layout. */
+  update(projectId: string, dashboardId: string, widgetId: string, patch: WidgetPatch): Observable<Widget> {
+    return this.http.patch<Widget>(`${this.widgetsUrl(projectId, dashboardId)}/${widgetId}`, patch);
+  }
+
+  remove(projectId: string, dashboardId: string, widgetId: string): Observable<void> {
+    return this.http.delete<void>(`${this.widgetsUrl(projectId, dashboardId)}/${widgetId}`);
+  }
+
   private url(projectId: string): string {
     return `${base}/${projectId}/indicators`;
+  }
+
+  private dashboardsUrl(projectId: string): string {
+    return `${base}/${projectId}/dashboards`;
+  }
+
+  private dashboardUrl(projectId: string, dashboardId: string): string {
+    return `${this.dashboardsUrl(projectId)}/${dashboardId}`;
+  }
+
+  private widgetsUrl(projectId: string, dashboardId: string): string {
+    return `${this.dashboardUrl(projectId, dashboardId)}/widgets`;
   }
 }

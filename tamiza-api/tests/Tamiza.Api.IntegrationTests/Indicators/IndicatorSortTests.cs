@@ -281,7 +281,7 @@ public sealed class IndicatorSortTests(PostgresFixture postgres)
         var id = (await h.AddWidgetAsync(new { title = "Plain", chartType = "column", config = new { indicator = "ranked", groupBy = "municipality" } })).GetProperty("id").GetGuid();
         await h.ExecuteAsync("UPDATE tamiza.dashboard_widgets SET config = config - 'sort' WHERE id = @id", ("id", id));
 
-        var widget = (await h.GetAsync()).GetProperty("widgets")[0];
+        var widget = (await h.GetWidgetsAsync())[0];
         var result = await h.QueryAsync(widget.GetProperty("config"), "column");
 
         Assert.Equal(JsonValueKind.Null, widget.GetProperty("config").GetProperty("sort").ValueKind);
@@ -305,18 +305,18 @@ public sealed class IndicatorSortTests(PostgresFixture postgres)
     // Widgets
 
     [Fact]
-    public async Task A_column_widget_keeps_its_sort_as_saved_and_returns_it_from_the_overview()
+    public async Task A_column_widget_keeps_its_sort_as_saved_and_returns_it_from_the_dashboard()
     {
         await using var h = await WithAsync(Rows(Row("Cali")));
         var sort = Sort("column", "municipality", "text", "desc");
 
         var widget = await h.AddWidgetAsync(new { title = "Sorted", chartType = "column", config = Config(sort) });
-        var overview = await h.GetAsync();
+        var widgets = await h.GetWidgetsAsync();
 
         var saved = widget.GetProperty("config").GetProperty("sort");
         Assert.Equal(("column", "municipality", "text", "desc"),
             (saved.GetProperty("by").GetString(), saved.GetProperty("column").GetString(), saved.GetProperty("compareAs").GetString(), saved.GetProperty("direction").GetString()));
-        Assert.Equal(widget.ToString(), overview.GetProperty("widgets")[0].ToString());
+        Assert.Equal(widget.ToString(), widgets[0].ToString());
     }
 
     [Fact]
@@ -349,8 +349,8 @@ public sealed class IndicatorSortTests(PostgresFixture postgres)
         await using var h = await WithAsync(Rows(Row("Cali")));
         var id = (await h.AddWidgetAsync(new { title = "Sorted", chartType = "column", config = Config(Sort("value", direction: "desc")) })).GetProperty("id").GetGuid();
 
-        var line = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { chartType = "line" });
-        var moved = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { layout = new { x = 3, y = 0, w = 3, h = 2 } });
+        var line = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { chartType = "line" });
+        var moved = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { layout = new { x = 3, y = 0, w = 3, h = 2 } });
 
         Assert.Equal(HttpStatusCode.BadRequest, line.StatusCode);
         Assert.Contains("config.sort", (await line.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors").EnumerateObject().Select(p => p.Name));

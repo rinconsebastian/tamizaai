@@ -1,5 +1,5 @@
 import { DIALOG_DATA, Dialog, DialogRef } from '@angular/cdk/dialog';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, Signal, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { Observable, catchError, of, switchMap, tap } from 'rxjs';
@@ -14,6 +14,7 @@ import {
   IndicatorsService,
   Widget,
   WidgetConfig,
+  WidgetPatch,
   chartTypes,
   emptyConfig,
   maxBuckets,
@@ -27,6 +28,7 @@ import {
   WidgetTooltipItem,
   basemapKinds,
 } from '../../../core/projects/indicators.service';
+import { DashboardEntry } from '../../../core/projects/projects.service';
 import { Alert, Button, Disclosure, FormField, Input } from '../../../shared/ui';
 import { DataFilterDialog, DataFilterDialogData, DataFilterDialogResult } from '../data-filter-dialog';
 import { describeFilter, normalizeFilter } from '../data-view';
@@ -34,12 +36,21 @@ import { WidgetView, savedConfig } from './widget-view';
 
 export interface WidgetDialogData {
   projectId: string;
+  /** The dashboard the dialog is opened on: a new widget is added to it, and the edited widget is on it. */
+  dashboardId: string;
+  /** The project's dashboards as the page knows them, kept current: an edited widget can move to another of them (design D9). */
+  dashboards: Signal<DashboardEntry[]>;
   /** The widget to edit; null for a new one. */
   widget: Widget | null;
   /** The project's indicators, whether or not they have published. */
   indicators: IndicatorEntry[];
   timeZone: string;
+  /** Told when the API refuses the dashboard chosen (removed meanwhile, or full): the page's list of dashboards may be out of date. */
+  refused?: () => void;
 }
+
+/** The widget saved, or `gone` when its dashboard no longer exists (`dashboards.notFound`), for the page to catch up. */
+export type WidgetDialogResult = Widget | { gone: true };
 
 function sortKeyOf(sort: WidgetSort | null): string {
   return !sort ? '' : sort.by === 'value' ? 'value' : `column:${sort.column ?? ''}`;
@@ -54,7 +65,9 @@ function ownComparison(type: string): 'text' | 'number' | null {
 export const previewDelayMs = 400;
 
 type Mode = 'measure' | 'ratio';
-type Problems = Partial<Record<'title' | 'indicator' | 'measure' | 'ratio' | 'groupBy' | 'geometryColumn' | 'buckets' | 'sort' | 'tooltip' | 'basemap', string>>;
+type Problems = Partial<
+  Record<'title' | 'dashboardId' | 'indicator' | 'measure' | 'ratio' | 'groupBy' | 'geometryColumn' | 'buckets' | 'sort' | 'tooltip' | 'basemap', string>
+>;
 /** What the server refused in one tooltip item. */
 type ItemProblems = Partial<Record<'column' | 'label' | 'format', string>>;
 
@@ -64,7 +77,8 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
  * Adds or edits a widget (design D6, D8): its chart type and title, its query (the indicator, a measure or a ratio of two numeric
  * columns, the group-by column, filters, the geometry column of a map, the buckets of a histogram) and a live preview from the
  * same query endpoint that renders a saved widget. The columns offered are those of the chosen indicator's published table. A draft
- * the server refuses shows that refusal where the preview is, never the previous chart.
+ * the server refuses shows that refusal where the preview is, never the previous chart. An edited widget can move to another of the
+ * project's dashboards (design D9 of add-multiple-dashboards).
  */
 @Component({
   selector: 'app-widget-dialog',
@@ -80,7 +94,8 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
       <h2 id="widget-dialog-title" class="break-words text-lg font-medium text-heading">{{ data.widget ? t('indicators.dialog.editTitle') : t('indicators.dialog.addTitle') }}</h2>
 
       <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
-      <div class="flex min-w-0 flex-col gap-4">
+      <!-- Every control here changes the widget, so a change marks the form edited; the Dashboard select alone does not (see touched). -->
+      <div class="flex min-w-0 flex-col gap-4" (input)="touched($event)" (change)="touched($event)">
       <div class="grid gap-4 sm:grid-cols-2">
         <tmz-form-field [label]="t('indicators.dialog.chartType')" fieldId="widgetType">
           <select tmzInput id="widgetType" (change)="setType($any($event.target).value)" data-testid="dialog-chart-type">
@@ -93,6 +108,18 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
           <input tmzInput id="widgetTitle" autocomplete="off" [attr.maxlength]="maxTitleLength" [value]="title()" (input)="title.set($any($event.target).value)" data-testid="dialog-title" />
         </tmz-form-field>
       </div>
+
+      @if (offersDashboards()) {
+        <div class="grid gap-4 sm:grid-cols-2">
+          <tmz-form-field [label]="t('indicators.dialog.dashboard')" fieldId="widgetDashboard" [error]="shown().dashboardId" [hint]="t('indicators.dialog.dashboardHelp')">
+            <select tmzInput id="widgetDashboard" (change)="setDashboard($any($event.target).value)" data-testid="dialog-dashboard">
+              @for (dashboard of data.dashboards(); track dashboard.id) {
+                <option [value]="dashboard.id" [selected]="dashboard.id === destination()">{{ dashboard.name }}</option>
+              }
+            </select>
+          </tmz-form-field>
+        </div>
+      }
 
       <tmz-form-field [label]="t('indicators.dialog.indicator')" fieldId="widgetIndicator" [error]="shown().indicator">
         <select tmzInput id="widgetIndicator" (change)="pick($any($event.target).value)" data-testid="dialog-indicator">
@@ -351,7 +378,7 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
 })
 export class WidgetDialog {
   protected readonly data = inject<WidgetDialogData>(DIALOG_DATA);
-  protected readonly ref = inject<DialogRef<Widget>>(DialogRef);
+  protected readonly ref = inject<DialogRef<WidgetDialogResult>>(DialogRef);
   private readonly service = inject(IndicatorsService);
   private readonly errors = inject(ApiErrors);
   private readonly dialog = inject(Dialog);
@@ -370,6 +397,23 @@ export class WidgetDialog {
   private readonly start = this.data.widget?.config ?? emptyConfig();
   /** The filters start open only for a widget that already has some; adding the first one never closes or reopens it. */
   protected readonly startsWithFilters = this.start.filters.length > 0;
+
+  /** The dashboard chosen for the widget: its own until another is chosen (design D9). */
+  private readonly chosenDashboard = signal(this.data.dashboardId);
+  /**
+   * The dashboard the select shows and the save sends: the one chosen while the project lists it, the widget's own once a reload of
+   * the project dropped it (another member removed it).
+   */
+  protected readonly destination = computed(() => {
+    const chosen = this.chosenDashboard();
+    return this.data.dashboards().some((d) => d.id === chosen) ? chosen : this.data.dashboardId;
+  });
+  /**
+   * A control other than the Dashboard select changed the widget. Until one does, saving a moved widget sends the move alone, never
+   * the draft: the draft is recomputed from the saved query and can differ from it where a script changed the table, which would
+   * refuse a widget that only moves (design D9).
+   */
+  private edited = false;
 
   protected readonly chartType = signal<ChartType>(this.data.widget?.chartType ?? 'column');
   protected readonly title = signal(this.data.widget?.title ?? '');
@@ -417,6 +461,12 @@ export class WidgetDialog {
   private readonly serverFieldErrors = signal<Problems>({});
   /** What the server refused in each tooltip item, by position. */
   protected readonly itemProblems = signal<Record<number, ItemProblems>>({});
+
+  /**
+   * The Dashboard select: when editing, in a project with another dashboard to move to. It stays while it shows the server's refusal,
+   * even when the reload that followed left the project one dashboard.
+   */
+  protected readonly offersDashboards = computed(() => !!this.data.widget && (this.data.dashboards().length > 1 || !!this.serverFieldErrors().dashboardId));
 
   protected readonly entry = computed(() => this.data.indicators.find((i) => i.name === this.indicator()) ?? null);
 
@@ -610,6 +660,23 @@ export class WidgetDialog {
     return describeFilter(filter, t);
   }
 
+  /** Choosing another dashboard moves the widget; it is not an edit of the widget. */
+  protected setDashboard(id: string): void {
+    this.chosenDashboard.set(id);
+    this.serverFieldErrors.update(({ dashboardId: _dashboardId, ...others }) => others);
+  }
+
+  /**
+   * Marks the form edited when one of its controls changes, except the Dashboard select (a move) and the column picked before a
+   * filter is added (nothing saved changes until the filter is). The buttons that change the widget mark it themselves.
+   */
+  protected touched(event: Event): void {
+    const id = (event.target as HTMLElement | null)?.id;
+    if (id !== 'widgetDashboard' && id !== 'widgetFilterColumn') {
+      this.edited = true;
+    }
+  }
+
   protected setType(value: string): void {
     this.chartType.set(value as ChartType);
     this.serverFieldErrors.set({});
@@ -695,17 +762,20 @@ export class WidgetDialog {
 
   protected addTooltip(): void {
     if (this.tooltip().length < maxTooltipItems) {
+      this.edited = true;
       this.tooltip.update((items) => [...items, { column: '', label: null, format: null }]);
     }
   }
 
   protected removeTooltip(index: number): void {
+    this.edited = true;
     this.tooltip.update((items) => items.filter((_, i) => i !== index));
     this.itemProblems.set({});
     this.serverFieldErrors.update(({ tooltip: _tooltip, ...others }) => others);
   }
 
   protected moveTooltip(index: number, by: -1 | 1): void {
+    this.edited = true;
     this.tooltip.update((items) => {
       const to = index + by;
       if (to < 0 || to >= items.length) {
@@ -737,6 +807,7 @@ export class WidgetDialog {
   }
 
   protected removeFilter(column: string): void {
+    this.edited = true;
     this.filters.update((list) => list.filter((f) => f.column !== column));
   }
 
@@ -772,6 +843,7 @@ export class WidgetDialog {
       if ('remove' in result) {
         this.removeFilter(columnName);
       } else {
+        this.edited = true;
         const normalized = normalizeFilter(result.filter);
         this.filters.update((list) => (existing ? list.map((f) => (f.column === columnName ? normalized : f)) : [...list, normalized]));
       }
@@ -788,22 +860,37 @@ export class WidgetDialog {
     return this.service.query(this.data.projectId, { ...config, filters: [...others, normalizeFilter(filter)] }, this.chartType());
   }
 
+  /**
+   * Adds the widget, or saves the edited one: the whole form, with the dashboard chosen when it moves. A move with nothing else
+   * changed sends the dashboard alone, so neither the form's checks nor the server's can refuse a stale query (design D9).
+   */
   protected save(): void {
-    this.submitted.set(true);
     this.serverFieldErrors.set({});
     this.itemProblems.set({});
     this.error.set(null);
-    if (Object.keys(this.problems()).length) {
-      return;
+    const { projectId, dashboardId, widget } = this.data;
+    const target = widget && this.destination() !== dashboardId ? this.destination() : null;
+    const moveOnly = target !== null && !this.edited;
+    if (!moveOnly) {
+      this.submitted.set(true);
+      if (Object.keys(this.problems()).length) {
+        return;
+      }
     }
     const body = { title: this.title().trim(), chartType: this.chartType(), config: this.draft() };
+    const patch: WidgetPatch = target === null ? body : moveOnly ? { dashboardId: target } : { ...body, dashboardId: target };
     this.busy.set(true);
-    const request = this.data.widget ? this.service.update(this.data.projectId, this.data.widget.id, body) : this.service.create(this.data.projectId, body);
+    const request = widget ? this.service.update(projectId, dashboardId, widget.id, patch) : this.service.create(projectId, dashboardId, body);
     request.subscribe({
-      next: (widget) => this.ref.close(widget),
+      next: (saved) => this.ref.close(saved),
       error: (failure) => {
         this.busy.set(false);
         const parsed = this.errors.parse(failure);
+        if (parsed.code === 'dashboards.notFound') {
+          // Another member removed the dashboard: nothing was saved, and the page takes the member to the first one.
+          this.ref.close({ gone: true });
+          return;
+        }
         const fields: Problems = {};
         const items: Record<number, ItemProblems> = {};
         for (const [path, message] of Object.entries(parsed.fieldErrors)) {
@@ -821,6 +908,11 @@ export class WidgetDialog {
         this.itemProblems.set(items);
         const others = Object.entries(parsed.fieldErrors).filter(([path]) => !this.itemFor(path) && !this.fieldFor(path));
         this.error.set(Object.keys(fields).length && !others.length ? null : others.length ? others.map(([, message]) => message).join(' ') : parsed.message);
+        if (fields.dashboardId) {
+          // The dashboard chosen was removed meanwhile, or is full: the project is read again, so a removed one leaves the select
+          // and the tab row (design D9).
+          this.data.refused?.();
+        }
       },
     });
   }
@@ -837,6 +929,7 @@ export class WidgetDialog {
 
   private fieldFor(path: string): keyof Problems | null {
     const name = path.toLowerCase();
+    if (name === 'dashboardid') return 'dashboardId';
     if (name.includes('tooltip')) return 'tooltip';
     if (name.includes('basemap')) return 'basemap';
     if (name.includes('title')) return 'title';

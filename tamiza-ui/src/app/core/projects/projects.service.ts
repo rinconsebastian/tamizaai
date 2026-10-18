@@ -25,6 +25,12 @@ export interface MetricAvailability {
   hint: 'selectEnumeratorField' | 'defineSamplingFrame' | 'updateSamplingFrame' | null;
 }
 
+/** One of the project's own dashboards: its name is shown as typed, never translated, and its id makes its address. */
+export interface DashboardEntry {
+  id: string;
+  name: string;
+}
+
 export interface ProjectDetails {
   id: string;
   name: string;
@@ -41,6 +47,8 @@ export interface ProjectDetails {
   unavailableFormVersions: number;
   /** IANA name of the zone that defines the dashboard's days; `UTC` until an admin sets another. */
   timeZone: string;
+  /** The project's own dashboards, in the order of their tabs: at least one. */
+  dashboards: DashboardEntry[];
 }
 
 export type FormVersionStatus = 'available' | 'pending' | 'failed' | 'not_found';

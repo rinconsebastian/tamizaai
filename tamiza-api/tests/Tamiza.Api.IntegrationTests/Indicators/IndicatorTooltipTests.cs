@@ -50,7 +50,7 @@ public sealed class IndicatorTooltipTests(PostgresFixture postgres)
 
         var response = await h.PostWidgetAsync(MapWidget(MapConfig(tooltip, basemap: "satellite")));
         var created = (await ReadAsync(response)).GetProperty("config");
-        var saved = (await h.GetAsync(client: h.Viewer)).GetProperty("widgets")[0].GetProperty("config");
+        var saved = (await h.GetWidgetsAsync(client: h.Viewer))[0].GetProperty("config");
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         foreach (var config in new[] { created, saved })
@@ -70,7 +70,7 @@ public sealed class IndicatorTooltipTests(PostgresFixture postgres)
         var widget = await h.AddWidgetAsync(MapWidget(MapConfig(Tooltip(("address", null, null)), basemap: "streets")));
         await h.ExecuteAsync("UPDATE tamiza.dashboard_widgets SET config = config - 'tooltip' - 'basemap' WHERE id = @id", ("id", widget.GetProperty("id").GetGuid()));
 
-        var config = (await h.GetAsync()).GetProperty("widgets")[0].GetProperty("config");
+        var config = (await h.GetWidgetsAsync())[0].GetProperty("config");
 
         Assert.Equal(0, config.GetProperty("tooltip").GetArrayLength());
         Assert.Equal(JsonValueKind.Null, config.GetProperty("basemap").ValueKind);
@@ -174,8 +174,8 @@ public sealed class IndicatorTooltipTests(PostgresFixture postgres)
         var widget = await h.AddWidgetAsync(MapWidget(MapConfig(Tooltip(("address", "Dirección", null)), basemap: "streets")));
         var id = widget.GetProperty("id").GetGuid();
 
-        var toBar = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { chartType = "bar" });
-        var moved = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { layout = new { x = 6, y = 0, w = 6, h = 6 } });
+        var toBar = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { chartType = "bar" });
+        var moved = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { layout = new { x = 6, y = 0, w = 6, h = 6 } });
 
         Assert.Equal(HttpStatusCode.BadRequest, toBar.StatusCode);
         Assert.Contains("config.tooltip", (await ReadAsync(toBar)).GetProperty("errors").EnumerateObject().Select(p => p.Name));
@@ -191,7 +191,7 @@ public sealed class IndicatorTooltipTests(PostgresFixture postgres)
         await using var h = await WithAsync(Row("0042"));
         var id = (await h.AddWidgetAsync(MapWidget(MapConfig(Tooltip(("address", null, null)), basemap: "streets")))).GetProperty("id").GetGuid();
 
-        var response = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new
         {
             chartType = "bar",
             config = new { indicator = "survey_progress", groupBy = "block", tooltip = Array.Empty<object>(), basemap = (string?)null },

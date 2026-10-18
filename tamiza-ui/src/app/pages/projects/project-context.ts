@@ -1,5 +1,16 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { FormChoice, FormField, ProjectDetails, ProjectRole, ProjectsService, hasRole } from '../../core/projects/projects.service';
+import { EMPTY, Observable, tap } from 'rxjs';
+import { DashboardEntry, FormChoice, FormField, ProjectDetails, ProjectRole, ProjectsService, hasRole } from '../../core/projects/projects.service';
+
+/**
+ * What the dashboard page says after opening another dashboard than the one asked for, which no longer exists (design D10), or
+ * after a change to the dashboards the API refused (design D12): `dashboardId` is the dashboard shown, and the notice is shown only
+ * while it is open.
+ */
+export interface DashboardNotice {
+  dashboardId: string;
+  text: string;
+}
 
 /** The project open on the project page, shared by its sections. */
 @Injectable()
@@ -7,6 +18,10 @@ export class ProjectContext {
   private readonly service = inject(ProjectsService);
 
   readonly project = signal<ProjectDetails | null>(null);
+  /** The project's own dashboards, in the order of their tabs; part of the details, so there is one source. */
+  readonly dashboards = computed(() => this.project()?.dashboards ?? []);
+  /** Kept here rather than on the dashboard page, so it survives the redirect to the dashboard it names. */
+  readonly notice = signal<DashboardNotice | null>(null);
   readonly formFields = signal<FormField[] | null>(null);
   /** The form's choice lists, read once per form check by the pages that need them. */
   readonly formChoices = signal<FormChoice[] | null>(null);
@@ -62,6 +77,23 @@ export class ProjectContext {
     const project = this.project();
     if (project) {
       this.service.get(project.id).subscribe({ next: (fresh) => this.update(fresh), error: () => undefined });
+    }
+  }
+
+  /**
+   * Reads the details again when the subscriber needs the fresh ones (a dashboard another member removed or reordered): they are
+   * applied, then emitted. A failure keeps the details already shown and reaches the subscriber.
+   */
+  reload(): Observable<ProjectDetails> {
+    const project = this.project();
+    return project ? this.service.get(project.id).pipe(tap((fresh) => this.update(fresh))) : EMPTY;
+  }
+
+  /** Replaces the list of dashboards after a change the API answered with it, or one this page knows of (a dashboard found removed). */
+  setDashboards(dashboards: DashboardEntry[]): void {
+    const project = this.project();
+    if (project) {
+      this.project.set({ ...project, dashboards });
     }
   }
 

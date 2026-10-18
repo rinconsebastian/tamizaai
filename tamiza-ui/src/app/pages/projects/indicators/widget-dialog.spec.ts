@@ -1,7 +1,8 @@
 import { MapStub, stubMap } from '../../../../testing/leaflet';
-import { settle, typeInto } from '../../../../testing/project-harness';
+import { details, projectId, settle, typeInto } from '../../../../testing/project-harness';
 import { BasemapList } from '../../../core/basemaps.service';
 import { IndicatorColumns, IndicatorEntry, Widget, WidgetConfig } from '../../../core/projects/indicators.service';
+import { DashboardEntry } from '../../../core/projects/projects.service';
 import { valueSearchDelayMs } from '../data-filter-dialog';
 import {
   Context,
@@ -21,6 +22,8 @@ import {
   text,
   wait,
   widget,
+  widgetUrl,
+  widgetsUrl,
 } from './indicators-testing';
 import { loadLeaflet } from './map-engine';
 import { previewDelayMs } from './widget-dialog';
@@ -37,11 +40,13 @@ interface Setup {
   /** The table of the indicator the dialog opens on, or of any indicator by name. */
   columns?: IndicatorColumns | ((name: string) => IndicatorColumns);
   indicators?: IndicatorEntry[];
+  /** The project's dashboards, when they are not just "Indicators" (`d1`, where the dialog is opened). */
+  dashboards?: DashboardEntry[];
 }
 
 /** Opens the dialog to add a widget, or to edit `existing`, and answers the request for the columns of the indicator it starts on. */
-async function openDialog({ existing = null, columns = catalog(), indicators }: Setup = {}) {
-  const context = await open('analyst', existing ? [existing] : [], existing ? result([row('Cali', 75)]) : null, indicators ? { indicators } : {});
+async function openDialog({ existing = null, columns = catalog(), indicators, dashboards }: Setup = {}) {
+  const context = await open('analyst', existing ? [existing] : [], existing ? result([row('Cali', 75)]) : null, indicators ? { indicators } : {}, dashboards ? { dashboards } : {});
   if (existing) {
     // Edit is an item of the widget's actions menu.
     context.root.querySelector<HTMLElement>('[data-testid="menu-trigger"]')!.click();
@@ -89,7 +94,6 @@ async function previewAnswer(context: Context, answer: ReturnType<typeof result>
 }
 
 const unpublishedColumns = catalog({ published: false, columns: [], numeric: [], defaults: { measure: null, groupBy: null } });
-const widgetsUrl = `${indicatorsUrl}/widgets`;
 const isCreate = (r: { url: string; method: string }) => r.method === 'POST' && r.url === widgetsUrl;
 
 describe('the widget dialog', () => {
@@ -1259,6 +1263,188 @@ describe('the widget dialog', () => {
       const patch = context.http.match(isPatch)[0];
       expect(patch.request.body.config.basemap).toBeNull();
       patch.flush(widget('w1'));
+    });
+  });
+
+  describe('the dashboard of an edited widget (design D9)', () => {
+    const indicatorsAndField: DashboardEntry[] = [{ id: 'd1', name: 'Indicators' }, { id: 'd2', name: 'Field' }];
+    const projectUrl = `/api/v1/projects/${projectId}`;
+    const select = () => field<HTMLSelectElement>('dialog-dashboard');
+    const refusal = (message: string) => [{ title: 'x', errors: { dashboardId: [message] } }, { status: 400, statusText: 'Bad Request' }] as const;
+    const full = 'A dashboard can have at most 50 widgets. Remove one or move it to another dashboard first.';
+
+    it('is offered after the title, on the widget\'s own, listing the project\'s dashboards (Widget moved to another dashboard)', async () => {
+      await openDialog({ existing: widget('w1'), dashboards: indicatorsAndField });
+
+      expect(optionsOf('dialog-dashboard')).toEqual(['d1', 'd2']);
+      expect(optionTexts('dialog-dashboard')).toEqual(['Indicators', 'Field']);
+      expect(select().value).toBe('d1');
+      expect(text(dialog().querySelector('label[for="widgetDashboard"]'))).toBe('Dashboard');
+      expect(field('dialog-title').compareDocumentPosition(select()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('is not offered in a project that has one dashboard', async () => {
+      await openDialog({ existing: widget('w1') });
+
+      expect(fields('dialog-dashboard')).toHaveLength(0);
+    });
+
+    it('is not offered when adding a widget, which goes to the dashboard open (New widget)', async () => {
+      const context = await openDialog({ dashboards: indicatorsAndField });
+      expect(fields('dialog-dashboard')).toHaveLength(0);
+
+      await change(context, field('dialog-title'), 'Coverage');
+      await click(context, field('dialog-save'));
+
+      const request = context.http.expectOne(isCreate);
+      expect(request.request.url).toBe(widgetsUrl);
+      expect(Object.keys(request.request.body)).toEqual(['title', 'chartType', 'config']);
+    });
+
+    it('sends the dashboard alone when nothing else changed (Widget moved to another dashboard)', async () => {
+      const context = await openDialog({ existing: widget('w1'), dashboards: indicatorsAndField });
+
+      await change(context, select(), 'd2');
+      await click(context, field('dialog-save'));
+
+      const request = context.http.expectOne(isPatch);
+      expect(request.request.url).toBe(widgetUrl('w1'));
+      expect(request.request.body).toEqual({ dashboardId: 'd2' });
+    });
+
+    it('sends the whole form with the dashboard once another field changed, before or after choosing it', async () => {
+      const context = await openDialog({ existing: widget('w1', { title: 'Coverage by municipality' }), dashboards: indicatorsAndField });
+
+      await change(context, select(), 'd2');
+      await change(context, field('dialog-title'), 'Coverage');
+      await click(context, field('dialog-save'));
+
+      expect(context.http.expectOne(isPatch).request.body).toEqual({ title: 'Coverage', chartType: 'column', config: config(), dashboardId: 'd2' });
+    });
+
+    it('counts a filter removed with its button as a change', async () => {
+      const filtered = widget('w1', { config: config({ filters: [{ column: 'round', op: 'range', min: '2' }] }) });
+      const context = await openDialog({ existing: filtered, dashboards: indicatorsAndField });
+
+      await click(context, field('dialog-filter-remove'));
+      await change(context, select(), 'd2');
+      await click(context, field('dialog-save'));
+
+      expect(context.http.expectOne(isPatch).request.body).toEqual({ title: 'Widget w1', chartType: 'column', config: config(), dashboardId: 'd2' });
+    });
+
+    it('counts a tooltip column moved with its button as a change', async () => {
+      const tooltip: WidgetConfig['tooltip'] = [{ column: 'value', label: null, format: null }, { column: 'round', label: null, format: null }];
+      const map = widget('w1', { chartType: 'map', config: config({ geometryColumn: 'geometry', tooltip }) });
+      const context = await openDialog({ existing: map, dashboards: indicatorsAndField });
+
+      await click(context, fields('tooltip-down')[0]);
+      await change(context, select(), 'd2');
+      await click(context, field('dialog-save'));
+
+      const body = context.http.expectOne(isPatch).request.body;
+      expect(body.dashboardId).toBe('d2');
+      expect(body.config.tooltip.map((item: { column: string }) => item.column)).toEqual(['round', 'value']);
+    });
+
+    it('does not count the column picked for a filter that was not added as a change', async () => {
+      const context = await openDialog({ existing: widget('w1'), dashboards: indicatorsAndField });
+
+      await change(context, field('filter-column'), 'round');
+      await change(context, select(), 'd2');
+      await click(context, field('dialog-save'));
+
+      expect(context.http.expectOne(isPatch).request.body).toEqual({ dashboardId: 'd2' });
+    });
+
+    it('moves a widget whose group column the table no longer has, sending the dashboard alone (Stale widget moved)', async () => {
+      const stale = widget('w1', { config: config({ groupBy: 'district' }) });
+      const context = await openDialog({ existing: stale, dashboards: indicatorsAndField });
+      expect(field<HTMLSelectElement>('dialog-group-by').value).toBe('district'); // what is saved, though the table lacks it
+
+      await change(context, select(), 'd2');
+      await click(context, field('dialog-save'));
+
+      expect(context.http.expectOne(isPatch).request.body).toEqual({ dashboardId: 'd2' });
+    });
+
+    it('moves a map whose tooltip column has become text, sending the dashboard alone and not the format the form drops (Stale widget moved)', async () => {
+      const stale = widget('w1', { chartType: 'map', config: config({ geometryColumn: 'geometry', tooltip: [{ column: 'municipality', label: null, format: 'percent' }] }) });
+      const context = await openDialog({ existing: stale, dashboards: indicatorsAndField });
+
+      await change(context, select(), 'd2');
+      await click(context, field('dialog-save'));
+
+      expect(context.http.expectOne(isPatch).request.body).toEqual({ dashboardId: 'd2' });
+    });
+
+    it('shows a full dashboard\'s refusal next to the select, keeps the form open and reads the project again (Full dashboard)', async () => {
+      const context = await openDialog({ existing: widget('w1'), dashboards: indicatorsAndField });
+      await change(context, select(), 'd2');
+      await click(context, field('dialog-save'));
+
+      context.http.expectOne(isPatch).flush(...refusal(full));
+      await settle(context.harness);
+
+      expect(errorOf('widgetDashboard')).toBe(full);
+      expect(select().getAttribute('aria-describedby')).toBe('widgetDashboard-error');
+      expect(field('dialog-error')).toBeNull();
+      expect(field<HTMLButtonElement>('dialog-save').disabled).toBe(false);
+      context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: indicatorsAndField }));
+      await settle(context.harness);
+      expect(select().value).toBe('d2'); // still chosen: the project still has it
+      expect(errorOf('widgetDashboard')).toBe(full);
+    });
+
+    it('drops a dashboard removed meanwhile from the select once the project is read again (Target removed meanwhile)', async () => {
+      const three: DashboardEntry[] = [{ id: 'd1', name: 'Indicators' }, { id: 'd2', name: 'Health' }, { id: 'd3', name: 'Field' }];
+      const context = await openDialog({ existing: widget('w1'), dashboards: three });
+      await change(context, select(), 'd3');
+      await click(context, field('dialog-save'));
+
+      context.http.expectOne(isPatch).flush(...refusal('The dashboard does not exist.'));
+      await settle(context.harness);
+      context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: three.slice(0, 2) }));
+      await settle(context.harness);
+
+      expect(optionTexts('dialog-dashboard')).toEqual(['Indicators', 'Health']);
+      expect(select().value).toBe('d1'); // back on the widget's own
+      expect(errorOf('widgetDashboard')).toBe('The dashboard does not exist.');
+
+      await change(context, select(), 'd2');
+      expect(errorOf('widgetDashboard')).toBe('');
+      await click(context, field('dialog-save'));
+      expect(context.http.expectOne(isPatch).request.body).toEqual({ dashboardId: 'd2' });
+    });
+
+    it('keeps the select and its refusal when the project is left with one dashboard', async () => {
+      const context = await openDialog({ existing: widget('w1'), dashboards: indicatorsAndField });
+      await change(context, select(), 'd2');
+      await click(context, field('dialog-save'));
+
+      context.http.expectOne(isPatch).flush(...refusal('The dashboard does not exist.'));
+      await settle(context.harness);
+      context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: indicatorsAndField.slice(0, 1) }));
+      await settle(context.harness);
+
+      expect(optionTexts('dialog-dashboard')).toEqual(['Indicators']);
+      expect(errorOf('widgetDashboard')).toBe('The dashboard does not exist.');
+    });
+
+    it('reads the project again for a refusal of the dashboard only', async () => {
+      const context = await openDialog({ existing: widget('w1'), dashboards: indicatorsAndField });
+      await change(context, select(), 'd2');
+      await change(context, field('dialog-group-by'), 'round');
+      await click(context, field('dialog-save'));
+
+      context.http
+        .expectOne(isPatch)
+        .flush({ title: 'x', errors: { 'config.groupBy': ["The table has no column 'round'."] } }, { status: 400, statusText: 'Bad Request' });
+      await settle(context.harness);
+
+      expect(errorOf('widgetGroupBy')).toBe("The table has no column 'round'.");
+      expect(errorOf('widgetDashboard')).toBe('');
+      context.http.expectNone(projectUrl);
     });
   });
 });

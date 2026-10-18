@@ -4,6 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { IndicatorsService, WidgetConfig, chartTypes, emptyConfig, needsGroup } from './indicators.service';
 
 const base = '/api/v1/projects/p1/indicators';
+const dashboards = '/api/v1/projects/p1/dashboards';
 
 describe('IndicatorsService', () => {
   let service: IndicatorsService;
@@ -42,23 +43,71 @@ describe('IndicatorsService', () => {
     expect(typed.request.body).toEqual({ config, chartType: 'histogram' });
   });
 
-  it('creates a widget, leaving the layout out when there is none', () => {
-    service.create('p1', { title: 'Coverage', chartType: 'column', config }).subscribe();
+  it('creates a widget on its dashboard, leaving the layout out when there is none', () => {
+    service.create('p1', 'd1', { title: 'Coverage', chartType: 'column', config }).subscribe();
 
-    const request = http.expectOne(`${base}/widgets`);
+    const request = http.expectOne(`${dashboards}/d1/widgets`);
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({ title: 'Coverage', chartType: 'column', config });
   });
 
-  it('patches only what changed and deletes by id', () => {
-    service.update('p1', 'w1', { layout: { x: 1, y: 2, w: 3, h: 4 } }).subscribe();
-    service.remove('p1', 'w1').subscribe();
+  it('patches only what changed and deletes by id, under the widget\'s dashboard', () => {
+    service.update('p1', 'd1', 'w1', { layout: { x: 1, y: 2, w: 3, h: 4 } }).subscribe();
+    service.remove('p1', 'd1', 'w1').subscribe();
 
     const patch = http.expectOne((r) => r.method === 'PATCH');
     expect(patch.request.method).toBe('PATCH');
     expect(patch.request.body).toEqual({ layout: { x: 1, y: 2, w: 3, h: 4 } });
-    expect(patch.request.url).toBe(`${base}/widgets/w1`);
-    expect(http.expectOne((r) => r.method === 'DELETE').request.url).toBe(`${base}/widgets/w1`);
+    expect(patch.request.url).toBe(`${dashboards}/d1/widgets/w1`);
+    expect(http.expectOne((r) => r.method === 'DELETE').request.url).toBe(`${dashboards}/d1/widgets/w1`);
+  });
+
+  it('moves a widget to another dashboard with a patch of the target alone, sent to the dashboard it is on', () => {
+    service.update('p1', 'd1', 'w1', { dashboardId: 'd2' }).subscribe();
+
+    const patch = http.expectOne(`${dashboards}/d1/widgets/w1`);
+    expect(patch.request.method).toBe('PATCH');
+    expect(patch.request.body).toEqual({ dashboardId: 'd2' });
+  });
+
+  it('reads one dashboard with its widgets', () => {
+    service.dashboard('p1', 'd2').subscribe();
+
+    const request = http.expectOne(`${dashboards}/d2`);
+    expect(request.request.method).toBe('GET');
+    expect(request.request.body).toBeNull();
+  });
+
+  it('adds, renames and removes a dashboard', () => {
+    service.addDashboard('p1', 'Field progress').subscribe();
+    service.renameDashboard('p1', 'd2', 'Coverage').subscribe();
+    service.removeDashboard('p1', 'd3').subscribe();
+
+    const add = http.expectOne((r) => r.method === 'POST');
+    expect(add.request.url).toBe(dashboards);
+    expect(add.request.body).toEqual({ name: 'Field progress' });
+    const rename = http.expectOne((r) => r.method === 'PATCH');
+    expect(rename.request.url).toBe(`${dashboards}/d2`);
+    expect(rename.request.body).toEqual({ name: 'Coverage' });
+    const remove = http.expectOne((r) => r.method === 'DELETE');
+    expect(remove.request.url).toBe(`${dashboards}/d3`);
+    expect(remove.request.body).toBeNull();
+  });
+
+  it('reorders the dashboards with the order the page shows and the one it asks for', () => {
+    service.reorderDashboards('p1', ['d1', 'd2', 'd3'], ['d2', 'd1', 'd3']).subscribe();
+
+    const request = http.expectOne(`${dashboards}/order`);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.body).toEqual({ expectedIds: ['d1', 'd2', 'd3'], dashboardIds: ['d2', 'd1', 'd3'] });
+  });
+
+  it('duplicates a dashboard under the name given', () => {
+    service.duplicateDashboard('p1', 'd2', 'Housing (copy)').subscribe();
+
+    const request = http.expectOne(`${dashboards}/d2/copies`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ name: 'Housing (copy)' });
   });
 
   it('asks for the export of one indicator\'s whole table in the chosen format', () => {

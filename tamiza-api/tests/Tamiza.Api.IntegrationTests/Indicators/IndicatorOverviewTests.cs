@@ -5,7 +5,10 @@ using Tamiza.Api.IntegrationTests.Infrastructure;
 
 namespace Tamiza.Api.IntegrationTests.Indicators;
 
-/// <summary><c>GET /projects/{id}/indicators</c> and <c>.../indicators/{name}/columns</c>: the dashboard's state and a table's columns.</summary>
+/// <summary>
+/// <c>GET /projects/{id}/indicators</c>, <c>.../dashboards/{dashboardId}</c> and <c>.../indicators/{name}/columns</c>: what every
+/// dashboard shows, a dashboard's widgets and a table's columns.
+/// </summary>
 [Collection(PostgresCollection.Name)]
 public sealed class IndicatorOverviewTests(PostgresFixture postgres)
 {
@@ -32,6 +35,7 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
         await h.AddWidgetAsync(Widget);
 
         var overview = await h.GetAsync(client: h.Viewer);
+        var widgets = await h.GetWidgetsAsync(client: h.Viewer);
 
         var coverage = Entry(overview, "coverage");
         Assert.Equal("Piped water coverage", coverage.GetProperty("label").GetString());
@@ -42,8 +46,10 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
         Assert.Equal(runId, coverage.GetProperty("runId").GetGuid());
         Assert.Equal(JsonValueKind.String, coverage.GetProperty("publishedAt").ValueKind);
         Assert.Equal(3, coverage.GetProperty("rows").GetInt64());
-        Assert.Equal("Coverage", overview.GetProperty("widgets").EnumerateArray().Single().GetProperty("title").GetString());
-        Assert.Equal((50, 5000), (overview.GetProperty("limits").GetProperty("maxWidgets").GetInt32(), overview.GetProperty("limits").GetProperty("maxQueryRows").GetInt32()));
+        Assert.Equal("Coverage", widgets.EnumerateArray().Single().GetProperty("title").GetString());
+        var limits = overview.GetProperty("limits");
+        Assert.Equal((50, 5000, 7), (limits.GetProperty("maxWidgets").GetInt32(), limits.GetProperty("maxQueryRows").GetInt32(), limits.GetProperty("maxDashboards").GetInt32()));
+        Assert.False(overview.TryGetProperty("widgets", out _)); // each dashboard lists its own
     }
 
     [Fact]
@@ -123,7 +129,7 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
     // No indicator has published
 
     [Fact]
-    public async Task While_no_indicator_has_published_the_overview_lists_them_unpublished_and_still_lists_the_widgets()
+    public async Task While_no_indicator_has_published_the_overview_lists_them_unpublished_and_the_dashboard_still_lists_the_widgets()
     {
         await using var h = await IndicatorsHarness.CreateAsync(postgres);
         await h.AddIndicatorAsync("coverage", label: "Coverage");
@@ -131,10 +137,11 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
 
         var response = await h.Viewer.GetAsync(h.Url);
         var overview = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var widgets = await h.GetWidgetsAsync();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(Entry(overview, "coverage").GetProperty("published").GetBoolean());
-        Assert.Equal(1, overview.GetProperty("widgets").GetArrayLength());
+        Assert.Equal(1, widgets.GetArrayLength());
     }
 
     [Fact]
@@ -144,9 +151,10 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
         await h.AddWidgetAsync(Widget);
 
         var overview = await h.GetAsync();
+        var widgets = await h.GetWidgetsAsync();
 
         Assert.Equal(0, overview.GetProperty("indicators").GetArrayLength());
-        Assert.Equal(1, overview.GetProperty("widgets").GetArrayLength());
+        Assert.Equal(1, widgets.GetArrayLength());
     }
 
     [Fact]
@@ -155,9 +163,10 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
         await using var h = await IndicatorsHarness.CreateAsync(postgres);
 
         var overview = await h.GetAsync();
+        var widgets = await h.GetWidgetsAsync();
 
         Assert.Equal(0, overview.GetProperty("indicators").GetArrayLength());
-        Assert.Equal(0, overview.GetProperty("widgets").GetArrayLength());
+        Assert.Equal(0, widgets.GetArrayLength());
     }
 
     [Fact]
@@ -176,16 +185,18 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
     // Not a member
 
     [Fact]
-    public async Task A_user_who_is_not_a_member_gets_404_for_the_overview_and_the_columns()
+    public async Task A_user_who_is_not_a_member_gets_404_for_the_overview_a_dashboard_and_the_columns()
     {
         await using var h = await IndicatorsHarness.CreateAsync(postgres);
         await h.PublishAsync("coverage", Columns, Rows);
 
         var overview = await h.Outsider.GetAsync(h.Url);
+        var dashboard = await h.Outsider.GetAsync(h.DashboardUrl());
         var columns = await h.Outsider.GetAsync(h.Url + "/coverage/columns");
         var unknown = await h.Admin.GetAsync(IndicatorsHarness.UrlOf(Guid.NewGuid()));
 
-        Assert.Equal([HttpStatusCode.NotFound, HttpStatusCode.NotFound, HttpStatusCode.NotFound], new[] { overview.StatusCode, columns.StatusCode, unknown.StatusCode });
+        Assert.Equal([HttpStatusCode.NotFound, HttpStatusCode.NotFound, HttpStatusCode.NotFound, HttpStatusCode.NotFound],
+            new[] { overview.StatusCode, dashboard.StatusCode, columns.StatusCode, unknown.StatusCode });
     }
 
     [Fact]
@@ -348,8 +359,6 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
             [
                 "/api/v1/projects/{projectId}/indicators",
                 "/api/v1/projects/{projectId}/indicators/query",
-                "/api/v1/projects/{projectId}/indicators/widgets",
-                "/api/v1/projects/{projectId}/indicators/widgets/{widgetId}",
                 "/api/v1/projects/{projectId}/indicators/{name}/columns",
                 "/api/v1/projects/{projectId}/indicators/{name}/exports",
             ],

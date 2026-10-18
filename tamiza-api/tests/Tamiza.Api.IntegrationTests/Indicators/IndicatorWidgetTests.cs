@@ -5,7 +5,7 @@ using Tamiza.Api.IntegrationTests.Infrastructure;
 
 namespace Tamiza.Api.IntegrationTests.Indicators;
 
-/// <summary><c>POST/PATCH/DELETE /projects/{id}/indicators/widgets</c>: adding, editing, arranging and removing widgets.</summary>
+/// <summary><c>POST/PATCH/DELETE /projects/{id}/dashboards/{dashboardId}/widgets</c>: adding, editing, arranging and removing widgets.</summary>
 [Collection(PostgresCollection.Name)]
 public sealed class IndicatorWidgetTests(PostgresFixture postgres)
 {
@@ -43,14 +43,14 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
 
         var response = await h.PostWidgetAsync(Column());
         var widget = await ReadAsync(response);
-        var overview = await h.GetAsync(client: h.Viewer);
+        var widgets = await h.GetWidgetsAsync(client: h.Viewer);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        Assert.Equal($"/api/v1/projects/{h.ProjectId}/indicators/widgets/{widget.GetProperty("id").GetGuid()}", response.Headers.Location!.OriginalString);
+        Assert.Equal(h.WidgetUrl(widget.GetProperty("id").GetGuid()), response.Headers.Location!.OriginalString);
         Assert.Equal("Coverage by municipality", widget.GetProperty("title").GetString());
         Assert.Equal("column", widget.GetProperty("chartType").GetString());
         Assert.Equal(JsonValueKind.String, widget.GetProperty("updatedAt").ValueKind);
-        var saved = overview.GetProperty("widgets").EnumerateArray().Single();
+        var saved = widgets.EnumerateArray().Single();
         Assert.Equal(widget.GetProperty("id").GetGuid(), saved.GetProperty("id").GetGuid());
         Assert.Equal("Coverage by municipality", saved.GetProperty("title").GetString());
     }
@@ -103,10 +103,10 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
             },
             layout = new { x = 6, y = 2, w = 6, h = 5 },
         });
-        var overview = await h.GetAsync();
+        var widgets = await h.GetWidgetsAsync();
 
         var config = widget.GetProperty("config");
-        Assert.Equal(widget.ToString(), overview.GetProperty("widgets")[0].ToString());
+        Assert.Equal(widget.ToString(), widgets[0].ToString());
         Assert.Equal(("coverage", "year", "numerator", 20), (config.GetProperty("indicator").GetString(), config.GetProperty("groupBy").GetString(),
             config.GetProperty("measure").GetString(), config.GetProperty("buckets").GetInt32()));
         Assert.Equal("Cali", config.GetProperty("filters")[0].GetProperty("values")[0].GetString());
@@ -125,9 +125,9 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
             chartType = "bar",
             config = new { indicator = "coverage", groupBy = "municipality", ratio = new { numerator = "numerator", denominator = "denominator" } },
         });
-        var overview = await h.GetAsync();
+        var widgets = await h.GetWidgetsAsync();
 
-        var ratio = overview.GetProperty("widgets")[0].GetProperty("config").GetProperty("ratio");
+        var ratio = widgets[0].GetProperty("config").GetProperty("ratio");
         Assert.Equal(("numerator", "denominator"), (ratio.GetProperty("numerator").GetString(), ratio.GetProperty("denominator").GetString()));
         Assert.Equal(JsonValueKind.Null, widget.GetProperty("config").GetProperty("measure").ValueKind);
     }
@@ -196,7 +196,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         await h.AddWidgetAsync(Column("first", new { x = 0, y = 0, w = 3, h = 2 }));
         await h.AddWidgetAsync(Column("fourth", new { x = 0, y = 4, w = 3, h = 2 }));
 
-        var titles = (await h.GetAsync()).GetProperty("widgets").EnumerateArray().Select(w => w.GetProperty("title").GetString());
+        var titles = (await h.GetWidgetsAsync()).EnumerateArray().Select(w => w.GetProperty("title").GetString());
 
         Assert.Equal(["first", "second", "third", "fourth"], titles);
     }
@@ -204,20 +204,23 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     // Viewer cannot edit
 
     [Fact]
-    public async Task A_viewer_cannot_add_edit_or_remove_a_widget()
+    public async Task A_viewer_cannot_add_edit_move_or_remove_a_widget()
     {
         await using var h = await PublishedAsync();
         var widget = await h.AddWidgetAsync(Column());
         var id = widget.GetProperty("id").GetGuid();
+        var second = await h.InsertDashboardAsync("Second");
 
         var add = await h.PostWidgetAsync(Column(), h.Viewer);
-        var rename = await h.Viewer.PatchJsonAsync($"{h.Url}/widgets/{id}", new { title = "Renamed" });
-        var move = await h.Viewer.PatchJsonAsync($"{h.Url}/widgets/{id}", new { layout = new { x = 3, y = 0, w = 3, h = 2 } });
-        var remove = await h.Viewer.DeleteAsync($"{h.Url}/widgets/{id}");
+        var rename = await h.Viewer.PatchJsonAsync(h.WidgetUrl(id), new { title = "Renamed" });
+        var move = await h.Viewer.PatchJsonAsync(h.WidgetUrl(id), new { layout = new { x = 3, y = 0, w = 3, h = 2 } });
+        var moveAway = await h.Viewer.PatchJsonAsync(h.WidgetUrl(id), new { dashboardId = second });
+        var remove = await h.Viewer.DeleteAsync(h.WidgetUrl(id));
 
-        Assert.Equal([HttpStatusCode.Forbidden, HttpStatusCode.Forbidden, HttpStatusCode.Forbidden, HttpStatusCode.Forbidden],
-            [add.StatusCode, rename.StatusCode, move.StatusCode, remove.StatusCode]);
-        var after = (await h.GetAsync()).GetProperty("widgets").EnumerateArray().Single();
+        Assert.Equal([HttpStatusCode.Forbidden, HttpStatusCode.Forbidden, HttpStatusCode.Forbidden, HttpStatusCode.Forbidden, HttpStatusCode.Forbidden],
+            [add.StatusCode, rename.StatusCode, move.StatusCode, moveAway.StatusCode, remove.StatusCode]);
+        Assert.Equal(0, (await h.GetWidgetsAsync(second)).GetArrayLength());
+        var after = (await h.GetWidgetsAsync()).EnumerateArray().Single();
         Assert.Equal("Coverage by municipality", after.GetProperty("title").GetString());
         Assert.Equal(0, after.GetProperty("layout").GetProperty("x").GetInt32());
     }
@@ -229,8 +232,8 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         var id = (await h.AddWidgetAsync(Column())).GetProperty("id").GetGuid();
 
         var add = await h.PostWidgetAsync(Column(), h.Outsider);
-        var edit = await h.Outsider.PatchJsonAsync($"{h.Url}/widgets/{id}", new { title = "x" });
-        var remove = await h.Outsider.DeleteAsync($"{h.Url}/widgets/{id}");
+        var edit = await h.Outsider.PatchJsonAsync(h.WidgetUrl(id), new { title = "x" });
+        var remove = await h.Outsider.DeleteAsync(h.WidgetUrl(id));
 
         Assert.Equal([HttpStatusCode.NotFound, HttpStatusCode.NotFound, HttpStatusCode.NotFound], [add.StatusCode, edit.StatusCode, remove.StatusCode]);
     }
@@ -240,7 +243,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     [Fact]
     public async Task Adding_a_widget_past_the_limit_fails_with_a_message_naming_it()
     {
-        await using var h = await PublishedAsync(new() { ["IndicatorDashboard:MaxWidgetsPerProject"] = "2" });
+        await using var h = await PublishedAsync(new() { ["IndicatorDashboard:MaxWidgetsPerDashboard"] = "2" });
         await h.AddWidgetAsync(Column("one"));
         await h.AddWidgetAsync(Column("two"));
 
@@ -249,31 +252,31 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("at most 2 widgets", IndicatorsHarness.Errors(problem, "widgets")[0]);
-        Assert.Equal(2, (await h.GetAsync()).GetProperty("widgets").GetArrayLength());
+        Assert.Equal(2, (await h.GetWidgetsAsync()).GetArrayLength());
     }
 
     [Fact]
     public async Task Widgets_added_at_the_same_moment_cannot_pass_the_limit()
     {
-        await using var h = await PublishedAsync(new() { ["IndicatorDashboard:MaxWidgetsPerProject"] = "2" });
+        await using var h = await PublishedAsync(new() { ["IndicatorDashboard:MaxWidgetsPerDashboard"] = "2" });
 
         var responses = await Task.WhenAll(Enumerable.Range(0, 8).Select(i => h.PostWidgetAsync(Column($"w{i}"))));
 
         Assert.Equal(2, responses.Count(r => r.StatusCode == HttpStatusCode.Created));
         Assert.Equal(6, responses.Count(r => r.StatusCode == HttpStatusCode.BadRequest));
-        Assert.Equal(2, (await h.GetAsync()).GetProperty("widgets").GetArrayLength());
+        Assert.Equal(2, (await h.GetWidgetsAsync()).GetArrayLength());
     }
 
     [Fact]
-    public async Task The_limit_counts_one_projects_widgets_only_and_frees_a_place_when_one_is_removed()
+    public async Task The_limit_counts_one_dashboards_widgets_only_and_frees_a_place_when_one_is_removed()
     {
-        await using var h = await PublishedAsync(new() { ["IndicatorDashboard:MaxWidgetsPerProject"] = "1" });
-        var other = await h.AddOtherProjectAsync();
-        var otherResponse = await h.Admin.PostAsJsonAsync(IndicatorsHarness.UrlOf(other) + "/widgets", Column("elsewhere"));
+        await using var h = await PublishedAsync(new() { ["IndicatorDashboard:MaxWidgetsPerDashboard"] = "1" });
+        var (other, otherDashboard) = await h.AddOtherProjectAsync();
+        var otherResponse = await h.Admin.PostAsJsonAsync(IndicatorsHarness.DashboardUrlOf(other, otherDashboard) + "/widgets", Column("elsewhere"));
         var first = await h.AddWidgetAsync(Column("one"));
 
         var full = await h.PostWidgetAsync(Column("two"));
-        await h.Analyst.DeleteAsync($"{h.Url}/widgets/{first.GetProperty("id").GetGuid()}");
+        await h.Analyst.DeleteAsync(h.WidgetUrl(first.GetProperty("id").GetGuid()));
         var again = await h.PostWidgetAsync(Column("two"));
 
         Assert.Equal(HttpStatusCode.Created, otherResponse.StatusCode);
@@ -284,11 +287,22 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     [Fact]
     public async Task The_overview_reports_the_limits()
     {
-        await using var h = await PublishedAsync(new() { ["IndicatorDashboard:MaxWidgetsPerProject"] = "7", ["IndicatorDashboard:MaxWidgetQueryRows"] = "123" });
+        await using var h = await PublishedAsync(new() { ["IndicatorDashboard:MaxWidgetsPerDashboard"] = "9", ["IndicatorDashboard:MaxWidgetQueryRows"] = "123" });
 
         var limits = (await h.GetAsync()).GetProperty("limits");
 
-        Assert.Equal((7, 123), (limits.GetProperty("maxWidgets").GetInt32(), limits.GetProperty("maxQueryRows").GetInt32()));
+        Assert.Equal((9, 123, 7), (limits.GetProperty("maxWidgets").GetInt32(), limits.GetProperty("maxQueryRows").GetInt32(),
+            limits.GetProperty("maxDashboards").GetInt32()));
+    }
+
+    [Fact]
+    public async Task The_overview_reports_the_former_widget_limit_variable_when_only_it_is_set()
+    {
+        await using var h = await PublishedAsync(new() { ["IndicatorDashboard:MaxWidgetsPerProject"] = "9" });
+
+        var limits = (await h.GetAsync()).GetProperty("limits");
+
+        Assert.Equal(9, limits.GetProperty("maxWidgets").GetInt32());
     }
 
     // Chart type constraints (a missing groupBy on a column chart rejected)
@@ -307,7 +321,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains($"A {chartType} widget needs a column to group by", IndicatorsHarness.Errors(problem, "config.groupBy")[0]);
-        Assert.Equal(0, (await h.GetAsync()).GetProperty("widgets").GetArrayLength());
+        Assert.Equal(0, (await h.GetWidgetsAsync()).GetArrayLength());
     }
 
     [Theory]
@@ -447,7 +461,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     {
         await using var h = await PublishedAsync();
 
-        var response = await h.Analyst.PostAsync(h.Url + "/widgets", null);
+        var response = await h.Analyst.PostAsync(h.WidgetsUrl(), null);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -540,9 +554,10 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
             config = new { indicator = "attendance", groupBy = "round", filters = new[] { new { column = "region", op = "notEmpty" } } },
         });
         var overview = await h.GetAsync();
+        var widgets = await h.GetWidgetsAsync();
 
         Assert.False(overview.GetProperty("indicators")[0].GetProperty("published").GetBoolean());
-        Assert.Equal(widget.GetProperty("id").GetGuid(), overview.GetProperty("widgets")[0].GetProperty("id").GetGuid());
+        Assert.Equal(widget.GetProperty("id").GetGuid(), widgets[0].GetProperty("id").GetGuid());
     }
 
     [Fact]
@@ -575,7 +590,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         });
         var id = created.GetProperty("id").GetGuid();
 
-        var response = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { layout = new { x = 6, y = 1, w = 4, h = 3 } });
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { layout = new { x = 6, y = 1, w = 4, h = 3 } });
         var moved = await ReadAsync(response);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -586,11 +601,11 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
             moved.GetProperty("layout").GetProperty("w").GetInt32(), moved.GetProperty("layout").GetProperty("h").GetInt32()));
         Assert.True(moved.GetProperty("updatedAt").GetDateTimeOffset() >= created.GetProperty("updatedAt").GetDateTimeOffset());
 
-        var renamed = await ReadAsync(await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { title = "  Renamed  " }));
+        var renamed = await ReadAsync(await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { title = "  Renamed  " }));
         Assert.Equal("Renamed", renamed.GetProperty("title").GetString());
         Assert.Equal(6, renamed.GetProperty("layout").GetProperty("x").GetInt32());
 
-        var reconfigured = await ReadAsync(await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}",
+        var reconfigured = await ReadAsync(await h.Analyst.PatchJsonAsync(h.WidgetUrl(id),
             new { config = new { indicator = "target", groupBy = "municipality" } }));
         Assert.Equal("target", reconfigured.GetProperty("config").GetProperty("indicator").GetString());
         Assert.Equal("municipality", reconfigured.GetProperty("config").GetProperty("groupBy").GetString()); // the config is replaced whole
@@ -602,13 +617,13 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         await using var h = await PublishedAsync();
         var id = (await h.AddWidgetAsync(new { title = "Total", chartType = "stat", config = new { indicator = "coverage" } })).GetProperty("id").GetGuid();
 
-        var response = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { chartType = "pie" });
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { chartType = "pie" });
         var problem = await ReadAsync(response);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("A pie widget needs a column to group by", IndicatorsHarness.Errors(problem, "config.groupBy")[0]);
 
-        var fixedUp = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { chartType = "pie", config = new { indicator = "coverage", groupBy = "municipality" } });
+        var fixedUp = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { chartType = "pie", config = new { indicator = "coverage", groupBy = "municipality" } });
         Assert.Equal(HttpStatusCode.OK, fixedUp.StatusCode);
         Assert.Equal("pie", (await ReadAsync(fixedUp)).GetProperty("chartType").GetString());
     }
@@ -619,10 +634,10 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         await using var h = await PublishedAsync();
         var id = (await h.AddWidgetAsync(Column("Keep"))).GetProperty("id").GetGuid();
 
-        var response = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { title = "Changed", layout = new { x = 11, y = 0, w = 5, h = 2 } });
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { title = "Changed", layout = new { x = 11, y = 0, w = 5, h = 2 } });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal("Keep", (await h.GetAsync()).GetProperty("widgets")[0].GetProperty("title").GetString());
+        Assert.Equal("Keep", (await h.GetWidgetsAsync())[0].GetProperty("title").GetString());
     }
 
     [Fact]
@@ -632,8 +647,8 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         var id = (await h.AddWidgetAsync(new { title = "By year", chartType = "bar", config = new { indicator = "coverage", groupBy = "year" } })).GetProperty("id").GetGuid();
         await h.PublishAsync("coverage", IndicatorsHarness.StandardColumns, "('Cali', 1, 1, 1)"); // no year column any more
 
-        var moved = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { layout = new { x = 3, y = 0, w = 3, h = 2 }, title = "Still here" });
-        var reconfigured = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{id}", new { config = new { indicator = "coverage", groupBy = "year" } });
+        var moved = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { layout = new { x = 3, y = 0, w = 3, h = 2 }, title = "Still here" });
+        var reconfigured = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { config = new { indicator = "coverage", groupBy = "year" } });
 
         Assert.Equal(HttpStatusCode.OK, moved.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, reconfigured.StatusCode); // a new query is checked against the table
@@ -643,16 +658,17 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     public async Task Patching_a_widget_that_does_not_exist_or_belongs_to_another_project_is_404()
     {
         await using var h = await PublishedAsync();
-        var other = await h.AddOtherProjectAsync();
-        var foreign = (await ReadAsync(await h.Admin.PostAsJsonAsync(IndicatorsHarness.UrlOf(other) + "/widgets", Column("Foreign")))).GetProperty("id").GetGuid();
+        var (other, otherDashboard) = await h.AddOtherProjectAsync();
+        var otherUrl = IndicatorsHarness.DashboardUrlOf(other, otherDashboard);
+        var foreign = (await ReadAsync(await h.Admin.PostAsJsonAsync(otherUrl + "/widgets", Column("Foreign")))).GetProperty("id").GetGuid();
 
-        var missing = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{Guid.NewGuid()}", new { title = "x" });
-        var wrongProject = await h.Analyst.PatchJsonAsync($"{h.Url}/widgets/{foreign}", new { title = "x" });
-        var wrongDelete = await h.Analyst.DeleteAsync($"{h.Url}/widgets/{foreign}");
+        var missing = await h.Analyst.PatchJsonAsync(h.WidgetUrl(Guid.NewGuid()), new { title = "x" });
+        var wrongProject = await h.Analyst.PatchJsonAsync(h.WidgetUrl(foreign), new { title = "x" });
+        var wrongDelete = await h.Analyst.DeleteAsync(h.WidgetUrl(foreign));
 
         Assert.Equal([HttpStatusCode.NotFound, HttpStatusCode.NotFound, HttpStatusCode.NotFound], [missing.StatusCode, wrongProject.StatusCode, wrongDelete.StatusCode]);
-        var otherOverview = await ReadAsync(await h.Admin.GetAsync(IndicatorsHarness.UrlOf(other)));
-        Assert.Equal("Foreign", otherOverview.GetProperty("widgets")[0].GetProperty("title").GetString());
+        var otherDashboardView = await ReadAsync(await h.Admin.GetAsync(otherUrl));
+        Assert.Equal("Foreign", otherDashboardView.GetProperty("widgets")[0].GetProperty("title").GetString());
     }
 
     // Remove
@@ -663,12 +679,12 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
         await using var h = await PublishedAsync();
         var id = (await h.AddWidgetAsync(Column())).GetProperty("id").GetGuid();
 
-        var response = await h.Analyst.DeleteAsync($"{h.Url}/widgets/{id}");
-        var again = await h.Analyst.DeleteAsync($"{h.Url}/widgets/{id}");
+        var response = await h.Analyst.DeleteAsync(h.WidgetUrl(id));
+        var again = await h.Analyst.DeleteAsync(h.WidgetUrl(id));
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, again.StatusCode);
-        Assert.Equal(0, (await h.GetAsync()).GetProperty("widgets").GetArrayLength());
+        Assert.Equal(0, (await h.GetWidgetsAsync()).GetArrayLength());
     }
 
     [Fact]

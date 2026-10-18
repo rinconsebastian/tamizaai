@@ -121,6 +121,12 @@
         "unavailable": "The map provider cannot serve tiles right now (its quota may be used up). The map is shown without its basemap.",
         "upstream": "The map provider answered with an error. The map is shown without its basemap.",
         "rateLimited": "Too many map tiles were requested. Wait a moment and the basemap will load again."
+      },
+      "dashboards": {
+        "notFound": "The dashboard no longer exists.",
+        "limit": "A project can have at most 7 dashboards. Remove one before adding another.",
+        "lastOne": "A project needs at least one dashboard.",
+        "orderChanged": "The project’s dashboards have changed. Reload and try again."
       }
     }
   },
@@ -168,7 +174,6 @@
     "tabs": {
       "performance": "Performance",
       "cleanData": "Clean data",
-      "indicators": "Indicators",
       "overview": "General",
       "data": "Submissions",
       "scripts": "Scripts",
@@ -1316,17 +1321,18 @@
     },
     "published": "Published {{ time }}",
     "publishedRun": "by run {{ run }}",
-    "count": "{{ count }} of {{ max }} widgets",
+    "count": "{{ count }} of {{ max }} widgets on this dashboard",
     "showTables": "Show all as tables",
     "showCharts": "Show all as charts",
     "add": "Add widget",
-    "limit": "The dashboard has the most widgets it can hold ({{ count }}). Remove one to add another.",
+    "limit": "This dashboard has the most widgets it can hold ({{ count }}). Remove one or move it to another dashboard to add another.",
     "added": "Widget {{ title }} added.",
     "saved": "Widget {{ title }} saved.",
+    "moved": "Widget {{ title }} moved to {{ name }}.",
     "noWidgets": {
-      "title": "No widgets yet",
-      "editor": "Add a widget to chart a published indicator: a figure, a chart or a map.",
-      "viewer": "An analyst or admin can add widgets to this dashboard."
+      "title": "No widgets on this dashboard yet",
+      "editor": "Add a widget to chart a published indicator on this dashboard: a figure, a chart or a map.",
+      "viewer": "An analyst or admin can add widgets to this dashboard, or move some here from another one."
     },
     "export": {
       "button": "Export",
@@ -1339,7 +1345,7 @@
     },
     "remove": {
       "title": "Remove {{ title }}?",
-      "message": "The widget is removed for every member of the project.",
+      "message": "The widget is removed from this dashboard for every member of the project.",
       "confirm": "Remove widget",
       "done": "Widget {{ title }} removed."
     },
@@ -1451,6 +1457,8 @@
       "editTitle": "Edit widget",
       "chartType": "Chart type",
       "title": "Title",
+      "dashboard": "Dashboard",
+      "dashboardHelp": "Another dashboard takes the widget below its own widgets.",
       "indicator": "Indicator",
       "indicatorChoose": "Choose an indicator",
       "notPublished": "not published yet",
@@ -1522,6 +1530,65 @@
       "basemap": "Basemap",
       "basemapHelp": "Drawn under the shapes for every member. Anyone can switch it for their own screen without saving.",
       "basemapGone": "{{ name }} (no longer offered)"
+    }
+  },
+  "dashboards": {
+    "scrollStart": "Show earlier tabs",
+    "scrollEnd": "Show more tabs",
+    "add": "New dashboard",
+    "actions": "Dashboard actions",
+    "limitHint": "The project has the most dashboards it can hold ({{ max }}).",
+    "menu": {
+      "rename": "Rename",
+      "duplicate": "Duplicate",
+      "moveLeft": "Move left",
+      "moveRight": "Move right",
+      "remove": "Remove"
+    },
+    "unavailable": {
+      "limit": "A project can have at most {{ max }} dashboards.",
+      "lastOne": "A project needs at least one dashboard.",
+      "first": "It is already the first dashboard.",
+      "last": "It is already the last dashboard.",
+      "moving": "The new order is being saved."
+    },
+    "nameDialog": {
+      "title": {
+        "add": "New dashboard",
+        "rename": "Rename {{ name }}",
+        "duplicate": "Duplicate {{ name }}"
+      },
+      "name": "Name",
+      "hint": "Up to {{ max }} characters, different from the names of the project’s other dashboards.",
+      "confirm": {
+        "add": "Add dashboard",
+        "rename": "Rename",
+        "duplicate": "Duplicate"
+      },
+      "saving": "Saving…",
+      "copy": " (copy)",
+      "copyN": " (copy {{ n }})",
+      "errors": {
+        "required": "Enter a name.",
+        "long": "The name can have at most {{ max }} characters."
+      }
+    },
+    "renamed": "Renamed to \"{{ name }}\".",
+    "moved": "{{ name }} moved to position {{ position }} of {{ count }}",
+    "remove": {
+      "title": "Remove dashboard",
+      "message": "Remove {{ name }} and its {{ count }} widgets? This cannot be undone.",
+      "messageOne": "Remove {{ name }} and its widget? This cannot be undone.",
+      "messageNone": "Remove {{ name }}? It has no widgets. This cannot be undone.",
+      "confirm": "Remove dashboard",
+      "done": "\"{{ name }}\" and its {{ count }} widgets were removed.",
+      "doneOne": "\"{{ name }}\" and its widget were removed.",
+      "doneNone": "\"{{ name }}\" was removed."
+    },
+    "notice": {
+      "missing": "The dashboard you opened does not exist. Showing {{ name }} instead.",
+      "removed": "\"{{ removed }}\" no longer exists. Showing {{ name }} instead.",
+      "dismiss": "Dismiss"
     }
   }
 }
