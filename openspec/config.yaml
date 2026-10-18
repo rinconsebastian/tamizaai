@@ -12,7 +12,8 @@ context: |
 
   Open source web application that complements KoboToolbox: it receives the data captured
   in Kobo forms, runs Python scripts for cleaning, transformation and indicator
-  calculation, and presents the results in three dashboards.
+  calculation, and presents the results in dashboards: performance, clean data, and the
+  project's own indicators dashboards (1 to 7 per project).
 
   It replaces today's manual flow: Kobo → Jupyter/pandas → indicators → Power BI/Excel/Word.
 

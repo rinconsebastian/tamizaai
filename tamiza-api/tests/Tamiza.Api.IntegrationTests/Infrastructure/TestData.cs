@@ -25,6 +25,7 @@ public static class TestData
          {"name":"age_range","xpath":"group/age_range","type":"select_one","label":"Age range"}]
         """;
 
+    /// <summary>Inserts a project with its first dashboard, "Indicators", as creating one through the API does.</summary>
     /// <param name="formFieldsJson">Fields in the API's shape, for example with <c>listName</c>, <c>orOther</c> and <c>inRepeat</c>.</param>
     /// <param name="formChoicesJson">Choices as <c>[{"listName", "name", "label"}]</c>, in form order.</param>
     public static async Task<Guid> InsertProjectAsync(
@@ -36,7 +37,9 @@ public static class TestData
             INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
                                          form_name, form_fields, form_choices, form_checked_at, created_by, created_at, updated_at)
             VALUES (@id, @name, 'https://kf.kobotoolbox.org', 'aSeededAsset', 'x', 'x', 'Seeded form', @fields::jsonb, @choices::jsonb, now(),
-                    @createdBy, now(), now())
+                    @createdBy, now(), now());
+            INSERT INTO tamiza.dashboards (project_id, name, normalized_name, position, created_by, updated_by)
+            VALUES (@id, 'Indicators', 'indicators', 0, @createdBy, @createdBy);
             """,
             ("id", id), ("name", name), ("createdBy", createdBy), ("fields", formFieldsJson), ("choices", formChoicesJson));
         return id;

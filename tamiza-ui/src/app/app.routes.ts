@@ -20,7 +20,10 @@ export const routes: Routes = [
           { path: '', pathMatch: 'full', redirectTo: 'performance' },
           { path: 'performance', loadComponent: () => import('./pages/projects/project-performance').then((m) => m.ProjectPerformance) },
           { path: 'clean-data', loadComponent: () => import('./pages/projects/project-clean-data').then((m) => m.ProjectCleanData) },
-          { path: 'indicators', loadComponent: () => import('./pages/projects/project-indicators').then((m) => m.ProjectIndicators) },
+          // The project's own dashboards, by id, so a rename or a move keeps their address.
+          { path: 'dashboards/:dashboardId', loadComponent: () => import('./pages/projects/project-indicators').then((m) => m.ProjectIndicators) },
+          // The former Indicators tab: opens the first dashboard, so old bookmarks keep working.
+          { path: 'indicators', loadComponent: () => import('./pages/projects/first-dashboard').then((m) => m.FirstDashboard) },
           {
             path: '',
             loadComponent: () => import('./pages/projects/project-settings-layout').then((m) => m.ProjectSettingsLayout),

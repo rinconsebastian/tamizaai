@@ -132,4 +132,31 @@ public sealed class ScriptConventionTests
             name => Assert.StartsWith("ix_assistant_calls_", name));
         Assert.Contains("CREATE UNIQUE INDEX ix_assistant_calls_user_id_running ON tamiza.assistant_calls (user_id) WHERE status = 'running'", sql);
     }
+
+    [Fact]
+    public void The_multiple_dashboards_script_names_every_constraint_and_index()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0012_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0012_add_multiple_dashboards.sql", resource);
+        foreach (var constraint in new[]
+                 {
+                     "pk_dashboards PRIMARY KEY", "ck_dashboards_position CHECK", "fk_dashboards_projects_project_id FOREIGN KEY",
+                     "fk_dashboards_users_created_by FOREIGN KEY", "fk_dashboards_users_updated_by FOREIGN KEY",
+                     "fk_dashboard_widgets_dashboards_dashboard_id FOREIGN KEY",
+                 })
+        {
+            Assert.Contains($"CONSTRAINT {constraint}", sql);
+        }
+
+        // Every key, check and foreign key is introduced by a CONSTRAINT name; every index has an ix_ name.
+        Assert.Equal(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count,
+            System.Text.RegularExpressions.Regex.Matches(sql, @"CONSTRAINT (?:pk|fk|ck)_\w+ (?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count);
+        Assert.All(System.Text.RegularExpressions.Regex.Matches(sql, @"CREATE (?:UNIQUE )?INDEX (\w+)").Select(m => m.Groups[1].Value),
+            name => Assert.True(name.StartsWith("ix_dashboards_", StringComparison.Ordinal) || name.StartsWith("ix_dashboard_widgets_", StringComparison.Ordinal), name));
+        Assert.Contains("CREATE UNIQUE INDEX ix_dashboards_project_id_normalized_name ON tamiza.dashboards (project_id, normalized_name)", sql);
+        Assert.Contains("CREATE INDEX ix_dashboard_widgets_dashboard_id ON tamiza.dashboard_widgets (dashboard_id)", sql);
+    }
 }

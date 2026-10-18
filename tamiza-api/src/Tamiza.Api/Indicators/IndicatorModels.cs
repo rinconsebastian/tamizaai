@@ -153,10 +153,14 @@ public sealed record WidgetConfig(
     public IReadOnlyList<WidgetTooltipItem> Tooltip { get; init; } = Tooltip ?? [];
 }
 
+/// <param name="DashboardId">The project dashboard the widget is on.</param>
 /// <param name="UpdatedAt">When the widget was last changed (ISO 8601).</param>
-public sealed record Widget(Guid Id, string Title, string ChartType, WidgetConfig Config, WidgetLayout Layout, DateTimeOffset UpdatedAt);
+public sealed record Widget(
+    Guid Id, Guid DashboardId, string Title, string ChartType, WidgetConfig Config, WidgetLayout Layout, DateTimeOffset UpdatedAt);
 
-public sealed record IndicatorLimits(int MaxWidgets, int MaxQueryRows);
+/// <param name="MaxWidgets">The most widgets one dashboard holds.</param>
+/// <param name="MaxDashboards">The most dashboards of its own a project has.</param>
+public sealed record IndicatorLimits(int MaxWidgets, int MaxQueryRows, int MaxDashboards);
 
 /// <param name="Published">False while the indicator's table has never been published.</param>
 /// <param name="PublishedAt">When the step that published the table finished.</param>
@@ -165,9 +169,25 @@ public sealed record IndicatorLimits(int MaxWidgets, int MaxQueryRows);
 public sealed record IndicatorEntry(
     string Name, string Label, string? Description, string? Unit, string Format, bool Published, DateTimeOffset? PublishedAt, Guid? RunId, long? Rows);
 
+/// <summary>What every dashboard of the project shows besides its widgets (<see cref="DashboardView"/>).</summary>
 /// <param name="Indicators">The project's current indicator scripts, ordered by name.</param>
+public sealed record IndicatorOverview(IReadOnlyList<IndicatorEntry> Indicators, IndicatorLimits Limits);
+
+/// <summary>One of the project's own dashboards with its widgets.</summary>
 /// <param name="Widgets">Ordered by <c>layout.y</c>, <c>layout.x</c>, then creation; listed whether or not their indicator is published.</param>
-public sealed record IndicatorOverview(IReadOnlyList<IndicatorEntry> Indicators, IReadOnlyList<Widget> Widgets, IndicatorLimits Limits);
+public sealed record DashboardView(Guid Id, string Name, IReadOnlyList<Widget> Widgets);
+
+/// <summary>One of the project's own dashboards, without its widgets.</summary>
+public sealed record DashboardEntry(Guid Id, string Name);
+
+/// <summary>The body that adds, renames or duplicates a dashboard.</summary>
+/// <param name="Name">1 to 40 characters once trimmed, stored trimmed.</param>
+public sealed record DashboardNameRequest(string? Name);
+
+/// <summary>A new order of the project's dashboards. The API knows nothing of left and right: the page sends the whole list.</summary>
+/// <param name="ExpectedIds">The order the member's page shows. When it is not the project's current order, nothing changes.</param>
+/// <param name="DashboardIds">The order asked for: the same dashboards, once each.</param>
+public sealed record ReorderDashboardsRequest(IReadOnlyList<Guid>? ExpectedIds, IReadOnlyList<Guid>? DashboardIds);
 
 /// <summary>The measure and group column a new widget over the table starts with.</summary>
 public sealed record ColumnDefaults(string? Measure, string? GroupBy);
@@ -218,7 +238,12 @@ public sealed record IndicatorQueryRequest(WidgetConfigInput? Config, string? Ch
 public sealed record CreateWidgetRequest(string? Title, string? ChartType, WidgetConfigInput? Config, WidgetLayout? Layout = null);
 
 /// <summary>Any subset of the widget's fields; what is left out keeps its value.</summary>
-public sealed record UpdateWidgetRequest(string? Title = null, string? ChartType = null, WidgetConfigInput? Config = null, WidgetLayout? Layout = null);
+/// <param name="DashboardId">
+/// Another dashboard of the project to move the widget to. The widget is placed below that dashboard's widgets, so a
+/// <paramref name="Layout"/> sent with a move is ignored. The widget's own dashboard, or null, moves nothing.
+/// </param>
+public sealed record UpdateWidgetRequest(
+    string? Title = null, string? ChartType = null, WidgetConfigInput? Config = null, WidgetLayout? Layout = null, Guid? DashboardId = null);
 
 /// <param name="Format"><c>csv</c> or <c>xlsx</c>.</param>
 public sealed record IndicatorExportRequest(string? Format);

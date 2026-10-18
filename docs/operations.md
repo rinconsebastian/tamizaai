@@ -79,6 +79,29 @@ Replace `tamiza` after `-U` with your `POSTGRES_USER` if you changed it.
 
 **Databases from early development builds.** Development builds that predate the SQL scripts tracked the schema in a `tamiza.__ef_migrations_history` table. On its first start, a newer `api` takes such a database over once: it keeps all data, records the initial script as applied and drops the old table. A database from an even older build is refused, and the `api` log says it must be recreated. Recreating deletes all data, including the encryption key ring: run `docker compose down -v`, then `docker compose up -d --build --wait`.
 
+### Rolling back the multiple dashboards upgrade
+
+The script `0012_add_multiple_dashboards.sql` lets a project have several indicators dashboards (see [Dashboards](indicators-dashboard.md#dashboards)). It runs at `api` startup in one transaction: every project gets one dashboard, **Indicators**, and all its widgets move to it with their layout and query unchanged. No configuration needs to change; `IndicatorDashboard__MaxWidgetsPerProject` keeps working (see [Common changes](#common-changes)).
+
+An `api` older than that script knows no dashboards. Run against the upgraded database, it cannot add widgets, because every widget now needs a dashboard, and it shows the widgets of all a project's dashboards on one canvas, overlapping. To go back, restore the copy of both volumes (see [Data](#data)) taken before the upgrade, together with the previous images. Without such a copy, stop `api`, undo the script by hand, then start the previous images (`docker compose up -d` with the earlier `TAMIZA_VERSION`):
+
+```sh
+docker compose stop api
+docker compose exec db psql -U tamiza -d tamiza -c "
+BEGIN;
+ALTER TABLE tamiza.dashboard_widgets DROP COLUMN dashboard_id;
+DROP TABLE tamiza.dashboards;
+DELETE FROM tamiza.schema_versions WHERE scriptname = '0012_add_multiple_dashboards.sql';
+COMMIT;"
+```
+
+Replace `tamiza` after `-U` with your `POSTGRES_USER` if you changed it. What this costs:
+
+- The widgets of every dashboard of a project share one canvas again and may overlap, and the widgets of a duplicated dashboard appear twice.
+- The older `api` counts them all against its limit per project, so a project above 50 widgets (or above `IndicatorDashboard__MaxWidgetsPerProject`) refuses new ones until enough are removed.
+- The dashboards' names and order are lost.
+- The older `api` reads only `IndicatorDashboard__MaxWidgetsPerProject`: if you renamed it to `IndicatorDashboard__MaxWidgetsPerDashboard`, rename it back.
+
 ## Health and logs
 
 | Service | Healthy when |
@@ -145,12 +168,14 @@ Projects' synchronization intervals are set per project by their admins, in the 
 
 Exports are written to `ExportDirectory` before the browser downloads them, so they use the `api` container's disk (its writable layer), not memory. A file is deleted as soon as it is downloaded or its link expires, and the directory is emptied whenever `api` starts. In the worst case the disk holds `MaxExportFileSize` for each export prepared in the last `ExportLinkLifetime` that nobody has downloaded yet; lower `MaxExportFileSize` on a small disk. Download links live in the memory of the `api` process, so a restart invalidates links that were not used yet, which is another reason to run a single `api` replica.
 
-**Indicators dashboard.** The dashboard of widgets (see [indicators-dashboard.md](indicators-dashboard.md)) reads the indicator tables with the `DataDashboard__` time limits and query slots above, and exports them with the same export settings. Two more variables on the `api` service limit what a project can ask of it:
+**Indicators dashboards.** A project's dashboards of widgets (see [indicators-dashboard.md](indicators-dashboard.md)) read the indicator tables with the `DataDashboard__` time limits and query slots above, and export them with the same export settings. Two more variables on the `api` service limit what a project can ask of them:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `IndicatorDashboard__MaxWidgetsPerProject` | `50` | Most widgets one project's dashboard can hold, from 1 to 500. Widgets already saved are kept if you lower it; the project just cannot add more until it is under the limit. |
+| `IndicatorDashboard__MaxWidgetsPerDashboard` | `50` | Most widgets one dashboard can hold, from 1 to 500. A project has up to 7 dashboards, so it can hold up to 7 times as many widgets. Widgets already saved are kept if you lower it: a dashboard at or above the limit cannot get more widgets, added or moved to it, until it is under the limit, and one above the limit cannot be duplicated until it holds no more widgets than the limit. |
 | `IndicatorDashboard__MaxWidgetQueryRows` | `5000` | Most rows one widget plots, from 1 to 100,000. A widget with more says that only the first rows are shown. |
+
+`IndicatorDashboard__MaxWidgetsPerProject`, the name of the widget limit before a project could have several dashboards, still works: when `IndicatorDashboard__MaxWidgetsPerDashboard` is not set, `api` uses its value as the limit of each dashboard, checks it the same way (a value that is not a number from 1 to 500 stops `api` at startup), and logs one warning at startup naming both variables. When both are set, `IndicatorDashboard__MaxWidgetsPerDashboard` wins and the old one is ignored. Rename it when convenient. The number of dashboards a project can have, 7, is fixed.
 
 **Per-project tables.** The pipeline publishes each project's results in PostgreSQL schemas named `p_<project id without dashes>_raw`, `_clean`, `_output` and `_indicators` (see [scripts.md](scripts.md)). They are rebuilt by every run (the `_indicators` schema holds one table per indicator, which a run replaces one at a time). To remove a project's tables by hand, drop its four schemas, for example `DROP SCHEMA p_01a0ffdc120470188195fe685d20c5c9_raw CASCADE;`; the next run creates them again.
 

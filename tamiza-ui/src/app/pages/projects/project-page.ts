@@ -34,7 +34,13 @@ import { projectSections } from './project-sections';
             <a routerLink="webhook" class="font-medium underline">{{ t('project.tokenUnreadableWebhook') }}</a>
           </tmz-alert>
         }
-        <tmz-tabs-nav class="mb-6 block" [items]="tabs()" [label]="t('project.sections')" />
+        <tmz-tabs-nav
+          class="mb-6 block"
+          [items]="tabs()"
+          [label]="t('project.sections')"
+          [scrollStartLabel]="t('dashboards.scrollStart')"
+          [scrollEndLabel]="t('dashboards.scrollEnd')"
+        />
         <router-outlet />
       } @else if (notFound()) {
         <div class="mx-auto max-w-xl py-8" data-testid="project-not-found">
@@ -75,10 +81,17 @@ export class ProjectPage {
     const id = this.id();
     const t = (key: string) => this.transloco.translate(key);
     const sections = projectSections(id, this.context.can('admin')).map((s) => ({ label: t(s.labelKey), link: s.link }));
+    // The project's own dashboards, in their order: a name is the analysts' text, shown as typed and never looked up as a key.
+    const dashboards = this.context.dashboards().map((d) => ({
+      label: d.name,
+      link: `/projects/${id}/dashboards/${d.id}`,
+      truncate: true,
+      testId: `dashboard-tab-${d.id}`,
+    }));
     return [
       { label: t('project.tabs.performance'), link: `/projects/${id}/performance` },
       { label: t('project.tabs.cleanData'), link: `/projects/${id}/clean-data` },
-      { label: t('project.tabs.indicators'), link: `/projects/${id}/indicators` },
+      ...dashboards,
       // Settings opens the first configuration section and stands for all of them.
       { label: t('project.tabs.settings'), link: sections[0].link, children: sections },
     ];

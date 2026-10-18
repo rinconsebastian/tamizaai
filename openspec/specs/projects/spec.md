@@ -56,7 +56,7 @@ The Kobo API token SHALL never appear in any API response or log. A project `adm
 - **THEN** the request fails with the reason and the previous token stays in use
 
 ### Requirement: Project list and details
-The system SHALL list the projects a user belongs to, with the user's role in each; superadmins see every project. Project details SHALL include the name, Kobo server, asset UID, form name, the result of the last form field check and the requesting user's role. A project `admin` SHALL be able to rename the project.
+The system SHALL list the projects a user belongs to, with the user's role in each; superadmins see every project. Project details SHALL include the name, Kobo server, asset UID, form name, the result of the last form field check, the requesting user's role, and the project's dashboards in their order, each with its identifier and name. A project `admin` SHALL be able to rename the project.
 
 #### Scenario: List shows only own projects
 - **WHEN** a user who belongs to two of five projects requests the project list
@@ -65,6 +65,10 @@ The system SHALL list the projects a user belongs to, with the user's role in ea
 #### Scenario: Rename by a non-admin
 - **WHEN** an `analyst` tries to rename the project
 - **THEN** the API responds 403 and the name is unchanged
+
+#### Scenario: Details list the dashboards
+- **WHEN** a `viewer` requests the details of a project whose dashboards are "Health" and then "Field"
+- **THEN** the details list "Health" and then "Field", each with its identifier
 
 ### Requirement: Form field check for the performance dashboard
 When a project is created, whenever an `admin` or `analyst` re-checks the Kobo connection, and on every synchronization of the project's submissions, the system SHALL read the definition of the form's deployed version, keep the list of its fields (each question's name, path, type, label in the form's default language, and whether it is inside a repeat group) and its choice lists (each choice's list, name and label in the form's default language), and check whether the form contains `start`, `end` and an enumerator identifier. The enumerator identifier is the form question the admin selected, while the deployed form still has it, or else the `username` metadata field. The system SHALL report which performance-dashboard metrics will be unavailable when fields are missing, and SHALL report sampling frame coverage as unavailable while the project has no sampling frame or a dimension of its frame maps to a field the form no longer has.

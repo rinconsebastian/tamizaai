@@ -135,8 +135,8 @@ The tables' columns also carry the text of their questions, as labels (see [scri
 | Role | Can |
 |---|---|
 | Admin | Everything below, plus project settings, the synchronization and script schedules, the Kobo token, the webhook and members. |
-| Analyst | Edit the sampling frame, re-check the form, run **Sync now** and **Full resync**, write and run the [scripts](scripts.md), and build the [indicators dashboard](indicators-dashboard.md). |
-| Viewer | Read the project, including the dashboards, the Settings > Submissions page and its synchronization log. |
+| Analyst | Edit the sampling frame, re-check the form, run **Sync now** and **Full resync**, write and run the [scripts](scripts.md), and build the project's [indicators dashboards](indicators-dashboard.md): add, rename, move, duplicate and remove [dashboards](indicators-dashboard.md#dashboards), and add, edit, arrange, remove and move widgets between them. |
+| Viewer | Read the project, including every dashboard and its widgets, the Settings > Submissions page and its synchronization log. |
 
 Everyone in the project sees its people in **Settings > Members**, with their role (you are marked **You**). Admins press **Add member** to add a person by email and role in a dialog, and use each row's menu to change a role, remove someone or revoke an invitation; people invited who have not signed in yet are rows of the same list, marked with the role they are invited as. The only admin has no demotion or removal in their menu, because a project always keeps one:
 

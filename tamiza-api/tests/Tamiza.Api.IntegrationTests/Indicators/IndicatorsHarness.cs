@@ -8,7 +8,8 @@ namespace Tamiza.Api.IntegrationTests.Indicators;
 
 /// <summary>
 /// A project with an admin, an analyst and a viewer, plus a user who is not a member, whose indicator table is written with SQL
-/// as the analytics worker would publish it, next to the run record it leaves.
+/// as the analytics worker would publish it, next to the run record it leaves. The project has its first dashboard, "Indicators",
+/// which the widget helpers use unless given another.
 /// </summary>
 public sealed class IndicatorsHarness : IAsyncDisposable
 {
@@ -16,12 +17,13 @@ public sealed class IndicatorsHarness : IAsyncDisposable
     public const string StandardColumns = "municipality text, value numeric, numerator numeric, denominator numeric";
 
     private IndicatorsHarness(
-        TamizaApiFactory factory, string db, Guid projectId, string exportDirectory,
+        TamizaApiFactory factory, string db, Guid projectId, Guid dashboardId, string exportDirectory,
         HttpClient viewer, HttpClient analyst, HttpClient admin, HttpClient outsider)
     {
         Factory = factory;
         Db = db;
         ProjectId = projectId;
+        DashboardId = dashboardId;
         ExportDirectory = exportDirectory;
         Viewer = viewer;
         Analyst = analyst;
@@ -34,6 +36,9 @@ public sealed class IndicatorsHarness : IAsyncDisposable
     public string Db { get; }
 
     public Guid ProjectId { get; }
+
+    /// <summary>The project's first dashboard, "Indicators", seeded with the project.</summary>
+    public Guid DashboardId { get; }
 
     public string ExportDirectory { get; }
 
@@ -52,6 +57,18 @@ public sealed class IndicatorsHarness : IAsyncDisposable
 
     public static string UrlOf(Guid projectId) => $"/api/v1/projects/{projectId}/indicators";
 
+    /// <summary>The project's dashboards: adding one, and <c>/order</c>.</summary>
+    public string DashboardsUrl => $"/api/v1/projects/{ProjectId}/dashboards";
+
+    /// <summary>The address of a dashboard of this project, the first one unless given another.</summary>
+    public string DashboardUrl(Guid? dashboardId = null) => DashboardUrlOf(ProjectId, dashboardId ?? DashboardId);
+
+    public static string DashboardUrlOf(Guid projectId, Guid dashboardId) => $"/api/v1/projects/{projectId}/dashboards/{dashboardId}";
+
+    public string WidgetsUrl(Guid? dashboardId = null) => DashboardUrl(dashboardId) + "/widgets";
+
+    public string WidgetUrl(Guid widgetId, Guid? dashboardId = null) => $"{WidgetsUrl(dashboardId)}/{widgetId}";
+
     public static async Task<IndicatorsHarness> CreateAsync(PostgresFixture postgres, Dictionary<string, string?>? settings = null)
     {
         var exportDirectory = Path.Combine(Path.GetTempPath(), "tamiza-indicator-export-tests-" + Guid.NewGuid().ToString("N"));
@@ -68,7 +85,8 @@ public sealed class IndicatorsHarness : IAsyncDisposable
         var viewerId = await TestData.SignInAsync(factory, "vic", "vic@example.org");
         await TestData.AddMemberAsync(db, projectId, viewerId, "viewer");
         await TestData.SignInAsync(factory, "mallory", "mallory@example.org");
-        return new IndicatorsHarness(factory, db, projectId, exportDirectory,
+        var dashboardId = await TestData.ScalarAsync<Guid>(db, "SELECT id FROM tamiza.dashboards WHERE project_id = @id", ("id", projectId));
+        return new IndicatorsHarness(factory, db, projectId, dashboardId, exportDirectory,
             TestData.ClientFor(factory, "vic", "vic@example.org"),
             TestData.ClientFor(factory, "grace", "grace@example.org"),
             TestData.ClientFor(factory, "ada", "ada@example.org"),
@@ -114,13 +132,82 @@ public sealed class IndicatorsHarness : IAsyncDisposable
 
     public Task ExecuteAsync(string sql, params (string Name, object Value)[] parameters) => TestData.ExecuteAsync(Db, sql, parameters);
 
-    /// <summary>A second project of the same admin, for widgets that must stay in their own project.</summary>
-    public async Task<Guid> AddOtherProjectAsync()
+    /// <summary>A second project of the same admin, with its first dashboard, for widgets that must stay in their own project.</summary>
+    public async Task<(Guid ProjectId, Guid DashboardId)> AddOtherProjectAsync()
     {
         var adminId = await TestData.ScalarAsync<Guid>(Db, "SELECT id FROM tamiza.users WHERE keycloak_sub = 'ada'");
         var otherId = await TestData.InsertProjectAsync(Db, adminId, "Other");
         await TestData.AddMemberAsync(Db, otherId, adminId, "admin");
-        return otherId;
+        var dashboardId = await TestData.ScalarAsync<Guid>(Db, "SELECT id FROM tamiza.dashboards WHERE project_id = @id", ("id", otherId));
+        return (otherId, dashboardId);
+    }
+
+    /// <summary>Adds a dashboard after the project's others with SQL, as another member's session would leave it.</summary>
+    public async Task<Guid> InsertDashboardAsync(string name)
+    {
+        var id = Guid.NewGuid();
+        await ExecuteAsync(
+            """
+            INSERT INTO tamiza.dashboards (id, project_id, name, normalized_name, position, created_by, updated_by)
+            SELECT @id, p.id, @name, lower(@name), (SELECT count(*) FROM tamiza.dashboards WHERE project_id = p.id), p.created_by, p.created_by
+            FROM tamiza.projects AS p WHERE p.id = @projectId
+            """,
+            ("id", id), ("name", name), ("projectId", ProjectId));
+        return id;
+    }
+
+    /// <summary>Removes a dashboard with SQL, as another member's removal would, with its widgets.</summary>
+    public Task RemoveDashboardAsync(Guid dashboardId) =>
+        ExecuteAsync("DELETE FROM tamiza.dashboards WHERE id = @id", ("id", dashboardId));
+
+    /// <summary>Asks the API to add a dashboard named <paramref name="name"/>, as the analyst unless given another client.</summary>
+    public Task<HttpResponseMessage> PostDashboardAsync(string name, HttpClient? client = null) =>
+        (client ?? Analyst).PostAsJsonAsync(DashboardsUrl, new { name });
+
+    /// <summary>Adds a dashboard through the API, after the project's others, and returns its id; fails the test when it is not created.</summary>
+    public async Task<Guid> AddDashboardAsync(string name, HttpClient? client = null)
+    {
+        var response = await PostDashboardAsync(name, client);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+    }
+
+    /// <summary>The project's dashboards as stored, in their order (position, then creation, then id).</summary>
+    public async Task<(Guid Id, string Name, int Position)[]> DashboardsAsync() =>
+        (await StoredDashboardsAsync())
+            .Select(row => row.Split('|'))
+            .Select(parts => (Guid.Parse(parts[1]), parts[2], int.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture)))
+            .ToArray();
+
+    /// <summary>
+    /// The project's dashboards in their order as <c>position|id|name|normalized name|updated_by|updated_at</c>, to check that a refused
+    /// request changed nothing.
+    /// </summary>
+    public async Task<string[]> StoredDashboardsAsync()
+    {
+        var rows = await TestData.ScalarAsync<string>(Db,
+            """
+            SELECT coalesce(string_agg(concat_ws('|', position, id, name, normalized_name, updated_by, updated_at), E'\n'
+                                       ORDER BY position, created_at, id), '')
+            FROM tamiza.dashboards WHERE project_id = @id
+            """,
+            ("id", ProjectId));
+        return rows!.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    /// <summary>
+    /// Every widget of the project, whatever its dashboard, as <c>title|dashboard id|chart type|config|layout|updated_at</c>, to check
+    /// that a refused request changed nothing.
+    /// </summary>
+    public async Task<string[]> StoredWidgetsAsync()
+    {
+        var rows = await TestData.ScalarAsync<string>(Db,
+            """
+            SELECT coalesce(string_agg(concat_ws('|', title, dashboard_id, chart_type, config, layout, updated_at), E'\n' ORDER BY title, id), '')
+            FROM tamiza.dashboard_widgets WHERE project_id = @id
+            """,
+            ("id", ProjectId));
+        return rows!.Split('\n', StringSplitOptions.RemoveEmptyEntries);
     }
 
     public async Task<JsonElement> GetAsync(string path = "", HttpClient? client = null)
@@ -129,6 +216,18 @@ public sealed class IndicatorsHarness : IAsyncDisposable
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
+
+    /// <summary>A dashboard of the project with its widgets (<c>{ id, name, widgets }</c>), the first one unless given another.</summary>
+    public async Task<JsonElement> GetDashboardAsync(Guid? dashboardId = null, HttpClient? client = null)
+    {
+        var response = await (client ?? Viewer).GetAsync(DashboardUrl(dashboardId));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    /// <summary>The widgets of a dashboard of the project, the first one unless given another.</summary>
+    public async Task<JsonElement> GetWidgetsAsync(Guid? dashboardId = null, HttpClient? client = null) =>
+        (await GetDashboardAsync(dashboardId, client)).GetProperty("widgets");
 
     /// <summary>Runs a widget's query (<paramref name="config"/> is the widget's <c>config</c>) and returns the response.</summary>
     public async Task<JsonElement> QueryAsync(object config, string? chartType = null, HttpClient? client = null)
@@ -141,13 +240,14 @@ public sealed class IndicatorsHarness : IAsyncDisposable
     public Task<HttpResponseMessage> PostQueryAsync(object config, string? chartType = null, HttpClient? client = null) =>
         (client ?? Viewer).PostAsJsonAsync(Url + "/query", new { config, chartType });
 
-    public Task<HttpResponseMessage> PostWidgetAsync(object body, HttpClient? client = null) =>
-        (client ?? Analyst).PostAsJsonAsync(Url + "/widgets", body);
+    /// <summary>Adds a widget to a dashboard of the project, the first one unless given another.</summary>
+    public Task<HttpResponseMessage> PostWidgetAsync(object body, HttpClient? client = null, Guid? dashboardId = null) =>
+        (client ?? Analyst).PostAsJsonAsync(WidgetsUrl(dashboardId), body);
 
     /// <summary>Adds a widget as the analyst and returns its JSON; fails the test when it is not created.</summary>
-    public async Task<JsonElement> AddWidgetAsync(object body, HttpClient? client = null)
+    public async Task<JsonElement> AddWidgetAsync(object body, HttpClient? client = null, Guid? dashboardId = null)
     {
-        var response = await PostWidgetAsync(body, client);
+        var response = await PostWidgetAsync(body, client, dashboardId);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }

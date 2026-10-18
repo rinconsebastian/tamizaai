@@ -270,16 +270,20 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
         Assert.Equal("Existing", await ScalarAsync<string>(connectionString, "SELECT name FROM tamiza.projects"));
         Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.dashboard_widgets"));
 
-        // The defaults fill in what a widget does not say, and the constraints refuse what it must not be.
+        // The defaults fill in what a widget does not say, and the constraints refuse what it must not be. Since 0012 a widget
+        // goes on one of its project's dashboards.
         await ExecuteAsync(connectionString, """
-            INSERT INTO tamiza.dashboard_widgets (project_id, chart_type, title, created_by, updated_by)
-            VALUES ('00000000-0000-0000-0000-0000000000aa', 'map', 'First', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001')
+            INSERT INTO tamiza.dashboard_widgets (project_id, dashboard_id, chart_type, title, created_by, updated_by)
+            VALUES ('00000000-0000-0000-0000-0000000000aa', (SELECT id FROM tamiza.dashboards WHERE project_id = '00000000-0000-0000-0000-0000000000aa'),
+                    'map', 'First', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001')
             """);
         Assert.Equal("{} {}", await ScalarAsync<string>(connectionString, "SELECT config::text || ' ' || layout::text FROM tamiza.dashboard_widgets"));
-        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, """
-            INSERT INTO tamiza.dashboard_widgets (project_id, chart_type, title, created_by, updated_by)
-            VALUES ('00000000-0000-0000-0000-0000000000aa', 'radar', 'Bad', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001')
+        var badChartType = await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, """
+            INSERT INTO tamiza.dashboard_widgets (project_id, dashboard_id, chart_type, title, created_by, updated_by)
+            VALUES ('00000000-0000-0000-0000-0000000000aa', (SELECT id FROM tamiza.dashboards WHERE project_id = '00000000-0000-0000-0000-0000000000aa'),
+                    'radar', 'Bad', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001')
             """));
+        Assert.Equal("ck_dashboard_widgets_chart_type", badChartType.ConstraintName);
 
         // Deleting the project deletes its widgets.
         await ExecuteAsync(connectionString, "DELETE FROM tamiza.projects WHERE id = '00000000-0000-0000-0000-0000000000aa'");
@@ -514,6 +518,89 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
         // Deleting a project deletes its records.
         await ExecuteAsync(connectionString, $"DELETE FROM tamiza.projects WHERE id = '{project}'");
         Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.assistant_calls"));
+    }
+
+    [Fact]
+    public async Task Multiple_dashboards_script_gives_every_project_an_indicators_dashboard_that_holds_its_widgets()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(
+            connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql", "0004_add_pipeline_authoring.sql",
+            "0005_add_choice_labels.sql", "0006_add_performance_dashboard.sql", "0007_add_indicators_dashboard.sql", "0008_split_indicator_scripts.sql",
+            "0009_add_script_workbench.sql", "0010_add_local_dev_kit.sql", "0011_add_script_assistant.sql");
+        const string withWidgets = "00000000-0000-0000-0000-0000000000aa";
+        const string withoutWidgets = "00000000-0000-0000-0000-0000000000bb";
+        const string ada = "00000000-0000-0000-0000-000000000001";
+        const string grace = "00000000-0000-0000-0000-000000000002";
+        // Each project has its own creator, and Grace authored the widgets of Ada's project.
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at)
+            VALUES ('{{ada}}', 'sub-1', 'Ada', now(), now()), ('{{grace}}', 'sub-2', 'Grace', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('{{withWidgets}}', 'With widgets', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(), '{{ada}}', now(), now()),
+                   ('{{withoutWidgets}}', 'Without widgets', 'https://kf.kobotoolbox.org', 'bAsset', 'x', 'x', 'Form', '[]', now(), '{{grace}}', now(), now());
+            INSERT INTO tamiza.dashboard_widgets (id, project_id, chart_type, title, config, layout, created_by, created_at, updated_by, updated_at)
+            VALUES ('00000000-0000-0000-0000-0000000000c1', '{{withWidgets}}', 'stat', 'Households', '{"indicator":"households","measure":"value"}',
+                    '{"x":0,"y":0,"w":3,"h":2}', '{{grace}}', '2026-10-01 08:00:00+00', '{{grace}}', '2026-10-02 09:30:00+00'),
+                   ('00000000-0000-0000-0000-0000000000c2', '{{withWidgets}}', 'bar', 'By municipality',
+                    '{"indicator":"coverage","measure":"value","groupBy":"municipality"}', '{"x":3,"y":0,"w":9,"h":4}', '{{grace}}',
+                    '2026-10-03 08:00:00+00', '{{grace}}', '2026-10-04 17:45:00+00');
+            """);
+        const string widgets = """
+            SELECT string_agg(format('%s %s %s %s %s %s %s', id, project_id, chart_type, title, config, layout, updated_at), ' | ' ORDER BY id)
+            FROM tamiza.dashboard_widgets
+            """;
+        var widgetsBefore = await ScalarAsync<string>(connectionString, widgets);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        Assert.Contains("0012_add_multiple_dashboards.sql", Scripts);
+        // Every project, with widgets or without, has exactly one dashboard: Indicators, first, owned by the project's creator.
+        Assert.Equal(
+            $"{withWidgets} Indicators indicators 0 {ada} {ada} | {withoutWidgets} Indicators indicators 0 {grace} {grace}",
+            await ScalarAsync<string>(connectionString, """
+                SELECT string_agg(format('%s %s %s %s %s %s', project_id, name, normalized_name, position, created_by, updated_by), ' | ' ORDER BY project_id)
+                FROM tamiza.dashboards
+                """));
+        // Both widgets are on their own project's dashboard, with their query, place, size and last change untouched.
+        Assert.Equal(widgetsBefore, await ScalarAsync<string>(connectionString, widgets));
+        Assert.Equal(2L, await ScalarAsync<long>(connectionString, """
+            SELECT count(*) FROM tamiza.dashboard_widgets AS w JOIN tamiza.dashboards AS d ON d.id = w.dashboard_id AND d.project_id = w.project_id
+            """));
+
+        // A widget needs a dashboard, a dashboard's name is unique in its project whatever its case, and its position is not negative.
+        var noDashboard = await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.dashboard_widgets (project_id, chart_type, title, created_by, updated_by)
+            VALUES ('{{withoutWidgets}}', 'stat', 'Loose', '{{grace}}', '{{grace}}')
+            """));
+        Assert.Equal((PostgresErrorCodes.NotNullViolation, "dashboard_id"), (noDashboard.SqlState, noDashboard.ColumnName));
+        var sameName = await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.dashboards (project_id, name, normalized_name, position, created_by, updated_by)
+            VALUES ('{{withWidgets}}', 'INDICATORS', 'indicators', 1, '{{ada}}', '{{ada}}')
+            """));
+        Assert.Equal("ix_dashboards_project_id_normalized_name", sameName.ConstraintName);
+        var negativePosition = await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.dashboards (project_id, name, normalized_name, position, created_by, updated_by)
+            VALUES ('{{withWidgets}}', 'Field', 'field', -1, '{{ada}}', '{{ada}}')
+            """));
+        Assert.Equal("ck_dashboards_position", negativePosition.ConstraintName);
+
+        // Removing a dashboard removes its widgets and no other.
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.dashboards (id, project_id, name, normalized_name, position, created_by, updated_by)
+            VALUES ('00000000-0000-0000-0000-0000000000d2', '{{withWidgets}}', 'Field', 'field', 1, '{{ada}}', '{{ada}}');
+            INSERT INTO tamiza.dashboard_widgets (project_id, dashboard_id, chart_type, title, created_by, updated_by)
+            VALUES ('{{withWidgets}}', '00000000-0000-0000-0000-0000000000d2', 'stat', 'Visits', '{{ada}}', '{{ada}}');
+            """);
+        await ExecuteAsync(connectionString, $"DELETE FROM tamiza.dashboards WHERE project_id = '{withWidgets}' AND name = 'Indicators'");
+        Assert.Equal("Visits", await ScalarAsync<string>(connectionString, "SELECT string_agg(title, ', ') FROM tamiza.dashboard_widgets"));
+
+        // Removing a project removes its dashboards and their widgets, and leaves the other project's.
+        await ExecuteAsync(connectionString, $"DELETE FROM tamiza.projects WHERE id = '{withWidgets}'");
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+        Assert.Equal(withoutWidgets, await ScalarAsync<string>(connectionString, "SELECT string_agg(project_id::text, ', ') FROM tamiza.dashboards"));
     }
 
     /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>

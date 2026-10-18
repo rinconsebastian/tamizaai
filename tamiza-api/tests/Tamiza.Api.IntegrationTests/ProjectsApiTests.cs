@@ -35,6 +35,10 @@ public sealed class ProjectsApiTests(PostgresFixture postgres) : IDisposable
     private static async Task<string> CodeAsync(HttpResponseMessage response) =>
         (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString()!;
 
+    /// <summary>The <c>dashboards</c> of project details as <c>(id, name)</c>, in the order listed.</summary>
+    private static (Guid Id, string Name)[] Dashboards(JsonElement details) =>
+        details.GetProperty("dashboards").EnumerateArray().Select(d => (d.GetProperty("id").GetGuid(), d.GetProperty("name").GetString()!)).ToArray();
+
     // 3.2 — creation
 
     [Fact]
@@ -235,6 +239,83 @@ public sealed class ProjectsApiTests(PostgresFixture postgres) : IDisposable
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
         Assert.Equal("UTC", details.GetProperty("timeZone").GetString());
         Assert.Contains("\"timeZone\"", openApi);
+    }
+
+    // Dashboards: New project (custom-dashboards), Details list the dashboards (projects)
+
+    [Fact]
+    public async Task A_new_project_starts_with_one_dashboard_named_indicators_and_no_widgets()
+    {
+        var (factory, db) = await FactoryAsync();
+        await using var owner = factory;
+        using var client = TestData.ClientFor(factory, "ada", "ada@example.org");
+
+        var created = (await CreateProjectAsync(client)).GetProperty("project");
+        var id = created.GetProperty("id").GetGuid();
+        var details = await client.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{id}");
+
+        var dashboard = Assert.Single(Dashboards(created));
+        Assert.Equal("Indicators", dashboard.Name);
+        Assert.Equal([dashboard], Dashboards(details));
+        // Saved with the project: first, named as the migration names it, and owned by the project's creator.
+        Assert.Equal($"{dashboard.Id}|Indicators|indicators|0|t", await TestData.ScalarAsync<string>(db,
+            """
+            SELECT string_agg(concat_ws('|', d.id, d.name, d.normalized_name, d.position, d.created_by = p.created_by AND d.updated_by = p.created_by), ',')
+            FROM tamiza.dashboards AS d JOIN tamiza.projects AS p ON p.id = d.project_id
+            """));
+        var opened = await client.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{id}/dashboards/{dashboard.Id}");
+        Assert.Equal("Indicators", opened.GetProperty("name").GetString());
+        Assert.Equal(0, opened.GetProperty("widgets").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task The_details_list_the_dashboards_in_their_order_to_every_member_including_a_viewer()
+    {
+        var (factory, db) = await FactoryAsync();
+        await using var owner = factory;
+        using var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
+        var created = (await CreateProjectAsync(admin)).GetProperty("project");
+        var id = created.GetProperty("id").GetGuid();
+        var field = Dashboards(created).Single().Id;
+        var viewerId = await TestData.SignInAsync(factory, "vic", "vic@example.org");
+        await TestData.AddMemberAsync(db, id, viewerId, "viewer");
+        using var viewer = TestData.ClientFor(factory, "vic", "vic@example.org");
+        // "Field" is older, stored first and first by name; only its position puts it after "Health".
+        await TestData.ExecuteAsync(db,
+            "UPDATE tamiza.dashboards SET name = 'Field', normalized_name = 'field', position = 1 WHERE id = @id", ("id", field));
+        var health = await TestData.ScalarAsync<Guid>(db,
+            """
+            INSERT INTO tamiza.dashboards (project_id, name, normalized_name, position, created_by, updated_by)
+            SELECT id, 'Health', 'health', 0, created_by, created_by FROM tamiza.projects WHERE id = @id
+            RETURNING id
+            """,
+            ("id", id));
+
+        var seen = await viewer.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{id}");
+        var seenByAdmin = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{id}");
+
+        Assert.Equal([(health, "Health"), (field, "Field")], Dashboards(seen));
+        Assert.Equal([(health, "Health"), (field, "Field")], Dashboards(seenByAdmin));
+    }
+
+    [Fact]
+    public async Task The_details_a_rename_answers_still_list_the_dashboards()
+    {
+        var (factory, _) = await FactoryAsync();
+        await using var owner = factory;
+        using var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
+        var created = (await CreateProjectAsync(admin)).GetProperty("project");
+        var id = created.GetProperty("id").GetGuid();
+        var indicators = Dashboards(created).Single().Id;
+        var added = await admin.PostAsJsonAsync($"/api/v1/projects/{id}/dashboards", new { name = "Field progress" });
+        var field = (await added.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var renamed = await admin.PatchAsJsonAsync($"/api/v1/projects/{id}", new { name = "Renamed" });
+        var body = await renamed.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
+        Assert.Equal("Renamed", body.GetProperty("name").GetString());
+        Assert.Equal([(indicators, "Indicators"), (field, "Field progress")], Dashboards(body));
     }
 
     // 3.4 — token replacement and re-check

@@ -1,8 +1,46 @@
 # Indicators dashboard
 
-The indicators dashboard is a canvas of **widgets**: stat tiles, charts and maps that members of a project arrange over the tables its indicator scripts published. Each widget plots **one indicator**. It is the third tab of a project, after [Performance](performance-dashboard.md) and [Clean data](clean-data-dashboard.md). Every member can see it and export the tables; analysts and admins build it.
+A project's own dashboards are canvases of **widgets**: stat tiles, charts and maps that members of a project arrange over the tables its indicator scripts published. Each widget plots **one indicator**. A project has from 1 to 7 dashboards of its own, each with its name and its widgets, shown as tabs after [Performance](performance-dashboard.md) and [Clean data](clean-data-dashboard.md); a new project starts with one, **Indicators** (see [Dashboards](#dashboards)). Every member can see them all and export the tables; analysts and admins build them.
 
-It shows what the last successful run of each [indicator script](scripts.md#3-indicator-scripts-computecleaned-ctx) published, and nothing else: it does not read the stored submissions, does not contact Kobo and never starts a run. When a run fails, or one indicator fails, the table of the last successful run stays on screen. The widgets come first. After them, a collapsed list titled **Indicators (N) · M published** shows each indicator with its label, unit and format, whether it has published a table, when, and its row count; open it to read it or to export a table. While no indicator has published, the page says so with the list expanded as part of that message; analysts and admins get a link to the scripts, and the widgets already configured are kept and listed, so a dashboard can be laid out before the first run. A widget whose indicator has not published stays short until it does.
+A dashboard shows what the last successful run of each [indicator script](scripts.md#3-indicator-scripts-computecleaned-ctx) published, and nothing else: it does not read the stored submissions, does not contact Kobo and never starts a run. When a run fails, or one indicator fails, the table of the last successful run stays on screen. The widgets come first. After them, a collapsed list titled **Indicators (N) · M published** shows each indicator with its label, unit and format, whether it has published a table, when, and its row count; open it to read it or to export a table. Every dashboard of the project lists the same indicators, with the same exports. While no indicator has published, every dashboard says so with the list expanded as part of that message; analysts and admins get a link to the scripts, and the widgets already configured on the dashboard are kept and listed, so a dashboard can be laid out before the first run. A widget whose indicator has not published stays short until it does.
+
+## Dashboards
+
+The tab row of a project reads **Performance**, **Clean data**, the project's own dashboards in their order, and **Settings** at its end. Performance and Clean data always come first and are not among the project's own: they cannot be renamed, moved, duplicated or removed, and no dashboard can take their place or their name. Every member sees every dashboard of the project; there are no dashboards for some members only.
+
+A dashboard's name is shown exactly as it was saved: never translated, and always as text, never as markup. From 768 pixels wide, tabs that do not fit scroll sideways inside the row, never the page: each side that hides tabs shows an arrow that scrolls the row, Settings stays visible at its end, and the open tab is brought into view. A name too long for its tab is cut with an ellipsis; pointing at the tab or reaching it with the keyboard shows the whole name, and screen readers read it whole. Below 768 pixels one select lists Performance, Clean data and the project's dashboards in the same order, then the Settings group.
+
+Each dashboard shows its name as a heading above its widgets. For analysts and admins the heading is followed by the **New dashboard** button and the **Dashboard actions** menu (the button with three dots), with **Rename**, **Duplicate**, **Move left**, **Move right** and **Remove**; on a narrow screen they wrap under the name. An item that is unavailable stays in the menu, dimmed, with a second line saying why (for example "It is already the first dashboard."); the arrow keys still reach it, so a screen reader reads the reason too, but it cannot be chosen. Viewers see the heading only.
+
+**New dashboard**, **Rename** and **Duplicate** open the same name form: one **Name** field, of up to 40 characters and different from the names of the project's other dashboards, then **Add dashboard**, **Rename** or **Duplicate** to save, or **Cancel** (or Escape) to close it without a change. A name that is refused (empty, too long, taken, the name of a permanent tab, or holding a control character) is explained under the field, and what you typed is kept.
+
+- **New dashboard** asks for a name, adds the dashboard after the project's others, with no widgets, and opens it with the focus on its heading.
+- **Rename** changes only the name: the dashboard keeps its widgets, its place and its address. A message confirms the new name (`Renamed to "Coverage".`), and the focus returns to the actions button.
+- **Move left** and **Move right** move the dashboard one place among the project's dashboards, for every member. The first dashboard cannot move left and the last cannot move right. Screen readers are told the dashboard's new position ("Health moved to position 3 of 4"), and the focus returns to the actions button, so a dashboard can be moved several places in a row. While a move is being saved, both items are unavailable.
+- **Duplicate** asks for the copy's name, proposed as the original's name followed by " (copy)", the original's name cut where needed so the whole fits in 40 characters (to its first 33 before " (copy)"); when the project already has that name, in any case, it proposes " (copy 2)", " (copy 3)" and so on, cut the same way. The copy is placed right after the original and holds a copy of each of its widgets, with the same title, type, query, position and size, and it opens with the focus on its heading. A widget you moved or resized a moment before is saved first, so the copy has it in its new place. From then on the two are independent: changing or removing a widget of one leaves the other as it is. A dashboard that holds more widgets than the [limit](#limits) allows, which happens only after an operator lowered it, cannot be duplicated: the name form says so ("A dashboard can have at most 50 widgets. Remove one or move it to another dashboard first.") and nothing is added.
+- **Remove** asks for confirmation, saying how many widgets go with the dashboard, counted on the server when you ask ("Remove Health and its 5 widgets? This cannot be undone."), then, on **Remove dashboard**, removes the dashboard and all its widgets for every member. It cannot be undone. The dashboard now in its place opens, or the new last one when the removed dashboard was last, with the focus on its heading, and a message says what was removed (`"Health" and its 5 widgets were removed.`).
+
+The rules:
+
+- **1 to 7 dashboards.** A project always keeps one: on its only dashboard **Remove** is unavailable ("A project needs at least one dashboard."). At 7, **New dashboard** is unavailable, with a line below it that says why ("The project has the most dashboards it can hold (7)."), and so is **Duplicate** ("A project can have at most 7 dashboards."). Both can still be reached with the keyboard, so a screen reader reads why. The 7 is a rule of the product, not a setting.
+- **Names** are 1 to 40 characters once leading and trailing spaces are removed (`  Salud  ` is saved as `Salud`), with no control characters such as tabs or line breaks. Two dashboards of a project cannot have names that differ only in case (`Salud` and `SALUD`), and no dashboard can be named Performance, Clean data or Settings, in any case. Another project can use the same names.
+- **Who.** Analysts and admins add, rename, move, duplicate and remove dashboards. Viewers see every dashboard and its widgets but none of these actions, and the API refuses their requests (403). Someone who is not a member of the project gets the same answer as for a project that does not exist.
+
+### Dashboard addresses
+
+Each dashboard has its own address, `/projects/<project id>/dashboards/<dashboard id>`. The identifier does not change when the dashboard is renamed or moved, and the address holds no part of its name, so links and bookmarks keep working. Opening a dashboard from its address or its tab leaves the focus where it is.
+
+- `/projects/<project id>/indicators`, the address of the former Indicators tab, opens the project's first dashboard, and the address becomes that dashboard's own.
+- The address of a dashboard the project does not have, such as a removed one, opens the project's first dashboard instead and replaces the address with its own. A notice above it, also announced to screen readers, says that the dashboard asked for does not exist and names the one shown ("The dashboard you opened does not exist. Showing Health instead."). It stays until you **Dismiss** it, which puts the focus on the dashboard's heading, or until another dashboard or tab opens.
+
+### Two members at the same time
+
+Your tab row shows the dashboards as they were when the page loaded. Other members' changes appear when you reload the page, or when one of your own changes is refused because of them:
+
+- A change to a dashboard another member has removed (renaming, moving, duplicating or removing it) or to one of its widgets (adding, editing, moving, resizing or removing a widget) saves nothing. Then, as when you open such a dashboard from its tab, it leaves your tab row, and the project's first dashboard opens with the focus on its heading and a notice that says what happened (`"Housing" no longer exists. Showing Health instead.`), which stays until you **Dismiss** it or another dashboard or tab opens.
+- A move based on an order that has changed since your page loaded, because another member added, removed or moved a dashboard, is refused with a notice above the dashboard ("The project's dashboards have changed. Reload and try again."), and your tab row is reloaded at once. Move it again from there.
+- Adding or duplicating a dashboard just after another member reached the 7 is refused in the name form with the rule's message ("A project can have at most 7 dashboards. Remove one before adding another."); removing what has just become the project's only dashboard is refused with a notice ("A project needs at least one dashboard."). Either way your tab row is reloaded.
+- Otherwise the last change wins: when two members rename the same dashboard, the later name stays.
 
 ## What an indicator script must provide
 
@@ -185,15 +223,23 @@ Add a **Map** widget over `survey_progress`, group by `block_code`, choose `geom
 
 ## Building the dashboard
 
-The **Add widget** button opens the widget form. Each widget has an actions menu in its header with **Edit widget** and **Remove widget**. Above the widgets, editors see how many of the allowed widgets exist; when the limit is reached the line says so and **Add widget** is off. All of this is for **analysts and admins**: a `viewer` sees every widget, switches to tables and exports, but has no add, edit, remove or move controls, and the API refuses their requests.
+The **Add widget** button opens the widget form, and the widget is added to the open dashboard. Each widget has an actions menu in its header with **Edit widget** and **Remove widget**. Above the widgets, editors see how many of the allowed widgets the dashboard holds; when the limit is reached the line says so and **Add widget** is off. All of this is for **analysts and admins**: a `viewer` sees every widget, switches to tables and exports, but has no add, edit, remove or move controls, and the API refuses their requests.
 
-- **A project holds at most 50 widgets** by default; the page shows how many are used and, at the limit, says so and disables **Add widget**. An operator can change the limit; see [operations.md](operations.md#common-changes).
-- Every member sees the same dashboard: it is saved with the project, not per person. If two members change the same widget at the same time, the last change is kept.
+- **A dashboard holds at most 50 widgets** by default. The limit counts the widgets of one dashboard, so a full dashboard does not stop another from getting more. The page shows how many are used ("12 of 50 widgets on this dashboard") and, at the limit, says so ("This dashboard has the most widgets it can hold (50). Remove one or move it to another dashboard to add another.") and disables **Add widget**. An operator can change the limit; see [operations.md](operations.md#common-changes).
+- Every member sees the same dashboards: they are saved with the project, not per person. If two members change the same widget at the same time, the last change is kept.
 - Removing a widget asks for confirmation and removes it for everyone.
+
+### Moving a widget to another dashboard
+
+When the project has more than one dashboard, **Edit widget** shows a **Dashboard** field after the title, set to the widget's own dashboard. Choose another one and save: the widget keeps its title, type, query and size, and goes to the left edge below the widgets of its new dashboard. It leaves the open dashboard, a message names the dashboard it went to ("Widget Coverage moved to Field."), and the focus moves to the open dashboard's heading.
+
+- A widget that cannot be drawn because its table lost a column can still be moved: change only the dashboard, and it moves and keeps naming what is missing. Changing anything else as well checks the whole widget again.
+- A dashboard that already holds the most widgets it can ("A dashboard can have at most 50 widgets. Remove one or move it to another dashboard first."), or that another member has just removed ("The dashboard does not exist."), refuses the widget with an error next to the field; the form stays open and the widget stays where it was. A removed dashboard then leaves the field and the tab row.
+- Adding a widget offers no dashboard choice: a new widget goes to the open dashboard.
 
 ### The grid
 
-Widgets sit on a grid of 12 columns. A new widget goes below the existing ones, 3 columns by 2 rows for a stat tile, 6 by 6 for a map and 6 by 4 for the other types; a widget is at most 40 rows high.
+Each dashboard has its own grid of 12 columns. A new widget goes below the existing widgets of its dashboard, 3 columns by 2 rows for a stat tile, 6 by 6 for a map and 6 by 4 for the other types; a widget is at most 40 rows high.
 
 - **Drag** a widget by the handle at the left of its title to move it, and drag the corner at the bottom right to resize it. A dashed outline shows where it will land. A widget dropped on others pushes them down; widgets that do not overlap stay where they are.
 - **Keyboard.** Focus the move handle and press the arrow keys to move the widget one cell; hold **Shift** with the arrow keys to resize it. On the resize handle, the arrow keys resize. The new place is announced to screen readers. The handles are hidden on narrow screens.
@@ -202,7 +248,7 @@ Widgets sit on a grid of 12 columns. A new widget goes below the existing ones, 
 
 ## Show as table
 
-Every widget except the stat tile has a table button in its header (shown once the widget has rows to draw) that replaces the picture with the numbers it plots, formatted like the chart (a histogram lists its ranges and their counts, a map its groups with their tooltip columns, written as in the tooltip, and the kind of shape each has). The button above the grid, **Show all as tables**, does the same for every widget at once, in reading order, and resets the choice made on single widgets. Each chart also carries a text description for assistive technology.
+Every widget except the stat tile has a table button in its header (shown once the widget has rows to draw) that replaces the picture with the numbers it plots, formatted like the chart (a histogram lists its ranges and their counts, a map its groups with their tooltip columns, written as in the tooltip, and the kind of shape each has). The button above the grid, **Show all as tables**, does the same for every widget of the dashboard at once, in reading order, and resets the choice made on single widgets. Each chart also carries a text description for assistive technology.
 
 ## Export
 
@@ -221,8 +267,10 @@ The other widgets keep working.
 
 | Limit | Default |
 |---|---|
-| Widgets in a project | 50 |
+| Widgets in a dashboard | 50 |
 | Rows one widget plots (group values, after summing) | 5,000 |
+| Dashboards of a project's own | 7, and at least 1 |
+| Length of a dashboard's name | 40 characters |
 | Filters in a widget | 50 |
 | Values in an **is one of** filter | 100 |
 | Ranges in a histogram | 100 (10 by default) |
@@ -232,7 +280,7 @@ The other widgets keep working.
 | Indicators in a project | 100 |
 | Length of a title | 200 characters |
 
-An operator can change the first two; see [operations.md](operations.md#common-changes). A widget whose query matches more rows than the limit shows the first ones and says so ("Only the first 5,000 rows are shown"); add a filter or group by a coarser column. A query that takes longer than the dashboard time limit (25 seconds by default, shared with the clean data dashboard) is stopped with a message.
+An operator can change the first two; the others are fixed. See [operations.md](operations.md#common-changes). A widget whose query matches more rows than the limit shows the first ones and says so ("Only the first 5,000 rows are shown"); add a filter or group by a coarser column. A query that takes longer than the dashboard time limit (25 seconds by default, shared with the clean data dashboard) is stopped with a message.
 
 ## What it does not do
 
@@ -240,6 +288,8 @@ An operator can change the first two; see [operations.md](operations.md#common-c
 - Its basemap is a background and nothing more: there is no satellite imagery from anyone but Google, no street labels over the imagery, no basemap you define yourself, and no administrative boundaries of its own, since the shapes come from your script.
 - It does not save a zoomed view as the map's starting view, and only maps have a tooltip with columns; a tooltip column's numbers are always summed, with no choice of minimum, maximum or average.
 - It does not filter across widgets or across the whole dashboard; each widget has its own filters.
-- A project has one indicators dashboard.
+- Every member sees every dashboard: there are no dashboards for some members only, and no dashboards of one's own.
+- It does not copy a dashboard or a widget to another project, and a removed dashboard cannot be brought back.
+- Tabs cannot be dragged: a dashboard moves with **Move left** and **Move right**, which also work from the keyboard and on a phone.
 - It does not save a chart or a map as an image.
-- It does not refresh by itself: reload the page after a run.
+- It does not refresh by itself: reload the page after a run, or to see the dashboards other members have added, renamed, moved or removed.

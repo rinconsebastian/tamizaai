@@ -1,4 +1,5 @@
 using Tamiza.Api.Data;
+using Tamiza.Api.Indicators;
 using Tamiza.Api.Kobo;
 
 namespace Tamiza.Api.Projects;
@@ -15,6 +16,7 @@ public sealed record ReplaceTokenRequest(string? ApiToken);
 
 public sealed record ProjectSummary(Guid Id, string Name, string FormName, ProjectRole MyRole);
 
+/// <param name="Dashboards">The project's own dashboards in their order, at least one: what the tab row shows after Performance and Clean data.</param>
 public sealed record ProjectDetails(
     Guid Id,
     string Name,
@@ -28,7 +30,8 @@ public sealed record ProjectDetails(
     bool TokenUnreadable,
     DateTimeOffset CreatedAt,
     int UnavailableFormVersions,
-    string TimeZone);
+    string TimeZone,
+    IReadOnlyList<DashboardEntry> Dashboards);
 
 public sealed record WebhookSettings(string Url, string Username, string? Secret, bool SecretUnreadable);
 
