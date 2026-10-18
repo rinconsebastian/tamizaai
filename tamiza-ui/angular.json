@@ -19,12 +19,19 @@
             "browser": "src/main.ts",
             "tsConfig": "tsconfig.app.json",
             "loader": {
-              ".py": "text"
+              ".py": "text",
+              ".css": "text",
+              ".conf": "text"
             },
             "assets": [
               {
                 "glob": "**/*",
                 "input": "public"
+              },
+              {
+                "glob": "leaflet.css",
+                "input": "node_modules/leaflet/dist",
+                "output": "vendor/leaflet/1.9.4"
               }
             ],
             "styles": [

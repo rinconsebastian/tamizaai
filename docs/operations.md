@@ -9,6 +9,7 @@ How to install, run and upgrade a self-hosted Tamiza. The quick start in the [RE
 - An existing Keycloak realm configured as described in [keycloak.md](keycloak.md).
 - **Outbound HTTPS from the `api` container** to the Kobo servers your projects use (for example `kf.kobotoolbox.org` or `eu.kobotoolbox.org`). Besides the checks users start, `api` synchronizes every project on a schedule (by default every 12 hours, plus a daily deletion check), so this traffic happens without anyone signed in. Tamiza connects to Kobo directly and does not use an outbound HTTP proxy: a proxy would make the connection on Tamiza's behalf and bypass its check that Kobo addresses are public. Installations that can only reach the Internet through a proxy cannot connect to Kobo yet.
 - **Outbound HTTPS from the `api` container to the model provider**, only if you turn on the [AI assistant](#ai-assistant). Each assistant request goes from `api` straight to the base URL you configure (a provider on the Internet, or a model server on your own network over plain HTTP), also without an outbound HTTP proxy. Without the three assistant variables nothing is sent anywhere.
+- **Outbound HTTPS from the `api` container to `tile.googleapis.com`**, only if you set `TAMIZA_MAP_BASEMAP_PROVIDER=google` (see [Map basemaps](#map-basemaps-optional)). Without a proxy, as for the other providers. With `osm`, viewers' browsers (not `api`) contact `tile.openstreetmap.org`; with no provider nothing is sent anywhere.
 - **Kobo must reach Tamiza** for the webhook: the `TAMIZA_PUBLIC_URL` must be reachable from the Kobo server (for kf or eu, from the Internet). If it is not, submissions still arrive, but only through the scheduled synchronization.
 - **HTTPS in front of Tamiza** for any address other than `localhost`. Browsers expose the WebCrypto API that sign-in (PKCE) needs only in a secure context, so plain HTTP on a server address breaks sign-in. Tamiza does not terminate TLS itself.
 
@@ -363,6 +364,81 @@ FROM tamiza.assistant_calls ORDER BY started_at DESC LIMIT 20"
 ```
 
 A request that costs several times the tokens of the others, or a `tokens_estimated` of true on every row, usually means a reasoning model thinking at full effort or a provider that reports no usage: lower the effort in the extra fields. Run the seven again whenever you change the model, its settings or the provider, and after a Tamiza upgrade that changes the assistant's rules.
+
+## Map basemaps (optional)
+
+The dashboard's maps can have a background map under their shapes, streets or satellite imagery (see [Maps](indicators-dashboard.md#maps)). It is **off by default**: with no provider, no browser and no server makes a request to any tile provider, and maps still zoom and pan on their plain background. Tamiza ships with no provider account and no key: you choose one, and the choice is yours to make.
+
+A deployment offers **one provider**. The analyst picks None, Streets or Satellite for each map widget, and any project member can switch the background of a map for their own screen without saving anything.
+
+### Turn it on
+
+Set these in `.env` and run `docker compose up -d api`. Only `api` reads them. The `ui` image that came with the release (rebuilt by `docker compose up -d --build`) already carries the content security policy and the tile route that basemaps need.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TAMIZA_MAP_BASEMAP_PROVIDER` | empty (`none`) | `none`, `osm` or `google`. |
+| `TAMIZA_MAP_GOOGLE_API_KEY` | empty | Required with `google`: a Map Tiles API key. Letters, digits, `-` and `_` only. |
+| `TAMIZA_MAP_GOOGLE_LANGUAGE` | empty (`en-US`) | An IETF language tag for Google's labels, such as `es-419`. |
+| `TAMIZA_MAP_GOOGLE_REGION` | empty (`US`) | A region code for Google's labels and borders, such as `CO`. Upper-cased. |
+| `TAMIZA_MAP_TILES_PER_MINUTE` | `600` | Google tiles each user may be sent per minute, 60 to 10,000. |
+| `TAMIZA_MAP_TILES_PER_USER_PER_DAY` | `3000` | Google tiles each user may be sent per UTC day, 100 to 1,000,000. |
+
+Blank text means unset. A provider other than the three, `google` without a key, or a number out of range stops `api` at startup and names the variable. The key, language and region are read only with `google`; set without it, they are ignored and `api` logs one warning naming them. At startup `api` logs one line saying which hosts will be contacted and by whom; check it with:
+
+```sh
+docker compose logs api | grep "Map basemaps"
+```
+
+To turn basemaps off, blank `TAMIZA_MAP_BASEMAP_PROVIDER` and run `docker compose up -d api`. Maps saved with a basemap are drawn without one and without an error; the widget form shows the saved basemap as no longer offered and keeps it if the widget is saved unchanged. Links that browsers still hold stop working at once.
+
+### OpenStreetMap (`osm`)
+
+Streets only, from OpenStreetMap's standard tiles. Each viewer's **browser** loads the tiles from `https://tile.openstreetmap.org/{z}/{x}/{y}.png`; `api` is not involved. OpenStreetMap's [tile usage policy](https://operations.osmfoundation.org/policies/tiles/) applies to you as the operator, and in short it asks for:
+
+- exactly that tile address, with no change to its host or path;
+- a visible credit, "© OpenStreetMap contributors", which Tamiza always shows inside the map;
+- a valid `Referer`: Tamiza sends your deployment's origin only (never a page's path) on tile requests, and keeps `Referrer-Policy: no-referrer` for everything else, such as export links;
+- no prefetching and no offline copy: Tamiza loads only the tiles of the area on screen, and never stores them;
+- no heavy or commercial use. OpenStreetMap's servers are run by volunteers and may block an address or an application that uses them heavily. If your dashboards are used by many people, or by a business, use `google`, or run your own tile service, which Tamiza does not support yet.
+
+The `ui` content security policy allows images from `https://tile.openstreetmap.org` in **every** deployment, even with no provider set. That single fixed origin is the only one added.
+
+### Google (`google`)
+
+Streets (Google's roadmap) and Satellite, through Google's Map Tiles API. **Only the `api` container contacts Google**, from its own address, with a session it creates and renews itself. The key never reaches a browser: viewers get tiles from `api` through links that `api` issues only to members of at least one project (and superadmins), valid for at most an hour, for one user and one basemap, and that stop working when you switch the provider off. `api` passes each tile on as Google sent it, with Google's cache rules, and stores nothing; the tile route marks tiles for use by your own pages only. `api` needs outbound HTTPS to `tile.googleapis.com`, without a proxy.
+
+What you do, as the operator:
+
+1. In [Google Cloud](https://console.cloud.google.com/), create or choose a project, **enable the Map Tiles API** and **set up billing**. You accept Google's [Maps Platform terms](https://cloud.google.com/maps-platform/terms) and the [Map Tiles API policies](https://developers.google.com/maps/documentation/tile/policies) with your own account.
+2. Create an API key and **restrict it** to the Map Tiles API and to the outbound IP address of the `api` container's host. Google describes such a key as one that is not expected to be public, and with the address restriction a leaked copy is of no use elsewhere. Put it in `TAMIZA_MAP_GOOGLE_API_KEY`. Never commit a file that holds it.
+3. **Set the daily quota for 2D tiles in the Google Cloud console and billing alerts.** The quota is your cost cap. Read Google's current pricing and quota pages: when this was written, the first 100,000 tiles a month were free, tiles after that were billed each, and the default quota was 15,000 2D tiles a day.
+4. Choose per-user limits that fit that quota. A busy map view loads a few dozen tiles, and zooming and panning load more; `TAMIZA_MAP_TILES_PER_USER_PER_DAY` (default 3,000) stops one user, or a script holding their token, from using up the project's whole day. Tamiza's limits protect against bursts and against one user; they are **not** a cost cap, because they reset when `api` restarts and count each user alone. Past the limit a user's tiles answer 429 and their map says the basemap is unavailable.
+5. **Mention Google's terms and privacy policy in your deployment's end-user terms.** Google's terms ask for it (section 3.2.2(a) of the Maps Platform Terms of Service); the people who use your dashboards are Google's end users through your deployment. Link [Google's terms](https://policies.google.com/terms) and [privacy policy](https://policies.google.com/privacy).
+
+Tamiza shows Google's logo and the data credits Google gives for the area on screen at all times, and **draws no Google imagery when it cannot get those credits**. Zooming past the imagery Google has for an area shows the deepest tiles enlarged instead of failing.
+
+**One provider per deployment.** Google's terms do not allow showing its maps with or near a non-Google map (section 3.2.3(e)). Offering a single provider makes that true by construction, so a Google map is never next to an OpenStreetMap one. This is a reading of the terms by the authors of Tamiza, **not legal advice**: your organization answers for its own use of Google's services.
+
+### What leaves the deployment
+
+Basemap requests carry only the basemap kind, tile coordinates and, for Google's data credits, the zoom and bounds of the area on screen. **No row, group value, geometry or tooltip value is ever sent** to a tile provider.
+
+- With `osm`, each viewer's browser contacts OpenStreetMap and sends what a browser sends with any image: its IP address, its user agent and your deployment's origin. OpenStreetMap can see which blocks of the map each viewer looks at.
+- With `google`, only `api` contacts Google, adding its session, the key, the language and the region. Google sees `api`'s address and the tiles requested, not the viewers.
+- **Any project member can turn a basemap on** for any map they can see, once a provider is set. The analyst's choice in the widget form decides what everyone sees first; it is not a privacy control. If you do not want a provider contacted, leave `TAMIZA_MAP_BASEMAP_PROVIDER` empty.
+
+This is a data-protection decision of your organization, like [the assistant's](#choosing-a-provider). The location of the areas people look at can itself be sensitive (for example, the blocks of a survey of households). Read the provider's current terms and privacy pages first. In Colombia, for example, Ley 1581 de 2012 and the authorization you hold from the people concerned may regulate what reaches a provider, and donors often set rules of their own. This is not legal advice: ask whoever answers for data protection in your organization.
+
+### Logs and proxies
+
+- The `ui` container's tile route (`/api/v1/basemap-tiles/`) turns proxy buffering off, so no tile is spooled to disk, and turns its access log off, so tile links stay out of the `ui` access log. nginx's **error log** still holds the request line when `api` fails to answer, for example while it restarts. The error log is kept on purpose, for diagnosis; treat it like any log that may hold a tile link.
+- An **outer reverse proxy** or load balancer that logs requests will log tile addresses. A tile link is valid for at most an hour, for one user and one basemap, and tile coordinates show which area a viewer looked at. Keep those logs as private as the rest of your access logs, or exclude `/api/v1/basemap-tiles/` from them.
+- The key is never in a tile address, a response, a page, or a log line of `api`: the client that talks to Google logs nothing of its requests, and `api` logs a failure at most once a minute per basemap, without Google's message.
+
+### Rollback
+
+Restore the previous images (`docker compose up -d` with the earlier `TAMIZA_VERSION`). Widgets keep working. But an `api` that predates this change does not know the `tooltip` and `basemap` fields, so **any widget edited or moved under it loses its tooltip columns and its basemap** (a move saves the whole widget). Widgets are not changed otherwise, and nothing is lost until one is saved under the old `api`.
 
 ## Data
 

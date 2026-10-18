@@ -42,6 +42,8 @@ public sealed class IndicatorValidationTests
         Assert.Null(config.GeometryColumn);
         Assert.Null(config.Buckets);
         Assert.Null(config.Sort);
+        Assert.Empty(config.Tooltip);
+        Assert.Null(config.Basemap);
     }
 
     [Fact]
@@ -412,5 +414,145 @@ public sealed class IndicatorValidationTests
         var own = new FieldErrors();
         IndicatorValidation.CheckAgainstColumns(Sorted(new WidgetSort("column", "seen", null, "asc")), columns, "UTC", "config.", own);
         Assert.Empty(own.ToDictionary());
+    }
+
+    // Tooltip columns and basemap (map only)
+
+    private static WidgetConfig Mapped(IReadOnlyList<WidgetTooltipItem>? tooltip = null, string? basemap = null) =>
+        new WidgetConfigInput("a", GroupBy: "municipality", GeometryColumn: "geometry", Tooltip: tooltip, Basemap: basemap).Normalize();
+
+    private static WidgetTooltipItem Item(string column = "year", string? label = null, string? format = null) => new(column, label, format);
+
+    [Fact]
+    public void Tooltip_labels_and_formats_are_trimmed_and_blank_ones_are_left_out()
+    {
+        var config = Mapped([Item("year", "  Year  ", " "), Item("value", "", "")]);
+
+        Assert.Equal("Year", config.Tooltip[0].Label);
+        Assert.Null(config.Tooltip[0].Format);
+        Assert.Null(config.Tooltip[1].Label);
+        Assert.Null(config.Tooltip[1].Format);
+        Assert.Null(new WidgetConfigInput("a", Basemap: "").Normalize().Basemap);
+    }
+
+    [Fact]
+    public void A_null_tooltip_item_is_kept_so_that_it_can_be_named()
+    {
+        var config = Mapped([Item(), null!]);
+
+        Assert.Equal(2, config.Tooltip.Count);
+        Assert.Null(config.Tooltip[1]);
+        Assert.Equal(["A tooltip column needs a column."], Check(config, "map")["config.tooltip[1]"]);
+    }
+
+    [Fact]
+    public void A_map_may_have_up_to_five_tooltip_columns_and_a_basemap()
+    {
+        var five = Enumerable.Range(0, 5).Select(i => Item($"c{i}")).ToList();
+
+        Assert.Empty(Check(Mapped(five, "satellite"), "map"));
+        Assert.Empty(Check(Mapped([], "streets"), "map"));
+        Assert.Empty(Check(Mapped(five), null));
+    }
+
+    [Fact]
+    public void More_than_five_tooltip_columns_is_an_error_on_the_tooltip()
+    {
+        var six = Enumerable.Range(0, 6).Select(i => Item($"c{i}")).ToList();
+
+        Assert.Equal(["A map has at most 5 tooltip columns."], Check(Mapped(six), "map")["config.tooltip"]);
+    }
+
+    [Theory]
+    [InlineData("bar")]
+    [InlineData("column")]
+    [InlineData("line")]
+    [InlineData("pie")]
+    [InlineData("stat")]
+    [InlineData("histogram")]
+    public void Only_maps_can_have_tooltip_columns_or_a_basemap(string chartType)
+    {
+        var errors = Check(Mapped([Item()], "streets") with { GeometryColumn = null }, chartType);
+
+        Assert.Equal(["Only map widgets can have tooltip columns."], errors["config.tooltip"]);
+        Assert.Equal(["Only map widgets can have a basemap."], errors["config.basemap"]);
+    }
+
+    [Fact]
+    public void A_tooltip_column_needs_a_name_that_is_not_too_long_a_repeat_or_the_geometry_column()
+    {
+        var tooLong = new string('x', DataQueryBuilder.MaxTextLength + 1);
+
+        Assert.Equal(["Choose the tooltip column."], Check(Mapped([Item("")]), "map")["config.tooltip[0].column"]);
+        Assert.Equal([$"The tooltip column is longer than {DataQueryBuilder.MaxTextLength} characters."], Check(Mapped([Item(tooLong)]), "map")["config.tooltip[0].column"]);
+        Assert.Equal(["Column 'year' is already a tooltip column."], Check(Mapped([Item("year"), Item("year", "Again")]), "map")["config.tooltip[1].column"]);
+        Assert.Equal(["The geometry column cannot be a tooltip column."], Check(Mapped([Item("geometry")]), "map")["config.tooltip[0].column"]);
+    }
+
+    [Fact]
+    public void A_tooltip_label_has_at_most_eighty_characters()
+    {
+        Assert.Empty(Check(Mapped([Item(label: new string('x', 80))]), "map"));
+        Assert.Equal(["The label is longer than 80 characters."], Check(Mapped([Item(label: new string('x', 81))]), "map")["config.tooltip[0].label"]);
+    }
+
+    [Theory]
+    [InlineData("count", true)]
+    [InlineData("decimal", true)]
+    [InlineData("percent", true)]
+    [InlineData("currency", false)]
+    [InlineData("Percent", false)]
+    public void A_tooltip_format_is_count_decimal_or_percent(string format, bool valid)
+    {
+        var errors = Check(Mapped([Item(format: format)]), "map");
+
+        Assert.Equal(valid, !errors.ContainsKey("config.tooltip[0].format"));
+        if (!valid)
+        {
+            Assert.Equal(["The format must be one of count, decimal, percent."], errors["config.tooltip[0].format"]);
+        }
+    }
+
+    [Theory]
+    [InlineData("satellite", true)]
+    [InlineData("streets", true)]
+    [InlineData("hybrid", false)]
+    [InlineData("Streets", false)]
+    public void A_basemap_is_streets_or_satellite(string basemap, bool valid)
+    {
+        var errors = Check(Mapped(basemap: basemap), "map");
+
+        Assert.Equal(valid, !errors.ContainsKey("config.basemap"));
+        if (!valid)
+        {
+            Assert.Equal(["The basemap must be 'streets' or 'satellite'."], errors["config.basemap"]);
+        }
+    }
+
+    [Fact]
+    public void A_basemap_is_not_checked_against_what_the_deployment_offers()
+    {
+        // No provider is configured in this test: the saved kind is only a kind.
+        Assert.Empty(Check(Mapped(basemap: "satellite"), "map"));
+    }
+
+    [Fact]
+    public void Tooltip_columns_must_be_in_the_table_and_are_named()
+    {
+        var errors = CheckTable(Mapped([Item("year"), Item("address"), Item("round", "Round")]));
+
+        Assert.Equal(["The table has no column 'address'."], errors["config.tooltip[1].column"]);
+        Assert.Equal(["The table has no column 'round'."], errors["config.tooltip[2].column"]);
+        Assert.DoesNotContain("config.tooltip[0].column", errors.Keys);
+    }
+
+    [Fact]
+    public void Only_a_number_column_can_have_a_format()
+    {
+        var errors = CheckTable(Mapped([Item("municipality", format: "percent"), Item("year", format: "count"), Item("value", format: "percent")]));
+
+        Assert.Equal(["Only a number column can have a format."], errors["config.tooltip[0].format"]);
+        Assert.DoesNotContain("config.tooltip[1].format", errors.Keys);
+        Assert.DoesNotContain("config.tooltip[2].format", errors.Keys);
     }
 }

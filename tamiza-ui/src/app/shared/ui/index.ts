@@ -2,6 +2,7 @@ export * from './alert';
 export * from './badge';
 export * from './button';
 export * from './card';
+export * from './chart-tooltip';
 export * from './confirm-dialog';
 export * from './date-format';
 export * from './disclosure';

@@ -38,7 +38,7 @@ A script defines one top-level function with this name and two parameters. It ma
 - Script 2: `prepare_output(cleaned, ctx)` receives the clean tables and returns a dictionary of the tables the clean data dashboard shows, with the readers' view in mind: chosen and ordered columns, descriptive names. Row order is kept, so sort when it matters.
 - Indicator: `compute(cleaned, ctx)` receives the clean tables and returns one DataFrame, published as the indicator's table. Details below.
 
-Table names must be lowercase letters, digits and underscores, start with a letter and have at most 63 characters. Column names of what you return are reduced the same way (`Household size` becomes `household_size`), and two columns that end up with the same name fail the step. A named index is published as a column, an unnamed index is dropped, so call `reset_index()`. Geometry columns are published as WKT text, in degrees (longitude and latitude). A script may be at most 200 KB and by default runs for at most 10 minutes and 1024 MB.
+Table names must be lowercase letters, digits and underscores, start with a letter and have at most 63 characters. Column names of what you return are reduced the same way (`Household size` becomes `household_size`), and two columns that end up with the same name fail the step. A named index is published as a column, an unnamed index is dropped, so call `reset_index()`. Geometry columns are published as WKT text, and their coordinates are not converted: a map can show a basemap only when they are in degrees (longitude and latitude, EPSG:4326), so project a geometry column first, for example `gdf = gdf.to_crs(4326)`. A script may be at most 200 KB and by default runs for at most 10 minutes and 1024 MB.
 
 Script 2 and the indicators do not depend on each other and cannot import from each other: preparation that several need belongs in script 1.
 
@@ -52,7 +52,7 @@ Return a DataFrame with the dimensions you need and at least one numeric column 
 - Rows must be unique by their dimensions: rows that share the values of every dimension are added up by widgets. Aggregate with `groupby` so that there is one row per combination.
 - The indicator's format is set by the analyst in the details, not in your code: `count`, `decimal`, `percent` (a fraction shown as a percentage: 0.42 reads 42%, so never multiply by 100), or `currency`. A value already multiplied by 100 belongs in the format `decimal` with the unit `%`. You can only suggest a change of details.
 - Use `groupby(..., dropna=False)` when the empty group matters, so that submissions without an answer are not silently left out.
-- A map needs a geometry column (a geopandas column or WKT text).
+- A map needs a geometry column (a geopandas column or WKT text) in degrees, so call `to_crs(4326)` first. Return one row per mapped shape: the map's tooltip sums the numeric columns of the rows that share a group, which is wrong for a rate or an average, so plot a rate as a ratio of `numerator` and `denominator`.
 
 ## The data
 

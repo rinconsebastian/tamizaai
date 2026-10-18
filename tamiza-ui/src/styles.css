@@ -75,3 +75,28 @@
   --tmz-seq-6: #9ec5f4;
   --tmz-seq-7: #cde2fb;
 }
+
+/*
+ * The map widget's shapes and container (design D3, D5, D18). Leaflet builds this DOM itself, so a component's own styles (which
+ * carry its _ngcontent attribute) never reach it; and Tailwind's utilities sit in a cascade layer, so leaflet.css (loaded as a
+ * plain <link> with the map) beats them. These rules are therefore global and unlayered, each more specific than the Leaflet rule
+ * it overrides, so neither the load order nor the layer can change which one wins. Leaflet writes fill and stroke as presentation
+ * attributes, which any author rule here overrides, so the tokens above and their dark-mode swap keep working.
+ */
+.tmz-map path.tmz-seq-1 { fill: var(--tmz-seq-1); }
+.tmz-map path.tmz-seq-2 { fill: var(--tmz-seq-2); }
+.tmz-map path.tmz-seq-3 { fill: var(--tmz-seq-3); }
+.tmz-map path.tmz-seq-4 { fill: var(--tmz-seq-4); }
+.tmz-map path.tmz-seq-5 { fill: var(--tmz-seq-5); }
+.tmz-map path.tmz-seq-6 { fill: var(--tmz-seq-6); }
+.tmz-map path.tmz-seq-7 { fill: var(--tmz-seq-7); }
+.tmz-map path { stroke: var(--color-neutral-primary-soft, #fff); }
+.tmz-map path:hover { opacity: 0.8; }
+.tmz-map path.tmz-active { stroke: var(--color-heading, #111827); stroke-width: 3px; opacity: 1; }
+.tmz-map.leaflet-container { background: transparent; font: inherit; }
+/* The browser fixes touch-action when a touch starts, before any script runs, so one finger must already be allowed to scroll the
+   page; the map moves with two fingers. Leaflet's .leaflet-container.leaflet-touch-drag.leaflet-touch-zoom { touch-action: none }, at
+   (0,3,0), would forbid both; the last selector here is (0,4,0), so it wins whatever the load order. */
+.tmz-map.leaflet-container,
+.tmz-map.leaflet-container.leaflet-touch-drag,
+.tmz-map.leaflet-container.leaflet-touch-drag.leaflet-touch-zoom { touch-action: pan-x pan-y; }

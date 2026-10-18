@@ -382,4 +382,120 @@ public sealed class IndicatorQueryBuilderTests
 
         Assert.DoesNotContain("ORDER BY", Plan(input, perRow: true).Sql!.Sql);
     }
+
+    // Tooltip columns of a map
+
+    private static readonly TableColumn[] TooltipColumns =
+    [
+        .. Columns,
+        new("address", DataColumnType.Text, null),
+        new("target", DataColumnType.Integer, null),
+        new("progress", DataColumnType.Decimal, null),
+        new("visited_on", DataColumnType.Date, null),
+        new("seen_at", DataColumnType.Timestamp, null),
+    ];
+
+    private static IndicatorQueryPlan MapPlan(params string[] tooltip) =>
+        Plan(Config(geometry: "geometry") with { Tooltip = tooltip.Select(c => new WidgetTooltipItem(c)).ToList() }, columns: TooltipColumns);
+
+    [Theory]
+    [InlineData("target", "sum(\"target\")::text")]
+    [InlineData("progress", "sum(\"progress\")::text")]
+    [InlineData("address", "left(min(NULLIF(\"address\"::text, '')), 201)")]
+    [InlineData("visited_on", "min(\"visited_on\")::text")]
+    [InlineData("seen_at", "min(\"seen_at\")::text")]
+    [InlineData("flag", "bool_and(\"flag\")")]
+    public void Each_column_type_has_its_own_tooltip_expression(string column, string expression)
+    {
+        var plan = MapPlan(column);
+
+        Assert.Contains($", count(*), {expression}\nFROM", plan.Sql!.Sql);
+        Assert.Equal([TooltipColumns.Single(c => c.Name == column).Type], plan.Sql.TooltipTypes);
+    }
+
+    [Fact]
+    public void A_map_selects_the_row_count_and_the_tooltip_columns_in_order_after_the_geometry()
+    {
+        var plan = MapPlan("address", "target", "progress");
+
+        Assert.Contains(
+            "SELECT \"municipality\"::text, (sum(\"value\")::double precision), min(\"geometry\"::text), count(*), "
+            + "left(min(NULLIF(\"address\"::text, '')), 201), sum(\"target\")::text, sum(\"progress\")::text\n",
+            plan.Sql!.Sql);
+        Assert.Equal([DataColumnType.Text, DataColumnType.Integer, DataColumnType.Decimal], plan.Sql.TooltipTypes);
+    }
+
+    [Fact]
+    public void A_map_with_no_tooltip_columns_still_counts_its_rows()
+    {
+        var plan = MapPlan();
+
+        Assert.Contains("min(\"geometry\"::text), count(*)\n", plan.Sql!.Sql);
+        Assert.Empty(plan.Sql.TooltipTypes!);
+    }
+
+    [Fact]
+    public void Tooltip_columns_are_quoted_through_the_catalog()
+    {
+        TableColumn[] columns = [.. TooltipColumns, new("Dirección \"x\"", DataColumnType.Text, null)];
+        var plan = Plan(Config(geometry: "geometry") with { Tooltip = [new WidgetTooltipItem("Dirección \"x\"")] }, columns: columns);
+
+        Assert.Contains("min(NULLIF(\"Dirección \"\"x\"\"\"::text, ''))", plan.Sql!.Sql);
+    }
+
+    [Fact]
+    public void A_tooltip_value_is_never_text_in_the_sql_only_its_column_name_is()
+    {
+        var plan = MapPlan("address");
+
+        Assert.DoesNotContain(plan.Sql!.Parameters, p => p.Name != "limit");
+    }
+
+    [Fact]
+    public void Missing_tooltip_columns_are_listed_last_after_the_sort_column()
+    {
+        var input = Config(groupBy: "round", geometry: "shape") with
+        {
+            Tooltip = [new WidgetTooltipItem("address"), new WidgetTooltipItem("gone"), new WidgetTooltipItem("round")],
+            Sort = null,
+        };
+        var plan = Plan(input, columns: TooltipColumns);
+
+        Assert.Null(plan.Sql);
+        Assert.Equal(["round", "shape", "gone"], plan.MissingColumns);
+    }
+
+    [Fact]
+    public void Tooltip_columns_come_after_the_sort_column_in_the_missing_list()
+    {
+        var input = Config(geometry: "geometry") with
+        {
+            Sort = new WidgetSort("column", "order_key", "text", "asc"),
+            Tooltip = [new WidgetTooltipItem("gone")],
+        };
+
+        Assert.Equal(["order_key", "gone"], Plan(input, columns: TooltipColumns).MissingColumns);
+    }
+
+    [Fact]
+    public void A_grouped_query_that_is_not_a_map_has_no_extra_outputs()
+    {
+        var plan = Plan(Config(), columns: TooltipColumns);
+
+        Assert.DoesNotContain("count(*)", plan.Sql!.Sql);
+        Assert.Null(plan.Sql.TooltipTypes);
+        Assert.StartsWith("SELECT \"municipality\"::text, (sum(\"value\")::double precision), NULL::text\n", plan.Sql.Sql);
+    }
+
+    [Fact]
+    public void The_tooltip_rows_are_those_the_where_keeps_including_the_filters()
+    {
+        var plan = Plan(
+            Config(geometry: "geometry", filters: [new DataFilter("year", "range", Min: "2026", Max: "2026")]) with { Tooltip = [new WidgetTooltipItem("target")] },
+            columns: TooltipColumns);
+
+        // One WHERE serves the aggregate, the row count and the tooltip outputs alike.
+        Assert.Equal(1, plan.Sql!.Sql.Split("WHERE").Length - 1);
+        Assert.Contains("\"year\" >= ", plan.Sql.Sql);
+    }
 }

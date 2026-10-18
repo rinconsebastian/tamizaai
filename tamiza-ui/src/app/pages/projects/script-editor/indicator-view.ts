@@ -1,6 +1,6 @@
 import { LOCALE_ID, Component, computed, inject, input, output, signal } from '@angular/core';
 import { TranslocoDirective } from '@jsverse/transloco';
-import { QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
+import { QueryRow, WidgetConfig, emptyConfig } from '../../../core/projects/indicators.service';
 import type { IndicatorMetadata, IndicatorTestView } from '../../../core/projects/pipeline.service';
 import { Alert, Badge, Button, Input } from '../../../shared/ui';
 import { AxisChart } from '../indicators/axis-chart';
@@ -207,6 +207,6 @@ export class IndicatorView {
   });
 
   private config(parts: Pick<WidgetConfig, 'measure' | 'ratio'>): WidgetConfig {
-    return { indicator: '', groupBy: this.dimension() ?? null, filters: [], geometryColumn: null, buckets: null, sort: null, ...parts };
+    return { ...emptyConfig(), groupBy: this.dimension() ?? null, ...parts };
   }
 }

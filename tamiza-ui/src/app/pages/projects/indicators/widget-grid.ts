@@ -2,7 +2,7 @@ import { CdkDrag, CdkDragEnd, CdkDragHandle, CdkDragMove } from '@angular/cdk/dr
 import { Component, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { IndicatorEntry, Layout, Widget } from '../../../core/projects/indicators.service';
-import { DropdownMenu, MenuItem } from '../../../shared/ui';
+import { ChartTooltips, DropdownMenu, MenuItem } from '../../../shared/ui';
 import { Placed, changed, movedBy, readingOrder, reflow, resizedBy, unitsFor } from './grid-layout';
 import { WidgetView } from './widget-view';
 
@@ -35,6 +35,7 @@ const fallbackWidth = 1200;
           <article
             cdkDrag
             [cdkDragDisabled]="!editable()"
+            (cdkDragStarted)="tileMoving()"
             (cdkDragMoved)="dragMoved(widget, $event)"
             (cdkDragEnded)="dragEnded(widget, $event)"
             class="flex h-full min-h-0 flex-col rounded-base border border-default bg-neutral-primary-soft shadow-xs"
@@ -95,6 +96,7 @@ const fallbackWidth = 1200;
               class="absolute bottom-0 end-0 z-20 hidden size-8 cursor-nwse-resize items-end justify-end rounded-ee-base p-1 text-body hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary md:inline-flex"
               [attr.aria-label]="t('indicators.grid.resize', { title: widget.title })"
               [attr.aria-describedby]="'grid-help'"
+              (cdkDragStarted)="tileMoving()"
               (cdkDragMoved)="resizeMoved(widget, $event)"
               (cdkDragEnded)="resizeEnded(widget, $event)"
               (keydown)="key(widget, $event, 'resize')"
@@ -160,6 +162,7 @@ const fallbackWidth = 1200;
 })
 export class WidgetGrid {
   private readonly transloco = inject(TranslocoService);
+  private readonly tooltips = inject(ChartTooltips);
   private readonly grid = viewChild.required<ElementRef<HTMLElement>>('grid');
 
   readonly widgets = input.required<Widget[]>();
@@ -252,6 +255,11 @@ export class WidgetGrid {
     return unitsFor(distance, this.grid().nativeElement.getBoundingClientRect().width || fallbackWidth);
   }
 
+  /** A tile moves from under the pointer: a tooltip left open over it would point at nothing. */
+  protected tileMoving(): void {
+    this.tooltips.closeAll();
+  }
+
   protected dragMoved(widget: Widget, event: CdkDragMove): void {
     const { columns, rows } = this.units(event.distance);
     this.dragging.set(widget.id);
@@ -285,6 +293,7 @@ export class WidgetGrid {
       return;
     }
     event.preventDefault();
+    this.tileMoving();
     const [columns, rows] = step;
     this.commit(widget, handle === 'resize' || event.shiftKey ? resizedBy(widget.layout, columns, rows) : movedBy(widget.layout, columns, rows));
   }

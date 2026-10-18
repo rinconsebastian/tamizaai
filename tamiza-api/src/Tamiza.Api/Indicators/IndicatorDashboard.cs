@@ -142,7 +142,7 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
             await data.SleepForTestsAsync(connection, transaction, ct);
             var group = columns.FirstOrDefault(c => c.Name == config.GroupBy);
             var (rows, limitReached) = await ReadRowsAsync(connection, transaction, plan.Sql, group?.Type, maxRows, ct);
-            return new IndicatorQueryOutcome(new IndicatorQueryResponse(true, rows, limitReached, MissingReferences.None), null);
+            return new IndicatorQueryOutcome(new IndicatorQueryResponse(true, rows, limitReached, MissingReferences.None, plan.Sql.TooltipTypes), null);
         }, ct), ct);
     }
 
@@ -166,6 +166,38 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// A tooltip output as the response carries it: a number (text beyond what a decimal holds stays text; NaN and infinity have no
+    /// number in JSON and read as no value), the text cut at <see cref="WidgetConfig.MaxTooltipText"/> with an ellipsis, an ISO date or
+    /// timestamp, or true/false. Null when no row had a value.
+    /// </summary>
+    private static object? ReadTooltipValue(NpgsqlDataReader reader, int ordinal, DataColumnType type)
+    {
+        if (reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        if (type == DataColumnType.Boolean)
+        {
+            return reader.GetBoolean(ordinal);
+        }
+
+        var text = reader.GetString(ordinal);
+        switch (type)
+        {
+            case DataColumnType.Integer or DataColumnType.Decimal:
+                return text is "NaN" or "Infinity" or "-Infinity" ? null : DataValues.Number(text);
+            case DataColumnType.Timestamp:
+                return DataValues.IsoTimestamp(text);
+            case DataColumnType.Date:
+                return text;
+            default:
+                var (shown, cut) = DataValues.Display(text, WidgetConfig.MaxTooltipText);
+                return cut ? shown + "…" : shown;
+        }
     }
 
     private static async Task<(List<IndicatorRow> Rows, bool LimitReached)> ReadRowsAsync(
@@ -195,10 +227,25 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
             }
 
             var group = reader.IsDBNull(0) ? null : reader.GetString(0);
+            long? combined = null;
+            List<object?>? tooltip = null;
+            if (sql.TooltipTypes is { } types)
+            {
+                // A map query: the row count is the fourth column, and each tooltip column follows.
+                combined = reader.GetInt64(3);
+                tooltip = new List<object?>(types.Count);
+                for (var i = 0; i < types.Count; i++)
+                {
+                    tooltip.Add(ReadTooltipValue(reader, 4 + i, types[i]));
+                }
+            }
+
             rows.Add(new IndicatorRow(
                 group is not null && groupType == DataColumnType.Timestamp ? DataValues.IsoTimestamp(group) : group,
                 value,
-                reader.IsDBNull(2) ? null : reader.GetString(2)));
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                combined,
+                tooltip));
         }
 
         return (rows, limitReached);

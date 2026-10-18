@@ -142,6 +142,84 @@ public static class IndicatorValidation
 
         CheckFilterShape(config.Filters, prefix, errors);
         CheckSort(config, chartType, prefix, errors);
+        CheckTooltip(config, chartType, prefix, errors);
+        CheckBasemap(config.Basemap, chartType, prefix, errors);
+    }
+
+    /// <summary>The checks of a map's tooltip columns that need no table: where they may be, how many, and the shape of each.</summary>
+    private static void CheckTooltip(WidgetConfig config, string? chartType, string prefix, FieldErrors errors)
+    {
+        var items = config.Tooltip;
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        if (chartType is not null && chartType != ChartTypes.Map)
+        {
+            errors.Add(prefix + "tooltip", "Only map widgets can have tooltip columns.");
+            return;
+        }
+
+        if (items.Count > WidgetConfig.MaxTooltipItems)
+        {
+            errors.Add(prefix + "tooltip", $"A map has at most {WidgetConfig.MaxTooltipItems} tooltip columns.");
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < items.Count; i++)
+        {
+            var field = $"{prefix}tooltip[{i}]";
+            if (items[i] is not { } item)
+            {
+                errors.Add(field, "A tooltip column needs a column.");
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(item.Column))
+            {
+                errors.Add(field + ".column", "Choose the tooltip column.");
+            }
+            else if (item.Column.Length > DataQueryBuilder.MaxTextLength)
+            {
+                errors.Add(field + ".column", $"The tooltip column is longer than {DataQueryBuilder.MaxTextLength} characters.");
+            }
+            else if (!seen.Add(item.Column))
+            {
+                errors.Add(field + ".column", $"Column '{item.Column}' is already a tooltip column.");
+            }
+            else if (item.Column == config.GeometryColumn)
+            {
+                errors.Add(field + ".column", "The geometry column cannot be a tooltip column.");
+            }
+
+            if (item.Label is { Length: > WidgetConfig.MaxTooltipLabel })
+            {
+                errors.Add(field + ".label", $"The label is longer than {WidgetConfig.MaxTooltipLabel} characters.");
+            }
+
+            if (item.Format is not null && !TooltipFormats.All.Contains(item.Format))
+            {
+                errors.Add(field + ".format", $"The format must be one of {string.Join(", ", TooltipFormats.All)}.");
+            }
+        }
+    }
+
+    private static void CheckBasemap(string? basemap, string? chartType, string prefix, FieldErrors errors)
+    {
+        if (basemap is null)
+        {
+            return;
+        }
+
+        if (!BasemapKinds.All.Contains(basemap))
+        {
+            errors.Add(prefix + "basemap", $"The basemap must be '{BasemapKinds.Streets}' or '{BasemapKinds.Satellite}'.");
+        }
+        else if (chartType is not null && chartType != ChartTypes.Map)
+        {
+            errors.Add(prefix + "basemap", "Only map widgets can have a basemap.");
+        }
     }
 
     /// <summary>The checks of a widget's order that need no table: where it may be, and the shape of its fields.</summary>
@@ -285,6 +363,24 @@ public static class IndicatorValidation
             else if (SortColumnError(sort, column) is { } sortError)
             {
                 errors.Add(prefix + "sort.column", sortError);
+            }
+        }
+
+        for (var i = 0; i < config.Tooltip.Count; i++)
+        {
+            if (config.Tooltip[i] is not { Column: { Length: > 0 } tooltipColumn } item)
+            {
+                continue;
+            }
+
+            var field = $"{prefix}tooltip[{i}]";
+            if (!byName.TryGetValue(tooltipColumn, out var column))
+            {
+                errors.Add(field + ".column", $"The table has no column '{tooltipColumn}'.");
+            }
+            else if (item.Format is not null && !IsNumeric(column))
+            {
+                errors.Add(field + ".format", "Only a number column can have a format.");
             }
         }
 
