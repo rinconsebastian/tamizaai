@@ -1,9 +1,9 @@
-import { DatePipe } from '@angular/common';
-import { Component, DestroyRef, computed, effect, inject, input, output, signal } from '@angular/core';
+import { Component, DestroyRef, LOCALE_ID, computed, effect, inject, input, output, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { IndicatorMetadata, PipelineService, RunStatus, SCRIPT_TEST_POLL_MS, ScriptTest, ShownPreview, TestStep, TestTable } from '../../core/projects/pipeline.service';
-import { Alert, Badge, Button, Card, Input, Tone } from '../../shared/ui';
+import { Alert, Badge, Button, Card, Input, Tone, DateTimePipe } from '../../shared/ui';
+import { countKey } from '../../core/i18n/plural';
 import { durationText } from './pipeline-runs.util';
 import { FixTarget } from './script-editor/assistant-state';
 import { IndicatorView, ViewWarning, askedWarning } from './script-editor/indicator-view';
@@ -21,16 +21,16 @@ const statusTones: Record<RunStatus | 'stopped', Tone> = {
 /** The result of a script test: its status while it waits or runs, then each step with its log and table previews. */
 @Component({
   selector: 'app-script-test-panel',
-  imports: [DatePipe, TranslocoDirective, Alert, Badge, Button, Card, IndicatorView, Input, TablePreview],
+  imports: [DateTimePipe, TranslocoDirective, Alert, Badge, Button, Card, IndicatorView, Input, TablePreview],
   template: `
     <tmz-card *transloco="let t" data-testid="test-panel">
       @if (test(); as test) {
         <div class="mb-3 flex flex-wrap items-center gap-2">
           <h2 class="text-lg font-semibold text-heading">
-            {{ t('scriptTests.title', { kind: kindLabel(test), size: test.sampleSize }) }}
+            {{ t(key('scriptTests.title', test.sampleSize), { kind: kindLabel(test), size: test.sampleSize }) }}
           </h2>
           <tmz-badge [tone]="tone(test.status)" data-testid="test-status">{{ t('runs.status.' + test.status) }}</tmz-badge>
-          <span class="text-sm text-body">{{ test.queuedAt | date: 'shortTime' }}</span>
+          <span class="text-sm text-body">{{ test.queuedAt | dateTime: 'time' }}</span>
         </div>
 
         @if (stale()) {
@@ -45,7 +45,8 @@ const statusTones: Record<RunStatus | 'stopped', Tone> = {
           <p class="mb-3 text-sm text-body" role="status" data-testid="test-progress">{{ progress(test) }}</p>
         }
         @if (test.status === 'failed' && test.error) {
-          <p class="mb-3 break-words text-sm text-fg-danger-strong" data-testid="test-error">{{ errorText(test) }}</p>
+          @let message = errorParts(test);
+          <p class="mb-3 break-words text-sm text-fg-danger-strong" data-testid="test-error">{{ message.intro }}@if (message.detail) {<span lang="en">{{ message.detail }}</span>}</p>
         }
         @if (test.status === 'succeeded' && test.stopAtLine) {
           <p class="mb-3 text-sm text-body" data-testid="test-success">{{ t('scriptTests.succeededThroughCell') }}</p>
@@ -73,7 +74,7 @@ const statusTones: Record<RunStatus | 'stopped', Tone> = {
               </summary>
               <div class="mt-3 flex min-w-0 flex-col gap-3">
                 @if (step.error) {
-                  <pre class="max-h-60 overflow-auto rounded-base border border-danger-subtle bg-danger-soft p-3 text-xs whitespace-pre-wrap text-fg-danger-strong" data-testid="test-step-error">{{ step.error }}</pre>
+                  <pre class="max-h-60 overflow-auto rounded-base border border-danger-subtle bg-danger-soft p-3 text-xs whitespace-pre-wrap text-fg-danger-strong" data-testid="test-step-error" lang="en">{{ step.error }}</pre>
                   @if (askable() && step.status === 'failed' && step.step === test.kind) {
                     <div>
                       <button tmzButton variant="secondary" size="sm" type="button" (click)="ask.emit({ testId: test.id })" data-testid="test-step-ask">{{ t('scriptTests.askAssistant') }}</button>
@@ -106,14 +107,14 @@ const statusTones: Record<RunStatus | 'stopped', Tone> = {
                     </ul>
                     @if (shown.item.table; as shownTable) {
                       <p class="text-sm text-body" data-testid="test-shown-note">
-                        {{ t('scriptTests.shownTable', { name: shown.item.name, line: shown.item.line, shown: shownTable.previewRows, rows: shown.item.rows }) }}
+                        {{ t(key('scriptTests.shownTable', shown.item.rows), { name: shown.item.name, line: shown.item.line, shown: shownTable.previewRows, rows: shown.item.rows }) }}
                       </p>
                       @if (shownTable.columns && shownTable.preview) {
                         <app-table-preview [columns]="shownTable.columns" [rows]="shownTable.preview" [cutCells]="shownTable.cutCells" />
                       }
                     } @else {
                       <p class="text-sm text-body" data-testid="test-shown-note">{{ t('scriptTests.shownText', { name: shown.item.name, line: shown.item.line }) }}</p>
-                      <pre class="max-h-60 overflow-auto rounded-base border border-default bg-neutral-secondary-soft p-3 text-xs whitespace-pre-wrap text-body" data-testid="test-shown-text">{{ shown.item.text }}</pre>
+                      <pre class="max-h-60 overflow-auto rounded-base border border-default bg-neutral-secondary-soft p-3 text-xs whitespace-pre-wrap text-body" data-testid="test-shown-text" lang="en">{{ shown.item.text }}</pre>
                     }
                   </div>
                 }
@@ -130,7 +131,7 @@ const statusTones: Record<RunStatus | 'stopped', Tone> = {
                       [attr.data-testid]="'test-table-select-' + step.step"
                     >
                       @for (option of step.tables; track option.name) {
-                        <option [value]="option.name">{{ t('scriptTests.tableOption', { name: option.name, rows: option.rows }) }}</option>
+                        <option [value]="option.name">{{ t(key('scriptTests.tableOption', option.rows), { name: option.name, rows: option.rows }) }}</option>
                       }
                     </select>
                   </div>
@@ -138,7 +139,7 @@ const statusTones: Record<RunStatus | 'stopped', Tone> = {
                     <p class="text-sm text-body" data-testid="test-preview-note">{{ previewNote(table) }}</p>
                     <app-table-preview [columns]="table.columns" [rows]="table.preview" [cutCells]="table.cutCells" />
                   } @else {
-                    <p class="text-sm text-body" data-testid="test-no-preview">{{ t('scriptTests.noPreview', { rows: table.rows }) }}</p>
+                    <p class="text-sm text-body" data-testid="test-no-preview">{{ t(key('scriptTests.noPreview', table.rows), { rows: table.rows }) }}</p>
                   }
                 }
                 @if (step.dashboard; as facts) {
@@ -147,7 +148,7 @@ const statusTones: Record<RunStatus | 'stopped', Tone> = {
                   }
                 }
                 @if (step.log) {
-                  <pre class="max-h-60 overflow-auto rounded-base border border-default bg-neutral-secondary-soft p-3 text-xs whitespace-pre-wrap text-body" data-testid="test-step-log">{{ step.log }}</pre>
+                  <pre class="max-h-60 overflow-auto rounded-base border border-default bg-neutral-secondary-soft p-3 text-xs whitespace-pre-wrap text-body" data-testid="test-step-log" lang="en">{{ step.log }}</pre>
                 }
               </div>
             </details>
@@ -178,10 +179,11 @@ export class ScriptTestPanel {
   private readonly service = inject(PipelineService);
   private readonly errors = inject(ApiErrors);
   private readonly transloco = inject(TranslocoService);
+  private readonly locale = inject(LOCALE_ID);
   private readonly pollMs = inject(SCRIPT_TEST_POLL_MS);
 
   protected readonly test = signal<ScriptTest | null>(null);
-  protected readonly duration = durationText;
+  protected readonly duration = (start: string | null, end: string | null) => durationText(start, end, this.locale);
   protected readonly stale = computed(() => {
     const test = this.test();
     return !!test && test.code !== this.draft();
@@ -277,21 +279,29 @@ export class ScriptTestPanel {
     return this.transloco.translate('scriptTests.stoppedAt', { name, line });
   }
 
+  /** The key of a message about a count of rows: its singular form for one row. */
+  protected key(base: string, count: number): string {
+    return countKey(base, count, this.transloco.getActiveLang());
+  }
+
   protected previewNote(table: TestTable): string {
-    const key = table.previewRows < Math.min(table.rows, 100) ? 'scriptTests.previewTrimmed' : 'scriptTests.previewRows';
+    const key = table.previewRows < Math.min(table.rows, 100) ? 'scriptTests.previewTrimmed' : this.key('scriptTests.previewRows', table.rows);
     return this.transloco.translate(key, { shown: table.previewRows, rows: table.rows });
   }
 
-  /** The translated message for the test's error code, followed by the error itself for a failed step. */
-  protected errorText(test: ScriptTest): string {
+  /**
+   * The translated message for the test's error code, followed by the error itself for a failed step. The error is the worker's
+   * English text, so it comes apart from the introduction: `intro` is the UI's words (with the space before the detail), `detail` the English text.
+   */
+  protected errorParts(test: ScriptTest): { intro: string; detail: string } {
     if (test.errorCode) {
       const key = `errors.codes.${test.errorCode}`;
       const translated = this.transloco.translate(key);
       if (translated && translated !== key) {
-        return test.error && test.errorCode.startsWith('step.') ? `${translated} ${test.error}` : translated;
+        return test.error && test.errorCode.startsWith('step.') ? { intro: `${translated} `, detail: test.error } : { intro: translated, detail: '' };
       }
     }
-    return test.error ?? this.transloco.translate('errors.generic');
+    return test.error ? { intro: '', detail: test.error } : { intro: this.transloco.translate('errors.generic'), detail: '' };
   }
 
   /** A warning of the dashboard view goes to the assistant with its key and the params the API keeps, never its figures. */

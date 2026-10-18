@@ -1,9 +1,9 @@
-import { DatePipe, DecimalPipe } from '@angular/common';
-import { Component, computed, input, output, signal } from '@angular/core';
+import { Component, computed, inject, input, output, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { TranslocoDirective } from '@jsverse/transloco';
+import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
+import { countKey } from '../../../core/i18n/plural';
 import type { InputColumn, InputQuestion, ScriptInputs } from '../../../core/projects/pipeline.service';
-import { Alert, Button, Disclosure, Input, Skeleton, dateTimeFormat } from '../../../shared/ui';
+import { Alert, Button, Disclosure, Input, Skeleton, DateTimePipe, NumberPipe } from '../../../shared/ui';
 
 interface TableView {
   name: string;
@@ -23,7 +23,7 @@ function matches(filter: string, ...texts: (string | null | undefined)[]): boole
  */
 @Component({
   selector: 'app-script-inputs-panel',
-  imports: [DatePipe, DecimalPipe, RouterLink, TranslocoDirective, Alert, Button, Disclosure, Input, Skeleton],
+  imports: [DateTimePipe, NumberPipe, RouterLink, TranslocoDirective, Alert, Button, Disclosure, Input, Skeleton],
   template: `
     <div class="flex flex-col gap-3 text-sm" *transloco="let t" data-testid="inputs-panel">
       <div class="flex items-start justify-between gap-2">
@@ -31,7 +31,7 @@ function matches(filter: string, ...texts: (string | null | undefined)[]): boole
           @if (inputs() === null || failed()) {
             {{ t('scripts.inputs.title') }}
           } @else if (inputs()!.publishedAt; as published) {
-            <span data-testid="inputs-published">{{ t(inputs()!.source === 'clean' ? 'scripts.inputs.cleanPublished' : 'scripts.inputs.rawPublished', { when: (published | date: dateTimeFormat) }) }}</span>
+            <span data-testid="inputs-published">{{ t(inputs()!.source === 'clean' ? 'scripts.inputs.cleanPublished' : 'scripts.inputs.rawPublished', { when: (published | dateTime) }) }}</span>
           } @else {
             <span data-testid="inputs-none">{{ t('scripts.inputs.nothingPublished') }}</span>
           }
@@ -72,7 +72,7 @@ function matches(filter: string, ...texts: (string | null | undefined)[]): boole
                     <summary class="cursor-pointer">
                       <button type="button" class="font-medium text-heading hover:underline" (click)="pick.emit(table.name); $event.preventDefault()" data-testid="input-name">{{ table.name }}</button>
                       @if (table.rows !== null) {
-                        <span class="ms-1 text-body">{{ t('scripts.inputs.rows', { count: (table.rows | number) }) }}</span>
+                        <span class="ms-1 text-body">{{ t(key('scripts.inputs.rows', table.rows), { count: (table.rows | num) }) }}</span>
                       }
                     </summary>
                     <ul class="mt-1 flex max-h-72 flex-col gap-0.5 overflow-y-auto">
@@ -154,9 +154,10 @@ export class ScriptInputsPanel {
   readonly canInsert = input(false);
   /** Where the reference tables are managed, shown as a link for whoever may; null for everyone else. */
   readonly manageLink = input<string[] | null>(null);
-  protected readonly dateTimeFormat = dateTimeFormat;
   readonly pick = output<string>();
   readonly refresh = output<void>();
+
+  private readonly transloco = inject(TranslocoService);
 
   protected readonly filter = signal('');
   private readonly needle = computed(() => this.filter().trim().toLowerCase());
@@ -170,6 +171,11 @@ export class ScriptInputsPanel {
     const filter = this.needle();
     return (this.inputs()?.questions ?? []).filter((question) => !filter || matches(filter, question.name, question.label, question.path));
   });
+
+  /** The key of a message about a count: the singular form when the count is 1. */
+  protected key(base: string, count: number): string {
+    return countKey(base, count, this.transloco.getActiveLang());
+  }
 
   private narrow(tables: { name: string; rows: number | null; columns: InputColumn[] }[], withLabels: boolean): TableView[] {
     const filter = this.needle();

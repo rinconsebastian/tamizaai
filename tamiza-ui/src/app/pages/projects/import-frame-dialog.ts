@@ -1,14 +1,14 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { DIALOG_DATA, DialogRef } from '@angular/cdk/dialog';
-import { DecimalPipe } from '@angular/common';
 import { Component, DestroyRef, LOCALE_ID, inject, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { Subscription } from 'rxjs';
 import { ApiErrors } from '../../core/api-error';
 import { FormChoice, FormField, IgnoredColumn, ImportPreview, ProjectsService, SamplingDimension } from '../../core/projects/projects.service';
-import { Alert, Button, Disclosure, Input } from '../../shared/ui';
+import { Alert, ApiLang, Button, Disclosure, Input, numberText } from '../../shared/ui';
 import { FrameFileGuide } from './frame-file-guide';
 import { FieldGuess, fieldIssue, guessField } from './sampling-frame-fields';
+import { isSingular, pluralKey } from '../../core/i18n/plural';
 
 export interface ImportFrameData {
   projectId: string;
@@ -29,6 +29,21 @@ export interface ImportedFrame {
 
 /** The dialog closes with the imported rows, or with the user's request for a template made from the form's questions. */
 export type ImportFrameResult = ({ kind: 'rows' } & ImportedFrame) | { kind: 'template' };
+
+/** Stands for a text written by the API inside a translated message, so the message can be cut around it. */
+export const detailMark = '\uE000';
+
+/** A message with a text of the API in the middle: what the UI wrote before and after it. */
+export interface AroundDetail {
+  before: string;
+  after: string;
+}
+
+/** Cuts a translated message built with `detailMark` as the text of the API into what comes before and after it. */
+export function aroundDetail(translated: string): AroundDetail {
+  const at = translated.indexOf(detailMark);
+  return at < 0 ? { before: translated, after: '' } : { before: translated.slice(0, at), after: translated.slice(at + detailMark.length) };
+}
 
 /** Rows with a problem listed before the rest are counted ("and N more"). */
 const shownErrors = 20;
@@ -60,7 +75,7 @@ export function rowRanges(rows: number[], limit = shownRanges): { ranges: [numbe
  */
 @Component({
   selector: 'app-import-frame-dialog',
-  imports: [TranslocoDirective, Alert, Button, Disclosure, FrameFileGuide, Input],
+  imports: [TranslocoDirective, Alert, ApiLang, Button, Disclosure, FrameFileGuide, Input],
   template: `
     <div
       class="flex h-dvh w-screen flex-col overflow-y-auto bg-neutral-primary-soft p-4 md:h-auto md:max-h-[calc(100dvh-2rem)] md:w-[min(40rem,calc(100vw-2rem))] md:rounded-base md:border md:border-default md:p-6 md:shadow-sm"
@@ -87,7 +102,7 @@ export function rowRanges(rows: number[], limit = shownRanges): { ranges: [numbe
         <span class="break-all text-sm text-body" data-testid="file-name">{{ fileName() ?? t('frame.noFile') }}</span>
       </div>
       @if (importError(); as message) {
-        <tmz-alert tone="danger" class="mt-4" data-testid="import-error">{{ message }}</tmz-alert>
+        <tmz-alert tone="danger" class="mt-4" [tmzApiLang]="message" data-testid="import-error">{{ message }}</tmz-alert>
       }
 
       <!-- Only the counts are announced; the rows and columns they refer to are listed below. -->
@@ -123,7 +138,8 @@ export function rowRanges(rows: number[], limit = shownRanges): { ranges: [numbe
             <tmz-alert tone="danger" [heading]="t('frame.previewErrors')" data-testid="import-errors">
               <ul class="mt-1 list-disc ps-5">
                 @for (error of current.errors.slice(0, shownErrors); track $index) {
-                  <li>{{ t('frame.rowError', { row: error.row, message: error.message }) }}</li>
+                  @let around = rowErrorAround(error.row);
+                  <li>{{ around.before }}<span lang="en">{{ error.message }}</span>{{ around.after }}</li>
                 }
               </ul>
               @if (current.errors.length > shownErrors) {
@@ -170,7 +186,7 @@ export class ImportFrameDialog {
   private readonly service = inject(ProjectsService);
   private readonly errors = inject(ApiErrors);
   private readonly transloco = inject(TranslocoService);
-  private readonly decimal = new DecimalPipe(inject(LOCALE_ID));
+  private readonly locale = inject(LOCALE_ID);
 
   protected readonly shownErrors = shownErrors;
   protected readonly preview = signal<ImportPreview | null>(null);
@@ -216,6 +232,11 @@ export class ImportFrameDialog {
     });
   }
 
+  /** "Row 3: " and what follows the row's message, which is written by the API and sits between them. */
+  protected rowErrorAround(row: number): AroundDetail {
+    return aroundDetail(this.transloco.translate('frame.rowError', { row, message: detailMark }));
+  }
+
   protected map(index: number, field: string): void {
     this.mapping.update((fields) => fields.map((current, i) => (i === index ? field : current)));
   }
@@ -228,7 +249,7 @@ export class ImportFrameDialog {
   protected leftOutRows(rows: number[]): string {
     const { ranges, more } = rowRanges(rows);
     const text = ranges.map(([from, to]) => (from === to ? this.format(from) : `${this.format(from)}–${this.format(to)}`)).join(', ');
-    const listed = this.transloco.translate(rows.length === 1 ? 'frame.preview.rowRange' : 'frame.preview.rowRanges', { ranges: text });
+    const listed = this.transloco.translate(isSingular(rows.length, this.transloco.getActiveLang()) ? 'frame.preview.rowRange' : 'frame.preview.rowRanges', { ranges: text });
     return more ? `${listed} ${this.plural('frame.preview.moreRows', more)}` : listed;
   }
 
@@ -240,7 +261,7 @@ export class ImportFrameDialog {
 
   /** The `One` or `Many` form of a message, with the count formatted for the locale. */
   protected plural(key: string, count: number, params: Record<string, unknown> = {}): string {
-    return this.transloco.translate(`${key}${count === 1 ? 'One' : 'Many'}`, { ...params, count: this.format(count) });
+    return this.transloco.translate(pluralKey(key, count, this.transloco.getActiveLang()), { ...params, count: this.format(count) });
   }
 
   /** A question the dashboard cannot count reliably says so in the list and, once chosen, under the select. */
@@ -263,6 +284,6 @@ export class ImportFrameDialog {
   }
 
   private format(value: number): string {
-    return this.decimal.transform(value) ?? String(value);
+    return numberText(value, this.locale) ?? String(value);
   }
 }

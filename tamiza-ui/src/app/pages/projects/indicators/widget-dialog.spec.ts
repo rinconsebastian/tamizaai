@@ -446,6 +446,7 @@ describe('the widget dialog', () => {
       await settle(context.harness);
 
       expect(text(field('dialog-error'))).toBe('A project can have at most 50 widgets.');
+      expect(field('dialog-error').querySelector('[lang="en"]')).not.toBeNull(); // written by the API
     });
 
     it('closes without saving on Cancel', async () => {
@@ -491,6 +492,7 @@ describe('the widget dialog', () => {
       await previewAnswer(context, { status: 400, body: { title: 'x', errors: { measure: ["Column 'round' is not a number."] } } });
 
       expect(text(field('dialog-preview').querySelector('[data-testid="view-error"]'))).toBe("Column 'round' is not a number.");
+      expect(field('dialog-preview').querySelector('[data-testid="view-error"] [lang="en"]')).not.toBeNull();
       expect(field('dialog-preview').querySelector('[data-testid="chart-svg"]')).toBeNull();
     });
 
@@ -1006,6 +1008,7 @@ describe('the widget dialog', () => {
 
       context.http.expectNone(isCreate);
       expect(text(field('tooltip-list-error'))).toBe('Choose a column for every tooltip column, or remove the empty ones.');
+      expect(field('tooltip-list-error').hasAttribute('lang')).toBe(false); // the UI wrote this one
     });
 
     it('saves no tooltip columns when a map is turned into another chart type', async () => {
@@ -1049,6 +1052,8 @@ describe('the widget dialog', () => {
       const shown = items().map((item) => Array.from(item.querySelectorAll('[data-testid="tooltip-error"]')).map(text));
       expect(shown).toEqual([['A label takes at most 80 characters.'], ['Only a number column can have a format.']]);
       expect(text(field('tooltip-list-error'))).toBe('A map has at most 5 tooltip columns.');
+      expect(field('tooltip-list-error').getAttribute('lang')).toBe('en');
+      expect(items()[0].querySelector('[data-testid="tooltip-error"]')!.getAttribute('lang')).toBe('en');
       expect(field<HTMLButtonElement>('dialog-save').disabled).toBe(false);
     });
 

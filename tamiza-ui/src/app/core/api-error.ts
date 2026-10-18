@@ -1,7 +1,7 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { TranslocoService } from '@jsverse/transloco';
-import { ToastService } from '../shared/ui';
+import { ToastService, markApiText } from '../shared/ui';
 
 /**
  * An API failure ready to show: a message, the API's error code, field messages keyed by field path and the other members
@@ -45,13 +45,13 @@ export class ApiErrors {
     const fieldErrors = Object.fromEntries(
       Object.entries(body.errors ?? {})
         .filter(([, messages]) => messages?.length)
-        .map(([field, messages]) => [field, messages[0]]),
+        .map(([field, messages]) => [field, markApiText(messages[0])]),
     );
     const code = body.code ?? null;
     const translated = code ? this.translated(`errors.codes.${code}`) : null;
     const message =
       translated ??
-      (Object.keys(fieldErrors).length ? this.t('errors.validation') : (body.detail ?? body.title ?? this.t('errors.generic')));
+      (Object.keys(fieldErrors).length ? this.t('errors.validation') : this.apiMessage(body));
     const extensions = Object.fromEntries(Object.entries(body).filter(([name]) => !standardMembers.has(name)));
     return { status: error.status, code, message, fieldErrors, extensions };
   }
@@ -63,6 +63,12 @@ export class ApiErrors {
       this.toasts.error(parsed.message);
     }
     return parsed;
+  }
+
+  /** The text the API wrote for an error: its detail, else its title; the UI's own generic text when it wrote neither. */
+  private apiMessage(body: ProblemBody): string {
+    const text = body.detail ?? body.title;
+    return text ? markApiText(text) : this.t('errors.generic');
   }
 
   private t(key: string): string {

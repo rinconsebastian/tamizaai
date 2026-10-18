@@ -1,4 +1,4 @@
-import { DOCUMENT, DatePipe } from '@angular/common';
+import { DOCUMENT } from '@angular/common';
 import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
@@ -11,27 +11,11 @@ import {
   SyncStatus,
 } from '../../core/projects/ingestion.service';
 import { PipelineService, PipelineSettings } from '../../core/projects/pipeline.service';
-import {
-  Badge,
-  Button,
-  Card,
-  ConfirmDialog,
-  FormField,
-  Input,
-  Skeleton,
-  Table,
-  TableContainer,
-  ToastService,
-  Tone,
-  dateTimeFormat,
-  tableCell,
-  tableHead,
-  tableHeaderCell,
-  tableRow,
-} from '../../shared/ui';
+import { Badge, Button, Card, ConfirmDialog, FormField, Input, Skeleton, Table, TableContainer, ToastService, Tone, tableCell, tableHead, tableHeaderCell, tableRow, DateTimePipe, NumberPipe } from '../../shared/ui';
 import { FormVersionItem, FormVersionList, FormVersionStatus, ProjectsService } from '../../core/projects/projects.service';
 import { PipelineSettingsCard } from './pipeline-settings';
 import { ProjectContext } from './project-context';
+import { countKey, isSingular } from '../../core/i18n/plural';
 
 const pageSize = 10;
 
@@ -40,7 +24,7 @@ const versionTones: Record<FormVersionStatus, Tone> = { available: 'success', pe
 
 @Component({
   selector: 'app-project-data',
-  imports: [DatePipe, TranslocoDirective, Badge, Button, Card, FormField, Input, PipelineSettingsCard, Skeleton, Table, TableContainer],
+  imports: [DateTimePipe, NumberPipe, TranslocoDirective, Badge, Button, Card, FormField, Input, PipelineSettingsCard, Skeleton, Table, TableContainer],
   template: `
     <div class="flex flex-col gap-6" *transloco="let t">
       <tmz-card [heading]="t('data.statusTitle')">
@@ -57,7 +41,7 @@ const versionTones: Record<FormVersionStatus, Tone> = { available: 'success', pe
             <div>
               <dt class="text-body">{{ t('data.lastWebhook') }}</dt>
               <dd class="text-heading" data-testid="last-webhook">
-                {{ status.lastWebhookAt ? (status.lastWebhookAt | date: dateTimeFormat) : t('data.noWebhook') }}
+                {{ status.lastWebhookAt ? (status.lastWebhookAt | dateTime) : t('data.noWebhook') }}
               </dd>
             </div>
             <div>
@@ -65,7 +49,7 @@ const versionTones: Record<FormVersionStatus, Tone> = { available: 'success', pe
               <dd class="flex flex-wrap items-center gap-2 text-heading" data-testid="last-sync">
                 @if (status.lastSync; as last) {
                   <tmz-badge [tone]="tone(last.status)">{{ t('data.status.' + last.status) }}</tmz-badge>
-                  <span>{{ last.finishedAt | date: dateTimeFormat }}</span>
+                  <span>{{ last.finishedAt | dateTime }}</span>
                 } @else {
                   {{ t('data.never') }}
                 }
@@ -73,11 +57,11 @@ const versionTones: Record<FormVersionStatus, Tone> = { available: 'success', pe
             </div>
             <div>
               <dt class="text-body">{{ t('data.nextSync') }}</dt>
-              <dd class="text-heading">{{ status.nextSyncAt | date: dateTimeFormat }}</dd>
+              <dd class="text-heading">{{ status.nextSyncAt | dateTime }}</dd>
             </div>
             <div>
               <dt class="text-body">{{ t('data.nextReconcile') }}</dt>
-              <dd class="text-heading">{{ status.nextReconcileAt | date: dateTimeFormat }}</dd>
+              <dd class="text-heading">{{ status.nextReconcileAt | dateTime }}</dd>
             </div>
           </dl>
 
@@ -113,9 +97,9 @@ const versionTones: Record<FormVersionStatus, Tone> = { available: 'success', pe
                 <p data-testid="runs-line">
                   {{ run.runAfterSync ? t('data.runsAfterSync') : t('data.runsNotAfterSync') }}
                   ·
-                  {{ run.runIntervalHours ? t('data.runsEvery', { hours: run.runIntervalHours }) : t('pipeline.noSchedule') }}
+                  {{ run.runIntervalHours ? t(key('data.runsEvery', run.runIntervalHours), { hours: run.runIntervalHours }) : t('pipeline.noSchedule') }}
                   @if (run.nextRunAt) {
-                    · {{ t('pipeline.nextRun', { time: (run.nextRunAt | date: dateTimeFormat) }) }}
+                    · {{ t('pipeline.nextRun', { time: (run.nextRunAt | dateTime) }) }}
                   }
                 </p>
               }
@@ -175,14 +159,14 @@ const versionTones: Record<FormVersionStatus, Tone> = { available: 'success', pe
                     }
                   </div>
                   <p class="mt-1 text-body">
-                    {{ (sync.startedAt ?? sync.queuedAt) | date: dateTimeFormat }}
+                    {{ (sync.startedAt ?? sync.queuedAt) | dateTime }}
                     @if (sync.finishedAt) {
-                      · {{ t('data.endedAt', { time: (sync.finishedAt | date: dateTimeFormat) }) }}
+                      · {{ t('data.endedAt', { time: (sync.finishedAt | dateTime) }) }}
                     }
                     · {{ t('data.countsSummary', { created: sync.createdCount, updated: sync.updatedCount, deleted: sync.deletedCount }) }}
                   </p>
                   @if (sync.status === 'failed') {
-                    <p class="mt-2 text-fg-danger-strong break-words">{{ errorText(sync) }}</p>
+                    <p class="mt-2 text-fg-danger-strong break-words" [attr.lang]="errorLang(sync)">{{ errorText(sync) }}</p>
                   }
                 </li>
               }
@@ -201,9 +185,9 @@ const versionTones: Record<FormVersionStatus, Tone> = { available: 'success', pe
                   @for (sync of log.items; track sync.id) {
                     <tr [class]="tableRow" [attr.data-testid]="'log-row-' + sync.status">
                       <td [class]="tableCell + ' whitespace-nowrap'">
-                        {{ (sync.startedAt ?? sync.queuedAt) | date: dateTimeFormat }}
+                        {{ (sync.startedAt ?? sync.queuedAt) | dateTime }}
                         @if (sync.finishedAt) {
-                          <span class="block text-xs" data-testid="log-ended">{{ t('data.endedAt', { time: (sync.finishedAt | date: dateTimeFormat) }) }}</span>
+                          <span class="block text-xs" data-testid="log-ended">{{ t('data.endedAt', { time: (sync.finishedAt | dateTime) }) }}</span>
                         }
                       </td>
                       <td [class]="tableCell">
@@ -213,7 +197,7 @@ const versionTones: Record<FormVersionStatus, Tone> = { available: 'success', pe
                       <td [class]="tableCell">
                         <tmz-badge [tone]="tone(sync.status)">{{ t('data.status.' + sync.status) }}</tmz-badge>
                         @if (sync.status === 'failed') {
-                          <span class="mt-1 block max-w-md text-xs text-fg-danger-strong break-words" data-testid="log-error">{{ errorText(sync) }}</span>
+                          <span class="mt-1 block max-w-md text-xs text-fg-danger-strong break-words" data-testid="log-error" [attr.lang]="errorLang(sync)">{{ errorText(sync) }}</span>
                         }
                       </td>
                       <td [class]="tableCell + ' whitespace-nowrap text-right tabular-nums'">
@@ -263,13 +247,13 @@ const versionTones: Record<FormVersionStatus, Tone> = { available: 'success', pe
                     }
                     <tmz-badge [tone]="versionTone(version.status)">{{ t('data.versions.status.' + version.status) }}</tmz-badge>
                   </div>
-                  <p class="text-body">{{ t('data.versions.columns.deployed') }}: {{ version.deployedAt ? (version.deployedAt | date: dateTimeFormat) : t('data.versions.notDeployed') }}</p>
-                  <p class="text-body">{{ t('data.versions.columns.submissions') }}: {{ version.submissions }}</p>
+                  <p class="text-body">{{ t('data.versions.columns.deployed') }}: {{ version.deployedAt ? (version.deployedAt | dateTime) : t('data.versions.notDeployed') }}</p>
+                  <p class="text-body">{{ t('data.versions.columns.submissions') }}: {{ version.submissions | num }}</p>
                   @if (version.status === 'failed' || version.status === 'not_found') {
-                    <p class="mt-2 break-words text-fg-danger-strong">{{ versionError(version) }}</p>
+                    <p class="mt-2 break-words text-fg-danger-strong" [attr.lang]="versionErrorLang(version)">{{ versionError(version) }}</p>
                   }
                   @if (version.status === 'failed' && version.nextAttemptAt) {
-                    <p class="text-body">{{ t('data.versions.nextAttempt') }} {{ version.nextAttemptAt | date: dateTimeFormat }}</p>
+                    <p class="text-body">{{ t('data.versions.nextAttempt') }} {{ version.nextAttemptAt | dateTime }}</p>
                   }
                 </li>
               }
@@ -298,15 +282,15 @@ const versionTones: Record<FormVersionStatus, Tone> = { available: 'success', pe
                           }
                         </div>
                       </td>
-                      <td [class]="tableCell + ' whitespace-nowrap'">{{ version.deployedAt ? (version.deployedAt | date: dateTimeFormat) : t('data.versions.notDeployed') }}</td>
-                      <td [class]="tableCell + ' text-right'" data-testid="version-submissions">{{ version.submissions }}</td>
+                      <td [class]="tableCell + ' whitespace-nowrap'">{{ version.deployedAt ? (version.deployedAt | dateTime) : t('data.versions.notDeployed') }}</td>
+                      <td [class]="tableCell + ' text-right'" data-testid="version-submissions">{{ version.submissions | num }}</td>
                       <td [class]="tableCell">
                         <tmz-badge [tone]="versionTone(version.status)">{{ t('data.versions.status.' + version.status) }}</tmz-badge>
                         @if (version.status === 'failed' || version.status === 'not_found') {
-                          <span class="mt-1 block max-w-md break-words text-xs text-fg-danger-strong" data-testid="version-error">{{ versionError(version) }}</span>
+                          <span class="mt-1 block max-w-md break-words text-xs text-fg-danger-strong" data-testid="version-error" [attr.lang]="versionErrorLang(version)">{{ versionError(version) }}</span>
                         }
                         @if (version.status === 'failed' && version.nextAttemptAt) {
-                          <span class="block text-xs" data-testid="version-next-attempt">{{ t('data.versions.nextAttempt') }} {{ version.nextAttemptAt | date: dateTimeFormat }}</span>
+                          <span class="block text-xs" data-testid="version-next-attempt">{{ t('data.versions.nextAttempt') }} {{ version.nextAttemptAt | dateTime }}</span>
                         }
                       </td>
                     </tr>
@@ -317,7 +301,7 @@ const versionTones: Record<FormVersionStatus, Tone> = { available: 'success', pe
           }
           @if (list.withoutVersion > 0) {
             <p class="mt-4 text-sm text-body" data-testid="without-version">
-              {{ list.withoutVersion === 1 ? t('data.versions.withoutVersionOne') : t('data.versions.withoutVersion', { count: list.withoutVersion }) }}
+              {{ singular(list.withoutVersion) ? t('data.versions.withoutVersionOne') : t('data.versions.withoutVersion', { count: list.withoutVersion }) }}
             </p>
           }
           @if (hasUnreadable(list)) {
@@ -350,7 +334,6 @@ export class ProjectData {
   protected readonly context = inject(ProjectContext);
 
   protected readonly pageSize = pageSize;
-  protected readonly dateTimeFormat = dateTimeFormat;
   protected readonly tableHead = tableHead;
   protected readonly tableHeaderCell = tableHeaderCell;
   protected readonly tableRow = tableRow;
@@ -435,6 +418,11 @@ export class ProjectData {
     return version.error ?? this.transloco.translate('errors.generic');
   }
 
+  /** `en` when the text shown for the version is the raw reason the worker stored, which is always English. */
+  protected versionErrorLang(version: FormVersionItem): string | null {
+    return !this.translatedCode(version.errorCode) && version.error ? 'en' : null;
+  }
+
   protected async copy(uid: string): Promise<void> {
     try {
       await this.document.defaultView!.navigator.clipboard.writeText(uid);
@@ -454,6 +442,20 @@ export class ProjectData {
       }
     }
     return sync.error ?? this.transloco.translate('errors.generic');
+  }
+
+  /** `en` when the text shown for the run is the raw reason the worker stored, which is always English. */
+  protected errorLang(sync: SyncItem): string | null {
+    return !this.translatedCode(sync.errorCode) && sync.error ? 'en' : null;
+  }
+
+  private translatedCode(code: string | null | undefined): string | null {
+    if (!code) {
+      return null;
+    }
+    const key = `errors.codes.${code}`;
+    const translated = this.transloco.translate(key);
+    return translated && translated !== key ? translated : null;
   }
 
   protected start(kind: 'incremental' | 'full'): void {
@@ -582,5 +584,15 @@ export class ProjectData {
 
   private projectId(): string {
     return this.context.project()!.id;
+  }
+
+  /** Whether a message about `count` things takes its singular form in the interface language. */
+  protected singular(count: number): boolean {
+    return isSingular(count, this.transloco.getActiveLang());
+  }
+
+  /** The key of a message about a count: the singular form when the count is 1. */
+  protected key(base: string, count: number): string {
+    return countKey(base, count, this.transloco.getActiveLang());
   }
 }

@@ -1,24 +1,9 @@
 import { Dialog } from '@angular/cdk/dialog';
-import { DatePipe } from '@angular/common';
-import { Component, DestroyRef, computed, effect, inject, output, signal } from '@angular/core';
+import { Component, DestroyRef, LOCALE_ID, computed, effect, inject, output, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { PIPELINE_POLL_MS, PipelineService, RunPage, RunStatus, RunStepStatus, RunSummary, StepSummary } from '../../core/projects/pipeline.service';
-import {
-  Badge,
-  Button,
-  Card,
-  Skeleton,
-  Table,
-  TableContainer,
-  ToastService,
-  Tone,
-  dateTimeFormat,
-  tableCell,
-  tableHead,
-  tableHeaderCell,
-  tableRow,
-} from '../../shared/ui';
+import { Badge, Button, Card, Skeleton, Table, TableContainer, ToastService, Tone, tableCell, tableHead, tableHeaderCell, tableRow, DateTimePipe } from '../../shared/ui';
 import { durationText } from './pipeline-runs.util';
 import { ProjectContext } from './project-context';
 import { RunDetailsData, RunDetailsDialog } from './run-details-dialog';
@@ -30,7 +15,7 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
 /** "Run now" and the run log, refreshed while a run is queued or running. */
 @Component({
   selector: 'app-pipeline-runs',
-  imports: [DatePipe, TranslocoDirective, Badge, Button, Card, Skeleton, Table, TableContainer],
+  imports: [DateTimePipe, TranslocoDirective, Badge, Button, Card, Skeleton, Table, TableContainer],
   template: `
     <section *transloco="let t">
       <h2 id="runs" class="mb-3 text-lg font-semibold text-heading">{{ t('runs.title') }}</h2>
@@ -45,7 +30,7 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
                   <tmz-badge [tone]="tone(run.status)">{{ t('runs.status.' + run.status) }}</tmz-badge>
                   <span class="text-body">{{ t('runs.triggers.' + run.trigger) }}</span>
                 </div>
-                <p class="text-body">{{ (run.startedAt ?? run.queuedAt) | date: dateTimeFormat }}</p>
+                <p class="text-body">{{ (run.startedAt ?? run.queuedAt) | dateTime }}</p>
                 @if (hasProblem(run)) {
                   <p class="mt-1 flex flex-wrap gap-1">
                     @for (step of fixedSteps(run); track step.step) {
@@ -57,7 +42,8 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
                   </p>
                 }
                 @if (run.error) {
-                  <p class="mt-2 break-words text-fg-danger-strong">{{ errorText(run) }}</p>
+                  @let message = errorParts(run);
+                  <p class="mt-2 break-words text-fg-danger-strong">{{ message.intro }}@if (message.detail) {<span lang="en">{{ message.detail }}</span>}</p>
                 }
                 <button tmzButton variant="secondary" size="sm" type="button" class="mt-3" (click)="open(run)">{{ t('runs.details') }}</button>
               </li>
@@ -78,13 +64,14 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
                 @for (run of log.items; track run.id) {
                   <tr [class]="tableRow" [attr.data-testid]="'run-row-' + run.status">
                     <td [class]="tableCell + ' whitespace-nowrap'">
-                      {{ (run.startedAt ?? run.queuedAt) | date: dateTimeFormat }}
+                      {{ (run.startedAt ?? run.queuedAt) | dateTime }}
                       <span class="block text-xs">{{ t('runs.triggers.' + run.trigger) }}{{ run.requestedBy ? ' · ' + run.requestedBy.name : '' }}</span>
                     </td>
                     <td [class]="tableCell">
                       <tmz-badge [tone]="tone(run.status)">{{ t('runs.status.' + run.status) }}</tmz-badge>
                       @if (run.error) {
-                        <span class="mt-1 block max-w-xs break-words text-xs text-fg-danger-strong" data-testid="run-error">{{ errorText(run) }}</span>
+                        @let message = errorParts(run);
+                        <span class="mt-1 block max-w-xs break-words text-xs text-fg-danger-strong" data-testid="run-error">{{ message.intro }}@if (message.detail) {<span lang="en">{{ message.detail }}</span>}</span>
                       }
                     </td>
                     <td [class]="tableCell">
@@ -136,6 +123,7 @@ export class PipelineRuns {
   private readonly toasts = inject(ToastService);
   private readonly transloco = inject(TranslocoService);
   private readonly dialog = inject(Dialog);
+  private readonly locale = inject(LOCALE_ID);
   private readonly pollMs = inject(PIPELINE_POLL_MS);
   protected readonly context = inject(ProjectContext);
 
@@ -144,8 +132,7 @@ export class PipelineRuns {
   protected readonly tableHeaderCell = tableHeaderCell;
   protected readonly tableRow = tableRow;
   protected readonly tableCell = tableCell;
-  protected readonly duration = durationText;
-  protected readonly dateTimeFormat = dateTimeFormat;
+  protected readonly duration = (start: string | null, end: string | null) => durationText(start, end, this.locale);
 
   /** Emits when a run that was queued or running has ended, so the tables it published can be read again. */
   readonly runEnded = output<void>();
@@ -256,16 +243,19 @@ export class PipelineRuns {
     return this.transloco.translate('runs.indicatorsSummary', { done: steps.filter((s) => s.status === 'succeeded').length, total: steps.length });
   }
 
-  /** The translated message for the run's error code, or the API's text. */
-  protected errorText(run: RunSummary): string {
+  /**
+   * The translated message for the run's error code, or the worker's text. The worker's English text comes apart from the
+   * introduction: `intro` is the UI's words (with the space before the detail), `detail` the English text.
+   */
+  protected errorParts(run: RunSummary): { intro: string; detail: string } {
     if (run.errorCode) {
       const key = `errors.codes.${run.errorCode}`;
       const translated = this.transloco.translate(key);
       if (translated && translated !== key) {
-        return run.error && run.errorCode.startsWith('step.') ? `${translated} ${run.error}` : translated;
+        return run.error && run.errorCode.startsWith('step.') ? { intro: `${translated} `, detail: run.error } : { intro: translated, detail: '' };
       }
     }
-    return run.error ?? this.transloco.translate('errors.generic');
+    return run.error ? { intro: '', detail: run.error } : { intro: this.transloco.translate('errors.generic'), detail: '' };
   }
 
   private clearPoll(): void {

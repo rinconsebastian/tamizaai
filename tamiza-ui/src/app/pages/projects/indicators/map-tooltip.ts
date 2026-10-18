@@ -1,7 +1,6 @@
-import { formatDate } from '@angular/common';
 import { DataColumnType, DataValue } from '../../../core/projects/data.service';
 import { QueryRow, WidgetTooltipItem } from '../../../core/projects/indicators.service';
-import { ChartTooltipContent, timestampText } from '../../../shared/ui';
+import { ChartTooltipContent, dateText, timestampText } from '../../../shared/ui';
 import { ValueFormatter, valueFormatter } from './format';
 
 // What a map's tooltip says (design D6, D9): the group as its heading, the plotted value with the indicator's format and unit, the
@@ -47,20 +46,12 @@ export function tooltipValue(value: DataValue | undefined, type: DataColumnType 
     return t(value ? 'indicators.map.yes' : 'indicators.map.no');
   }
   if (type === 'date') {
-    return safely(() => formatDate(value, 'mediumDate', locale), value);
+    return dateText(value, locale, 'date') ?? value;
   }
   if (type === 'timestamp') {
     return timestampText(value, locale);
   }
   return value;
-}
-
-function safely(format: () => string, fallback: string): string {
-  try {
-    return format();
-  } catch {
-    return fallback;
-  }
 }
 
 /** The value of each of the widget's tooltip columns for one row, as text. */

@@ -1,11 +1,10 @@
-import { DatePipe } from '@angular/common';
 import { DOCUMENT, Component, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { IngestionService } from '../../core/projects/ingestion.service';
 import { ProjectsService, WebhookSettings } from '../../core/projects/projects.service';
-import { Alert, Button, Card, ConfirmDialog, Disclosure, Skeleton, ToastService, dateTimeFormat } from '../../shared/ui';
+import { Alert, Button, Card, ConfirmDialog, Disclosure, Skeleton, ToastService, DateTimePipe } from '../../shared/ui';
 import { ProjectContext } from './project-context';
 
 /**
@@ -15,7 +14,7 @@ import { ProjectContext } from './project-context';
  */
 @Component({
   selector: 'app-project-webhook',
-  imports: [DatePipe, RouterLink, TranslocoDirective, Alert, Button, Card, Disclosure, Skeleton],
+  imports: [DateTimePipe, RouterLink, TranslocoDirective, Alert, Button, Card, Disclosure, Skeleton],
   template: `
     <ng-container *transloco="let t">
       @if (!isAdmin) {
@@ -24,7 +23,7 @@ import { ProjectContext } from './project-context';
         <tmz-card [heading]="t('webhook.title')" class="max-w-3xl">
           @if (delivery(); as delivery) {
             @if (delivery.at) {
-              <p class="mb-3 text-sm text-body" data-testid="last-delivery">{{ t('webhook.lastDelivery', { time: (delivery.at | date: dateTimeFormat) }) }}</p>
+              <p class="mb-3 text-sm text-body" data-testid="last-delivery">{{ t('webhook.lastDelivery', { time: (delivery.at | dateTime) }) }}</p>
             } @else {
               <tmz-alert tone="warning" class="mb-3" data-testid="last-delivery">
                 {{ t('webhook.noDelivery') }}
@@ -105,7 +104,6 @@ export class ProjectWebhook {
   private readonly document = inject(DOCUMENT);
   private readonly context = inject(ProjectContext);
 
-  protected readonly dateTimeFormat = dateTimeFormat;
   protected readonly settings = signal<WebhookSettings | null>(null);
   protected readonly settingsFailed = signal(false);
   protected readonly revealed = signal(false);

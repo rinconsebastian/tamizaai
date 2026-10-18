@@ -21,6 +21,8 @@ Tamiza is compatible with KoboToolbox but is not affiliated with it.
 
 Users sign in with an existing Keycloak instance over OpenID Connect. Keycloak is not part of the stack.
 
+The interface is in English or Spanish. It follows the browser's preferred languages (the first one that is Spanish or English wins, and English is used when there is none), and dates, numbers and times follow that language's region, such as `es-CO` or `es-ES`. There is no language switcher: change the language in the browser. Text written by the `api` and the `analytics` worker (field validation messages, run logs and errors) and the files they produce stay in English for now.
+
 ## Quick start
 
 You need Docker with Compose v2, about 4 GB of RAM, and a Keycloak realm prepared as described in [docs/keycloak.md](docs/keycloak.md).

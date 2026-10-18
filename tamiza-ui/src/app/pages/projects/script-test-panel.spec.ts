@@ -112,6 +112,19 @@ describe('ScriptTestPanel', () => {
       expect(asked).toEqual([{ testId: 't1' }]);
     });
 
+    it("marks the worker's texts as English and leaves the words around them to the interface", async () => {
+      const shown = [{ name: 'note', line: 3, rows: 0, table: null, text: 'This value could not be shown: boom' }];
+      const root = await create(scriptTest({ steps: [step({ status: 'failed', error: "KeyError: 'age'", log: 'INFO starting', shown })] }));
+
+      expect(byTestId(root, 'test-step-error')?.getAttribute('lang')).toBe('en');
+      expect(byTestId(root, 'test-step-log')?.getAttribute('lang')).toBe('en');
+      expect(byTestId(root, 'test-shown-text')?.getAttribute('lang')).toBe('en');
+      const error = byTestId(root, 'test-error')!;
+      expect(error.getAttribute('lang')).toBeNull();
+      expect(error.querySelector('[lang="en"]')?.textContent).toBe('KeyError');
+      expect(textOf(error)).toBe('An indicator script failed: KeyError');
+    });
+
     it('is not offered when the page says it cannot be (disabled assistant, viewer, older version, another script)', async () => {
       const root = await create(scriptTest(), { canAsk: false });
 
@@ -155,6 +168,53 @@ describe('ScriptTestPanel', () => {
       const root = await create(scriptTest(), { canAsk: false, draft: code + '# edited\n' });
 
       expect(textOf(byTestId(root, 'test-stale'))).not.toContain('asking the assistant');
+    });
+  });
+
+  describe('the count of rows of a table', () => {
+    const columns = [{ name: 'value', type: 'integer' as const }];
+    const table = (name: string, rows: number, withPreview = true) => ({
+      name,
+      rows,
+      columns: withPreview ? columns : null,
+      previewRows: withPreview ? Math.min(rows, 2) : 0,
+      preview: withPreview ? [[1]] : null,
+      cutCells: null,
+    });
+    const succeeded = (overrides: Partial<TestStep>) =>
+      scriptTest({ status: 'succeeded', error: null, errorCode: null, steps: [step({ step: 'indicator', ...overrides })] });
+
+    it('words the preview note, the table option and the missing preview for one row in the singular and for several in the plural', async () => {
+      const several = await create(succeeded({ tables: [table('main', 2), table('lookup', 7, false)] }));
+      expect(textOf(byTestId(several, 'test-preview-note'))).toBe('First 2 of 2 rows.');
+      expect([...several.querySelectorAll('option')].map((option) => textOf(option))).toEqual(['main (2 rows)', 'lookup (7 rows)']);
+
+      const one = await create(succeeded({ tables: [table('main', 1), table('lookup', 1, false)] }));
+      expect(textOf(byTestId(one, 'test-preview-note'))).toBe('First 1 of 1 row.');
+      expect([...one.querySelectorAll('option')].map((option) => textOf(option))).toEqual(['main (1 row)', 'lookup (1 row)']);
+      const select = byTestId<HTMLSelectElement>(one, 'test-table-select-indicator')!;
+      select.value = 'lookup';
+      select.dispatchEvent(new Event('change'));
+      await settle();
+      expect(textOf(byTestId(one, 'test-no-preview'))).toBe('1 row. Only the first 20 tables of a step are previewed.');
+    });
+
+    it('words the title of a test on one submission in the singular and on several in the plural', async () => {
+      const several = await create(scriptTest({ sampleSize: 500 }));
+      expect(textOf(several.querySelector('h2'))).toMatch(/ on 500 submissions$/);
+
+      const one = await create(scriptTest({ sampleSize: 1 }));
+      expect(textOf(one.querySelector('h2'))).toMatch(/ on 1 submission$/);
+    });
+
+    it('words the note of a table the script showed for one row in the singular and for several in the plural', async () => {
+      const shown = (rows: number) => [{ name: 'households', line: 4, rows, table: table('households', rows), text: null }];
+
+      const several = await create(succeeded({ shown: shown(3) }));
+      expect(textOf(byTestId(several, 'test-shown-note'))).toBe('households, line 4: first 2 of 3 rows.');
+
+      const one = await create(succeeded({ shown: shown(1) }));
+      expect(textOf(byTestId(one, 'test-shown-note'))).toBe('households, line 4: first 1 of 1 row.');
     });
   });
 

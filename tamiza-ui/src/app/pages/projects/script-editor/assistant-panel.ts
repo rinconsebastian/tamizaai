@@ -1,11 +1,10 @@
 import { Dialog } from '@angular/cdk/dialog';
-import { formatDate } from '@angular/common';
-import { Component, ElementRef, OnInit, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, LOCALE_ID, OnInit, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiError, ApiErrors } from '../../../core/api-error';
 import { AssistantService, AssistantSettings } from '../../../core/projects/assistant.service';
 import type { IndicatorMetadata, ScriptKind } from '../../../core/projects/pipeline.service';
-import { Alert, Badge, Button, Input, ToastService, dateTimeFormat } from '../../../shared/ui';
+import { Alert, ApiLang, Badge, Button, Input, ToastService, dateTimeText, numberText } from '../../../shared/ui';
 import {
   ASSISTANT_SESSION,
   ApplyRequest,
@@ -17,11 +16,10 @@ import {
 } from './assistant-state';
 import { AssistantContextData, AssistantContextDialog } from './assistant-context-dialog';
 import { cellAt, cells, signatureOf } from './script-analysis';
+import { countKey, isSingular } from '../../../core/i18n/plural';
 
 /** The counter appears once a request reaches this share of the limit. */
 const counterFromBytes = (maxRequestBytes * 3) / 4;
-
-const kilobytes = (bytes: number) => (bytes / 1024).toFixed(1);
 
 /**
  * The Assistant tab of the Scripts side panel: it renders the state of the selected script that the page-scoped session holds (the
@@ -30,7 +28,7 @@ const kilobytes = (bytes: number) => (bytes / 1024).toFixed(1);
  */
 @Component({
   selector: 'app-assistant-panel',
-  imports: [TranslocoDirective, Alert, Badge, Button, Input],
+  imports: [TranslocoDirective, Alert, ApiLang, Badge, Button, Input],
   template: `
     <div class="flex min-w-0 flex-col gap-3 text-sm" *transloco="let t" data-testid="assistant-panel">
       <div class="flex flex-col gap-1">
@@ -89,7 +87,7 @@ const kilobytes = (bytes: number) => (bytes / 1024).toFixed(1);
       } @else {
         @if (failure(); as failure) {
           <tmz-alert tone="danger" data-testid="assistant-failure">
-            <span data-testid="assistant-failure-message">{{ failureText(failure) }}</span>
+            <span [tmzApiLang]="failureText(failure)" data-testid="assistant-failure-message">{{ failureText(failure) }}</span>
             <button tmzButton variant="ghost" size="sm" type="button" class="ms-2" (click)="session.dismissFailure()" data-testid="assistant-failure-dismiss">{{ t('scripts.assistant.dismiss') }}</button>
           </tmz-alert>
         }
@@ -106,7 +104,7 @@ const kilobytes = (bytes: number) => (bytes / 1024).toFixed(1);
                   @if (proposal.blocks.length > 1) {
                     <span class="font-medium text-heading">{{ t('scripts.assistant.blockNumber', { number: position + 1 }) }}</span> ·
                   }
-                  {{ block.lines === 1 ? t('scripts.assistant.oneLine') : t('scripts.assistant.lines', { lines: block.lines }) }}
+                  {{ singular(block.lines) ? t('scripts.assistant.oneLine') : t('scripts.assistant.lines', { lines: block.lines }) }}
                   ·
                   {{ block.definesContract ? t('scripts.assistant.definesContract', { signature: signature() }) : t('scripts.assistant.noContract', { signature: signature() }) }}
                 </p>
@@ -252,6 +250,7 @@ export class AssistantPanel implements OnInit {
   private readonly errors = inject(ApiErrors);
   private readonly toasts = inject(ToastService);
   private readonly transloco = inject(TranslocoService);
+  private readonly locale = inject(LOCALE_ID);
   private readonly dialog = inject(Dialog);
   private readonly requestBox = viewChild<ElementRef<HTMLTextAreaElement>>('requestBox');
 
@@ -288,7 +287,7 @@ export class AssistantPanel implements OnInit {
     return request ? Math.max(0, Math.floor((this.now() - request.startedAt) / 1000)) : 0;
   });
   private readonly bytes = computed(() => requestBytes(this.text()));
-  protected readonly size = computed(() => kilobytes(this.bytes()));
+  protected readonly size = computed(() => numberText(this.bytes() / 1024, this.locale, '1.1-1') ?? '');
   protected readonly tooLong = computed(() => this.bytes() > maxRequestBytes);
   protected readonly showCounter = computed(() => this.bytes() >= counterFromBytes);
   protected readonly canSend = computed(() => !this.viewing() && !this.pending() && !!this.text().trim() && !this.tooLong());
@@ -392,12 +391,17 @@ export class AssistantPanel implements OnInit {
   protected failureText(failure: ApiError): string {
     const retryAfter = failure.extensions['retryAfter'];
     if (failure.code === 'assistant.rateLimited' && typeof retryAfter === 'number' && retryAfter > 0) {
-      return this.transloco.translate('errors.codes.assistant.rateLimitedIn', { seconds: Math.ceil(retryAfter) });
+      return this.transloco.translate(countKey('errors.codes.assistant.rateLimitedIn', Math.ceil(retryAfter), this.transloco.getActiveLang()), { seconds: Math.ceil(retryAfter) });
     }
     const renewsAt = failure.extensions['renewsAt'];
     if (failure.code === 'assistant.budget' && typeof renewsAt === 'string' && !Number.isNaN(Date.parse(renewsAt))) {
-      return this.transloco.translate('errors.codes.assistant.budgetRenews', { when: formatDate(renewsAt, dateTimeFormat, 'en') });
+      return this.transloco.translate('errors.codes.assistant.budgetRenews', { when: dateTimeText(renewsAt, this.locale) ?? renewsAt });
     }
     return failure.message;
+  }
+
+  /** Whether a message about `count` things takes its singular form in the interface language. */
+  protected singular(count: number): boolean {
+    return isSingular(count, this.transloco.getActiveLang());
   }
 }

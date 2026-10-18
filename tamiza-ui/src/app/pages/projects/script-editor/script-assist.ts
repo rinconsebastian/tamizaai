@@ -5,6 +5,8 @@ import { Diagnostic, linter, lintGutter } from '@codemirror/lint';
 import { EditorState, Extension, Prec, RangeSetBuilder } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType, hoverTooltip, keymap } from '@codemirror/view';
 import type { InputColumn, ScriptKind } from '../../../core/projects/pipeline.service';
+import { isSingular } from '../../../core/i18n/plural';
+import { numberText } from '../../../shared/ui';
 import {
   CtxMember,
   ScriptInputsInfo,
@@ -41,6 +43,8 @@ export interface AssistOptions {
   /** Null until the inputs have loaded. */
   inputs: ScriptInputsInfo | null;
   translate: (key: string, params?: Record<string, unknown>) => string;
+  /** The locale that writes numbers (`es-CO`, `en-US`). */
+  locale: string;
   /** Whether the user can start tests: analysts and admins, on the current text rather than an older version. */
   canRun: boolean;
   /** Starts a test through the cell whose next marker is on `stopLine`; null runs the whole script (the last cell). */
@@ -136,17 +140,17 @@ function subscriptOptions(target: string, names: ReturnType<typeof scriptNames>,
   }
   const base = parts[1];
   const keys = [...parts[2].matchAll(subscriptKeys)].map((match) => match[1] ?? match[2]);
-  const columns = (table: string, items: InputColumn[]) => items.map((column) => columnOption(column, table));
+  const columns = (table: string, items: InputColumn[]) => items.map((column) => columnOption(column, table, options));
 
   if (base === names.data && keys.length === 0) {
     return inputs.tables.map((table) => ({
       label: table.name,
       type: 'class',
-      detail: table.rows === null ? undefined : `${table.rows.toLocaleString('en')} rows`,
+      detail: table.rows === null ? undefined : rowsText(table.rows, options),
     }));
   }
   if (base === `${names.ctx}.reference` && keys.length === 0) {
-    return inputs.referenceTables.map((table) => ({ label: table.name, type: 'class', detail: 'reference table' }));
+    return inputs.referenceTables.map((table) => ({ label: table.name, type: 'class', detail: options.translate('scripts.completion.referenceTable') }));
   }
   if (base === `${names.ctx}.reference` && keys.length === 1) {
     const table = inputs.referenceTables.find((candidate) => candidate.name === keys[0]);
@@ -162,12 +166,18 @@ function subscriptOptions(target: string, names: ReturnType<typeof scriptNames>,
   // Anywhere else in a subscript string: the columns of every input table, once each.
   const seen = new Set<string>();
   return inputs.tables.flatMap((candidate) =>
-    candidate.columns.filter((column) => !seen.has(column.name) && seen.add(column.name)).map((column) => columnOption(column, candidate.name)),
+    candidate.columns.filter((column) => !seen.has(column.name) && seen.add(column.name)).map((column) => columnOption(column, candidate.name, options)),
   );
 }
 
-function columnOption(column: InputColumn, table: string): Completion {
-  return { label: column.name, type: 'property', detail: `${column.type}, ${table}`, info: column.label ?? undefined };
+/** "480 rows" or "1 row": what the completion of an input table says about its size. */
+function rowsText(rows: number, options: AssistOptions): string {
+  const key = isSingular(rows, options.locale) ? 'scripts.completion.tableRowsOne' : 'scripts.completion.tableRows';
+  return options.translate(key, { count: numberText(rows, options.locale) });
+}
+
+function columnOption(column: InputColumn, table: string, options: AssistOptions): Completion {
+  return { label: column.name, type: 'property', detail: `${options.translate(`preview.types.${column.type}`)}, ${table}`, info: column.label ?? undefined };
 }
 
 function questionOptions(options: AssistOptions): Completion[] {

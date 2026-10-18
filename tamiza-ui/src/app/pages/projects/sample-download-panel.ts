@@ -1,16 +1,19 @@
-import { DatePipe } from '@angular/common';
-import { Component, DestroyRef, effect, inject, input, output, signal } from '@angular/core';
+import { Component, DestroyRef, LOCALE_ID, effect, inject, input, output, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { Downloader } from '../../core/download.service';
+import { countKey } from '../../core/i18n/plural';
 import { PipelineService, SCRIPT_TEST_POLL_MS, SampleDownload } from '../../core/projects/pipeline.service';
-import { Alert, Button, Card } from '../../shared/ui';
+import { aroundDetail, detailMark } from './import-frame-dialog';
+import { Alert, ApiLang, Button, Card, DateTimePipe, NumberPipe, numberText } from '../../shared/ui';
 
 const megabyte = 1024 * 1024;
 
-/** "812 KB" or "12.3 MB". */
-export function sizeText(bytes: number): string {
-  return bytes < megabyte ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / megabyte).toFixed(1)} MB`;
+/** "812 KB" or "12.3 MB", with the number written for the locale. */
+export function sizeText(bytes: number, locale: string): string {
+  return bytes < megabyte
+    ? `${numberText(Math.max(1, Math.round(bytes / 1024)), locale)} KB`
+    : `${numberText(bytes / megabyte, locale, '1.1-1')} MB`;
 }
 
 /**
@@ -19,7 +22,7 @@ export function sizeText(bytes: number): string {
  */
 @Component({
   selector: 'app-sample-download-panel',
-  imports: [DatePipe, TranslocoDirective, Alert, Button, Card],
+  imports: [DateTimePipe, NumberPipe, TranslocoDirective, Alert, ApiLang, Button, Card],
   template: `
     <tmz-card *transloco="let t" [heading]="t('sampleDownloads.title')" data-testid="sample-download">
       @if (expired()) {
@@ -30,7 +33,7 @@ export function sizeText(bytes: number): string {
       } @else if (download(); as download) {
         @switch (download.status) {
           @case ('failed') {
-            <tmz-alert tone="danger" data-testid="download-error">{{ download.error ?? t('errors.generic') }}</tmz-alert>
+            <tmz-alert tone="danger" [attr.lang]="download.error ? 'en' : null" data-testid="download-error">{{ download.error ?? t('errors.generic') }}</tmz-alert>
             <button tmzButton variant="secondary" type="button" class="mt-3" (click)="again.emit(download.sampleSize)" data-testid="download-again">
               {{ t('sampleDownloads.again') }}
             </button>
@@ -40,11 +43,11 @@ export function sizeText(bytes: number): string {
               <div class="flex flex-col gap-3" data-testid="download-ready">
                 <div class="flex flex-wrap items-center justify-between gap-3">
                   <p class="text-sm text-body" data-testid="download-summary">
-                    {{ t('sampleDownloads.ready', { submissions: contents.sample.submissions.toLocaleString('en'), requested: contents.sample.requested.toLocaleString('en') }) }}
+                    {{ t(key('sampleDownloads.ready', contents.sample.submissions), { submissions: (contents.sample.submissions | num), requested: (contents.sample.requested | num) }) }}
                     <span data-testid="download-size">
                       {{ t('sampleDownloads.size', { size: sizeLabel(download) }) }}
                       @if (download.expiresAt) {
-                        {{ t('sampleDownloads.until', { time: (download.expiresAt | date: 'shortTime') }) }}
+                        {{ t('sampleDownloads.until', { time: (download.expiresAt | dateTime: 'time') }) }}
                       }
                     </span>
                   </p>
@@ -55,11 +58,12 @@ export function sizeText(bytes: number): string {
                 <p class="text-sm text-body" data-testid="download-tables">{{ tablesLine(contents, t) }}</p>
                 @if (contents.clean.status === 'failed') {
                   <tmz-alert tone="warning" data-testid="download-script1-warning">
-                    {{ t('sampleDownloads.script1Failed', { version: contents.clean.version ?? '—', error: contents.clean.error ?? '' }) }}
+                    @let failed = script1Failed(contents);
+                    {{ failed.before }}<span lang="en">{{ contents.clean.error ?? '' }}</span>{{ failed.after }}
                   </tmz-alert>
                 }
                 @if (linkError(); as message) {
-                  <tmz-alert tone="danger" data-testid="download-link-error">{{ message }}</tmz-alert>
+                  <tmz-alert tone="danger" [tmzApiLang]="message" data-testid="download-link-error">{{ message }}</tmz-alert>
                 }
                 <p class="text-xs text-body" data-testid="download-notice">{{ t('sampleDownloads.notice') }}</p>
               </div>
@@ -84,6 +88,7 @@ export class SampleDownloadPanel {
   private readonly service = inject(PipelineService);
   private readonly errors = inject(ApiErrors);
   private readonly transloco = inject(TranslocoService);
+  private readonly locale = inject(LOCALE_ID);
   private readonly downloader = inject(Downloader);
   private readonly pollMs = inject(SCRIPT_TEST_POLL_MS);
 
@@ -121,7 +126,7 @@ export class SampleDownloadPanel {
   }
 
   protected sizeLabel(download: SampleDownload): string {
-    return sizeText(download.sizeBytes ?? 0);
+    return sizeText(download.sizeBytes ?? 0, this.locale);
   }
 
   protected progress(download: SampleDownload): string {
@@ -153,9 +158,19 @@ export class SampleDownloadPanel {
     return parts.join(' · ');
   }
 
+  /** The warning about a failed script 1 cut around the worker's error, which is English and sits between the two parts. */
+  protected script1Failed(contents: NonNullable<SampleDownload['contents']>): { before: string; after: string } {
+    return aroundDetail(this.transloco.translate('sampleDownloads.script1Failed', { version: contents.clean.version ?? '—', error: detailMark }));
+  }
+
+  /** The key of a message about a count: the singular form when the count is 1. */
+  protected key(base: string, count: number): string {
+    return countKey(base, count, this.transloco.getActiveLang());
+  }
+
   /** "main (320 rows), members (871 rows)". */
   protected tables(tables: { name: string; rows: number }[]): string {
-    return tables.map((table) => this.transloco.translate('sampleDownloads.tableRows', { name: table.name, rows: table.rows.toLocaleString('en') })).join(', ');
+    return tables.map((table) => this.transloco.translate(this.key('sampleDownloads.tableRows', table.rows), { name: table.name, rows: numberText(table.rows, this.locale) })).join(', ');
   }
 
   /** Asks for a new single-use link and follows it; a download that is gone says so instead of failing. */

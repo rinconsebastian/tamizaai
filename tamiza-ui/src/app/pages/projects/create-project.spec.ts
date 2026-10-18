@@ -69,6 +69,7 @@ describe('CreateProjectPage', () => {
     await settle(harness);
 
     expect(byTestId(page, 'form-error')?.textContent).toContain('Kobo rejected the API token');
+    expect(byTestId(page, 'form-error')!.hasAttribute('lang')).toBe(false); // translated from the code: the UI wrote it
   });
 
   it('goes to the webhook settings after creating the project', async () => {

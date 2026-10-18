@@ -1,10 +1,10 @@
 import { DIALOG_DATA, DialogRef } from '@angular/cdk/dialog';
-import { DatePipe } from '@angular/common';
-import { Component, inject, signal } from '@angular/core';
-import { TranslocoDirective } from '@jsverse/transloco';
+import { Component, LOCALE_ID, inject, signal } from '@angular/core';
+import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
+import { countKey } from '../../core/i18n/plural';
 import { PipelineService, RunDetails, RunStepStatus } from '../../core/projects/pipeline.service';
-import { Badge, Button, Skeleton, Tone, dateTimeFormat } from '../../shared/ui';
+import { Badge, Button, Skeleton, Tone, DateTimePipe, NumberPipe } from '../../shared/ui';
 import { durationText } from './pipeline-runs.util';
 
 export interface RunDetailsData {
@@ -17,7 +17,7 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
 /** One section per step: status, duration, rows, tables, log and error. */
 @Component({
   selector: 'app-run-details-dialog',
-  imports: [DatePipe, TranslocoDirective, Badge, Button, Skeleton],
+  imports: [DateTimePipe, NumberPipe, TranslocoDirective, Badge, Button, Skeleton],
   template: `
     <div
       class="flex max-h-[calc(100vh-2rem)] w-[min(56rem,calc(100vw-2rem))] flex-col rounded-base border border-default bg-neutral-primary-soft shadow-sm"
@@ -27,7 +27,7 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
         <h2 id="run-details-title" class="text-lg font-medium text-heading">
           {{ t('runs.detailsTitle') }}
           @if (details(); as details) {
-            <span class="block text-sm font-normal text-body">{{ (details.run.startedAt ?? details.run.queuedAt) | date: dateTimeFormat }} · {{ t('runs.triggers.' + details.run.trigger) }}</span>
+            <span class="block text-sm font-normal text-body">{{ (details.run.startedAt ?? details.run.queuedAt) | dateTime }} · {{ t('runs.triggers.' + details.run.trigger) }}</span>
             <span class="block text-sm font-normal text-body" data-testid="run-script-versions">{{ scriptVersions(details, t) }}</span>
           }
         </h2>
@@ -67,10 +67,10 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
                   </p>
                 }
                 @if (step.error) {
-                  <pre class="mb-2 max-h-60 overflow-auto rounded-base border border-danger-subtle bg-danger-soft p-3 text-xs whitespace-pre-wrap text-fg-danger-strong" data-testid="step-error">{{ step.error }}</pre>
+                  <pre class="mb-2 max-h-60 overflow-auto rounded-base border border-danger-subtle bg-danger-soft p-3 text-xs whitespace-pre-wrap text-fg-danger-strong" data-testid="step-error" lang="en">{{ step.error }}</pre>
                 }
                 @if (step.log) {
-                  <pre class="max-h-60 overflow-auto rounded-base border border-default bg-neutral-secondary-soft p-3 text-xs whitespace-pre-wrap text-body" data-testid="step-log">{{ step.log }}</pre>
+                  <pre class="max-h-60 overflow-auto rounded-base border border-default bg-neutral-secondary-soft p-3 text-xs whitespace-pre-wrap text-body" data-testid="step-log" lang="en">{{ step.log }}</pre>
                 }
               </li>
             }
@@ -82,7 +82,7 @@ const stepTones: Record<RunStepStatus, Tone> = { succeeded: 'success', failed: '
                 @for (table of details.referenceTables; track table.name) {
                   <li>
                     <code class="text-heading">{{ table.name }}</code>
-                    {{ t('runs.referenceTable', { rows: table.rows, updated: (table.updatedAt | date: dateTimeFormat) }) }}
+                    {{ t(key('runs.referenceTable', table.rows), { rows: (table.rows | num), updated: (table.updatedAt | dateTime) }) }}
                   </li>
                 }
               </ul>
@@ -102,10 +102,11 @@ export class RunDetailsDialog {
   protected readonly ref = inject<DialogRef<void>>(DialogRef);
   private readonly service = inject(PipelineService);
   private readonly errors = inject(ApiErrors);
+  private readonly locale = inject(LOCALE_ID);
+  private readonly transloco = inject(TranslocoService);
 
   protected readonly details = signal<RunDetails | null>(null);
-  protected readonly duration = durationText;
-  protected readonly dateTimeFormat = dateTimeFormat;
+  protected readonly duration = (start: string | null, end: string | null) => durationText(start, end, this.locale);
 
   constructor() {
     this.service.run(this.data.projectId, this.data.runId).subscribe({
@@ -115,6 +116,11 @@ export class RunDetailsDialog {
         this.ref.close();
       },
     });
+  }
+
+  /** The key of a message about a count: the singular form when the count is 1. */
+  protected key(base: string, count: number): string {
+    return countKey(base, count, this.transloco.getActiveLang());
   }
 
   protected tone(status: RunStepStatus): Tone {

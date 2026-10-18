@@ -135,6 +135,16 @@ Run these checks after configuring the realm and starting Tamiza. Use a test use
 5. **Session expiry.** Sign in, then end the session in Keycloak (*Users → (user) → Sessions → Sign out*). Within one access-token lifetime, the UI sends you back to the login page when it fails to renew the token.
 6. **Keycloak unavailable.** Stop Keycloak (or point `OIDC_AUTHORITY` at an unreachable URL) and reload Tamiza. The page reads "Sign-in is unavailable" instead of staying blank.
 
+## Sign-in page in Spanish
+
+The Tamiza interface is in Spanish or English, chosen from the browser's languages. The sign-in request carries the same choice (`ui_locales=es` or `ui_locales=en`), and Keycloak uses it when its login theme has that language. Out of the box a realm shows its login page in English only. To show it in Spanish:
+
+1. In the admin console, open *Realm settings → Localization*.
+2. Turn on *Internationalization*, add *Spanish* (`es`) to the supported locales and keep *English* as the default.
+3. Save, then open Tamiza in a browser whose first language is Spanish. The login page should be in Spanish; with an English browser it stays in English.
+
+This is optional. Tamiza works the same with a login page that stays in English.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |

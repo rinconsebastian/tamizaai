@@ -111,6 +111,7 @@
         "timeout": "The provider did not answer in time. Try again.",
         "rateLimited": "The provider is limiting requests. Try again in a moment.",
         "rateLimitedIn": "The provider is limiting requests. Try again in {{ seconds }} seconds.",
+        "rateLimitedInOne": "The provider is limiting requests. Try again in {{ seconds }} second.",
         "budget": "You have used your daily allowance of assistant requests. It renews at midnight UTC.",
         "budgetRenews": "You have used your daily allowance of assistant requests. It renews on {{ when }}.",
         "busy": "A request of yours is already in progress. Wait for it to finish, or cancel it.",
@@ -133,6 +134,7 @@
   "common": {
     "cancel": "Cancel",
     "save": "Save",
+    "dismiss": "Dismiss",
     "loading": "Loading…"
   },
   "roles": {
@@ -294,7 +296,8 @@
       "adminHow": "An admin can choose it in the project settings.",
       "adminLink": "Select the enumerator question",
       "askAdmin": "Ask a project admin to select the question that identifies the enumerator.",
-      "cardSummary": "{{ submissions }} submissions · mean {{ mean }} · outliers {{ outliers }} · last {{ last }}"
+      "cardSummary": "{{ submissions }} submissions · mean {{ mean }} · outliers {{ outliers }} · last {{ last }}",
+      "cardSummaryOne": "{{ submissions }} submission · mean {{ mean }} · outliers {{ outliers }} · last {{ last }}"
     },
     "coverage": {
       "title": "Sampling frame coverage",
@@ -411,6 +414,7 @@
     "runsAfterSync": "Scripts run after each synchronization with changes",
     "runsNotAfterSync": "Scripts do not run after a synchronization",
     "runsEvery": "also run every {{ hours }} hours",
+    "runsEveryOne": "also run every {{ hours }} hour",
     "editSchedules": "Edit schedules",
     "endedAt": "Ended {{ time }}"
   },
@@ -542,6 +546,11 @@
       "mixedIndentation": "This line is indented with tabs and spaces. Use four spaces.",
       "unavailableImport": "{{ module }} is not available to scripts. The libraries are: {{ available }}, and Python's standard library.",
       "neverImport": "Scripts receive their data from Tamiza and need neither files, processes nor the network, so {{ module }} is not needed."
+    },
+    "completion": {
+      "tableRows": "{{ count }} rows",
+      "tableRowsOne": "{{ count }} row",
+      "referenceTable": "reference table"
     },
     "editor": {
       "keys": "Tab indents. Press Esc, then Tab, to leave the editor.",
@@ -686,6 +695,7 @@
       "referenceTables": "Reference tables",
       "questions": "Questions",
       "rows": "{{ count }} rows",
+      "rowsOne": "{{ count }} row",
       "noMatch": "Nothing matches the filter.",
       "loadError": "The tables could not be loaded.",
       "copied": "Copied {{ name }}.",
@@ -825,6 +835,7 @@
     },
     "referenceTitle": "Reference data used",
     "referenceTable": "({{ rows }} rows, updated {{ updated }})",
+    "referenceTableOne": "({{ rows }} row, updated {{ updated }})",
     "noReference": "This run used no reference tables.",
     "indicatorsSummary": "Indicators {{ done }}/{{ total }}",
     "indicatorCount": "{{ count }} indicators",
@@ -1061,6 +1072,7 @@
       "replaceTitle": "Replace the rows?",
       "replace": "Replace rows",
       "replaceRows": "The editor's {{ count }} rows will be replaced by the rows made from the questions.",
+      "replaceRowsOne": "The editor's {{ count }} row will be replaced by the rows made from the questions.",
       "targetsNotKept": "The questions changed, so the current targets will not be kept.",
       "lostDimensions": "These dimensions cannot be made from questions and will not be kept: {{ names }}.",
       "notChoicesOne": "{{ count }} row has values that are not choices of their question and will not be kept.",
@@ -1078,8 +1090,10 @@
     "waitingForTest": "Waiting for a test to finish. The sample is prepared right after it.",
     "waitingForDownload": "Waiting for another sample to be prepared.",
     "ready": "The sample holds {{ submissions }} submissions (you asked for {{ requested }}).",
+    "readyOne": "The sample holds {{ submissions }} submission (you asked for {{ requested }}).",
     "noScript1": "No script 1: the clean tables are the flattened ones",
     "tableRows": "{{ name }} ({{ rows }} rows)",
+    "tableRowsOne": "{{ name }} ({{ rows }} row)",
     "script1Failed": "Script 1 (version {{ version }}) failed on this sample: {{ error }}. The zip holds only the flattened tables. Fix script 1 and download again to get its clean tables.",
     "size": "Size: {{ size }}.",
     "until": "Available until {{ time }}.",
@@ -1098,6 +1112,7 @@
     "hint": "Tests and samples use the code in the editor, saved or not. Nothing is saved or published.",
     "sampleSizeRange": "Enter a whole number of submissions from {{ min }} to {{ max }}.",
     "title": "Test of {{ kind }} on {{ size }} submissions",
+    "titleOne": "Test of {{ kind }} on {{ size }} submission",
     "stale": "The editor has changed since this test. Test again to see the result of the current code.",
     "staleAsk": "Test again before asking the assistant for a fix.",
     "askAssistant": "Ask the assistant",
@@ -1110,13 +1125,17 @@
     "draft": "{{ kind }} (draft)",
     "table": "Table",
     "tableOption": "{{ name }} ({{ rows }} rows)",
+    "tableOptionOne": "{{ name }} ({{ rows }} row)",
     "previewRows": "First {{ shown }} of {{ rows }} rows.",
+    "previewRowsOne": "First {{ shown }} of {{ rows }} row.",
     "previewTrimmed": "First {{ shown }} of {{ rows }} rows: fewer are shown to keep the preview under 1 MB.",
     "noPreview": "{{ rows }} rows. Only the first 20 tables of a step are previewed.",
+    "noPreviewOne": "{{ rows }} row. Only the first 20 tables of a step are previewed.",
     "indicator": "indicator {{ name }}",
     "shownTitle": "Shown by the script",
     "shownLine": "line {{ line }}",
     "shownTable": "{{ name }}, line {{ line }}: first {{ shown }} of {{ rows }} rows.",
+    "shownTableOne": "{{ name }}, line {{ line }}: first {{ shown }} of {{ rows }} row.",
     "shownText": "{{ name }}, line {{ line }}.",
     "stoppedAt": "Ran through the cell {{ name }} and stopped at line {{ line }}, where the next cell begins. The output was not validated.",
     "cellNumber": "{{ number }}",
@@ -1142,10 +1161,44 @@
         "noValue": "There is no value column. Widgets plot {{ measure }} by default; name a column value to choose another.",
         "ratioIncomplete": "numerator and denominator go together: with only one of them, widgets cannot plot a rate.",
         "emptyValues": "{{ count }} rows have no value in {{ measure }}; widgets leave them out of the sums.",
+        "emptyValuesOne": "{{ count }} row has no value in {{ measure }}; widgets leave it out of the sums.",
         "percentAboveOne": "The format is percent and the largest value is {{ max }}, which shows as {{ shown }}. A percent is a fraction: 0.42 shows as 42%.",
         "dimensionAsMeasure": "{{ column }} is a number, so widgets offer it as a measure, not as a dimension to break figures down by. Return it as text to use it as a dimension.",
         "duplicateRows": "{{ count }} rows share the same values in every dimension, so widgets add them up."
       }
+    }
+  },
+  "codeEditor": {
+    "phrases": {
+      "findField": "Find",
+      "replaceField": "Replace",
+      "next": "next",
+      "previous": "previous",
+      "all": "all",
+      "matchCase": "match case",
+      "regexp": "regexp",
+      "byWord": "by word",
+      "replaceButton": "replace",
+      "replaceAll": "replace all",
+      "close": "close",
+      "goToLine": "Go to line",
+      "go": "go",
+      "currentMatch": "current match",
+      "onLine": "on line",
+      "replacedMatches": "replaced $ matches",
+      "replacedMatchOnLine": "replaced match on line $",
+      "foldedCode": "folded code",
+      "to": "to",
+      "unfold": "unfold",
+      "foldedLines": "Folded lines",
+      "unfoldedLines": "Unfolded lines",
+      "foldLine": "Fold line",
+      "unfoldLine": "Unfold line",
+      "diagnostics": "Diagnostics",
+      "noDiagnostics": "No diagnostics",
+      "completions": "Completions",
+      "controlCharacter": "Control character",
+      "selectionDeleted": "Selection deleted"
     }
   },
   "preview": {
@@ -1164,7 +1217,11 @@
     "add": "Upload table",
     "emptyEditor": "No reference tables yet. Upload a CSV or XLSX file; scripts read it with ctx.reference[\"name\"] from the next run.",
     "emptyViewer": "This project has no reference tables.",
-    "size": "{{ rows }} rows, {{ columns }} columns",
+    "size": "{{ rows }}, {{ columns }}",
+    "rowCount": "{{ count }} rows",
+    "rowCountOne": "{{ count }} row",
+    "columnCount": "{{ count }} columns",
+    "columnCountOne": "{{ count }} column",
     "updated": "Updated by {{ name }}, {{ date }}",
     "preview": "Preview",
     "replace": "Replace",
@@ -1192,6 +1249,7 @@
     "deleteTitle": "Delete {{ name }}?",
     "deleteMessage": "Scripts that read ctx.reference[\"{{ name }}\"] fail from the next run.",
     "previewNote": "First {{ shown }} of {{ rows }} rows, from {{ file }}.",
+    "previewNoteOne": "First {{ shown }} of {{ rows }} row, from {{ file }}.",
     "actionsFor": "Actions for {{ name }}",
     "renamedSummary": "Columns of {{ name }} were renamed for scripts ({{ count }}).",
     "renamedList": "Renamed columns",
@@ -1206,6 +1264,7 @@
     },
     "tableLabel": "Table",
     "tableOption": "{{ name }} ({{ count }} rows)",
+    "tableOptionOne": "{{ name }} ({{ count }} row)",
     "published": "Published {{ time }}",
     "publishedRun": "by run {{ run }}",
     "runsLink": "See the runs",
@@ -1229,7 +1288,9 @@
     "noMatch": "No rows match the filters.",
     "clearFilters": "Clear filters",
     "matching": "{{ count }} matching rows",
+    "matchingOne": "{{ count }} matching row",
     "total": "{{ count }} rows",
+    "totalOne": "{{ count }} row",
     "emptyCell": "empty",
     "true": "true",
     "false": "false",
@@ -1296,7 +1357,9 @@
       "xlsx": "Excel file (XLSX)",
       "preparing": "Preparing the export…",
       "ready": "Export ready: {{ rows }} rows. The download starts now.",
-      "readyCut": "{{ cut }} cells were longer than Excel allows and were cut."
+      "readyOne": "Export ready: {{ rows }} row. The download starts now.",
+      "readyCut": "{{ cut }} cells were longer than Excel allows and were cut.",
+      "readyCutOne": "{{ cut }} cell was longer than Excel allows and was cut."
     }
   },
   "indicators": {
@@ -1306,7 +1369,8 @@
       "editor": "Add an indicator on the scripts page and run the scripts to publish its table. Widgets you add are kept and draw once their indicator publishes.",
       "editorLink": "Open the scripts",
       "viewer": "An analyst or admin has to add the indicators and run the project’s scripts first.",
-      "widgets": "{{ count }} widgets are already configured; they draw once their indicators are published."
+      "widgets": "{{ count }} widgets are already configured; they draw once their indicators are published.",
+      "widgetsOne": "{{ count }} widget is already configured; it draws once its indicator is published."
     },
     "list": {
       "title": "Indicators ({{ count }})",
@@ -1317,7 +1381,8 @@
       "published": "Published",
       "notPublished": "Not published yet",
       "summary": "· {{ count }} published",
-      "rowCount": "{{ count }} rows"
+      "rowCount": "{{ count }} rows",
+      "rowCountOne": "{{ count }} row"
     },
     "published": "Published {{ time }}",
     "publishedRun": "by run {{ run }}",
@@ -1341,6 +1406,7 @@
       "xlsx": "Excel file (XLSX)",
       "preparing": "Preparing the export…",
       "ready": "Export ready: {{ rows }} rows. The download starts now.",
+      "readyOne": "Export ready: {{ rows }} row. The download starts now.",
       "label": "Export {{ label }}"
     },
     "remove": {
@@ -1394,22 +1460,30 @@
       "summaryEmpty": "Chart of {{ what }}: no data.",
       "summary": {
         "bar": "Bar chart of {{ what }} by {{ group }}: {{ count }} groups, from {{ min }} to {{ max }}. Highest: {{ top }}.",
+        "barOne": "Bar chart of {{ what }} by {{ group }}: {{ count }} group, from {{ min }} to {{ max }}. Highest: {{ top }}.",
         "column": "Column chart of {{ what }} by {{ group }}: {{ count }} groups, from {{ min }} to {{ max }}. Highest: {{ top }}.",
+        "columnOne": "Column chart of {{ what }} by {{ group }}: {{ count }} group, from {{ min }} to {{ max }}. Highest: {{ top }}.",
         "line": "Line chart of {{ what }} by {{ group }}: {{ count }} points, from {{ min }} to {{ max }}. Highest: {{ top }}.",
+        "lineOne": "Line chart of {{ what }} by {{ group }}: {{ count }} point, from {{ min }} to {{ max }}. Highest: {{ top }}.",
         "histogram": "Histogram of {{ what }}: {{ count }} ranges, the fullest holds {{ max }} rows ({{ top }}).",
-        "pie": "Pie chart of {{ what }} by {{ group }}: {{ count }} slices. Largest: {{ top }}, {{ share }}."
+        "histogramOne": "Histogram of {{ what }}: {{ count }} range, the fullest holds {{ max }} rows ({{ top }}).",
+        "pie": "Pie chart of {{ what }} by {{ group }}: {{ count }} slices. Largest: {{ top }}, {{ share }}.",
+        "pieOne": "Pie chart of {{ what }} by {{ group }}: {{ count }} slice. Largest: {{ top }}, {{ share }}."
       }
     },
     "pie": {
       "other": "Other",
       "share": "Share",
-      "skipped": "{{ count }} groups with a zero or negative value are not drawn; the table lists them."
+      "skipped": "{{ count }} groups with a zero or negative value are not drawn; the table lists them.",
+      "skippedOne": "{{ count }} group with a zero or negative value is not drawn; the table lists it."
     },
     "map": {
       "caption": "{{ what }} by {{ group }}",
       "leftOut": "{{ count }} rows left out: their geometry is missing or cannot be read.",
+      "leftOutOne": "{{ count }} row left out: its geometry is missing or cannot be read.",
       "nothing": "No row has a geometry that can be drawn.",
       "summary": "Map of {{ what }}: {{ count }} places drawn, from {{ min }} to {{ max }}; {{ left }} left out.",
+      "summaryOne": "Map of {{ what }}: {{ count }} place drawn, from {{ min }} to {{ max }}; {{ left }} left out.",
       "geometry": "Geometry",
       "kind": {
         "polygon": "Region",

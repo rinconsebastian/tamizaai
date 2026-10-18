@@ -198,6 +198,19 @@ describe('IndicatorView', () => {
     expect(texts.some((text) => text!.includes('year is a number') && text!.includes('Return it as text'))).toBe(true);
   });
 
+  it('words the empty-values warning for one row in the singular and for several in the plural', async () => {
+    const { fixture, host } = await render();
+    const warning = () => (fixture.nativeElement.querySelector('[data-testid="view-warning"]') as HTMLElement).textContent;
+
+    host.facts.set(rate({ defaultMeasureNulls: 3 }));
+    fixture.detectChanges();
+    expect(warning()).toContain('3 rows have no value in value');
+
+    host.facts.set(rate({ defaultMeasureNulls: 1 }));
+    fixture.detectChanges();
+    expect(warning()).toContain('1 row has no value in value');
+  });
+
   it('offers "Ask the assistant" on each warning only when it may, and reports the warning chosen', async () => {
     const { fixture, q, host } = await render();
     host.facts.set(rate({ measures: ['year', 'value'], ratio: false, defaultMeasureMax: 45.2 }));

@@ -63,6 +63,26 @@ describe('ProjectReference', () => {
     expect(byTestId(root, 'reference-cards')?.children.length).toBe(1);
   });
 
+  it('words the size of a table with one row and one column in the singular', async () => {
+    const lookup: ReferenceTable = { ...population, name: 'lookup', fileName: 'lookup.csv', rowCount: 1, columns: [population.columns[0]] };
+    const { root } = await open('viewer', [lookup]);
+
+    expect(text(byTestId(root, 'reference-row-lookup'))).toContain('1 row, 1 column');
+    expect(text(byTestId(root, 'reference-cards')!.children[0])).toContain('lookup.csv · 1 row, 1 column ·');
+  });
+
+  it('words the preview note for one row in the singular', async () => {
+    const lookup: ReferenceTable = { ...population, name: 'lookup', fileName: 'lookup.csv', rowCount: 1 };
+    const { root, http, harness } = await open('viewer', [lookup]);
+
+    byTestId<HTMLButtonElement>(root, 'reference-preview-lookup')!.click();
+    await settle(harness);
+    http.expectOne(`${url}/lookup`).flush({ table: lookup, rows: [['05001', 2612958]] });
+    await settle(harness);
+
+    expect(text(byTestId(overlay(), 'reference-preview-note'))).toContain('First 1 of 1 row, from lookup.csv');
+  });
+
   it('opens with the title and no introduction', async () => {
     const { root } = await open('analyst');
     expect(root.textContent).not.toContain('Tables your scripts read by name');

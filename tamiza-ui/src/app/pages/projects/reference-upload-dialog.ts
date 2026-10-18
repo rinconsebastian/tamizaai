@@ -3,7 +3,7 @@ import { Component, inject, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { ReferenceService, ReferenceTableUpload, maxReferenceFileBytes, suggestedTableName } from '../../core/projects/reference.service';
-import { Alert, Button, FormField, Input } from '../../shared/ui';
+import { Alert, ApiLang, Button, FormField, Input } from '../../shared/ui';
 
 export interface ReferenceUploadData {
   projectId: string;
@@ -17,7 +17,7 @@ export interface ReferenceUploadData {
  */
 @Component({
   selector: 'app-reference-upload-dialog',
-  imports: [TranslocoDirective, Alert, Button, FormField, Input],
+  imports: [TranslocoDirective, Alert, ApiLang, Button, FormField, Input],
   template: `
     <form
       class="w-[min(32rem,calc(100vw-2rem))] rounded-base border border-default bg-neutral-primary-soft p-4 shadow-sm md:p-6"
@@ -36,7 +36,7 @@ export interface ReferenceUploadData {
         <span class="break-all text-sm text-body" data-testid="reference-file-name">{{ file()?.name ?? t('frame.noFile') }}</span>
       </div>
       @if (fileError(); as message) {
-        <p class="mt-2 text-sm text-fg-danger-strong" data-testid="reference-file-error">{{ message }}</p>
+        <p class="mt-2 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="reference-file-error">{{ message }}</p>
       }
 
       <tmz-form-field class="mt-4" [label]="t('reference.name')" fieldId="referenceName" [error]="nameError()" [hint]="t('reference.nameHint')">
@@ -44,7 +44,7 @@ export interface ReferenceUploadData {
       </tmz-form-field>
 
       @if (error(); as message) {
-        <tmz-alert tone="danger" class="mt-4" data-testid="reference-upload-error">{{ message }}</tmz-alert>
+        <tmz-alert tone="danger" class="mt-4" [tmzApiLang]="message" data-testid="reference-upload-error">{{ message }}</tmz-alert>
       }
 
       <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">

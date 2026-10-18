@@ -5,6 +5,8 @@ import { By } from '@angular/platform-browser';
 import { Router } from '@angular/router';
 import { EditorView } from '@codemirror/view';
 import { vi } from 'vitest';
+import es from '../../../../public/i18n/es.json';
+import { InterfaceLanguage } from '../../core/i18n/interface-language';
 import { Downloader } from '../../core/download.service';
 import { StoredConversation, conversationKey } from '../../core/projects/assistant-storage';
 import type { AssistantAnswer } from '../../core/projects/assistant.service';
@@ -148,6 +150,8 @@ interface Seed {
   testPollMs?: number;
   /** Whether the deployment's system configuration enables the assistant; absent means the configuration request is left unanswered. */
   assistant?: boolean;
+  /** The interface language; English unless given. */
+  lang?: InterfaceLanguage;
   /** More providers, for example a stand-in for the assistant session. */
   providers?: Provider[];
 }
@@ -163,7 +167,7 @@ async function open(role: ProjectRole, seed: Seed = {}) {
     ...(seed.testPollMs ? [{ provide: SCRIPT_TEST_POLL_MS, useValue: seed.testPollMs }] : []),
     ...(seed.providers ?? []),
   ];
-  const opened = await openProjectSection('scripts', role, {}, providers);
+  const opened = await openProjectSection('scripts', role, {}, providers, seed.lang);
   const { http, harness } = opened;
   if (seed.assistant !== undefined) {
     http
@@ -636,6 +640,10 @@ describe('ProjectScripts', () => {
       "Script 1 (clean) failed: KeyError: 'age'",
       'The run was interrupted because the analytics worker stopped. The next run proceeds normally.',
     ]);
+    const [stepError, interrupted] = [...table.querySelectorAll('[data-testid="run-error"]')];
+    expect(stepError.querySelector('[lang="en"]')?.textContent).toBe("KeyError: 'age'"); // the worker's text, after the UI's introduction
+    expect(stepError.getAttribute('lang')).toBeNull();
+    expect(interrupted.querySelector('[lang="en"]')).toBeNull(); // translated from its code
     expect(table.textContent).not.toContain('v2 / —'); // the versions are in the run details now
     expect(table.querySelectorAll('thead th')).toHaveLength(5);
     expect(byTestId(table, 'run-indicators')?.textContent).toContain('Indicators 1/1');
@@ -665,8 +673,27 @@ describe('ProjectScripts', () => {
     expect(byTestId(dialog, 'step-flatten')?.textContent).toContain('3 rows in, 9 out');
     expect(byTestId(byTestId(dialog, 'step-flatten')!, 'step-tables')?.textContent).toContain('members (6)');
     expect(byTestId(byTestId(dialog, 'step-clean')!, 'step-error')?.textContent).toContain("KeyError: 'age'");
+    expect(byTestId(byTestId(dialog, 'step-clean')!, 'step-error')?.getAttribute('lang')).toBe('en');
+    expect(byTestId(byTestId(dialog, 'step-clean')!, 'step-log')?.getAttribute('lang')).toBe('en');
     expect(byTestId(dialog, 'step-output')?.textContent).toContain('Skipped');
-    expect(byTestId(dialog, 'run-reference')?.textContent).toContain('population (1123 rows, updated Oct 1, 2026');
+    expect(byTestId(dialog, 'run-reference')?.textContent).toContain('population (1,123 rows, updated Oct 1, 2026');
+  });
+
+  it('writes a reference table of one row in the singular in the details of a run', async () => {
+    const done = run({ id: 'd' });
+    const { root, http, harness } = await open('viewer', { runs: { items: [done], total: 1 } });
+
+    byTestId<HTMLButtonElement>(root, 'run-details-d')!.click();
+    await settle(harness);
+    http.expectOne(`${runsUrl}/d`).flush({
+      run: done,
+      steps: [],
+      referenceTables: [{ name: 'population', rows: 1, updatedAt: '2026-10-01T12:00:00Z' }],
+    });
+    await settle(harness);
+
+    const dialog = document.querySelector('.cdk-overlay-container')!;
+    expect(byTestId(dialog, 'run-reference')?.textContent).toContain('population (1 row, updated Oct 1, 2026');
   });
 
   it('says when a run used no reference tables', async () => {
@@ -1214,6 +1241,7 @@ describe('ProjectScripts', () => {
     await settle(harness);
 
     expect(byTestId(root, 'save-error')?.textContent).toContain('at most 100 indicators');
+    expect(byTestId(root, 'save-error')?.getAttribute('lang')).toBe('en'); // written by the API
     expect(byTestId(root, 'unsaved')).not.toBeNull();
     expect(textOf(byTestId(root, 'indicator-menu'))).toContain('One too many');
     await openIndicatorMenu(opened);
@@ -1393,6 +1421,13 @@ describe('ProjectScripts', () => {
     );
     await settle(harness);
     expect(byTestId(root, 'input-table-main')?.textContent).toContain('5 rows');
+  });
+
+  it('writes a table of one row in the singular beside the editor', async () => {
+    const { root } = await open('analyst', { inputs: scriptInputs({ tables: [{ name: 'main', rows: 1, columns: [] }] }) });
+
+    expect(byTestId(root, 'input-table-main')?.textContent).toContain('1 row');
+    expect(byTestId(root, 'input-table-main')?.textContent).not.toContain('1 rows');
   });
 
   it('puts the side panel after the editor so that it sits below it on a phone', async () => {
@@ -1786,6 +1821,31 @@ describe('ProjectScripts', () => {
     http.expectNone(`${downloadsUrl}/d1`); // a ready download is not polled
   });
 
+  it('writes the sample and its tables in the singular when they hold one row', async () => {
+    const opened = await open('analyst', { testPollMs: 20 });
+    const { root, http, harness } = opened;
+
+    await requestDownload(opened, '1');
+    http.expectOne((r) => r.url === downloadsUrl && r.method === 'POST').flush(sampleDownload({ sampleSize: 1, waitingFor: 'run' }));
+    await settle(harness);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    http
+      .expectOne(`${downloadsUrl}/d1`)
+      .flush(
+        readyDownload(
+          { sampleSize: 1 },
+          { sample: { requested: 1, submissions: 1 }, raw: { tables: [{ name: 'main', rows: 1 }] }, clean: { status: 'succeeded', version: 2, error: null, tables: [{ name: 'main', rows: 1 }] } },
+        ),
+      );
+    await settle(harness);
+
+    const ready = byTestId(root, 'download-ready')!;
+    expect(ready.textContent).toContain('The sample holds 1 submission (you asked for 1)');
+    const tables = byTestId(ready, 'download-tables')!.textContent!.replace(/s+/g, ' ');
+    expect(tables).toContain('Flattened: main (1 row)');
+    expect(tables).toContain('Clean v2: main (1 row)');
+  });
+
   it('asks for a new link each time the zip is downloaded', async () => {
     const opened = await open('analyst');
     const { root, http, harness } = opened;
@@ -1848,6 +1908,11 @@ describe('ProjectScripts', () => {
     expect(warning.textContent).toContain('Script 1 (version 4) failed on this sample');
     expect(warning.textContent).toContain("KeyError: 'age'");
     expect(warning.textContent).toContain('only the flattened tables');
+    // The worker's error is English; the introduction around it is the UI's.
+    const workerError = warning.querySelector('[lang="en"]')!;
+    expect(workerError.textContent).toBe("KeyError: 'age'");
+    expect(warning.hasAttribute('lang')).toBe(false);
+    expect(warning.textContent).toContain("failed on this sample: KeyError: 'age'. The zip holds");
     expect(byTestId(root, 'download-tables')?.textContent).not.toContain('Clean tables');
     expect(byTestId(root, 'download-button')).not.toBeNull(); // the flattened tables can still be downloaded
   });
@@ -1922,6 +1987,7 @@ describe('ProjectScripts', () => {
     await settle(harness);
 
     expect(byTestId(root, 'download-link-error')?.textContent).toContain('Other files are being prepared. Try again in a moment.');
+    expect(byTestId(root, 'download-link-error')!.hasAttribute('lang')).toBe(false); // translated from the code: the UI wrote it
     expect(byTestId(root, 'download-ready')).not.toBeNull();
     expect(byTestId(root, 'download-expired')).toBeNull();
   });
@@ -1945,6 +2011,7 @@ describe('ProjectScripts', () => {
     await settle(harness);
 
     expect(byTestId(root, 'download-error')?.textContent).toContain('The sample is 130 MB, more than the 100 MB this server allows');
+    expect(byTestId(root, 'download-error')!.getAttribute('lang')).toBe('en'); // the worker's own text
     byTestId<HTMLButtonElement>(root, 'download-again')!.click();
     await settle(harness);
     expect(http.expectOne((r) => r.url === downloadsUrl && r.method === 'POST').request.body).toEqual({ sampleSize: 1000 });
@@ -2940,8 +3007,8 @@ describe('ProjectScripts', () => {
       });
 
       /** Selects the indicator `coverage`, tests it and has the API answer with `test`; the Assistant tab stays on view. */
-      async function testedIndicator(test: Partial<ScriptTest>, scripts = withIndicators(coverage)) {
-        const opened = await openAssistant({ scripts });
+      async function testedIndicator(test: Partial<ScriptTest>, scripts = withIndicators(coverage), lang?: InterfaceLanguage) {
+        const opened = await openAssistant({ scripts, lang });
         await selectIndicator(opened, coverage);
         opened.http.expectOne((r) => r.url === inputsUrl && r.params.get('kind') === 'indicator').flush(scriptInputs({ source: 'clean' }));
         await settle(opened.harness);
@@ -2972,6 +3039,21 @@ describe('ProjectScripts', () => {
         expect(scrolled).toHaveBeenCalledTimes(1);
         expect(scrolled.mock.contexts[0]).toBe(opened.root.querySelector('app-script-side-panel'));
         expect(scrolled).toHaveBeenCalledWith({ block: 'start' });
+      });
+
+      it('writes the request for a failed step in Spanish in the Spanish UI (Request for the assistant)', async () => {
+        const opened = await testedIndicator(
+          { status: 'failed', errorCode: 'step.indicator', error: keyError, steps: [flattenStep, cleanStep, failedStep('indicator', keyError)] },
+          withIndicators(coverage),
+          'es',
+        );
+
+        await click(opened, 'test-step-ask');
+
+        const step = es.scripts.assistant.scriptLabels.indicator.replace('{{ name }}', 'coverage');
+        expect(box(opened).value).toBe(es.scripts.assistant.fixStep.replace('{{ step }}', step));
+        expect(box(opened).value).toMatch(/^La última prueba falló en el indicador coverage\./);
+        expect(box(opened).value).not.toBe(sentence());
       });
 
       it('sends the fixed sentence with the test, and nothing of the error or the log (Fix with nothing typed)', async () => {

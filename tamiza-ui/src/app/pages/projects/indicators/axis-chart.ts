@@ -6,6 +6,7 @@ import { histogram, observeSize, pivot } from './chart-data';
 import { bandScale, charWidth, compactNumber, linePath, linearScale, niceAxis, seriesColor, truncate, Point } from './chart-scales';
 import { ValueFormatter, plotted } from './format';
 import { TableModel, WidgetTable } from './widget-table';
+import { countKey, isSingular } from '../../../core/i18n/plural';
 
 export type AxisKind = 'bar' | 'column' | 'line' | 'histogram';
 
@@ -141,7 +142,7 @@ export class AxisChart {
     const { categories, values, ranges } = this.data();
     const format = this.format();
     const tickText = (value: number) => (ranges ? this.compact(value) : format.tick(value));
-    const valueText = (value: number) => (ranges ? this.transloco.translate(value === 1 ? 'indicators.chart.rowCountOne' : 'indicators.chart.rowCount', { count: this.whole.format(value) }) : format(value));
+    const valueText = (value: number) => (ranges ? this.transloco.translate(isSingular(value, this.transloco.getActiveLang()) ? 'indicators.chart.rowCountOne' : 'indicators.chart.rowCount', { count: this.whole.format(value) }) : format(value));
     const w = Math.max(160, this.size().width);
     const h = Math.max(120, this.size().height);
     const count = categories.length;
@@ -252,7 +253,7 @@ export class AxisChart {
     }
     const format = this.format();
     const top = values.indexOf(Math.max(...values));
-    return t(`indicators.chart.summary.${this.kind()}`, {
+    return t(countKey(`indicators.chart.summary.${this.kind()}`, categories.length, this.transloco.getActiveLang()), {
       what,
       group: config.groupBy,
       count: categories.length,

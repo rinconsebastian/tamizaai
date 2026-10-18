@@ -440,6 +440,15 @@ describe('ProjectIndicators', () => {
       expect(byTestId(rows[2], 'indicator-published')).toBeNull();
     });
 
+    it('uses the singular for an indicator with one row', async () => {
+      const indicators = [indicator('coverage', { rows: 1 }), indicator('households_visited', { rows: 12450 })];
+      const { root } = await open('viewer', [], null, { indicators });
+
+      expect(text(byTestId(root, 'indicator-row-coverage'))).toContain('1 row');
+      expect(text(byTestId(root, 'indicator-row-coverage'))).not.toContain('1 rows');
+      expect(text(byTestId(root, 'indicator-row-households_visited'))).toContain('12,450 rows');
+    });
+
     it('asks for the rows of each widget with its own query and chart type', async () => {
       const wide = widget('w3', { chartType: 'map', config: config({ geometryColumn: 'geometry', buckets: 20 }) });
       const context = await open('viewer', [widget('w1', { chartType: 'histogram', config: config({ buckets: 12, measure: 'numerator', groupBy: null }) }), wide], null);
@@ -532,6 +541,12 @@ describe('ProjectIndicators', () => {
       expect(all(context.root, 'indicator-unpublished')).toHaveLength(defaultIndicators.length);
     });
 
+    it('uses the singular when one widget is configured', async () => {
+      const context = await open('viewer', [widget('w1')], null, unpublished);
+
+      expect(text(byTestId(context.root, 'indicators-empty-widgets'))).toBe('1 widget is already configured; it draws once its indicator is published.');
+    });
+
     it('says so too when the project has no indicators at all', async () => {
       const { root } = await open('analyst', [], null, { indicators: [] });
 
@@ -577,6 +592,7 @@ describe('ProjectIndicators', () => {
       await settle(harness);
 
       expect(text(byTestId(root, 'indicators-error'))).toBe('Something went wrong. Try again.');
+      expect(byTestId(root, 'indicators-error')!.querySelector('[lang]')).toBeNull(); // the UI's own generic text
     });
 
     it('shows the same error when only the dashboard\'s widgets cannot be read', async () => {
@@ -1180,6 +1196,22 @@ describe('ProjectIndicators', () => {
       await settle(context.harness);
       expect(busy.disabled).toBe(false);
       expect(TestBed.inject(ToastService).toasts()).toHaveLength(1);
+      expect(TestBed.inject(ToastService).toasts().at(-1)?.message).toBe('Export ready: 120 rows. The download starts now.');
+    });
+
+    it('uses the singular for a file with one row and one cut cell', async () => {
+      const context = await open('viewer', [], null);
+      byTestId(context.root, 'indicator-export-coverage')!.click();
+      await settle(context.harness);
+      (overlay().querySelector('[data-testid="indicators-export-xlsx"]') as HTMLElement).click();
+      await settle(context.harness);
+
+      context.http.expectOne(`${indicatorsUrl}/coverage/exports`).flush({ ...exported, rowCount: 1, cutCells: 1 });
+      await settle(context.harness);
+
+      const message = TestBed.inject(ToastService).toasts().at(-1)?.message;
+      expect(message).toContain('Export ready: 1 row. The download starts now.');
+      expect(message).toContain('1 cell was longer than Excel allows and was cut.');
     });
   });
 
@@ -1550,6 +1582,7 @@ describe('ProjectIndicators', () => {
       await settle(context.harness);
 
       expect(text(byTestId(context.root, 'dashboard-notice-text'))).toBe('A project needs at least one dashboard.');
+      expect(byTestId(context.root, 'dashboard-notice-text')!.hasAttribute('lang')).toBe(false); // translated from its code: the UI wrote it
       expect(status(context.root)).toBe('A project needs at least one dashboard.');
       expect(toasts()).toEqual([]);
       expect(tabs(context.root)).toEqual(['Housing']);

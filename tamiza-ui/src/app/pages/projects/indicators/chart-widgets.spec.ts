@@ -133,6 +133,12 @@ describe('chart widgets', () => {
       expect(marks(context)[0].getAttribute('style')).toContain('var(--tmz-series-1)');
     });
 
+    it('describes a single group in the singular', async () => {
+      const context = await show('column', {}, [row('Cali', 75)]);
+
+      expect(label(context)).toBe('Column chart of Coverage by municipality: 1 group, from 75 to 75. Highest: Cali.');
+    });
+
     it('describes itself to assistive technology and offers the same numbers as a table', async () => {
       const context = await show('column', {}, groups);
 
@@ -181,6 +187,12 @@ describe('chart widgets', () => {
 
   describe('bar chart', () => {
     const rows = [row('Cali', 75), row('Bogotá', 60), row('Pasto', 35)];
+
+    it('describes a single group in the singular', async () => {
+      const context = await show('bar', {}, [row('Cali', 75)]);
+
+      expect(label(context)).toBe('Bar chart of Coverage by municipality: 1 group, from 75 to 75. Highest: Cali.');
+    });
 
     it('shows one bar per group, the groups down the chart', async () => {
       const context = await show('bar', {}, rows);
@@ -246,6 +258,7 @@ describe('chart widgets', () => {
 
       expect(all(context.root, 'chart-line')[0].getAttribute('d')).toBe('');
       expect(all(context.root, 'chart-dot')).toHaveLength(1);
+      expect(label(context)).toBe('Line chart of Attendance by round: 1 point, from 60 to 60. Highest: 1.');
     });
 
     it('summarizes the trend and lists it in the table', async () => {
@@ -299,6 +312,12 @@ describe('chart widgets', () => {
       expect(titles(marks(context)).map((t) => t.split(': ')[1])).toEqual(['1 row', '1 row', '1 row', '1 row']);
       expect(titles(marks(context))[0]).toBe('0–2.5: 1 row');
       expect(titles(marks(context))[3]).toBe('7.5–10: 1 row');
+    });
+
+    it('describes a single range in the singular', async () => {
+      const context = await show('histogram', { buckets: 1, groupBy: null }, rowsOf([7, 8]));
+
+      expect(label(context)).toContain(': 1 range, ');
     });
 
     it('puts every row in one bucket when all values are equal', async () => {
@@ -356,12 +375,19 @@ describe('chart widgets', () => {
       expect(all(context.root, 'pie-slice').map((s) => s.getAttribute('style'))).toEqual([expect.stringContaining('var(--tmz-series-1)'), expect.stringContaining('var(--tmz-series-2)')]);
     });
 
+    it('counts a single value at or below zero in the singular', async () => {
+      const context = await show('pie', {}, [row('A', 10), row('B', 0)]);
+
+      expect(text(byTestId(context.root, 'pie-skipped'))).toBe('1 group with a zero or negative value is not drawn; the table lists it.');
+    });
+
     it('draws a whole circle for a single group', async () => {
       const context = await show('pie', {}, [row('Cali', 50)]);
 
       const slice = all(context.root, 'pie-slice')[0];
       expect(slice.tagName.toLowerCase()).toBe('circle');
       expect(titles([slice])).toEqual(['Cali: 50 (100%)']);
+      expect(label(context)).toContain(': 1 slice. Largest: Cali, 100%.');
     });
 
     it('folds the smallest groups past the eighth color into one "Other" slice', async () => {

@@ -227,6 +227,7 @@ describe('FrameQuestionsDialog', () => {
     await settle();
 
     expect(get('template-error')!.textContent).toContain('larger than the 5 MB import limit');
+    expect(get('template-error')!.getAttribute('lang')).toBe('en');
     expect(downloader.start).not.toHaveBeenCalled();
     expect(TestBed.inject(ToastService).toasts()).toEqual([]);
     expect(get<HTMLButtonElement>('download-template')!.disabled).toBe(false);

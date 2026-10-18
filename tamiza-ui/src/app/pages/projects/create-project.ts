@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { ProjectsService } from '../../core/projects/projects.service';
-import { Alert, Button, Card, FormField, Input, ToastService } from '../../shared/ui';
+import { Alert, ApiLang, Button, Card, FormField, Input, ToastService } from '../../shared/ui';
 
 export const koboServers = [
   { id: 'kf', url: 'https://kf.kobotoolbox.org' },
@@ -16,7 +16,7 @@ type ServerChoice = (typeof koboServers)[number]['id'];
 
 @Component({
   selector: 'app-create-project',
-  imports: [ReactiveFormsModule, TranslocoDirective, Alert, Button, Card, FormField, Input],
+  imports: [ReactiveFormsModule, TranslocoDirective, Alert, ApiLang, Button, Card, FormField, Input],
   template: `
     <section class="mx-auto max-w-2xl" *transloco="let t">
       <h1 class="mb-2 text-2xl font-semibold text-heading">{{ t('createProject.title') }}</h1>
@@ -25,7 +25,7 @@ type ServerChoice = (typeof koboServers)[number]['id'];
       <tmz-card>
         <form [formGroup]="form" (ngSubmit)="submit()" class="flex flex-col gap-5" novalidate>
           @if (formError(); as message) {
-            <tmz-alert tone="danger" data-testid="form-error">{{ message }}</tmz-alert>
+            <tmz-alert tone="danger" [tmzApiLang]="message" data-testid="form-error">{{ message }}</tmz-alert>
           }
 
           <tmz-form-field [label]="t('createProject.name')" fieldId="name" [error]="fieldErrors()['name']">
@@ -51,7 +51,7 @@ type ServerChoice = (typeof koboServers)[number]['id'];
               <input tmzInput id="koboServerUrl" formControlName="koboServerUrl" type="url" inputmode="url" placeholder="https://kobo.example.org" />
             </tmz-form-field>
           } @else if (fieldErrors()['koboServerUrl']) {
-            <p class="-mt-3 text-sm text-fg-danger-strong">{{ fieldErrors()['koboServerUrl'] }}</p>
+            <p class="-mt-3 text-sm text-fg-danger-strong" [tmzApiLang]="fieldErrors()['koboServerUrl']">{{ fieldErrors()['koboServerUrl'] }}</p>
           }
 
           <div class="grid gap-5 lg:grid-cols-2">

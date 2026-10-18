@@ -1,6 +1,7 @@
 import { Component, Injector, effect, runInInjectionContext, signal, viewChild } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { undo } from '@codemirror/commands';
+import { openSearchPanel } from '@codemirror/search';
 import { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { CodeEditor } from './code-editor';
@@ -11,12 +12,13 @@ Range.prototype.getBoundingClientRect ??= () => new DOMRect();
 
 @Component({
   imports: [CodeEditor],
-  template: `<tmz-code-editor [value]="value()" [readonly]="readonly()" [extensions]="extensions()" label="Clean script" (changed)="edits.push($event)" />`,
+  template: `<tmz-code-editor [value]="value()" [readonly]="readonly()" [extensions]="extensions()" [phrases]="phrases()" label="Clean script" (changed)="edits.push($event)" />`,
 })
 class Host {
   readonly value = signal('def clean(raw, ctx):\n    return raw\n');
   readonly readonly = signal(false);
   readonly extensions = signal<Extension[]>([]);
+  readonly phrases = signal<Record<string, string>>({});
   readonly edits: string[] = [];
   readonly editor = viewChild.required(CodeEditor);
 }
@@ -46,6 +48,28 @@ describe('CodeEditor', () => {
     expect(content.textContent).toContain('def clean(raw, ctx):');
     expect(content.getAttribute('aria-label')).toBe('Clean script');
     expect(fixture.nativeElement.querySelector('.tok-keyword, .ͼb, [class*="ͼ"]')).not.toBeNull();
+  });
+
+  it('writes the search panel in English unless it is given phrases', async () => {
+    const { fixture, view } = await render();
+
+    openSearchPanel(view);
+
+    const field = fixture.nativeElement.querySelector('.cm-search input[name="search"]') as HTMLInputElement;
+    expect(field.getAttribute('aria-label')).toBe('Find');
+  });
+
+  it('writes the search panel with the phrases it is given', async () => {
+    const { fixture, view } = await render();
+    fixture.componentInstance.phrases.set({ Find: 'Buscar', next: 'siguiente', 'match case': 'coincidir mayúsculas' });
+    fixture.detectChanges();
+
+    openSearchPanel(view);
+
+    const panel = fixture.nativeElement.querySelector('.cm-search') as HTMLElement;
+    expect(panel.querySelector('input[name="search"]')?.getAttribute('aria-label')).toBe('Buscar');
+    expect(panel.querySelector('button[name="next"]')?.textContent).toBe('siguiente');
+    expect(panel.textContent).toContain('coincidir mayúsculas');
   });
 
   it('emits each change and takes new values from outside', async () => {

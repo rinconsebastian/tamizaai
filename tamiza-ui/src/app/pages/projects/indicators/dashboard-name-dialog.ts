@@ -5,7 +5,7 @@ import { Observable } from 'rxjs';
 import { ApiErrors } from '../../../core/api-error';
 import { IndicatorsService, maxDashboardNameLength } from '../../../core/projects/indicators.service';
 import { DashboardEntry } from '../../../core/projects/projects.service';
-import { Alert, Button, FormField, Input } from '../../../shared/ui';
+import { Alert, ApiLang, Button, FormField, Input, markApiText } from '../../../shared/ui';
 
 /** What the name is for: a new dashboard, a new name for one, or a copy of one. */
 export type DashboardNameAction = 'add' | 'rename' | 'duplicate';
@@ -50,7 +50,7 @@ export function copyName(name: string, dashboards: DashboardEntry[], suffix: (n:
  */
 @Component({
   selector: 'app-dashboard-name-dialog',
-  imports: [TranslocoDirective, Alert, Button, FormField, Input],
+  imports: [TranslocoDirective, Alert, ApiLang, Button, FormField, Input],
   template: `
     <form
       class="w-[min(28rem,calc(100vw-2rem))] rounded-base border border-default bg-neutral-primary-soft p-4 shadow-sm md:p-6"
@@ -74,7 +74,7 @@ export function copyName(name: string, dashboards: DashboardEntry[], suffix: (n:
       </tmz-form-field>
 
       @if (error(); as message) {
-        <tmz-alert tone="danger" class="mt-4" data-testid="dashboard-name-error">{{ message }}</tmz-alert>
+        <tmz-alert tone="danger" class="mt-4" data-testid="dashboard-name-error"><span [tmzApiLang]="message">{{ message }}</span></tmz-alert>
       }
 
       <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -155,7 +155,7 @@ export class DashboardNameDialog {
         const name = fields.find(([field]) => field.toLowerCase() === 'name');
         const others = fields.filter(([field]) => field.toLowerCase() !== 'name').map(([, message]) => message);
         this.serverNameError.set(name?.[1] ?? null);
-        this.error.set(others.length ? others.join(' ') : name ? null : parsed.message);
+        this.error.set(others.length ? markApiText(others.join(' ')) : name ? null : parsed.message);
         if (parsed.code?.startsWith('dashboards.')) {
           this.data.refused?.();
         }
