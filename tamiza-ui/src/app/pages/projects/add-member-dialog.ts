@@ -1,7 +1,8 @@
 import { DIALOG_DATA, DialogRef } from '@angular/cdk/dialog';
 import { Component, inject, signal } from '@angular/core';
-import { TranslocoDirective } from '@jsverse/transloco';
+import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
+import { SystemConfigService } from '../../core/system-config';
 import { InviteResult, ProjectRole, ProjectsService } from '../../core/projects/projects.service';
 import { Alert, ApiLang, Button, FormField, Input } from '../../shared/ui';
 
@@ -34,7 +35,7 @@ const roles: ProjectRole[] = ['admin', 'analyst', 'viewer'];
     >
       <h2 id="add-member-title" class="text-lg font-medium text-heading">{{ t('members.inviteTitle') }}</h2>
 
-      <tmz-form-field class="mt-4" [label]="t('members.email')" fieldId="inviteEmail" [hint]="t('members.emailHint')" [error]="fieldErrors()['email']">
+      <tmz-form-field class="mt-4" [label]="t('members.email')" fieldId="inviteEmail" [hint]="emailsEnabled() ? t('members.emailHintInvite') : t('members.emailHint')" [error]="fieldErrors()['email']">
         <input tmzInput #email id="inviteEmail" type="email" autocomplete="off" />
       </tmz-form-field>
       <tmz-form-field class="mt-4" [label]="t('members.role')" fieldId="inviteRole" [error]="fieldErrors()['role']">
@@ -61,8 +62,11 @@ export class AddMemberDialog {
   protected readonly ref = inject<DialogRef<AddedMember>>(DialogRef);
   private readonly service = inject(ProjectsService);
   private readonly errors = inject(ApiErrors);
+  private readonly transloco = inject(TranslocoService);
 
   protected readonly roles = roles;
+  /** Whether the identity provider emails the people invited; the hint under the email field says so. */
+  protected readonly emailsEnabled = inject(SystemConfigService).accountEmailsEnabled;
   protected readonly busy = signal(false);
   protected readonly fieldErrors = signal<Record<string, string>>({});
   protected readonly error = signal<string | null>(null);
@@ -71,7 +75,7 @@ export class AddMemberDialog {
     this.fieldErrors.set({});
     this.error.set(null);
     this.busy.set(true);
-    this.service.invite(this.data.projectId, email, role as ProjectRole).subscribe({
+    this.service.invite(this.data.projectId, email, role as ProjectRole, this.transloco.getActiveLang()).subscribe({
       next: (result) => this.ref.close({ result, email }),
       error: (failure) => {
         this.busy.set(false);

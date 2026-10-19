@@ -1,6 +1,9 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { CurrentUserService } from '../../core/current-user.service';
+import { InterfaceLanguage } from '../../core/i18n/interface-language';
 import { Member, ProjectRole } from '../../core/projects/projects.service';
+import { SystemConfigService } from '../../core/system-config';
 import { ToastService } from '../../shared/ui';
 import { byTestId, openProjectSection, projectId, settle, typeInto } from '../../../testing/project-harness';
 import { tick } from '../../../testing/cdk';
@@ -16,8 +19,17 @@ describe('ProjectMembers', () => {
   const text = (element: Element | null) => element?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
   const overlay = () => document.querySelector('.cdk-overlay-container') as HTMLElement;
 
-  async function open(role: ProjectRole, list: Member[] = members, invitations: unknown[] = [invitation]) {
-    const opened = await openProjectSection('members', role);
+  /** A deployment whose identity provider sends account emails. */
+  const emailsOn = [{ provide: SystemConfigService, useValue: { accountEmailsEnabled: signal(true), assistantEnabled: signal(false) } }];
+
+  async function open(
+    role: ProjectRole,
+    list: Member[] = members,
+    invitations: unknown[] = [invitation],
+    providers: Parameters<typeof openProjectSection>[3] = [],
+    lang: InterfaceLanguage = 'en',
+  ) {
+    const opened = await openProjectSection('members', role, {}, providers, lang);
     opened.http.expectOne(`${base}/members`).flush(list);
     if (role === 'admin') {
       opened.http.expectOne(`${base}/invitations`).flush(invitations);
@@ -99,7 +111,7 @@ describe('ProjectMembers', () => {
 
       const request = http.expectOne(`${base}/members`);
       expect(request.request.method).toBe('POST');
-      expect(request.request.body).toEqual({ email: 'new@example.org', role: 'viewer' });
+      expect(request.request.body).toEqual({ email: 'new@example.org', role: 'viewer', language: 'en' });
       request.flush({ kind: 'invitation', member: null, invitation: { id: 'i2', email: 'new@example.org', role: 'viewer', createdAt: '' } });
       await tick();
       await reload(opened, members, [invitation, { id: 'i2', email: 'new@example.org', role: 'viewer', createdAt: '' }]);
@@ -247,5 +259,179 @@ describe('ProjectMembers', () => {
     await reload(opened);
 
     expect(byTestId(opened.root, 'invitation-row-i1')).toBeNull();
+  });
+
+  describe('account emails', () => {
+    const emailed = { ...invitation, lastEmailAt: '2026-10-18T14:30:00Z' };
+    const lastToast = () => TestBed.inject(ToastService).toasts().at(-1)!;
+
+    async function chooseItem(opened: Awaited<ReturnType<typeof open>>, row: string, label: string) {
+      const items = await openMenu(opened, row);
+      items.find((item) => text(item) === label)!.click();
+      await settle(opened.harness);
+    }
+
+    it('tells the admin in the dialog that a person without an account gets an email', async () => {
+      const opened = await open('admin', members, [invitation], emailsOn);
+      await openDialog(opened);
+
+      const form = text(byTestId(overlay(), 'invite-form'));
+
+      expect(form).toContain('they get an email to set a password');
+      expect(form).not.toContain('Tamiza sends no email');
+    });
+
+    it('still says that Tamiza sends no email when the deployment cannot send them', async () => {
+      const opened = await open('admin');
+      await openDialog(opened);
+
+      expect(text(byTestId(overlay(), 'invite-form'))).toContain('Tamiza sends no email');
+    });
+
+    it('sends the interface language with the invitation', async () => {
+      const opened = await open('admin', members, [invitation], emailsOn, 'es');
+      await openDialog(opened);
+      typeInto(overlay().querySelector<HTMLInputElement>('#inviteEmail')!, 'ana@example.org');
+      byTestId<HTMLFormElement>(overlay(), 'invite-form')!.dispatchEvent(new Event('submit'));
+      await settle(opened.harness);
+
+      const request = opened.http.expectOne(`${base}/members`);
+
+      expect(request.request.body).toEqual({ email: 'ana@example.org', role: 'analyst', language: 'es' });
+    });
+
+    it.each([
+      ['sent', 'success', 'was emailed a link to set a password'],
+      ['recentlySent', 'success', 'already emailed a link a few minutes ago'],
+      ['existingAccount', 'info', 'already has an account, so no email was sent: let them know'],
+      ['rateLimited', 'danger', 'the hourly limit is reached'],
+      ['failed', 'danger', 'the email could not be sent'],
+    ])('says what happened to the invitation email when it is %s', async (outcome, tone, words) => {
+      const opened = await open('admin', members, [invitation], emailsOn);
+      await openDialog(opened);
+      typeInto(overlay().querySelector<HTMLInputElement>('#inviteEmail')!, 'ana@example.org');
+      byTestId<HTMLFormElement>(overlay(), 'invite-form')!.dispatchEvent(new Event('submit'));
+      await settle(opened.harness);
+      opened.http.expectOne(`${base}/members`).flush({
+        kind: 'invitation',
+        member: null,
+        invitation: { id: 'i9', email: 'ana@example.org', role: 'analyst', createdAt: '', lastEmailAt: null },
+        emailOutcome: outcome,
+      });
+      await tick();
+      await reload(opened);
+
+      expect(lastToast().tone).toBe(tone);
+      expect(lastToast().message).toContain('Invitation saved');
+      expect(lastToast().message).toContain(words);
+      expect(lastToast().message).toContain('ana@example.org');
+    });
+
+    it('shows when the last invitation email went out and offers to resend it', async () => {
+      const opened = await open('admin', members, [emailed], emailsOn);
+
+      expect(text(byTestId(opened.root, 'email-sent-i1'))).toMatch(/^Email sent .*2026/);
+      expect((await openMenu(opened, 'invitation-row-i1')).map((i) => text(i))).toEqual(['Resend invitation email', 'Revoke']);
+    });
+
+    it('shows no email line for an invitation that was never emailed', async () => {
+      const opened = await open('admin', members, [{ ...invitation, lastEmailAt: null }], emailsOn);
+
+      expect(byTestId(opened.root, 'email-sent-i1')).toBeNull();
+    });
+
+    it('offers only Revoke, and no password reset, when the deployment cannot send emails', async () => {
+      const opened = await open('admin', members, [emailed]);
+
+      expect((await openMenu(opened, 'invitation-row-i1')).map((i) => text(i))).toEqual(['Revoke']);
+      document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = ''));
+      expect((await openMenu(opened, 'member-row-u2')).map((i) => text(i))).not.toContain('Send password reset email');
+    });
+
+    it('resends the invitation email, says so and reloads the list', async () => {
+      const opened = await open('admin', members, [emailed], emailsOn);
+
+      await chooseItem(opened, 'invitation-row-i1', 'Resend invitation email');
+      const request = opened.http.expectOne(`${base}/invitations/i1/email`);
+      expect(request.request.method).toBe('POST');
+      expect(request.request.body).toEqual({ language: 'en' });
+      request.flush({ ...emailed, lastEmailAt: '2026-10-19T08:00:00Z' });
+      await tick();
+      await reload(opened, members, [{ ...emailed, lastEmailAt: '2026-10-19T08:00:00Z' }]);
+
+      expect(lastToast().tone).toBe('success');
+      expect(lastToast().message).toBe('Invitation email sent to later@example.org.');
+      expect(text(byTestId(opened.root, 'email-sent-i1'))).toContain('2026');
+    });
+
+    it('offers the password reset to the admin for each member, before removal, even for the only admin', async () => {
+      const opened = await open('admin', members, [invitation], emailsOn);
+
+      expect((await openMenu(opened, 'member-row-u2')).map((i) => text(i))).toEqual([
+        'Make admin',
+        'Make analyst',
+        'Send password reset email',
+        'Remove from project',
+      ]);
+      document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = ''));
+      expect((await openMenu(opened, 'member-row-u1')).map((i) => text(i))).toEqual(['Send password reset email']);
+    });
+
+    it('asks for the password reset and says the email is on its way', async () => {
+      const opened = await open('admin', members, [invitation], emailsOn);
+
+      await chooseItem(opened, 'member-row-u2', 'Send password reset email');
+      const request = opened.http.expectOne(`${base}/members/u2/password-reset`);
+      expect(request.request.method).toBe('POST');
+      request.flush(null, { status: 204, statusText: 'No Content' });
+      await settle(opened.harness);
+
+      expect(lastToast().tone).toBe('success');
+      expect(lastToast().message).toBe('Password reset email on its way to grace@example.org.');
+    });
+
+    it.each([
+      [300, 'Try again in 5 minutes'],
+      [61, 'Try again in 2 minutes'],
+      [60, 'Try again in 1 minute.'],
+      [5, 'Try again in 1 minute.'],
+    ])('says to try again later when the API asks to wait %s seconds, for both actions', async (seconds, words) => {
+      const opened = await open('admin', members, [emailed], emailsOn);
+      const refusal = { code: 'accountEmail.rateLimited', retryAfter: seconds };
+
+      await chooseItem(opened, 'invitation-row-i1', 'Resend invitation email');
+      opened.http.expectOne(`${base}/invitations/i1/email`).flush(refusal, { status: 429, statusText: 'Too Many Requests' });
+      await settle(opened.harness);
+      expect(lastToast().tone).toBe('danger');
+      expect(lastToast().message).toContain('cannot be sent yet');
+      expect(lastToast().message).toContain(words);
+
+      document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = ''));
+      await chooseItem(opened, 'member-row-u2', 'Send password reset email');
+      opened.http.expectOne(`${base}/members/u2/password-reset`).flush(refusal, { status: 429, statusText: 'Too Many Requests' });
+      await settle(opened.harness);
+      expect(lastToast().message).toContain(words);
+    });
+
+    it('reports any other refusal with the message of its code', async () => {
+      const opened = await open('admin', members, [emailed], emailsOn);
+
+      await chooseItem(opened, 'member-row-u2', 'Send password reset email');
+      opened.http.expectOne(`${base}/members/u2/password-reset`).flush({ code: 'accountEmail.noAccount' }, { status: 409, statusText: 'Conflict' });
+      await settle(opened.harness);
+
+      expect(lastToast().tone).toBe('danger');
+      expect(lastToast().message).toContain('no active account');
+    });
+
+    it('reports a failure to send with the message of its code', async () => {
+      const opened = await open('admin', members, [emailed], emailsOn);
+
+      await chooseItem(opened, 'invitation-row-i1', 'Resend invitation email');
+      opened.http.expectOne(`${base}/invitations/i1/email`).flush({ code: 'accountEmail.failed' }, { status: 502, statusText: 'Bad Gateway' });
+      await settle(opened.harness);
+
+      expect(lastToast().message).toBe('The email could not be sent. Try again later.');
+    });
   });
 });

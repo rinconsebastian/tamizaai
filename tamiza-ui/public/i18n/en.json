@@ -128,6 +128,15 @@
         "limit": "A project can have at most 7 dashboards. Remove one before adding another.",
         "lastOne": "A project needs at least one dashboard.",
         "orderChanged": "The project’s dashboards have changed. Reload and try again."
+      },
+      "accountEmail": {
+        "disabled": "Account emails are not available on this installation.",
+        "existingAccount": "This person's account was not created by Tamiza or is already verified, so no invitation email can be sent. Let them know yourself.",
+        "noAccount": "This member has no active account with an email address to send to.",
+        "rateLimited": "Too many account emails. Try again later.",
+        "rateLimitedIn": "This email cannot be sent yet. Try again in {{ minutes }} minutes.",
+        "rateLimitedInOne": "This email cannot be sent yet. Try again in 1 minute.",
+        "failed": "The email could not be sent. Try again later."
       }
     }
   },
@@ -920,7 +929,20 @@
     "emailHint": "The email they sign in with. Tamiza sends no email: let them know.",
     "you": "You",
     "removeSelfTitle": "Remove yourself?",
-    "removeSelfMessage": "You lose access to this project immediately."
+    "removeSelfMessage": "You lose access to this project immediately.",
+    "emailHintInvite": "The email they sign in with. If they have no account yet, they get an email to set a password.",
+    "inviteEmail": {
+      "sent": "Invitation saved. {{ email }} was emailed a link to set a password and becomes a member on their first sign-in.",
+      "recentlySent": "Invitation saved. {{ email }} was already emailed a link a few minutes ago.",
+      "existingAccount": "Invitation saved. {{ email }} already has an account, so no email was sent: let them know.",
+      "rateLimited": "Invitation saved, but no email was sent: the hourly limit is reached. Resend it later or let {{ email }} know.",
+      "failed": "Invitation saved, but the email could not be sent. Resend it later or let {{ email }} know."
+    },
+    "emailSentAt": "Email sent {{ when }}",
+    "resendEmail": "Resend invitation email",
+    "resent": "Invitation email sent to {{ email }}.",
+    "passwordReset": "Send password reset email",
+    "passwordResetSent": "Password reset email on its way to {{ email }}."
   },
   "frame": {
     "target": "Target",

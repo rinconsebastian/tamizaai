@@ -30,7 +30,7 @@ export class AuthService {
     }
 
     try {
-      // Fails fast when the API or Keycloak is unreachable, instead of a silent failure on sign-in.
+      // Fails fast when the API or the identity provider is unreachable, instead of a silent failure on sign-in.
       await firstValueFrom(this.oidc.preloadAuthWellKnownDocument());
       const result = await firstValueFrom(this.oidc.checkAuth());
       if (result.isAuthenticated) {
@@ -50,7 +50,7 @@ export class AuthService {
     }
   }
 
-  /** Sends the user to Keycloak and remembers where to bring them back. */
+  /** Sends the user to the identity provider and remembers where to bring them back. */
   login(returnUrl = '/'): void {
     if (isSafeReturnUrl(returnUrl)) {
       this.document.defaultView?.sessionStorage.setItem(RETURN_URL_KEY, returnUrl);
@@ -58,7 +58,7 @@ export class AuthService {
     this.oidc.authorize();
   }
 
-  /** Ends the session in Tamiza and in Keycloak (RP-initiated logout). */
+  /** Ends the session in Tamiza and at the identity provider (RP-initiated logout). */
   logout(): void {
     this.signingOut = true;
     // Only the assistant's conversations: the OIDC library keeps its own state in the same store.

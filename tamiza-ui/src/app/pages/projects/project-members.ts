@@ -1,11 +1,13 @@
 import { Dialog } from '@angular/cdk/dialog';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, LOCALE_ID, computed, inject, signal } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { forkJoin, of } from 'rxjs';
 import { ApiErrors } from '../../core/api-error';
 import { CurrentUserService } from '../../core/current-user.service';
+import { countKey } from '../../core/i18n/plural';
 import { Invitation, Member, ProjectRole, ProjectsService } from '../../core/projects/projects.service';
-import { Badge, Button, ConfirmDialog, DropdownMenu, MenuItem, Skeleton, ToastService } from '../../shared/ui';
+import { SystemConfigService } from '../../core/system-config';
+import { Badge, Button, ConfirmDialog, DropdownMenu, MenuItem, Skeleton, ToastService, dateTimeText } from '../../shared/ui';
 import { AddMemberData, AddMemberDialog, AddedMember } from './add-member-dialog';
 import { ProjectContext } from './project-context';
 
@@ -54,9 +56,12 @@ const roles: ProjectRole[] = ['admin', 'analyst', 'viewer'];
             <li class="flex items-center gap-3 px-4 py-3" [attr.data-testid]="'invitation-row-' + invitation.id">
               <div class="min-w-0 flex-1">
                 <p class="break-all font-medium text-heading">{{ invitation.email }}</p>
+                @if (invitation.lastEmailAt; as sentAt) {
+                  <p class="text-sm text-body" [attr.data-testid]="'email-sent-' + invitation.id">{{ t('members.emailSentAt', { when: sentText(sentAt) }) }}</p>
+                }
               </div>
               <tmz-badge tone="warning">{{ t('members.pendingRole', { role: t('roles.' + invitation.role) }) }}</tmz-badge>
-              <tmz-dropdown-menu [label]="t('members.actionsFor', { name: invitation.email })" [items]="invitationActions()" (selected)="revoke(invitation)" />
+              <tmz-dropdown-menu [label]="t('members.actionsFor', { name: invitation.email })" [items]="invitationActions()" (selected)="onInvitationAction(invitation, $event)" />
             </li>
           }
         </ul>
@@ -73,6 +78,9 @@ export class ProjectMembers {
   private readonly dialog = inject(Dialog);
   private readonly context = inject(ProjectContext);
   private readonly currentUser = inject(CurrentUserService).user;
+  private readonly locale = inject(LOCALE_ID);
+  /** Whether the identity provider can email people: invitations, resends and password resets. */
+  protected readonly emailsEnabled = inject(SystemConfigService).accountEmailsEnabled;
 
   protected readonly members = signal<Member[]>([]);
   protected readonly invitations = signal<Invitation[]>([]);
@@ -98,18 +106,31 @@ export class ProjectMembers {
 
   /** What an admin can do to a member. The only admin keeps their role and their place, as the API insists. */
   protected memberActions(member: Member): MenuItem[] {
-    if (member.userId === this.onlyAdmin()) {
-      return [];
-    }
     const t = (key: string) => this.transloco.translate(key);
-    return [
-      ...roles.filter((role) => role !== member.role).map((role) => ({ id: role, label: t('members.makeRole.' + role) })),
-      { id: 'remove', label: t('members.remove'), danger: true },
-    ];
+    const protectedAdmin = member.userId === this.onlyAdmin();
+    const items: MenuItem[] = protectedAdmin
+      ? []
+      : roles.filter((role) => role !== member.role).map((role) => ({ id: role, label: t('members.makeRole.' + role) }));
+    if (this.emailsEnabled()) {
+      items.push({ id: 'passwordReset', label: t('members.passwordReset'), testId: 'password-reset' });
+    }
+    if (!protectedAdmin) {
+      items.push({ id: 'remove', label: t('members.remove'), danger: true });
+    }
+    return items;
   }
 
   protected invitationActions(): MenuItem[] {
-    return [{ id: 'revoke', label: this.transloco.translate('members.revoke'), danger: true, testId: 'revoke' }];
+    const t = (key: string) => this.transloco.translate(key);
+    return [
+      ...(this.emailsEnabled() ? [{ id: 'resend', label: t('members.resendEmail'), testId: 'resend-email' }] : []),
+      { id: 'revoke', label: t('members.revoke'), danger: true, testId: 'revoke' },
+    ];
+  }
+
+  /** When the last invitation email went out, in the interface's date and time format. */
+  protected sentText(sentAt: string): string {
+    return dateTimeText(sentAt, this.locale) ?? sentAt;
   }
 
   protected addMember(): void {
@@ -122,14 +143,64 @@ export class ProjectMembers {
     });
     ref.closed.subscribe((added) => {
       if (added) {
-        const key = added.result.kind === 'member' ? 'members.added' : 'members.invited';
-        this.toasts.success(this.transloco.translate(key, { email: added.email }));
+        this.announce(added);
         this.load();
       }
     });
   }
 
+  /** Says what the invitation did: a member at once, a saved invitation, and, when account emails are on, what happened to the email. */
+  private announce({ result, email }: AddedMember): void {
+    const t = (key: string) => this.transloco.translate(key, { email });
+    const outcome = result.kind === 'invitation' ? result.emailOutcome : null;
+    if (result.kind === 'member') {
+      this.toasts.success(t('members.added'));
+    } else if (!outcome) {
+      this.toasts.success(t('members.invited'));
+    } else if (outcome === 'existingAccount') {
+      this.toasts.info(t('members.inviteEmail.existingAccount'));
+    } else if (outcome === 'rateLimited' || outcome === 'failed') {
+      this.toasts.error(t('members.inviteEmail.' + outcome));
+    } else {
+      this.toasts.success(t('members.inviteEmail.' + outcome));
+    }
+  }
+
+  protected onInvitationAction(invitation: Invitation, action: string): void {
+    if (action === 'resend') {
+      this.service.resendInvitationEmail(this.projectId(), invitation.id, this.transloco.getActiveLang()).subscribe({
+        next: () => {
+          this.toasts.success(this.transloco.translate('members.resent', { email: invitation.email }));
+          this.load();
+        },
+        error: (e) => this.reportEmailFailure(e),
+      });
+      return;
+    }
+    void this.revoke(invitation);
+  }
+
+  /** A 429 from an account email action says how long to wait, in minutes; anything else is reported as any API failure. */
+  private reportEmailFailure(error: unknown): void {
+    const failure = this.errors.parse(error);
+    const retryAfter = failure.extensions['retryAfter'];
+    if (failure.code === 'accountEmail.rateLimited' && typeof retryAfter === 'number' && retryAfter > 0) {
+      const minutes = Math.max(1, Math.ceil(retryAfter / 60));
+      const key = countKey('errors.codes.accountEmail.rateLimitedIn', minutes, this.transloco.getActiveLang());
+      this.toasts.error(this.transloco.translate(key, { minutes }));
+      return;
+    }
+    this.errors.report(error);
+  }
+
   protected async onMemberAction(member: Member, action: string): Promise<void> {
+    if (action === 'passwordReset') {
+      this.service.sendPasswordReset(this.projectId(), member.userId).subscribe({
+        next: () => this.toasts.success(this.transloco.translate('members.passwordResetSent', { email: member.email ?? member.name })),
+        error: (e) => this.reportEmailFailure(e),
+      });
+      return;
+    }
     if (action === 'remove') {
       const t = (key: string, params?: Record<string, string>) => this.transloco.translate(key, params);
       const self = this.isYou(member);

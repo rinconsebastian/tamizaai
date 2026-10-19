@@ -58,6 +58,11 @@ const apiErrorCodes = [
   'basemaps.unavailable',
   'basemaps.upstream',
   'basemaps.rateLimited',
+  'accountEmail.disabled',
+  'accountEmail.existingAccount',
+  'accountEmail.noAccount',
+  'accountEmail.rateLimited',
+  'accountEmail.failed',
 ];
 
 function lookup(root: unknown, path: string): unknown {
@@ -72,6 +77,11 @@ describe('English translations', () => {
   it('have the assistant messages that name a time, for the codes that carry one', () => {
     expect(en.errors.codes.assistant.rateLimitedIn).toContain('{{ seconds }}');
     expect(en.errors.codes.assistant.budgetRenews).toContain('{{ when }}');
+  });
+
+  it('have the account email message that names the minutes to wait, in both forms', () => {
+    expect(en.errors.codes.accountEmail.rateLimitedIn).toContain('{{ minutes }}');
+    expect(en.errors.codes.accountEmail.rateLimitedInOne).not.toContain('{{');
   });
 
   it('name every run trigger, status, step and step status', () => {

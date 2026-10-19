@@ -68,7 +68,7 @@ public sealed class UserProvisioner(
         return await db.Users.SingleAsync(u => u.KeycloakSub == identity.Subject, cancellationToken);
     }
 
-    /// <summary>Update path: name, email or its verification changed in Keycloak.</summary>
+    /// <summary>Update path: name, email or its verification changed at the identity provider.</summary>
     private async Task UpdateAsync(User user, TokenIdentity identity, CancellationToken cancellationToken)
     {
         var verificationGained = identity is { EmailVerified: true, Email: not null }

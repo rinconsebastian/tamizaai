@@ -128,6 +128,15 @@
         "limit": "Un proyecto puede tener como máximo 7 tableros. Elimina uno antes de agregar otro.",
         "lastOne": "Un proyecto necesita al menos un tablero.",
         "orderChanged": "Los tableros del proyecto han cambiado. Recarga e intenta de nuevo."
+      },
+      "accountEmail": {
+        "disabled": "Los correos de cuenta no están disponibles en esta instalación.",
+        "existingAccount": "La cuenta de esta persona no la creó Tamiza o ya está verificada, así que no se puede enviar el correo de invitación. Avísale por otro medio.",
+        "noAccount": "Este miembro no tiene una cuenta activa con un correo al que enviar.",
+        "rateLimited": "Demasiados correos de cuenta. Inténtalo más tarde.",
+        "rateLimitedIn": "Todavía no se puede enviar este correo. Inténtalo de nuevo en {{ minutes }} minutos.",
+        "rateLimitedInOne": "Todavía no se puede enviar este correo. Inténtalo de nuevo en 1 minuto.",
+        "failed": "No se pudo enviar el correo. Inténtalo más tarde."
       }
     }
   },
@@ -920,7 +929,20 @@
     "emailHint": "El correo con el que inicia sesión. Tamiza no envía correos: avísale por otro medio.",
     "you": "Tú",
     "removeSelfTitle": "¿Eliminarte del proyecto?",
-    "removeSelfMessage": "Perderás el acceso a este proyecto de inmediato."
+    "removeSelfMessage": "Perderás el acceso a este proyecto de inmediato.",
+    "emailHintInvite": "El correo con el que inicia sesión. Si aún no tiene cuenta, recibe un correo para definir su contraseña.",
+    "inviteEmail": {
+      "sent": "Invitación guardada. Se envió a {{ email }} un correo con un enlace para definir su contraseña; pasa a ser miembro en su primer inicio de sesión.",
+      "recentlySent": "Invitación guardada. A {{ email }} ya se le envió un correo con el enlace hace pocos minutos.",
+      "existingAccount": "Invitación guardada. {{ email }} ya tiene una cuenta, así que no se envió ningún correo: avísale por otro medio.",
+      "rateLimited": "Invitación guardada, pero no se envió el correo: se alcanzó el límite por hora. Reenvíalo más tarde o avísale a {{ email }} por otro medio.",
+      "failed": "Invitación guardada, pero no se pudo enviar el correo. Reenvíalo más tarde o avísale a {{ email }} por otro medio."
+    },
+    "emailSentAt": "Correo enviado {{ when }}",
+    "resendEmail": "Reenviar correo de invitación",
+    "resent": "Correo de invitación enviado a {{ email }}.",
+    "passwordReset": "Enviar correo para restablecer la contraseña",
+    "passwordResetSent": "Correo para restablecer la contraseña en camino a {{ email }}."
   },
   "frame": {
     "target": "Meta",
