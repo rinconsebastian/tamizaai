@@ -1,6 +1,6 @@
 namespace Tamiza.Api.Data;
 
-/// <summary>Local record of a person who signed in through Keycloak.</summary>
+/// <summary>Local record of a person who signed in through the identity provider.</summary>
 public sealed class User
 {
     public Guid Id { get; set; }
@@ -12,7 +12,7 @@ public sealed class User
 
     public string? Email { get; set; }
 
-    /// <summary>Whether Keycloak marked the email as verified in the latest token. Invitations only match verified emails.</summary>
+    /// <summary>Whether the identity provider marked the email as verified in the latest token. Invitations only match verified emails.</summary>
     public bool EmailVerified { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }

@@ -145,6 +145,112 @@ The Tamiza interface is in Spanish or English, chosen from the browser's languag
 
 This is optional. Tamiza works the same with a login page that stays in English.
 
+## Account emails (optional)
+
+Without this section, Tamiza sends no email. A project admin who adds someone by email saves a pending invitation, and you create the person's account in Keycloak and tell them yourself. With it, three actions work from **Settings > Members**, and Keycloak sends the emails:
+
+- **Invitation.** Inviting an email that has no account creates one (email as username, no password, email not verified) and Keycloak emails the person a link to set a password and verify the email.
+- **Resend invitation email**, in the menu of a pending invitation, for a person who did not use the link in time.
+- **Send password reset email**, in the menu of a member, for a member who forgot their password.
+
+Tamiza never changes an account's data. It creates accounts for invitations, and asks Keycloak to email an account in two cases: the unverified accounts Tamiza created, for the invitation email, and a project member's own account, for the password reset. Accounts you made in the Keycloak console are never sent an invitation: the admin is told that the person already has an account and should let them know.
+
+**Use a realm that only Tamiza uses.** The client below can create and manage every user in its realm. If other applications share the realm, anyone who obtains the client secret can reach their users too.
+
+### What you need
+
+| Item | Why |
+|---|---|
+| **SMTP settings in the realm** (*Realm settings → Email*), checked with *Test connection* | Keycloak sends every email. Without them the actions answer "could not be sent" and the invitation is kept. |
+| A **confidential client** for Tamiza (for example `tamiza-admin`) with **Client authentication** On and **Service accounts roles** On. *Standard flow* and *Direct access grants* can stay Off | Tamiza signs in as this client (client credentials) to call Keycloak's admin API. |
+| The service account's roles **`manage-users`** and **`view-users`** from the `realm-management` client, and no others | It creates users, looks them up and asks for the emails. |
+
+On Keycloak 26.2 and later, *fine-grained admin permissions* can narrow the service account further. That is optional.
+
+### Option A: admin console
+
+1. Under *Realm settings → Email*, fill in the SMTP host, port, sender and sign-in, then press *Test connection*.
+2. Under *Clients → Create client*: *Client type* OpenID Connect, *Client ID* `tamiza-admin`. Set *Client authentication* **On**, *Standard flow* and *Direct access grants* **Off**, and *Service accounts roles* **On**.
+3. Open *Clients → tamiza-admin → Service accounts roles → Assign role*, filter by clients, and add `manage-users` and `view-users` of `realm-management`.
+4. Copy the secret from *Clients → tamiza-admin → Credentials*.
+5. Put the client ID and secret in `.env` and restart `api` (see the variables below).
+
+### Option B: `kcadm.sh`
+
+With the variables of Option B above set and `kcadm.sh config credentials` done:
+
+```sh
+# 1. SMTP. Use your own server; "auth" and "starttls" depend on it.
+kcadm.sh update "realms/$REALM" \
+  -s smtpServer.host=smtp.example.org -s smtpServer.port=587 \
+  -s smtpServer.from=no-reply@example.org -s smtpServer.fromDisplayName=Tamiza \
+  -s smtpServer.auth=true -s smtpServer.user=smtp-user -s smtpServer.password=smtp-password \
+  -s smtpServer.starttls=true
+
+# 2. The confidential client with a service account.
+kcadm.sh create clients -r "$REALM" \
+  -s clientId=tamiza-admin -s protocol=openid-connect \
+  -s publicClient=false -s serviceAccountsEnabled=true \
+  -s standardFlowEnabled=false -s directAccessGrantsEnabled=false
+
+# 3. Its roles.
+kcadm.sh add-roles -r "$REALM" --uusername service-account-tamiza-admin \
+  --cclientid realm-management --rolename manage-users --rolename view-users
+
+# 4. Its secret (the "value" field).
+ADMIN_UUID=$(kcadm.sh get clients -r "$REALM" -q clientId=tamiza-admin --fields id --format csv --noquotes)
+kcadm.sh get "clients/$ADMIN_UUID/client-secret" -r "$REALM"
+```
+
+### Values for `.env`
+
+| Variable | Value |
+|---|---|
+| `TAMIZA_KEYCLOAK_ADMIN_CLIENT_ID` | The client's ID, for example `tamiza-admin`. |
+| `TAMIZA_KEYCLOAK_ADMIN_CLIENT_SECRET` | The client's secret. Never commit a file that holds it. |
+| `TAMIZA_KEYCLOAK_ADMIN_URL` | Optional. A base URL such as `http://keycloak:8080`, when the public address does not serve `/admin` (some proxies block it) or the `api` container cannot reach it. Without it, Tamiza uses the base of `OIDC_METADATA_ADDRESS` when set, and otherwise of `OIDC_AUTHORITY`. Sign-in always keeps using `OIDC_AUTHORITY`. |
+| `TAMIZA_KEYCLOAK_LINK_HOURS` | Optional, 1 to 720. How long the links last. Empty keeps the realm's own setting. |
+| `TAMIZA_ACCOUNT_EMAILS_PER_HOUR` | Optional. Emails one user may cause per hour, 20 by default. |
+
+The features turn on when the client ID and the secret are both set. `OIDC_AUTHORITY` must then be a realm URL ending in `/realms/<name>`, and the `api` refuses to start otherwise.
+
+### How long the links last
+
+Without `TAMIZA_KEYCLOAK_LINK_HOURS`, Keycloak uses the realm's *Realm settings → Tokens → Action token generated by admin* (12 hours by default). A person who misses the link is sent a new one with *Resend invitation email*. Changing the lifetime in the realm needs no change in Tamiza:
+
+```sh
+kcadm.sh update "realms/$REALM" -s actionTokenGeneratedByAdminLifespan=86400   # 24 hours
+```
+
+### Limits
+
+Each user can cause 20 account emails per hour (`TAMIZA_ACCOUNT_EMAILS_PER_HOUR`), counting new accounts, resends and password resets together. The same person is never sent two within 10 minutes. The counters are in memory, so restarting `api` resets them.
+
+### Things to know
+
+- **The links use Keycloak's own address.** Keycloak builds the links in its emails from its public hostname. When `api` reaches Keycloak at an internal address (`TAMIZA_KEYCLOAK_ADMIN_URL`, or `OIDC_METADATA_ADDRESS`) and Keycloak has no fixed hostname, the links carry that internal address and do not open for the person. Set Keycloak's hostname to the public URL (for example `KC_HOSTNAME=https://auth.example.org`), and add `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true` when `api` must also reach it by another address. Checked this way with Keycloak 26: the account was created through the internal address and the email carried the public one.
+- **Language.** A new account gets the interface language of the admin who invited (Spanish or English). Keycloak uses it for the email and the password page when the realm has that language: see [Sign-in page in Spanish](#sign-in-page-in-spanish). Without internationalization the account is still created and the emails are in English.
+- **Names.** Keycloak's default user profile may ask a new person for their first and last name after they set the password.
+- **Revoking an invitation does not delete the account.** The person can still use the link until it expires and sign in, with no projects. Delete the account in *Users* if you want it gone.
+- **Password reset and federated accounts.** A member who signs in with an identity provider linked to Keycloak (for example Google) would get a local password if they use the reset link. Their linked sign-in keeps working.
+- **Account found by `sub`.** Tamiza looks up the member's account with the token's `sub`, which in Keycloak is the user ID. A custom *subject* mapper that changes it makes the password reset answer that the member has no active account.
+
+## Other OpenID Connect providers
+
+Sign-in uses standard OpenID Connect only, so a provider other than Keycloak can sign users in. Set the `OIDC_*` variables to the provider's values and leave the `TAMIZA_KEYCLOAK_*` ones empty. Account emails then do not exist: the members section offers no email actions, and an invited person must be told by the admin, as in Tamiza without the section above.
+
+What the provider needs:
+
+| Item | Detail |
+|---|---|
+| Discovery | `<OIDC_AUTHORITY>/.well-known/openid-configuration`, or `OIDC_METADATA_ADDRESS`. `OIDC_AUTHORITY` must equal the tokens' `iss`. |
+| A **public client** for the UI | Authorization code flow with PKCE (S256). Allow `<TAMIZA_PUBLIC_URL>/*` as redirect and post-logout URIs, and allow the browser origin (CORS) on the token endpoint. |
+| **Signed JWT access tokens** | With `aud` equal to `OIDC_AUDIENCE`, a `sub`, and the standard claims **`name`**, **`email`** and **`email_verified`** inside the access token itself, not only in the ID token. |
+| Refresh tokens | Tamiza renews the session with them. If the provider only issues them with `offline_access`, add that scope to `OIDC_SCOPE`. |
+| Sign-out | Used when the provider publishes an `end_session_endpoint`. |
+
+What depends on the claims: invitations match the **verified** `email` of the person signing in, and the superadmin role from `TAMIZA_SUPERADMIN_EMAILS` needs `email_verified` true. A provider whose tokens lack them still signs people in, but invitations never turn into memberships and nobody becomes superadmin.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
@@ -154,3 +260,9 @@ This is optional. Tamiza works the same with a login page that stays in English.
 | Sign-in loops, and API calls return 401 | Access tokens lack the audience: check the audience mapper and `OIDC_AUDIENCE`. A mismatch between `OIDC_AUTHORITY` and the token's `iss` causes the same symptom. |
 | API logs show "IDX20803: Unable to obtain configuration" | The `api` container cannot reach the discovery document. Set `OIDC_METADATA_ADDRESS` to a reachable URL. |
 | `isSuperAdmin` is false for a listed email | The email is not verified in Keycloak, or `api` was not restarted after editing `.env`. |
+| Inviting says the email "could not be requested" (`failed`) | Keycloak could not send it. Check *Realm settings → Email* with *Test connection*, and that the `api` reaches Keycloak (`TAMIZA_KEYCLOAK_ADMIN_URL`). The `api` log names the step and the HTTP status. The invitation is kept: use *Resend invitation email* once it is fixed. |
+| The `api` log says an admin request was refused (401 or 403) | The `tamiza-admin` client lacks the `manage-users` and `view-users` roles of `realm-management`, or its secret is wrong. |
+| Inviting says the person "already has an account" (`existingAccount`) | The email already has an account in Keycloak that Tamiza did not create, or the person already verified theirs. No email was sent: tell them yourself. |
+| Password reset says the member "has no active account" (`noAccount`) | The account was deleted or disabled in Keycloak, has no email, or Keycloak's user ID differs from the token's `sub`. |
+| The link in an invitation or reset email points to an internal address (`host.docker.internal`, a container name) | Keycloak builds links from the address it was reached at: fix its hostname, see "The links use Keycloak's own address". |
+| The `api` does not start and names `OIDC_AUTHORITY` | The Keycloak client variables are set but the authority is not a realm URL ending in `/realms/<name>`. Clear the client variables if you use another provider. |

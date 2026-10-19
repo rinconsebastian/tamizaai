@@ -13,6 +13,10 @@ export interface SystemConfig {
   assistant: {
     enabled: boolean;
   };
+  /** Whether the identity provider can send account emails (invitations, resends, password resets); nothing else about it is public. */
+  accountEmails: {
+    enabled: boolean;
+  };
 }
 
 export const SYSTEM_CONFIG_URL = '/api/v1/system/config';
@@ -28,6 +32,9 @@ export class SystemConfigService {
 
   /** Whether the AI script assistant is configured. False while the configuration loads and when it cannot be read. */
   readonly assistantEnabled = computed(() => this.config()?.assistant?.enabled === true);
+
+  /** Whether account emails are configured. False while the configuration loads, when it cannot be read, and for an older API. */
+  readonly accountEmailsEnabled = computed(() => this.config()?.accountEmails?.enabled === true);
 
   constructor() {
     this.http.get<SystemConfig>(SYSTEM_CONFIG_URL).subscribe({

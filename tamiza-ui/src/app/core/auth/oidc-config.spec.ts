@@ -9,6 +9,7 @@ const systemConfig: SystemConfig = {
   oidc: { authority: 'https://kc.example.org/realms/tamiza', clientId: 'tamiza-ui', scope: 'openid profile email' },
   version: '0.1.0',
   assistant: { enabled: false },
+  accountEmails: { enabled: false },
 };
 
 describe('OIDC configuration', () => {

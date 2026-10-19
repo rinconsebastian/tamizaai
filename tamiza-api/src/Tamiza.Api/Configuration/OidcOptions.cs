@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Tamiza.Api.Configuration;
 
-/// <summary>OpenID Connect settings for the external Keycloak realm, read from <c>OIDC_*</c> variables.</summary>
+/// <summary>OpenID Connect settings for the external identity provider (Keycloak or any compliant OIDC provider), read from <c>OIDC_*</c> variables.</summary>
 public sealed class OidcOptions
 {
     /// <summary>Realm URL as the browser sees it; also the expected token issuer.</summary>

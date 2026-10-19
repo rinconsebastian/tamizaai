@@ -19,6 +19,8 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
 
     public DbSet<ProjectInvitation> ProjectInvitations => Set<ProjectInvitation>();
 
+    public DbSet<InvitedAccount> InvitedAccounts => Set<InvitedAccount>();
+
     public DbSet<SamplingFrame> SamplingFrames => Set<SamplingFrame>();
 
     public DbSet<RawSubmission> RawSubmissions => Set<RawSubmission>();
@@ -117,6 +119,17 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             invitation.HasIndex(i => i.NormalizedEmail);
             invitation.HasOne<Project>().WithMany().HasForeignKey(i => i.ProjectId).OnDelete(DeleteBehavior.Cascade);
             invitation.HasOne<User>().WithMany().HasForeignKey(i => i.InvitedBy).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<InvitedAccount>(account =>
+        {
+            account.ToTable("invited_accounts");
+            account.HasKey(a => a.AccountId);
+            account.Property(a => a.AccountId).HasMaxLength(255).ValueGeneratedNever();
+            account.Property(a => a.NormalizedEmail).HasMaxLength(320);
+            account.HasIndex(a => a.NormalizedEmail);
+            account.HasIndex(a => a.CreatedBy);
+            account.HasOne<User>().WithMany().HasForeignKey(a => a.CreatedBy).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<SamplingFrame>(frame =>

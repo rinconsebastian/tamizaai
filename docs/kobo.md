@@ -141,7 +141,10 @@ The tables' columns also carry the text of their questions, as labels (see [scri
 Everyone in the project sees its people in **Settings > Members**, with their role (you are marked **You**). Admins press **Add member** to add a person by email and role in a dialog, and use each row's menu to change a role, remove someone or revoke an invitation; people invited who have not signed in yet are rows of the same list, marked with the role they are invited as. The only admin has no demotion or removal in their menu, because a project always keeps one:
 
 - If someone with that email has already signed in to Tamiza with the email **verified** in Keycloak, they become a member at once.
-- Otherwise the invitation stays pending and turns into a membership the first time that person signs in with the email verified. Tamiza does not send email, so tell the person yourself.
+- Otherwise the invitation stays pending and turns into a membership the first time that person signs in with the email verified. By default Tamiza sends no email, so tell the person yourself.
+- If the operator turned on [account emails](keycloak.md#account-emails-optional), Tamiza also creates the person's account when they have none and Keycloak emails them a link to set a password (the message after inviting says what happened to the email). A pending invitation then shows when its last email went out and has **Resend invitation email**, for a person who missed the link (it lasts 12 hours unless the operator changed it). A person who already had an account gets no email: tell them yourself.
+
+With account emails on, a member's menu also has **Send password reset email**, for a member who forgot their password; Keycloak emails them a link to set a new one. Each admin can cause 20 such emails per hour, and the same person is never sent two within 10 minutes.
 
 Make someone else admin before stepping down. A superadmin (configured by the operator in `TAMIZA_SUPERADMIN_EMAILS`) acts as admin on every project.
 

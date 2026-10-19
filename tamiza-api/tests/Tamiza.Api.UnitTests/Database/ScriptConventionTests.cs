@@ -159,4 +159,25 @@ public sealed class ScriptConventionTests
         Assert.Contains("CREATE UNIQUE INDEX ix_dashboards_project_id_normalized_name ON tamiza.dashboards (project_id, normalized_name)", sql);
         Assert.Contains("CREATE INDEX ix_dashboard_widgets_dashboard_id ON tamiza.dashboard_widgets (dashboard_id)", sql);
     }
+
+    [Fact]
+    public void The_account_emails_script_names_every_constraint_and_index()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0013_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0013_add_account_emails.sql", resource);
+        foreach (var constraint in new[] { "pk_invited_accounts PRIMARY KEY", "fk_invited_accounts_users_created_by FOREIGN KEY" })
+        {
+            Assert.Contains($"CONSTRAINT {constraint}", sql);
+        }
+
+        // Every key, check and foreign key is introduced by a CONSTRAINT name; every index has an ix_ name.
+        Assert.Equal(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count,
+            System.Text.RegularExpressions.Regex.Matches(sql, @"CONSTRAINT (?:pk|fk|ck)_\w+ (?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count);
+        Assert.All(System.Text.RegularExpressions.Regex.Matches(sql, @"CREATE (?:UNIQUE )?INDEX (\w+)").Select(m => m.Groups[1].Value),
+            name => Assert.StartsWith("ix_invited_accounts_", name));
+        Assert.Contains("CREATE INDEX ix_invited_accounts_normalized_email ON tamiza.invited_accounts (normalized_email)", sql);
+    }
 }

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Tamiza.Api.Accounts;
 using Tamiza.Api.Auth;
 using Tamiza.Api.Data;
 using Tamiza.Api.Http;
@@ -11,14 +12,20 @@ namespace Tamiza.Api.Projects;
 
 public sealed record MemberView(Guid UserId, string Name, string? Email, ProjectRole Role);
 
-public sealed record InvitationView(Guid Id, string Email, ProjectRole Role, DateTimeOffset CreatedAt);
+/// <summary><see cref="LastEmailAt"/> is when an invitation email was last requested for the person, null when none was.</summary>
+public sealed record InvitationView(Guid Id, string Email, ProjectRole Role, DateTimeOffset CreatedAt, DateTimeOffset? LastEmailAt = null);
 
-public sealed record InviteRequest(string? Email, string? Role);
+/// <summary><see cref="Language"/> is the inviter's interface language, used for the new account's emails.</summary>
+public sealed record InviteRequest(string? Email, string? Role, string? Language = null);
 
 public sealed record ChangeRoleRequest(string? Role);
 
-/// <summary><see cref="Kind"/> is <c>member</c> when the person already uses Tamiza, <c>invitation</c> otherwise.</summary>
-public sealed record InviteResult(string Kind, MemberView? Member, InvitationView? Invitation);
+/// <summary>
+/// <see cref="Kind"/> is <c>member</c> when the person already uses Tamiza, <c>invitation</c> otherwise. <see cref="EmailOutcome"/> says what
+/// happened to the invitation email (<c>sent</c>, <c>recentlySent</c>, <c>existingAccount</c>, <c>rateLimited</c> or <c>failed</c>); it is null when
+/// no email applies: the person became a member at once, or account emails are not configured.
+/// </summary>
+public sealed record InviteResult(string Kind, MemberView? Member, InvitationView? Invitation, string? EmailOutcome = null);
 
 public static class MemberEndpoints
 {
@@ -50,11 +57,16 @@ public static class MemberEndpoints
         TypedResults.Ok(await db.ProjectInvitations
             .Where(i => i.ProjectId == projectId)
             .OrderBy(i => i.CreatedAt)
-            .Select(i => new InvitationView(i.Id, i.Email, i.Role, i.CreatedAt))
+            .Select(i => new InvitationView(i.Id, i.Email, i.Role, i.CreatedAt,
+                db.InvitedAccounts.Where(a => a.NormalizedEmail == i.NormalizedEmail).Max(a => a.LastEmailAt)))
             .ToListAsync(ct));
 
+    /// <summary>When an invitation email was last requested for the address, from the accounts Tamiza created; null when none was.</summary>
+    internal static Task<DateTimeOffset?> LastEmailAsync(TamizaDbContext db, string normalizedEmail, CancellationToken ct) =>
+        db.InvitedAccounts.Where(a => a.NormalizedEmail == normalizedEmail).MaxAsync(a => a.LastEmailAt, ct);
+
     private static async Task<Results<Created<InviteResult>, ValidationProblem, ProblemHttpResult>> InviteAsync(
-        Guid projectId, InviteRequest request, TamizaDbContext db, ICurrentUser user, TimeProvider time, CancellationToken ct)
+        Guid projectId, InviteRequest request, TamizaDbContext db, ICurrentUser user, AccountEmails accountEmails, TimeProvider time, CancellationToken ct)
     {
         var errors = new FieldErrors();
         var email = request.Email?.Trim() ?? "";
@@ -117,8 +129,13 @@ public static class MemberEndpoints
         }
 
         await transaction.CommitAsync(ct);
+
+        // The invitation is saved whatever happens to the email: a provider that is down must not lose it.
+        // The invitation is already committed, so the email step does not observe the request: a closed tab must not skip it.
+        var sent = await accountEmails.SendInvitationAsync(normalized, user.Id, AccountEmailRequests.Language(request.Language), CancellationToken.None);
+        var lastEmailAt = sent is null ? null : await LastEmailAsync(db, normalized, ct);
         return TypedResults.Created($"/api/v1/projects/{projectId}/invitations/{invitation.Id}",
-            new InviteResult("invitation", null, new InvitationView(invitation.Id, invitation.Email, role, now)));
+            new InviteResult("invitation", null, new InvitationView(invitation.Id, invitation.Email, role, now, lastEmailAt), sent?.Wire));
     }
 
     private static async Task<Results<Ok<MemberView>, ValidationProblem, ProblemHttpResult, NotFound<ProblemDetails>>> ChangeMemberRoleAsync(
@@ -190,7 +207,8 @@ public static class MemberEndpoints
 
         invitation.Role = role;
         await db.SaveChangesAsync(ct);
-        return TypedResults.Ok(new InvitationView(invitation.Id, invitation.Email, invitation.Role, invitation.CreatedAt));
+        return TypedResults.Ok(new InvitationView(invitation.Id, invitation.Email, invitation.Role, invitation.CreatedAt,
+            await LastEmailAsync(db, invitation.NormalizedEmail, ct)));
     }
 
     private static async Task<Results<NoContent, NotFound<ProblemDetails>>> RevokeInvitationAsync(

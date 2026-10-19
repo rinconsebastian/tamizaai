@@ -23,7 +23,7 @@ export function buildOpenIdConfiguration(
     customParamsAuthRequest: { ui_locales: lang },
     silentRenew: true,
     useRefreshToken: true,
-    // Keycloak issues refresh tokens for the code flow without the offline_access scope.
+    // Keycloak issues refresh tokens for the code flow without the offline_access scope; a provider that needs it gets it through OIDC_SCOPE.
     disableRefreshTokenOfflineAccessScopeWarning: true,
     renewTimeBeforeTokenExpiresInSeconds: 30,
     ignoreNonceAfterRefresh: true,

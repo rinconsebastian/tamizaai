@@ -172,7 +172,7 @@ async function open(role: ProjectRole, seed: Seed = {}) {
   if (seed.assistant !== undefined) {
     http
       .match(SYSTEM_CONFIG_URL)
-      .forEach((r) => r.flush({ oidc: { authority: 'https://kc.example.org', clientId: 'tamiza-ui', scope: 'openid' }, version: '0.1.0', assistant: { enabled: seed.assistant } }));
+      .forEach((r) => r.flush({ oidc: { authority: 'https://kc.example.org', clientId: 'tamiza-ui', scope: 'openid' }, version: '0.1.0', assistant: { enabled: seed.assistant }, accountEmails: { enabled: false } }));
   }
   http.expectOne((r) => r.url === runsUrl && r.method === 'GET').flush(seed.runs ?? { items: [run()], total: 1 });
   http

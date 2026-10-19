@@ -2,7 +2,7 @@ using System.Security.Claims;
 
 namespace Tamiza.Api.Auth;
 
-/// <summary>The identity claims Tamiza reads from a validated Keycloak access token.</summary>
+/// <summary>The identity claims Tamiza reads from a validated access token of the identity provider.</summary>
 public sealed record TokenIdentity(string Subject, string Name, string? Email, bool EmailVerified)
 {
     public const string SubjectClaim = "sub";

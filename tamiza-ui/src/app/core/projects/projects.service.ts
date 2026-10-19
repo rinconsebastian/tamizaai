@@ -120,12 +120,19 @@ export interface Invitation {
   email: string;
   role: ProjectRole;
   createdAt: string;
+  /** When an invitation email was last requested for the person; null or absent when none was. */
+  lastEmailAt?: string | null;
 }
+
+/** What happened to the invitation email. */
+export type EmailOutcome = 'sent' | 'recentlySent' | 'existingAccount' | 'rateLimited' | 'failed';
 
 export interface InviteResult {
   kind: 'member' | 'invitation';
   member: Member | null;
   invitation: Invitation | null;
+  /** Absent when no email applies: the person became a member at once, or account emails are off. */
+  emailOutcome?: EmailOutcome | null;
 }
 
 export interface SamplingDimension {
@@ -240,8 +247,19 @@ export class ProjectsService {
     return this.http.get<Invitation[]>(`${base}/${id}/invitations`);
   }
 
-  invite(id: string, email: string, role: ProjectRole): Observable<InviteResult> {
-    return this.http.post<InviteResult>(`${base}/${id}/members`, { email, role });
+  /** `language` is the interface language, used for the emails of a new account. */
+  invite(id: string, email: string, role: ProjectRole, language?: string): Observable<InviteResult> {
+    return this.http.post<InviteResult>(`${base}/${id}/members`, { email, role, language });
+  }
+
+  /** Asks for the invitation email again; answers the invitation with the time of this email. */
+  resendInvitationEmail(id: string, invitationId: string, language?: string): Observable<Invitation> {
+    return this.http.post<Invitation>(`${base}/${id}/invitations/${invitationId}/email`, { language });
+  }
+
+  /** Asks the identity provider to email the member a link to set a new password. */
+  sendPasswordReset(id: string, userId: string): Observable<void> {
+    return this.http.post<void>(`${base}/${id}/members/${userId}/password-reset`, null);
   }
 
   changeMemberRole(id: string, userId: string, role: ProjectRole): Observable<Member> {
