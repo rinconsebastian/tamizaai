@@ -603,6 +603,57 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
         Assert.Equal(withoutWidgets, await ScalarAsync<string>(connectionString, "SELECT string_agg(project_id::text, ', ') FROM tamiza.dashboards"));
     }
 
+    [Fact]
+    public async Task Dashboard_filters_script_gives_every_dashboard_no_filters_and_leaves_widgets_alone()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(
+            connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql", "0004_add_pipeline_authoring.sql",
+            "0005_add_choice_labels.sql", "0006_add_performance_dashboard.sql", "0007_add_indicators_dashboard.sql", "0008_split_indicator_scripts.sql",
+            "0009_add_script_workbench.sql", "0010_add_local_dev_kit.sql", "0011_add_script_assistant.sql", "0012_add_multiple_dashboards.sql",
+            "0013_add_account_emails.sql");
+        const string project = "00000000-0000-0000-0000-0000000000aa";
+        const string ada = "00000000-0000-0000-0000-000000000001";
+        const string field = "00000000-0000-0000-0000-0000000000d2";
+        // Two dashboards, as a project had them before filters: Indicators, empty, and Field with the project's two widgets.
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('{{ada}}', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('{{project}}', 'Survey', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(), '{{ada}}', now(), now());
+            INSERT INTO tamiza.dashboards (id, project_id, name, normalized_name, position, created_by, updated_by)
+            VALUES ('00000000-0000-0000-0000-0000000000d1', '{{project}}', 'Indicators', 'indicators', 0, '{{ada}}', '{{ada}}'),
+                   ('{{field}}', '{{project}}', 'Field', 'field', 1, '{{ada}}', '{{ada}}');
+            INSERT INTO tamiza.dashboard_widgets (id, project_id, dashboard_id, chart_type, title, config, layout, created_by, created_at, updated_by, updated_at)
+            VALUES ('00000000-0000-0000-0000-0000000000c1', '{{project}}', '{{field}}', 'stat', 'Households', '{"indicator":"households","measure":"value"}',
+                    '{"x":0,"y":0,"w":3,"h":2}', '{{ada}}', '2026-10-01 08:00:00+00', '{{ada}}', '2026-10-02 09:30:00+00'),
+                   ('00000000-0000-0000-0000-0000000000c2', '{{project}}', '{{field}}', 'bar', 'By municipality',
+                    '{"indicator":"coverage","measure":"value","groupBy":"municipality","filters":[{"column":"round","op":"in","values":["2"]}]}',
+                    '{"x":3,"y":0,"w":9,"h":4}', '{{ada}}', '2026-10-03 08:00:00+00', '{{ada}}', '2026-10-04 17:45:00+00');
+            """);
+        const string widgets = """
+            SELECT string_agg(format('%s %s %s %s %s %s %s', id, dashboard_id, chart_type, title, config, layout, updated_at), ' | ' ORDER BY id)
+            FROM tamiza.dashboard_widgets
+            """;
+        var widgetsBefore = await ScalarAsync<string>(connectionString, widgets);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        Assert.Contains("0014_add_dashboard_filters.sql", Scripts);
+        // Both dashboards have an empty list of filters, and the widgets keep their query, place, size and last change.
+        Assert.Equal("Field [] | Indicators []", await ScalarAsync<string>(connectionString,
+            "SELECT string_agg(format('%s %s', name, filters), ' | ' ORDER BY name) FROM tamiza.dashboards"));
+        Assert.Equal(widgetsBefore, await ScalarAsync<string>(connectionString, widgets));
+
+        // A dashboard added without filters gets the empty list.
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.dashboards (project_id, name, normalized_name, position, created_by, updated_by)
+            VALUES ('{{project}}', 'Health', 'health', 2, '{{ada}}', '{{ada}}')
+            """);
+        Assert.Equal("[]", await ScalarAsync<string>(connectionString, "SELECT filters::text FROM tamiza.dashboards WHERE name = 'Health'"));
+    }
+
     /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>
     private static void ApplyScripts(string connectionString, params string[] names)
     {

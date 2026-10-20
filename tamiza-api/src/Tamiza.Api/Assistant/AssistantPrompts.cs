@@ -15,7 +15,7 @@ public static class AssistantPrompts
     /// Bumped with any change to <c>Prompts/system.md</c>, <c>Prompts/message-words.txt</c> or <c>Examples/**</c>, and stored in every
     /// usage record, so answers can be told apart by the instructions they were given.
     /// </summary>
-    public const int Version = 3;
+    public const int Version = 4;
 
     /// <summary>
     /// The templates of each script kind in the order the editor offers them: the first one is the one kept when the context

@@ -180,4 +180,18 @@ public sealed class ScriptConventionTests
             name => Assert.StartsWith("ix_invited_accounts_", name));
         Assert.Contains("CREATE INDEX ix_invited_accounts_normalized_email ON tamiza.invited_accounts (normalized_email)", sql);
     }
+
+    [Fact]
+    public void The_dashboard_filters_script_adds_one_column()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0014_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0014_add_dashboard_filters.sql", resource);
+        Assert.Contains("ALTER TABLE tamiza.dashboards ADD COLUMN filters jsonb NOT NULL DEFAULT '[]'::jsonb;", sql);
+
+        // No key, check, foreign key or index, so nothing can be left unnamed.
+        Assert.Empty(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|CHECK|INDEX)\b"));
+    }
 }

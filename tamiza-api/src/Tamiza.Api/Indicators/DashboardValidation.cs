@@ -1,3 +1,6 @@
+using Tamiza.Api.Http;
+using Tamiza.Api.Pipeline;
+
 namespace Tamiza.Api.Indicators;
 
 /// <summary>
@@ -48,4 +51,104 @@ public static class DashboardValidation
     public static string Normalize(string name) => name.Trim().ToLowerInvariant();
 
     public static string TakenMessage(string name) => $"Another dashboard of this project is named \"{name}\".";
+
+    /// <summary>
+    /// A dashboard's filters as they are saved, or null with <paramref name="errors"/> keyed <c>filters</c> and <c>filters[i].label</c>,
+    /// <c>.column</c>, <c>.kind</c> or <c>.default</c> (design D4). Nothing is checked against the tables: a filter may be defined before
+    /// its indicators publish, as a widget may. Labels are trimmed; a default keeps only what its kind takes.
+    /// </summary>
+    public static List<DashboardFilter>? Filters(IReadOnlyList<DashboardFilterInput?>? input, FieldErrors errors)
+    {
+        if (input is null)
+        {
+            errors.Add("filters", "The filters are required; send an empty list for none.");
+            return null;
+        }
+
+        if (input.Count > DashboardFilterRules.MaxFilters)
+        {
+            errors.Add("filters", $"A dashboard can have at most {DashboardFilterRules.MaxFilters} filters.");
+            return null;
+        }
+
+        var filters = new List<DashboardFilter>();
+        var labels = new HashSet<string>(StringComparer.Ordinal);
+        var columns = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < input.Count; i++)
+        {
+            var field = $"filters[{i}]";
+            if (input[i] is not { } filter)
+            {
+                errors.Add(field, "A filter needs a label, a column and a kind.");
+                continue;
+            }
+
+            var label = Label(filter.Label, field + ".label", errors);
+            if (label is not null && !labels.Add(label.ToLowerInvariant()))
+            {
+                errors.Add(field + ".label", $"Another filter of this dashboard is labelled \"{label}\".");
+            }
+
+            var column = filter.Column;
+            if (!ColumnNames.IsValidColumnName(column))
+            {
+                errors.Add(field + ".column", "The column must be a published column's name: lowercase letters, digits and underscores, "
+                    + "not starting with a digit, at most 63 characters.");
+                column = null;
+            }
+            else if (!columns.Add(column!))
+            {
+                errors.Add(field + ".column", $"Column '{column}' already has a filter on this dashboard.");
+            }
+
+            var kind = filter.Kind;
+            if (!DashboardFilterKinds.IsKnown(kind))
+            {
+                errors.Add(field + ".kind", $"The kind must be one of {string.Join(", ", DashboardFilterKinds.All)}.");
+                continue;
+            }
+
+            if (filter.Default is { } value)
+            {
+                DashboardFilterKinds.CheckValue(kind!, value, column ?? filter.Column ?? "", field + ".default", errors);
+            }
+
+            if (label is not null && column is not null)
+            {
+                filters.Add(new DashboardFilter(column, label, kind!, Normalize(kind!, filter.Default)));
+            }
+        }
+
+        return errors.Any ? null : filters;
+    }
+
+    private static string? Label(string? input, string field, FieldErrors errors)
+    {
+        var label = input?.Trim();
+        if (string.IsNullOrEmpty(label))
+        {
+            errors.Add(field, "The label is required.");
+            return null;
+        }
+
+        if (input!.Any(char.IsControl))
+        {
+            errors.Add(field, "The label cannot contain control characters.");
+            return null;
+        }
+
+        if (label.Length > DashboardFilterRules.MaxLabelLength)
+        {
+            errors.Add(field, $"The label can have at most {DashboardFilterRules.MaxLabelLength} characters.");
+            return null;
+        }
+
+        return label;
+    }
+
+    /// <summary>Values for a text or true/false filter, a range for the others; an empty end of a range is no end.</summary>
+    private static DashboardFilterValue? Normalize(string kind, DashboardFilterValue? value) =>
+        value is null ? null
+        : DashboardFilterKinds.TakesValues(kind) ? new DashboardFilterValue(value.Values)
+        : new DashboardFilterValue(null, string.IsNullOrEmpty(value.Min) ? null : value.Min, string.IsNullOrEmpty(value.Max) ? null : value.Max);
 }

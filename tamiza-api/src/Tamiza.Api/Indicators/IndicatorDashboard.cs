@@ -108,11 +108,14 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
     /// does not have, instead of failing; a request that is malformed is returned as validation errors. Throws
     /// <see cref="DataTimeoutException"/> when the read takes too long.
     /// </summary>
-    public async Task<IndicatorQueryOutcome> QueryAsync(Guid projectId, WidgetConfigInput input, string? chartType, CancellationToken ct)
+    /// <param name="dashboardFilters">The dashboard filter values in force that narrow the rows too (design D3); null or empty for none.</param>
+    public async Task<IndicatorQueryOutcome> QueryAsync(
+        Guid projectId, WidgetConfigInput input, string? chartType, CancellationToken ct, IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null)
     {
         var config = input.Normalize();
         var errors = new FieldErrors();
         IndicatorValidation.CheckConfig(config, ChartTypes.IsKnown(chartType) ? chartType : null, prefix: "", errors);
+        IndicatorValidation.CheckDashboardFilters(dashboardFilters, errors);
         if (errors.Any)
         {
             return new IndicatorQueryOutcome(null, errors.ToDictionary());
@@ -128,7 +131,7 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
             }
 
             var plan = IndicatorQueryBuilder.Plan(
-                config, columns, project.TimeZone, From(projectId, config.Indicator), maxRows, perRow: chartType == ChartTypes.Histogram);
+                config, columns, project.TimeZone, From(projectId, config.Indicator), maxRows, perRow: chartType == ChartTypes.Histogram, dashboardFilters);
             if (plan.Errors is not null)
             {
                 return new IndicatorQueryOutcome(null, plan.Errors);
@@ -142,9 +145,71 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
             await data.SleepForTestsAsync(connection, transaction, ct);
             var group = columns.FirstOrDefault(c => c.Name == config.GroupBy);
             var (rows, limitReached) = await ReadRowsAsync(connection, transaction, plan.Sql, group?.Type, maxRows, ct);
-            return new IndicatorQueryOutcome(new IndicatorQueryResponse(true, rows, limitReached, MissingReferences.None, plan.Sql.TooltipTypes), null);
+            return new IndicatorQueryOutcome(
+                new IndicatorQueryResponse(
+                    true, rows, limitReached, MissingReferences.None, plan.Sql.TooltipTypes, dashboardFilters is { Count: > 0 } ? plan.NotFiltered : null),
+                null);
         }, ct), ct);
     }
+
+    /// <summary>
+    /// The 50 most frequent values of a text column across the published tables of <paramref name="indicators"/> that have it as text,
+    /// most frequent first, for a dashboard's text filter (design D5). Tables without the column, with it as another type, or not
+    /// published are skipped, so the list may be empty. Values longer than a filter accepts are left out. Throws
+    /// <see cref="DataTimeoutException"/> when the read takes too long.
+    /// </summary>
+    /// <param name="indicators">Indicator names, each a valid table name, as the dashboard's widgets name them.</param>
+    /// <param name="search">Restricts the list to values that contain this text, ignoring case.</param>
+    public Task<IReadOnlyList<DataValueCount>> ValuesAsync(
+        Guid projectId, IReadOnlyList<string> indicators, string column, string? search, CancellationToken ct) =>
+        data.WithSlotAsync(() => data.InTransactionAsync<IReadOnlyList<DataValueCount>>(projectId, dataOptions.Value.StatementTimeout, async (connection, transaction, _) =>
+        {
+            // Every table and column name below was returned by the catalog, and is quoted.
+            var tables = new List<(string From, string Column)>();
+            foreach (var indicator in indicators)
+            {
+                var columns = await DataDashboard.LockAndDescribeAsync(connection, transaction, SchemaName(projectId), indicator, ct);
+                if (columns?.FirstOrDefault(c => c.Name == column && c.Type == DataColumnType.Text) is { } found)
+                {
+                    tables.Add((From(projectId, indicator), DataSources.Quote(found.Name)));
+                }
+            }
+
+            if (tables.Count == 0)
+            {
+                return [];
+            }
+
+            await data.SleepForTestsAsync(connection, transaction, ct);
+            var searching = !string.IsNullOrEmpty(search);
+            string Matching(string quoted) => searching ? $" AND {quoted}::text ILIKE '%' || @search || '%' ESCAPE '\\'" : "";
+            // Each table's counts, then the counts of a value added up across tables.
+            var each = tables.Select(t =>
+                $"""
+                SELECT {t.Column}::text AS v, count(*) AS n FROM {t.From}
+                WHERE {t.Column} IS NOT NULL AND char_length({t.Column}::text) <= {DataQueryBuilder.MaxTextLength}{Matching(t.Column)}
+                GROUP BY 1
+                """);
+            await using var command = new NpgsqlCommand(
+                $"""
+                SELECT v, sum(n)::bigint FROM (
+                {string.Join("\nUNION ALL\n", each)}
+                ) AS s GROUP BY v ORDER BY sum(n) DESC, v LIMIT {DataDashboard.MaxFrequentValues}
+                """, connection, transaction);
+            if (searching)
+            {
+                command.Parameters.Add(new NpgsqlParameter("search", NpgsqlDbType.Text) { Value = DataQueryBuilder.EscapeLike(search!) });
+            }
+
+            var values = new List<DataValueCount>();
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                values.Add(new DataValueCount(reader.GetString(0), reader.GetInt64(1)));
+            }
+
+            return values;
+        }, ct), ct);
 
     /// <summary>
     /// Writes the whole published table of one indicator to a file and registers its single-use link. Returns null when the table is

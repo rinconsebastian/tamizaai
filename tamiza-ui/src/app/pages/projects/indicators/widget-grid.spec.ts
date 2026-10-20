@@ -1,9 +1,11 @@
 import { TestBed } from '@angular/core/testing';
+import { Router } from '@angular/router';
 import { vi } from 'vitest';
-import { settle } from '../../../../testing/project-harness';
-import { Layout } from '../../../core/projects/indicators.service';
+import { projectId, settle } from '../../../../testing/project-harness';
+import { DashboardFilter, Layout } from '../../../core/projects/indicators.service';
 import { ChartTooltips } from '../../../shared/ui';
-import { Context, all, answerLoad, answerQueries, clearOverlay, isPatch, open, result, row, text, wait, widget, widgetUrl } from './indicators-testing';
+import { encodeFilters } from '../data-view';
+import { Context, all, answerLoad, answerQueries, clearOverlay, config, isPatch, isQuery, open, result, row, text, wait, widget, widgetUrl } from './indicators-testing';
 import { layoutSaveDelayMs } from '../project-indicators';
 
 const rows = result([row('Cali', 75)]);
@@ -266,5 +268,86 @@ describe('the widget grid', () => {
       expect(requests[0].request.body).toEqual({ layout: { x: 0, y: 0, w: 8, h: 5 } });
       requests[0].flush(left);
     }, 10000);
+  });
+});
+
+// Dashboard filters (dashboard filters, design D7): each widget's query gets the active filters it does not ignore, and the widget
+// says which active filters did not narrow it.
+describe('the widget grid with dashboard filters', () => {
+  afterEach(clearOverlay);
+
+  const municipality: DashboardFilter = { column: 'municipality', label: 'Municipality', kind: 'text', default: null };
+  const round: DashboardFilter = { column: 'round', label: 'Round', kind: 'number', default: null };
+  const cali = `f=${encodeFilters([{ column: 'municipality', op: 'in', values: ['Cali'] }])}`;
+  const note = (context: Context, id: string) => text(item(context, id).querySelector('[data-testid="widget-not-filtered"]'));
+  const bodyOf = (requests: { request: { body: { config: { indicator: string }; dashboardFilters?: unknown } } }[], indicator: string) =>
+    requests.find((r) => r.request.body.config.indicator === indicator)!.request.body;
+
+  it('re-queries every widget once with the new filters, and drops the queries still on their way', async () => {
+    const context = await open('viewer', [left, right], null, {}, { filters: [municipality] });
+    const first = context.http.match(isQuery);
+    expect(first).toHaveLength(2);
+
+    await TestBed.inject(Router).navigateByUrl(`/projects/${projectId}/dashboards/d1?${cali}`);
+    await settle(context.harness);
+    const second = await answerQueries(context, rows);
+
+    expect(first.every((r) => r.cancelled)).toBe(true);
+    expect(second).toHaveLength(2);
+    expect(second.map((r) => r.request.body.dashboardFilters)).toEqual([
+      [{ column: 'municipality', kind: 'text', values: ['Cali'] }],
+      [{ column: 'municipality', kind: 'text', values: ['Cali'] }],
+    ]);
+  });
+
+  it('names the filters a widget\'s table did not take (Indicator without the column, Column of another kind)', async () => {
+    const both = `f=${encodeFilters([
+      { column: 'municipality', op: 'in', values: ['Cali'] },
+      { column: 'round', op: 'range', min: '1', max: '2' },
+    ])}`;
+    const context = await open('viewer', [left, right], null, {}, { filters: [municipality, round], query: both });
+    const requests = context.http.match(isQuery);
+    requests[0].flush(result([row('Cali', 75)], { notFiltered: ['round'] }));
+    requests[1].flush(result([row('Cali', 75)], { notFiltered: ['municipality', 'round'] }));
+    await settle(context.harness);
+
+    expect(note(context, 'w1')).toBe('Not filtered by: Round');
+    expect(note(context, 'w2')).toBe('Not filtered by: Municipality, Round');
+    expect(item(context, 'w1').querySelector('[data-testid="widget-missing"]')).toBeNull();
+  });
+
+  it('leaves an ignored filter out of the widget\'s query and names it (Ignored filter)', async () => {
+    const total = widget('w3', {
+      title: 'Households, all municipalities',
+      chartType: 'stat',
+      config: config({ indicator: 'households_visited', groupBy: null, ignoredDashboardFilters: ['municipality'] }),
+      layout: { x: 0, y: 4, w: 3, h: 2 },
+    });
+    const context = await open('viewer', [left, total], null, {}, { filters: [municipality], query: cali });
+    const requests = await answerQueries(context, rows);
+
+    expect(bodyOf(requests, 'households_visited').dashboardFilters).toBeUndefined();
+    expect(bodyOf(requests, 'coverage').dashboardFilters).toEqual([{ column: 'municipality', kind: 'text', values: ['Cali'] }]);
+    expect(note(context, 'w3')).toBe('Not filtered by: Municipality');
+    expect(note(context, 'w1')).toBe('');
+  });
+
+  it('says nothing about a filter without a value (Filter without a value)', async () => {
+    const context = await open('viewer', [left], null, {}, { filters: [municipality] });
+    const requests = await answerQueries(context, rows);
+
+    expect(requests[0].request.body.dashboardFilters).toBeUndefined();
+    expect(note(context, 'w1')).toBe('');
+  });
+
+  it('says nothing about filters on a widget that draws nothing: not published, or a missing column', async () => {
+    const context = await open('viewer', [left, right], null, {}, { filters: [municipality], query: cali });
+    const requests = context.http.match(isQuery);
+    requests[0].flush(result([], { published: false, notFiltered: ['municipality'] }));
+    requests[1].flush(result([], { missing: { indicator: false, columns: ['round'] }, notFiltered: ['municipality'] }));
+    await settle(context.harness);
+
+    expect(note(context, 'w1')).toBe('');
+    expect(note(context, 'w2')).toBe('');
   });
 });

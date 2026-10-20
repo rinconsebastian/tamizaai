@@ -626,4 +626,197 @@ public sealed class IndicatorQueryTests(PostgresFixture postgres)
 
         Assert.Equal(["x|3"], IndicatorsHarness.Rows(result));
     }
+
+    // Dashboard filters (dashboard-filters: Filter kinds, Widgets a filter narrows, Widgets a filter does not narrow)
+
+    private const string VisitColumns = "municipality text, sex text, round bigint, visited_at timestamptz, value numeric, sample_target bigint, block text, geometry text";
+
+    // municipality, sex, round, visited_at, value, sample_target, block, geometry
+    private const string VisitRows = """
+        ('Cali',    'female', 1, '2026-09-01T15:00:00Z', 40, 10, '0042', 'POINT(1 1)'),
+        ('Cali',    'male',   2, '2026-09-02T04:30:00Z', 35, 20, '0042', 'POINT(1 1)'),
+        ('Palmira', 'female', 2, '2026-09-02T05:30:00Z', 60, 30, '0043', 'POINT(2 2)'),
+        ('Buga',    'male',   3, '2026-09-03T15:00:00Z', 25, 40, '0044', 'POINT(3 3)')
+        """;
+
+    private async Task<IndicatorsHarness> WithVisitsAsync()
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("visits", VisitColumns, VisitRows);
+        return h;
+    }
+
+    private static object ByMunicipality(object? filters = null) => new { indicator = "visits", groupBy = "municipality", filters };
+
+    private static object Text(string column, params string[] values) => new { column, kind = "text", values };
+
+    private static object Range(string column, string kind, string? min = null, string? max = null) => new { column, kind, min, max };
+
+    [Fact]
+    public async Task A_text_dashboard_filter_keeps_the_rows_holding_one_of_its_values()
+    {
+        await using var h = await WithVisitsAsync();
+
+        var result = await h.QueryAsync(ByMunicipality(), dashboardFilters: new[] { Text("municipality", "Cali", "Palmira") });
+
+        Assert.Equal(["Cali|75", "Palmira|60"], IndicatorsHarness.Rows(result));
+        Assert.Empty(result.GetProperty("notFiltered").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task A_date_dashboard_filter_keeps_whole_days_in_the_projects_time_zone()
+    {
+        await using var h = await WithVisitsAsync();
+        await h.ExecuteAsync("UPDATE tamiza.projects SET time_zone = 'America/Bogota'");
+
+        // 04:30 UTC on 2 September is 23:30 on 1 September in Bogotá; 05:30 UTC is already the 2nd there.
+        var result = await h.QueryAsync(ByMunicipality(), dashboardFilters: new[] { Range("visited_at", "date", "2026-09-01", "2026-09-01") });
+
+        Assert.Equal(["Cali|75"], IndicatorsHarness.Rows(result));
+    }
+
+    [Fact]
+    public async Task A_number_dashboard_filter_with_one_end_keeps_the_rows_from_it()
+    {
+        await using var h = await WithVisitsAsync();
+
+        var result = await h.QueryAsync(ByMunicipality(), dashboardFilters: new[] { Range("round", "number", min: "2") });
+
+        Assert.Equal(["Buga|25", "Cali|35", "Palmira|60"], IndicatorsHarness.Rows(result));
+    }
+
+    [Fact]
+    public async Task A_dashboard_filter_narrows_a_column_chart_and_a_stat_tile_alike()
+    {
+        await using var h = await WithVisitsAsync();
+        var cali = new[] { Text("municipality", "Cali") };
+
+        var column = await h.QueryAsync(ByMunicipality(), "column", dashboardFilters: cali);
+        var stat = await h.QueryAsync(new { indicator = "visits" }, "stat", dashboardFilters: cali);
+
+        Assert.Equal(["Cali|75"], IndicatorsHarness.Rows(column));
+        Assert.Equal(["|75"], IndicatorsHarness.Rows(stat));
+    }
+
+    [Fact]
+    public async Task A_number_dashboard_filter_narrows_integer_and_decimal_columns_of_two_indicators()
+    {
+        await using var h = await WithVisitsAsync();
+        await h.PublishAsync("attendance", "municipality text, round double precision, value numeric", "('Cali', 1, 5), ('Cali', 2, 7), ('Buga', 2.5, 9)");
+        var roundTwo = new[] { Range("round", "number", "2", "2") };
+
+        var visits = await h.QueryAsync(ByMunicipality(), dashboardFilters: roundTwo);
+        var attendance = await h.QueryAsync(new { indicator = "attendance", groupBy = "municipality" }, dashboardFilters: roundTwo);
+        // A decimal bound on the integer column: 2.5 and more is 3 and more.
+        var fromHalf = await h.QueryAsync(ByMunicipality(), dashboardFilters: new[] { Range("round", "number", min: "2.5") });
+
+        Assert.Equal(["Cali|35", "Palmira|60"], IndicatorsHarness.Rows(visits));
+        Assert.Equal(["Cali|7"], IndicatorsHarness.Rows(attendance));
+        Assert.Equal(["Buga|25"], IndicatorsHarness.Rows(fromHalf));
+    }
+
+    [Fact]
+    public async Task A_widget_filter_and_a_dashboard_filter_on_one_column_must_both_hold()
+    {
+        await using var h = await WithVisitsAsync();
+
+        var result = await h.QueryAsync(
+            ByMunicipality(new[] { new { column = "municipality", op = "in", values = new[] { "Cali", "Buga" } } }),
+            dashboardFilters: new[] { Text("municipality", "Cali", "Palmira") });
+
+        Assert.Equal(["Cali|75"], IndicatorsHarness.Rows(result));
+    }
+
+    [Fact]
+    public async Task A_dashboard_filter_narrows_a_maps_shapes_row_counts_and_tooltip_sums()
+    {
+        await using var h = await WithVisitsAsync();
+        var map = new { indicator = "visits", groupBy = "block", geometryColumn = "geometry", tooltip = new[] { new { column = "sample_target" } } };
+
+        var result = await h.QueryAsync(map, "map", dashboardFilters: new[] { Range("round", "number", "2", "2") });
+
+        var rows = result.GetProperty("rows").EnumerateArray()
+            .Select(r => $"{r.GetProperty("group").GetString()} {r.GetProperty("rows").GetInt64()} {r.GetProperty("tooltip")[0].GetDouble()}")
+            .ToArray();
+        Assert.Equal(["0042 1 20", "0043 1 30"], rows);
+    }
+
+    [Fact]
+    public async Task A_dashboard_filter_narrows_the_rows_before_they_are_summed()
+    {
+        await using var h = await WithVisitsAsync();
+
+        var result = await h.QueryAsync(ByMunicipality(), dashboardFilters: new[] { Text("sex", "female") });
+
+        Assert.Equal(["Cali|40", "Palmira|60"], IndicatorsHarness.Rows(result));
+    }
+
+    [Fact]
+    public async Task A_widget_with_fifty_filters_is_narrowed_by_a_dashboard_filter_too()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        var own = Enumerable.Range(0, 50).Select(i => $"c{i}").ToArray();
+        await h.PublishAsync(
+            "wide", "municipality text, value numeric, " + string.Join(", ", own.Select(c => c + " text")),
+            string.Join(", ", new[] { "Cali", "Buga" }.Select(m => $"('{m}', 1, {string.Join(", ", own.Select(_ => "'x'"))})")));
+
+        var result = await h.QueryAsync(
+            new { indicator = "wide", groupBy = "municipality", filters = own.Select(c => new { column = c, op = "in", values = new[] { "x" } }).ToArray() },
+            dashboardFilters: new[] { Text("municipality", "Cali") });
+
+        Assert.Equal(["Cali|1"], IndicatorsHarness.Rows(result));
+    }
+
+    [Fact]
+    public async Task A_dashboard_filter_the_table_cannot_take_leaves_the_rows_unfiltered_and_is_named()
+    {
+        await using var h = await WithVisitsAsync();
+        // `zone` is not in the table; `round` is a number there, not text. Neither makes the widget stale.
+        var result = await h.QueryAsync(
+            ByMunicipality(),
+            dashboardFilters: new[] { Text("zone", "north"), Text("round", "2"), Text("sex", "male") });
+
+        Assert.Equal(["Buga|25", "Cali|35"], IndicatorsHarness.Rows(result));
+        Assert.Equal(["zone", "round"], IndicatorsHarness.Strings(result.GetProperty("notFiltered")));
+        Assert.Empty(result.GetProperty("missing").GetProperty("columns").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task A_dashboard_filter_whose_column_a_script_change_removed_is_not_a_missing_column()
+    {
+        await using var h = await WithVisitsAsync();
+        await h.ExecuteAsync($"ALTER TABLE \"{h.Schema}\".visits DROP COLUMN municipality");
+
+        var result = await h.QueryAsync(new { indicator = "visits", groupBy = "sex" }, dashboardFilters: new[] { Text("municipality", "Cali") });
+
+        Assert.Equal(["female|100", "male|60"], IndicatorsHarness.Rows(result));
+        Assert.Equal(["municipality"], IndicatorsHarness.Strings(result.GetProperty("notFiltered")));
+        Assert.Empty(result.GetProperty("missing").GetProperty("columns").EnumerateArray());
+    }
+
+    [Theory]
+    [InlineData("number", "second", null, "round")]
+    [InlineData("date", "2026-09-30", "2026-09-01", "visited_at")]
+    public async Task A_dashboard_filter_value_of_the_wrong_kind_or_a_reversed_range_is_refused(string kind, string min, string? max, string column)
+    {
+        await using var h = await WithVisitsAsync();
+
+        var response = await h.PostQueryAsync(ByMunicipality(), dashboardFilters: new[] { Range(column, kind, min, max) });
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains($"'{column}'", IndicatorsHarness.Errors(problem, "dashboardFilters[0]").Single());
+    }
+
+    [Fact]
+    public async Task A_query_without_dashboard_filters_answers_no_list_of_filters_that_did_not_apply()
+    {
+        await using var h = await WithVisitsAsync();
+
+        var without = await h.QueryAsync(ByMunicipality());
+        var empty = await h.QueryAsync(ByMunicipality(), dashboardFilters: Array.Empty<object>());
+
+        Assert.False(without.TryGetProperty("notFiltered", out _));
+        Assert.False(empty.TryGetProperty("notFiltered", out _));
+    }
 }

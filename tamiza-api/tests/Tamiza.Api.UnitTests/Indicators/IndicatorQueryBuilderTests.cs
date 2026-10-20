@@ -498,4 +498,121 @@ public sealed class IndicatorQueryBuilderTests
         Assert.Equal(1, plan.Sql!.Sql.Split("WHERE").Length - 1);
         Assert.Contains("\"year\" >= ", plan.Sql.Sql);
     }
+
+    // Dashboard filters (design D3)
+
+    private static IndicatorQueryPlan Filtered(
+        WidgetConfigInput input, IReadOnlyList<AppliedDashboardFilter> dashboardFilters, TableColumn[]? columns = null, string zone = "UTC") =>
+        IndicatorQueryBuilder.Plan(input.Normalize(), columns ?? Columns, zone, From, 5000, dashboardFilters: dashboardFilters);
+
+    [Fact]
+    public void A_widget_filter_and_a_dashboard_filter_on_one_column_both_hold()
+    {
+        var plan = Filtered(
+            Config(filters: [new DataFilter("municipality", "in", Values: ["Cali", "Buga"])]),
+            [new AppliedDashboardFilter("municipality", DashboardFilterKinds.Text, Values: ["Cali", "Palmira"])]);
+
+        Assert.Contains("WHERE \"value\" IS NOT NULL AND \"municipality\"::text = ANY(@f0) AND \"municipality\"::text = ANY(@d0)", plan.Sql!.Sql);
+        Assert.Equal(["Cali", "Buga"], (string[])plan.Sql.Parameters.Single(p => p.Name == "f0").Value);
+        Assert.Equal(["Cali", "Palmira"], (string[])plan.Sql.Parameters.Single(p => p.Name == "d0").Value);
+        Assert.Empty(plan.NotFiltered!);
+    }
+
+    [Fact]
+    public void A_number_filter_on_an_integer_column_binds_a_numeric_bound()
+    {
+        var plan = Filtered(Config(), [new AppliedDashboardFilter("year", DashboardFilterKinds.Number, Min: "2025.5")]);
+
+        Assert.Contains("\"year\" >= @d0min", plan.Sql!.Sql);
+        var bound = plan.Sql.Parameters.Single(p => p.Name == "d0min");
+        Assert.Equal((NpgsqlDbType.Numeric, 2025.5m), (bound.Type, (decimal)bound.Value));
+    }
+
+    [Fact]
+    public void A_date_filter_on_a_timestamp_column_keeps_whole_days_in_the_zone_with_one_zone_parameter()
+    {
+        TableColumn[] columns = [.. Columns, new("visited_at", DataColumnType.Timestamp, null)];
+        var plan = Filtered(
+            Config(filters: [new DataFilter("visited_at", "range", Min: "2026-01-01")]),
+            [new AppliedDashboardFilter("visited_at", DashboardFilterKinds.Date, Min: "2026-09-01", Max: "2026-09-01")],
+            columns, "America/Bogota");
+
+        Assert.Contains(
+            "\"visited_at\" >= (@d0min::date)::timestamp AT TIME ZONE @tz AND \"visited_at\" < ((@d0max::date + 1)::timestamp AT TIME ZONE @tz)",
+            plan.Sql!.Sql);
+        Assert.Equal("America/Bogota", plan.Sql.Parameters.Single(p => p.Name == "tz").Value);
+    }
+
+    [Fact]
+    public void A_missing_column_or_one_of_another_kind_is_not_filtered_and_the_widget_still_draws()
+    {
+        // `year` is an integer here, so a text filter on it does not apply; `sex` is not in the table.
+        var plan = Filtered(
+            Config(),
+            [
+                new AppliedDashboardFilter("sex", DashboardFilterKinds.Text, Values: ["female"]),
+                new AppliedDashboardFilter("year", DashboardFilterKinds.Text, Values: ["2026"]),
+                new AppliedDashboardFilter("municipality", DashboardFilterKinds.Text, Values: ["Cali"]),
+            ]);
+
+        Assert.NotNull(plan.Sql);
+        Assert.Empty(plan.MissingColumns);
+        Assert.Equal(["sex", "year"], plan.NotFiltered!);
+        Assert.Contains("\"municipality\"::text = ANY(@d0)", plan.Sql.Sql);
+        Assert.DoesNotContain("\"year\"", plan.Sql.Sql);
+    }
+
+    [Fact]
+    public void A_true_false_filter_applies_only_to_a_true_false_column()
+    {
+        var plan = Filtered(
+            Config(),
+            [
+                new AppliedDashboardFilter("flag", DashboardFilterKinds.Boolean, Values: ["true"]),
+                new AppliedDashboardFilter("municipality", DashboardFilterKinds.Boolean, Values: ["true"]),
+            ]);
+
+        Assert.Contains("\"flag\" = ANY(@d0)", plan.Sql!.Sql);
+        Assert.Equal(["municipality"], plan.NotFiltered!);
+    }
+
+    [Fact]
+    public void Fifty_widget_filters_and_eight_dashboard_filters_plan_together()
+    {
+        TableColumn[] columns =
+        [
+            .. Columns,
+            .. Enumerable.Range(0, 50).Select(i => new TableColumn($"w{i}", DataColumnType.Text, null)),
+            .. Enumerable.Range(0, 8).Select(i => new TableColumn($"d{i}", DataColumnType.Text, null)),
+        ];
+        var plan = Filtered(
+            Config(filters: Enumerable.Range(0, 50).Select(i => new DataFilter($"w{i}", "in", Values: ["x"])).ToList()),
+            Enumerable.Range(0, 8).Select(i => new AppliedDashboardFilter($"d{i}", DashboardFilterKinds.Text, Values: ["y"])).ToList(),
+            columns);
+
+        Assert.Null(plan.Errors);
+        Assert.Equal(50 + 8 + 1, plan.Sql!.Parameters.Count); // and the limit
+    }
+
+    [Fact]
+    public void An_invalid_value_is_an_error_at_the_requests_index()
+    {
+        // The first filter does not apply, so the second is the first of the set built; its error keeps index 1.
+        var plan = Filtered(
+            Config(),
+            [
+                new AppliedDashboardFilter("sex", DashboardFilterKinds.Text, Values: ["female"]),
+                new AppliedDashboardFilter("year", DashboardFilterKinds.Number, Min: "3", Max: "2"),
+            ]);
+
+        Assert.Null(plan.Sql);
+        Assert.Equal(["dashboardFilters[1]"], plan.Errors!.Keys);
+    }
+
+    [Fact]
+    public void Without_dashboard_filters_nothing_is_reported_as_not_filtered()
+    {
+        Assert.Empty(Plan(Config()).NotFiltered!);
+        Assert.DoesNotContain("@d", Plan(Config()).Sql!.Sql);
+    }
 }

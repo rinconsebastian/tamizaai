@@ -110,3 +110,25 @@ describe('savedConfig', () => {
     expect(JSON.stringify(queryFor('map', saved))).toBe(JSON.stringify(queryFor('map', mapConfig())));
   });
 });
+
+describe('the dashboard filters a widget ignores', () => {
+  const ignoring = (): WidgetConfig => ({ ...emptyConfig('coverage'), groupBy: 'municipality', ignoredDashboardFilters: ['municipality', 'round'] });
+
+  it('are saved with the widget, whatever its chart type', () => {
+    for (const type of ['stat', 'bar', 'column', 'line', 'histogram', 'pie', 'map'] as const) {
+      expect(savedConfig(type, ignoring()).ignoredDashboardFilters).toEqual(['municipality', 'round']);
+    }
+  });
+
+  it('are not part of the query, so changing them never queries the widget again', () => {
+    expect(queryFor('column', ignoring()).ignoredDashboardFilters).toEqual([]);
+    expect(JSON.stringify(queryFor('column', ignoring()))).toBe(JSON.stringify(queryFor('column', { ...ignoring(), ignoredDashboardFilters: [] })));
+  });
+
+  it('read as none from a config that predates them', () => {
+    const old = { ...emptyConfig('coverage') } as Partial<WidgetConfig>;
+    delete old.ignoredDashboardFilters;
+
+    expect(savedConfig('column', old as WidgetConfig).ignoredDashboardFilters).toEqual([]);
+  });
+});

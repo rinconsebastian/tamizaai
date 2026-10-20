@@ -555,4 +555,80 @@ public sealed class IndicatorValidationTests
         Assert.DoesNotContain("config.tooltip[1].format", errors.Keys);
         Assert.DoesNotContain("config.tooltip[2].format", errors.Keys);
     }
+
+    // The dashboard filters a widget ignores (design D6)
+
+    private static IDictionary<string, string[]> CheckIgnored(params string[] columns) =>
+        Check(new WidgetConfigInput("coverage", GroupBy: "municipality", IgnoredDashboardFilters: columns).Normalize(), "bar");
+
+    [Fact]
+    public void A_widget_ignores_no_dashboard_filters_by_default() =>
+        Assert.Empty(new WidgetConfigInput("coverage").Normalize().IgnoredDashboardFilters);
+
+    [Fact]
+    public void A_widget_ignores_up_to_eight_dashboard_filters()
+    {
+        Assert.Empty(CheckIgnored([.. Enumerable.Range(0, 8).Select(i => $"c{i}")]));
+        Assert.Equal(
+            ["A widget can ignore at most 8 dashboard filters."],
+            CheckIgnored([.. Enumerable.Range(0, 9).Select(i => $"c{i}")])["config.ignoredDashboardFilters"]);
+    }
+
+    [Fact]
+    public void An_ignored_filter_is_named_by_a_published_column_once()
+    {
+        Assert.Equal(["The filter on column 'round' is already ignored."], CheckIgnored("round", "round")["config.ignoredDashboardFilters[1]"]);
+        Assert.Equal(["'Municipality' is not a valid column name."], CheckIgnored("Municipality")["config.ignoredDashboardFilters[0]"]);
+        Assert.Empty(CheckIgnored("_version", "municipality"));
+    }
+
+    // A query's dashboard filters
+
+    private static IDictionary<string, string[]> CheckDashboard(params AppliedDashboardFilter?[] filters)
+    {
+        var errors = new FieldErrors();
+        IndicatorValidation.CheckDashboardFilters(filters!, errors);
+        return errors.ToDictionary();
+    }
+
+    [Fact]
+    public void No_dashboard_filters_or_eight_valid_ones_pass()
+    {
+        var errors = new FieldErrors();
+        IndicatorValidation.CheckDashboardFilters(null, errors);
+        Assert.False(errors.Any);
+
+        Assert.Empty(CheckDashboard([.. Enumerable.Range(0, 8).Select(i => new AppliedDashboardFilter($"c{i}", DashboardFilterKinds.Text, Values: ["x"]))]));
+    }
+
+    [Fact]
+    public void Nine_dashboard_filters_are_refused() =>
+        Assert.Contains("dashboardFilters",
+            CheckDashboard([.. Enumerable.Range(0, 9).Select(i => new AppliedDashboardFilter($"c{i}", DashboardFilterKinds.Text, Values: ["x"]))]).Keys);
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Municipality")]
+    [InlineData("1round")]
+    [InlineData("round\n")]
+    public void A_dashboard_filter_column_must_be_a_published_column_name(string? column) =>
+        Assert.Contains("dashboardFilters[0]", CheckDashboard(new AppliedDashboardFilter(column, DashboardFilterKinds.Text, Values: ["x"])).Keys);
+
+    [Fact]
+    public void A_dashboard_filter_on_kobos_own_column_is_accepted() =>
+        Assert.Empty(CheckDashboard(new AppliedDashboardFilter("_version", DashboardFilterKinds.Text, Values: ["v1"])));
+
+    [Fact]
+    public void Two_dashboard_filters_on_one_column_an_unknown_kind_and_a_bad_value_are_refused_at_their_index()
+    {
+        var errors = CheckDashboard(
+            new AppliedDashboardFilter("round", DashboardFilterKinds.Number, Min: "1"),
+            new AppliedDashboardFilter("round", DashboardFilterKinds.Number, Min: "2"),
+            new AppliedDashboardFilter("zone", "color", Values: ["red"]),
+            new AppliedDashboardFilter("visit", DashboardFilterKinds.Date, Min: "second"),
+            null);
+
+        Assert.Equal(["dashboardFilters[1]", "dashboardFilters[2]", "dashboardFilters[3]", "dashboardFilters[4]"], errors.Keys.Order());
+        Assert.Contains("'visit'", errors["dashboardFilters[3]"].Single());
+    }
 }

@@ -273,6 +273,33 @@ public sealed class DataQueryBuilderTests
         Assert.Single(built!.Parameters, p => p.Name == "tz");
     }
 
+    // A second set of filters for the same command
+
+    [Fact]
+    public void A_parameter_prefix_names_the_second_set_and_keeps_the_zone_parameter()
+    {
+        var errors = new FieldErrors();
+        var query = DataQueryBuilder.Build(
+            Filter(new DataFilter("name", "in", Values: ["Cali"]), new DataFilter("at", "range", Min: "2026-09-01")),
+            Columns, "America/Bogota", errors, parameterPrefix: "d", fieldName: "dashboardFilters");
+
+        Assert.False(errors.Any);
+        Assert.Equal("\"name\"::text = ANY(@d0) AND \"at\" >= (@d1min::date)::timestamp AT TIME ZONE @tz", query!.Where);
+        Assert.Equal(new[] { "d0", "d1min", "tz" }, query.Parameters.Select(p => p.Name));
+    }
+
+    [Fact]
+    public void A_field_name_keys_the_errors_of_the_second_set()
+    {
+        var errors = new FieldErrors();
+        DataQueryBuilder.Build(
+            Filter(new DataFilter("name", "in", Values: ["Cali"]), new DataFilter("age", "range", Min: "adult")),
+            Columns, "UTC", errors, parameterPrefix: "d", fieldName: "dashboardFilters");
+
+        Assert.Equal(["dashboardFilters[1]"], errors.ToDictionary().Keys);
+        Assert.Contains("age", errors.ToDictionary()["dashboardFilters[1]"].Single());
+    }
+
     // True/false and empty
 
     [Fact]

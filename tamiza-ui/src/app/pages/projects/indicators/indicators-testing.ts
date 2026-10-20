@@ -2,7 +2,9 @@ import { TestRequest } from '@angular/common/http/testing';
 import { vi } from 'vitest';
 import { Downloader } from '../../../core/download.service';
 import {
+  AppliedDashboardFilter,
   Dashboard,
+  DashboardFilter,
   IndicatorColumns,
   IndicatorEntry,
   IndicatorsOverview,
@@ -30,6 +32,8 @@ export const isDashboardOf = (id: string) => (r: { url: string; method: string }
 export const isDashboard = isDashboardOf(dashboardId);
 export const isColumns = (r: { url: string; method: string }) => r.method === 'GET' && r.url.startsWith(`${indicatorsUrl}/`) && r.url.endsWith('/columns');
 export const isQuery = (r: { url: string; method: string }) => r.method === 'POST' && r.url === `${indicatorsUrl}/query`;
+/** The values a dashboard's text filter offers. */
+export const isDashboardValues = (r: { url: string; method: string }) => r.method === 'GET' && /^\/api\/v1\/projects\/[^/]+\/dashboards\/[^/]+\/values$/.test(r.url);
 /** A change to a widget, on whichever dashboard of the project it is. */
 export const isPatch = (r: { url: string; method: string }) => r.method === 'PATCH' && /^\/api\/v1\/projects\/[^/]+\/dashboards\/[^/]+\/widgets\/[^/]+$/.test(r.url);
 
@@ -88,7 +92,7 @@ export function overview(overrides: Partial<IndicatorsOverview> = {}): Indicator
 
 /** The dashboard "Indicators" with these widgets. */
 export function dashboard(widgets: Widget[], overrides: Partial<Dashboard> = {}): Dashboard {
-  return { id: dashboardId, name: 'Indicators', widgets, ...overrides };
+  return { id: dashboardId, name: 'Indicators', filters: [], widgets, ...overrides };
 }
 
 export function catalog(overrides: Partial<IndicatorColumns> = {}): IndicatorColumns {
@@ -121,19 +125,25 @@ export const text = (element: Element | null) => element?.textContent?.replace(/
 export const all = (root: ParentNode, id: string) => Array.from(root.querySelectorAll<HTMLElement>(`[data-testid="${id}"]`));
 
 /** What answers a widget's query: the rows for a request body, or one answer for everything. */
-export type Answer = QueryResult | ((body: { config: WidgetConfig; chartType?: string }) => QueryResult);
+export type Answer = QueryResult | ((body: { config: WidgetConfig; chartType?: string; dashboardFilters?: AppliedDashboardFilter[] }) => QueryResult);
 
-/** Which dashboard `open()` opens, and the project's dashboards when they are not just "Indicators" (`d1`). */
+/**
+ * Which dashboard `open()` opens, and the project's dashboards when they are not just "Indicators" (`d1`); the dashboard's filters,
+ * and a query string for the address (`f=…`, without the `?`).
+ */
 export interface OpenAt {
   dashboardId?: string;
   dashboards?: DashboardEntry[];
+  filters?: DashboardFilter[];
+  query?: string;
 }
 
 /** Opens a dashboard by its address, as a bookmark or a tab would, and answers what it reads; `d1` unless `at` says otherwise. */
 export async function open(role: ProjectRole, widgets: Widget[], answer: Answer | null, extra: Partial<IndicatorsOverview> = {}, at: OpenAt = {}) {
   const id = at.dashboardId ?? dashboardId;
-  const context = await openProjectSection(`dashboards/${id}`, role, at.dashboards ? { dashboards: at.dashboards } : {}, [{ provide: Downloader, useValue: downloader }]);
-  await answerLoad(context, widgets, extra, id);
+  const address = `dashboards/${id}${at.query ? `?${at.query}` : ''}`;
+  const context = await openProjectSection(address, role, at.dashboards ? { dashboards: at.dashboards } : {}, [{ provide: Downloader, useValue: downloader }]);
+  await answerLoad(context, widgets, extra, id, at.filters);
   if (answer) {
     await answerQueries(context, answer);
   }
@@ -142,10 +152,16 @@ export async function open(role: ProjectRole, widgets: Widget[], answer: Answer 
 
 export type Context = Awaited<ReturnType<typeof open>>;
 
-/** Answers what the page reads to draw a dashboard (`d1` by default): the project's indicators and the dashboard's widgets. */
-export async function answerLoad(context: Pick<Context, 'http' | 'harness'>, widgets: Widget[], extra: Partial<IndicatorsOverview> = {}, id = dashboardId): Promise<void> {
+/** Answers what the page reads to draw a dashboard (`d1` by default): the project's indicators and the dashboard's filters and widgets. */
+export async function answerLoad(
+  context: Pick<Context, 'http' | 'harness'>,
+  widgets: Widget[],
+  extra: Partial<IndicatorsOverview> = {},
+  id = dashboardId,
+  filters: DashboardFilter[] = [],
+): Promise<void> {
   context.http.expectOne(isOverview).flush(overview(extra));
-  context.http.expectOne(isDashboardOf(id)).flush(dashboard(widgets, { id }));
+  context.http.expectOne(isDashboardOf(id)).flush(dashboard(widgets, { id, filters }));
   await settle(context.harness);
 }
 

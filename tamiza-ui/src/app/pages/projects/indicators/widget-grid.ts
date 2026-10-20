@@ -3,6 +3,7 @@ import { Component, ElementRef, computed, effect, inject, input, output, signal,
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { IndicatorEntry, Layout, Widget } from '../../../core/projects/indicators.service';
 import { ChartTooltips, DropdownMenu, MenuItem } from '../../../shared/ui';
+import { ActiveDashboardFilter } from './dashboard-filters';
 import { Placed, changed, movedBy, readingOrder, reflow, resizedBy, unitsFor } from './grid-layout';
 import { WidgetView } from './widget-view';
 
@@ -85,6 +86,7 @@ const fallbackWidth = 1200;
                 [scriptsLink]="editable()"
                 [showToggle]="false"
                 [asTable]="shownAsTable(widget)"
+                [dashboardFilters]="filtersOf().get(widget.id) ?? none"
                 (tableAvailable)="setDrawable(widget.id, $event)"
               />
             </div>
@@ -172,6 +174,8 @@ export class WidgetGrid {
   /** The project's indicators: a widget draws with the format of its own, and does not ask for rows while that one has no table. */
   readonly indicators = input<IndicatorEntry[]>([]);
   readonly allTables = input(false);
+  /** The dashboard filters with a value in force on the member's screen, in the bar's order (dashboard filters, design D7). */
+  readonly dashboardFilters = input<ActiveDashboardFilter[]>([]);
 
   /** Every layout a move or resize changed, the dropped widget's and those it pushed down. */
   readonly layoutsChange = output<Placed[]>();
@@ -179,6 +183,17 @@ export class WidgetGrid {
   readonly remove = output<Widget>();
 
   protected readonly ordered = computed(() => readingOrder(this.widgets()));
+  protected readonly none: ActiveDashboardFilter[] = [];
+  /** Each widget's dashboard filters, marked where it ignores them; one list per widget, so a widget only re-queries when its own changes. */
+  protected readonly filtersOf = computed(() => {
+    const active = this.dashboardFilters();
+    return new Map(
+      this.widgets().map((widget) => {
+        const ignored = widget.config.ignoredDashboardFilters ?? [];
+        return [widget.id, active.map((a) => ({ ...a, ignored: ignored.includes(a.filter.column) }))];
+      }),
+    );
+  });
   /** The widgets whose table the member chose to see (or to hide again), by id; a widget without an entry follows `allTables`. */
   private readonly tableChoice = signal<Record<string, boolean>>({});
   /** The widgets that currently have rows to draw, by id: only those get the chart/table toggle. */

@@ -1621,7 +1621,11 @@
       },
       "basemap": "Mapa base",
       "basemapHelp": "Se dibuja debajo de las formas para todos los miembros. Cualquier persona puede cambiarlo en su propia pantalla sin guardar.",
-      "basemapGone": "{{ name }} (ya no se ofrece)"
+      "basemapGone": "{{ name }} (ya no se ofrece)",
+      "dashboardFilters": "Filtros del tablero",
+      "dashboardFiltersHelp": "Un filtro sin marcar no reduce este widget, como para un total que no debe cambiar cuando un miembro filtra el tablero.",
+      "applyFilter": "Reducir por {{ label }}",
+      "previewFiltered": "Vista previa filtrada por: {{ names }}"
     }
   },
   "dashboards": {
@@ -1635,7 +1639,8 @@
       "duplicate": "Duplicar",
       "moveLeft": "Mover a la izquierda",
       "moveRight": "Mover a la derecha",
-      "remove": "Eliminar"
+      "remove": "Eliminar",
+      "filters": "Filtros"
     },
     "unavailable": {
       "limit": "Un proyecto puede tener como máximo {{ max }} tableros.",
@@ -1681,6 +1686,64 @@
       "missing": "El tablero que abriste no existe. Se muestra {{ name }} en su lugar.",
       "removed": "\"{{ removed }}\" ya no existe. Se muestra {{ name }} en su lugar.",
       "dismiss": "Cerrar aviso"
+    }
+  },
+  "dashboardFilters": {
+    "bar": {
+      "title": "Filtros del tablero"
+    },
+    "all": "Todos",
+    "clear": "Quitar",
+    "clearAll": "Limpiar filtros",
+    "reset": "Filtros predeterminados",
+    "range": {
+      "both": "{{ min }} a {{ max }}",
+      "min": "desde {{ min }}",
+      "max": "hasta {{ max }}"
+    },
+    "announce": {
+      "filtered": "Tablero filtrado por {{ names }}.",
+      "cleared": "Se limpiaron los filtros del tablero."
+    },
+    "dropped": {
+      "title": "Algunos filtros de esta dirección ya no se aplican",
+      "item": "Se quitó el filtro \"{{ name }}\"."
+    },
+    "notFiltered": "Sin filtrar por: {{ names }}",
+    "saved": "Filtros guardados.",
+    "kinds": {
+      "text": "texto",
+      "boolean": "verdadero/falso",
+      "number": "número",
+      "date": "fecha"
+    },
+    "dialog": {
+      "title": "Filtros del tablero",
+      "intro": "Cada miembro puede cambiar estos filtros en su propia pantalla. Un filtro reduce los widgets cuya tabla de indicador tiene su columna con un tipo de su clase.",
+      "loadingColumns": "Leyendo las columnas de los indicadores del tablero…",
+      "noColumns": "Aún no hay columnas para filtrar: ninguno de los indicadores de los widgets de este tablero ha publicado una tabla.",
+      "empty": "Este tablero no tiene filtros.",
+      "label": "Etiqueta",
+      "column": "Columna",
+      "columnOption": "{{ column }} · {{ kind }} · reduce {{ count }} de {{ total }} widgets",
+      "columnMissing": "{{ column }} · {{ kind }} · en ninguna tabla",
+      "default": "Predeterminado",
+      "noDefault": "ninguno",
+      "setDefault": "Definir predeterminado",
+      "changeDefault": "Cambiar predeterminado",
+      "clearDefault": "Quitar predeterminado",
+      "moveUp": "Subir {{ label }}",
+      "moveDown": "Bajar {{ label }}",
+      "remove": "Eliminar {{ label }}",
+      "add": "Agregar filtro",
+      "limitHint": "Un tablero puede tener como máximo {{ max }} filtros.",
+      "save": "Guardar filtros",
+      "saving": "Guardando…",
+      "errors": {
+        "labelRequired": "Escribe una etiqueta.",
+        "labelLong": "La etiqueta puede tener como máximo {{ max }} caracteres.",
+        "labelTaken": "Otro filtro de este tablero se llama \"{{ label }}\"."
+      }
     }
   }
 }

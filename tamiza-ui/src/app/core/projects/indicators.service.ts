@@ -1,7 +1,7 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
-import { DataColumn, DataColumnType, DataExport, DataFilter, DataValue, ExportFormat } from './data.service';
+import { Observable, map } from 'rxjs';
+import { DataColumn, DataColumnType, DataExport, DataFilter, DataValue, DataValueCount, ExportFormat } from './data.service';
 import { IndicatorFormat } from './pipeline.service';
 import { DashboardEntry } from './projects.service';
 
@@ -30,6 +30,40 @@ export const maxDashboardNameLength = 40;
 export const maxDashboards = 7;
 export const maxTooltipItems = 5;
 export const maxTooltipLabel = 80;
+/** The most filters a dashboard has (`DashboardFilterRules.MaxFilters`), and so the most a widget ignores. */
+export const maxDashboardFilters = 8;
+/** A dashboard filter's label, once trimmed (`DashboardFilterRules.MaxLabelLength`). */
+export const maxDashboardFilterLabelLength = 40;
+
+/**
+ * The kinds of dashboard filter (`DashboardFilterKinds`). Each narrows a family of column types: text, true/false, integer or decimal
+ * (number), date or timestamp (date). Text and true/false filters choose values; number and date filters take a range.
+ */
+export type DashboardFilterKind = 'text' | 'boolean' | 'number' | 'date';
+
+export const dashboardFilterKinds: readonly DashboardFilterKind[] = ['text', 'boolean', 'number', 'date'];
+
+/** A value of a dashboard filter: `values` for a text or true/false filter, a range (either end optional) for a number or date filter. */
+export interface DashboardFilterValue {
+  values?: string[] | null;
+  min?: string | null;
+  max?: string | null;
+}
+
+/** One of a dashboard's filters. `column` is unique in the dashboard; the label is shown as saved, never translated. */
+export interface DashboardFilter {
+  column: string;
+  label: string;
+  kind: DashboardFilterKind;
+  /** In force when the dashboard opens without values in its address. */
+  default: DashboardFilterValue | null;
+}
+
+/** A dashboard filter's value in force on the member's screen, sent with a widget's query when the widget does not ignore it. */
+export interface AppliedDashboardFilter extends DashboardFilterValue {
+  column: string;
+  kind: DashboardFilterKind;
+}
 
 /** A place on the grid, in grid units: `x + w` never passes the 12 columns. */
 export interface Layout {
@@ -89,6 +123,11 @@ export interface WidgetConfig {
   tooltip: WidgetTooltipItem[];
   /** Maps only; null draws none. Saved with the widget, never part of the query. */
   basemap: BasemapKind | null;
+  /**
+   * The columns of the dashboard filters the widget ignores, kept by column on any dashboard. Saved with the widget, never part of the
+   * query: the page leaves those filters out of what it sends. (A config from an API that predates it has none.)
+   */
+  ignoredDashboardFilters: string[];
 }
 
 export interface Widget {
@@ -121,8 +160,9 @@ export interface IndicatorsOverview {
   limits: { maxWidgets: number; maxQueryRows: number; maxDashboards: number };
 }
 
-/** One of the project's dashboards with its widgets, ordered top to bottom then left to right. */
+/** One of the project's dashboards with its filters, in order, and its widgets, ordered top to bottom then left to right. */
 export interface Dashboard extends DashboardEntry {
+  filters: DashboardFilter[];
   widgets: Widget[];
 }
 
@@ -154,6 +194,11 @@ export interface QueryResult {
   missing: { indicator: boolean; columns: string[] };
   /** Maps only: the type of each tooltip column, so a value is written without asking the catalog. */
   tooltipTypes?: DataColumnType[];
+  /**
+   * The columns of the dashboard filters sent that did not narrow the rows: the table has no such column, or has it with another kind
+   * of type. Only when the query sent dashboard filters and drew something.
+   */
+  notFiltered?: string[];
 }
 
 export interface WidgetDraft {
@@ -167,7 +212,19 @@ export interface WidgetDraft {
 export type WidgetPatch = Partial<Pick<Widget, 'title' | 'chartType' | 'config' | 'layout' | 'dashboardId'>>;
 
 export function emptyConfig(indicator = ''): WidgetConfig {
-  return { indicator, measure: null, ratio: null, groupBy: null, filters: [], geometryColumn: null, buckets: null, sort: null, tooltip: [], basemap: null };
+  return {
+    indicator,
+    measure: null,
+    ratio: null,
+    groupBy: null,
+    filters: [],
+    geometryColumn: null,
+    buckets: null,
+    sort: null,
+    tooltip: [],
+    basemap: null,
+    ignoredDashboardFilters: [],
+  };
 }
 
 const base = '/api/v1/projects';
@@ -184,9 +241,16 @@ export class IndicatorsService {
     return this.http.get<IndicatorColumns>(`${this.url(projectId)}/${encodeURIComponent(indicator)}/columns`);
   }
 
-  /** Renders a saved widget, or previews a draft: the same query either way. The chart type lets a histogram plot a value per row. */
-  query(projectId: string, config: WidgetConfig, chartType?: ChartType): Observable<QueryResult> {
-    return this.http.post<QueryResult>(`${this.url(projectId)}/query`, chartType ? { config, chartType } : { config });
+  /**
+   * Renders a saved widget, or previews a draft: the same query either way. The chart type lets a histogram plot a value per row. The
+   * dashboard filters in force that the widget does not ignore narrow the rows too; they are sent only when there are some.
+   */
+  query(projectId: string, config: WidgetConfig, chartType?: ChartType, dashboardFilters: AppliedDashboardFilter[] = []): Observable<QueryResult> {
+    return this.http.post<QueryResult>(`${this.url(projectId)}/query`, {
+      config,
+      ...(chartType ? { chartType } : {}),
+      ...(dashboardFilters.length ? { dashboardFilters } : {}),
+    });
   }
 
   /** Prepares a file with the whole published table of one indicator; the result has the single-use link that downloads it. */
@@ -222,9 +286,28 @@ export class IndicatorsService {
     return this.http.put<DashboardEntry[]>(`${this.dashboardsUrl(projectId)}/order`, { expectedIds, dashboardIds });
   }
 
-  /** Copies the dashboard and its widgets under a new name, right after the original. */
+  /** Copies the dashboard, its filters and its widgets under a new name, right after the original. */
   duplicateDashboard(projectId: string, dashboardId: string, name: string): Observable<DashboardEntry> {
     return this.http.post<DashboardEntry>(`${this.dashboardUrl(projectId, dashboardId)}/copies`, { name });
+  }
+
+  /** Replaces the dashboard's filters with `filters`, in their order, and answers them as saved (labels trimmed). */
+  saveDashboardFilters(projectId: string, dashboardId: string, filters: DashboardFilter[]): Observable<DashboardFilter[]> {
+    return this.http
+      .put<{ filters: DashboardFilter[] }>(`${this.dashboardUrl(projectId, dashboardId)}/filters`, { filters })
+      .pipe(map((answer) => answer.filters));
+  }
+
+  /**
+   * The most frequent values of a text column across the indicator tables of the dashboard's widgets, optionally only those that
+   * contain `search`. Empty when no table has the column as text.
+   */
+  dashboardValues(projectId: string, dashboardId: string, column: string, search?: string): Observable<{ values: DataValueCount[] }> {
+    let params = new HttpParams().set('column', column);
+    if (search) {
+      params = params.set('search', search);
+    }
+    return this.http.get<{ values: DataValueCount[] }>(`${this.dashboardUrl(projectId, dashboardId)}/values`, { params });
   }
 
   // Widgets, on the dashboard they belong to.

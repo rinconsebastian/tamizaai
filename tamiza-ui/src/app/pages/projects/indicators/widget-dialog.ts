@@ -11,6 +11,7 @@ import {
   ChartType,
   IndicatorColumns,
   IndicatorEntry,
+  DashboardFilter,
   IndicatorsService,
   Widget,
   WidgetConfig,
@@ -18,6 +19,7 @@ import {
   chartTypes,
   emptyConfig,
   maxBuckets,
+  maxDashboardFilters,
   maxFilters,
   maxTitleLength,
   maxTooltipItems,
@@ -32,6 +34,7 @@ import { DashboardEntry } from '../../../core/projects/projects.service';
 import { Alert, ApiLang, Button, Disclosure, FormField, Input, markApiText } from '../../../shared/ui';
 import { DataFilterDialog, DataFilterDialogData, DataFilterDialogResult } from '../data-filter-dialog';
 import { describeFilter, normalizeFilter } from '../data-view';
+import { FilterValues, activeFilters } from './dashboard-filters';
 import { WidgetView, savedConfig } from './widget-view';
 
 export interface WidgetDialogData {
@@ -47,6 +50,10 @@ export interface WidgetDialogData {
   timeZone: string;
   /** Told when the API refuses the dashboard chosen (removed meanwhile, or full): the page's list of dashboards may be out of date. */
   refused?: () => void;
+  /** The open dashboard's filters: the widget can ignore any of them (dashboard filters, design D6). */
+  filters?: DashboardFilter[];
+  /** Their values in force on the member's screen when the form opened, which the preview applies (design D9). */
+  values?: FilterValues;
 }
 
 /** The widget saved, or `gone` when its dashboard no longer exists (`dashboards.notFound`), for the page to catch up. */
@@ -66,7 +73,10 @@ export const previewDelayMs = 400;
 
 type Mode = 'measure' | 'ratio';
 type Problems = Partial<
-  Record<'title' | 'dashboardId' | 'indicator' | 'measure' | 'ratio' | 'groupBy' | 'geometryColumn' | 'buckets' | 'sort' | 'tooltip' | 'basemap', string>
+  Record<
+    'title' | 'dashboardId' | 'indicator' | 'measure' | 'ratio' | 'groupBy' | 'geometryColumn' | 'buckets' | 'sort' | 'tooltip' | 'basemap' | 'dashboardFilters',
+    string
+  >
 >;
 /** What the server refused in one tooltip item. */
 type ItemProblems = Partial<Record<'column' | 'label' | 'format', string>>;
@@ -348,6 +358,30 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
           <p class="text-sm text-body">{{ t('indicators.dialog.filtersUnpublished') }}</p>
         }
       </tmz-disclosure>
+
+      @if (dashboardFilters.length) {
+        <!-- Checked: the filter narrows this widget; unchecked: the widget ignores it, as a total that must not change does. -->
+        <fieldset class="min-w-0" data-testid="dialog-dashboard-filters">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.dashboardFilters') }}</legend>
+          <p class="mb-2 text-sm text-body">{{ t('indicators.dialog.dashboardFiltersHelp') }}</p>
+          @for (filter of dashboardFilters; track filter.column) {
+            <label class="flex min-h-10 cursor-pointer items-start gap-3 py-1 text-sm">
+              <input
+                type="checkbox"
+                class="mt-0.5 size-4 shrink-0"
+                [checked]="!ignored().includes(filter.column)"
+                (change)="setIgnored(filter.column, !$any($event.target).checked)"
+                [attr.data-column]="filter.column"
+                data-testid="dialog-dashboard-filter"
+              />
+              <span class="min-w-0 flex-1 break-words text-heading">{{ t('indicators.dialog.applyFilter', { label: filter.label }) }}</span>
+            </label>
+          }
+          @if (shown().dashboardFilters; as message) {
+            <p class="mt-1 text-sm text-fg-danger-strong" data-testid="field-error" [tmzApiLang]="message">{{ message }}</p>
+          }
+        </fieldset>
+      }
       </div>
 
       <section aria-labelledby="widgetPreviewTitle" class="lg:sticky lg:top-0 lg:self-start">
@@ -360,8 +394,12 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
             [indicator]="entry()"
             [debounceMs]="previewDelayMs"
             [placeholder]="t('indicators.dialog.previewIncomplete')"
+            [dashboardFilters]="previewFilters()"
           />
         </div>
+        @if (previewFilteredBy().length) {
+          <p class="mt-2 text-xs text-body" data-testid="dialog-preview-filtered">{{ t('indicators.dialog.previewFiltered', { names: previewFilteredBy().join(', ') }) }}</p>
+        }
       </section>
       </div>
 
@@ -438,6 +476,24 @@ export class WidgetDialog {
   protected readonly tooltip = signal<WidgetTooltipItem[]>((this.start.tooltip ?? []).map((item) => ({ ...item })));
   /** The saved basemap; a kind the deployment no longer offers stays as it is, unless the member changes it. */
   protected readonly basemap = signal<BasemapKind | null>(this.start.basemap ?? null);
+  /** The open dashboard's filters, each offered with a box to ignore it. */
+  protected readonly dashboardFilters = this.data.filters ?? [];
+  /**
+   * The columns of the dashboard filters the widget ignores (design D6), with those of filters the dashboard does not have now: the
+   * widget keeps ignoring a filter removed and defined again.
+   */
+  protected readonly ignored = signal<string[]>([...(this.start.ignoredDashboardFilters ?? [])]);
+  /** What is saved: every entry while they fit, those of filters the dashboard has not dropped first, oldest first, when not. */
+  private readonly ignoredDashboardFilters = computed(() => {
+    const shown = new Set(this.dashboardFilters.map((f) => f.column));
+    const ignored = this.ignored();
+    let excess = Math.max(0, ignored.length - maxDashboardFilters);
+    return ignored.filter((column) => shown.has(column) || excess-- <= 0);
+  });
+  /** The dashboard filters in force that the preview applies, marked where the widget ignores them. */
+  protected readonly previewFilters = computed(() => activeFilters(this.dashboardFilters, this.data.values ?? {}, this.ignored()));
+  /** The labels of those the preview is narrowed by. */
+  protected readonly previewFilteredBy = computed(() => this.previewFilters().filter((a) => !a.ignored).map((a) => a.filter.label));
 
   /**
    * The basemaps to choose from: the kinds the deployment offers and, when the widget was saved with one it no longer offers, that
@@ -530,6 +586,7 @@ export class WidgetDialog {
       sort: this.sortConfig(),
       tooltip: this.tooltipItems(),
       basemap: this.basemap(),
+      ignoredDashboardFilters: this.ignoredDashboardFilters(),
     };
   });
 
@@ -654,6 +711,10 @@ export class WidgetDialog {
   protected defaultMeasureText(t: (key: string, params?: Record<string, unknown>) => string): string {
     const measure = this.catalog()?.defaults.measure;
     return measure ? t('indicators.dialog.measureDefault', { column: measure }) : t('indicators.dialog.measureDefaultUnknown');
+  }
+
+  protected setIgnored(column: string, ignore: boolean): void {
+    this.ignored.update((list) => (ignore ? (list.includes(column) ? list : [...list, column]) : list.filter((c) => c !== column)));
   }
 
   protected describe(filter: DataFilter, t: (key: string, params?: Record<string, unknown>) => string): string {
@@ -930,6 +991,7 @@ export class WidgetDialog {
   private fieldFor(path: string): keyof Problems | null {
     const name = path.toLowerCase();
     if (name === 'dashboardid') return 'dashboardId';
+    if (name.includes('ignoreddashboardfilters')) return 'dashboardFilters';
     if (name.includes('tooltip')) return 'tooltip';
     if (name.includes('basemap')) return 'basemap';
     if (name.includes('title')) return 'title';

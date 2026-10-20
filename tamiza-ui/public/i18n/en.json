@@ -1621,7 +1621,11 @@
       },
       "basemap": "Basemap",
       "basemapHelp": "Drawn under the shapes for every member. Anyone can switch it for their own screen without saving.",
-      "basemapGone": "{{ name }} (no longer offered)"
+      "basemapGone": "{{ name }} (no longer offered)",
+      "dashboardFilters": "Dashboard filters",
+      "dashboardFiltersHelp": "A filter left unchecked does not narrow this widget, as for a total that must not change when a member filters the dashboard.",
+      "applyFilter": "Narrow by {{ label }}",
+      "previewFiltered": "Preview filtered by: {{ names }}"
     }
   },
   "dashboards": {
@@ -1635,7 +1639,8 @@
       "duplicate": "Duplicate",
       "moveLeft": "Move left",
       "moveRight": "Move right",
-      "remove": "Remove"
+      "remove": "Remove",
+      "filters": "Filters"
     },
     "unavailable": {
       "limit": "A project can have at most {{ max }} dashboards.",
@@ -1681,6 +1686,64 @@
       "missing": "The dashboard you opened does not exist. Showing {{ name }} instead.",
       "removed": "\"{{ removed }}\" no longer exists. Showing {{ name }} instead.",
       "dismiss": "Dismiss"
+    }
+  },
+  "dashboardFilters": {
+    "bar": {
+      "title": "Dashboard filters"
+    },
+    "all": "All",
+    "clear": "Clear",
+    "clearAll": "Clear filters",
+    "reset": "Default filters",
+    "range": {
+      "both": "{{ min }} to {{ max }}",
+      "min": "from {{ min }}",
+      "max": "up to {{ max }}"
+    },
+    "announce": {
+      "filtered": "Dashboard filtered by {{ names }}.",
+      "cleared": "Dashboard filters cleared."
+    },
+    "dropped": {
+      "title": "Some filters in this address no longer apply",
+      "item": "The filter \"{{ name }}\" was removed."
+    },
+    "notFiltered": "Not filtered by: {{ names }}",
+    "saved": "Filters saved.",
+    "kinds": {
+      "text": "text",
+      "boolean": "true/false",
+      "number": "number",
+      "date": "date"
+    },
+    "dialog": {
+      "title": "Dashboard filters",
+      "intro": "Every member can change these filters on their own screen. A filter narrows the widgets whose indicator table has its column with a type of its kind.",
+      "loadingColumns": "Reading the columns of the dashboard's indicators…",
+      "noColumns": "There are no columns to filter on yet: none of the indicators of this dashboard's widgets has published a table.",
+      "empty": "This dashboard has no filters.",
+      "label": "Label",
+      "column": "Column",
+      "columnOption": "{{ column }} · {{ kind }} · narrows {{ count }} of {{ total }} widgets",
+      "columnMissing": "{{ column }} · {{ kind }} · in no table",
+      "default": "Default",
+      "noDefault": "none",
+      "setDefault": "Set default",
+      "changeDefault": "Change default",
+      "clearDefault": "Clear default",
+      "moveUp": "Move {{ label }} up",
+      "moveDown": "Move {{ label }} down",
+      "remove": "Remove {{ label }}",
+      "add": "Add filter",
+      "limitHint": "A dashboard can have at most {{ max }} filters.",
+      "save": "Save filters",
+      "saving": "Saving…",
+      "errors": {
+        "labelRequired": "Write a label.",
+        "labelLong": "The label can have at most {{ max }} characters.",
+        "labelTaken": "Another filter of this dashboard is labelled \"{{ label }}\"."
+      }
     }
   }
 }

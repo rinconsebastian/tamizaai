@@ -16,7 +16,9 @@ public sealed record IndicatorSql(string Sql, IReadOnlyList<SqlParam> Parameters
 /// The outcome of planning a query against the table's columns. Exactly one of <see cref="Errors"/> (a malformed request) or
 /// <see cref="Sql"/> is set unless something is <see cref="MissingColumns"/>, in which case there is nothing to run.
 /// </summary>
-public sealed record IndicatorQueryPlan(IndicatorSql? Sql, IReadOnlyList<string> MissingColumns, IDictionary<string, string[]>? Errors);
+/// <param name="NotFiltered">The columns of the dashboard filters that do not narrow this table, in the request's order (design D3).</param>
+public sealed record IndicatorQueryPlan(
+    IndicatorSql? Sql, IReadOnlyList<string> MissingColumns, IDictionary<string, string[]>? Errors, IReadOnlyList<string>? NotFiltered = null);
 
 /// <summary>Validates a widget query against the indicator table's columns and turns it into SQL.</summary>
 public static class IndicatorQueryBuilder
@@ -99,8 +101,14 @@ public static class IndicatorQueryBuilder
         };
     }
 
+    /// <param name="dashboardFilters">
+    /// The dashboard filters in force, already checked by <see cref="IndicatorValidation.CheckDashboardFilters"/>. Those the table has
+    /// a column of the right kind for narrow the rows as a second set of filters, so a widget filter and a dashboard filter on the same
+    /// column both hold; the others are <see cref="IndicatorQueryPlan.NotFiltered"/>, never missing.
+    /// </param>
     public static IndicatorQueryPlan Plan(
-        WidgetConfig config, IReadOnlyList<TableColumn> columns, string timeZone, string from, int maxRows, bool perRow = false)
+        WidgetConfig config, IReadOnlyList<TableColumn> columns, string timeZone, string from, int maxRows, bool perRow = false,
+        IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null)
     {
         var byName = columns.ToDictionary(c => c.Name, StringComparer.Ordinal);
 
@@ -159,7 +167,8 @@ public static class IndicatorQueryBuilder
 
         var present = config.Filters.Where(f => f is null || string.IsNullOrEmpty(f.Column) || byName.ContainsKey(f.Column)).ToList();
         var query = DataQueryBuilder.Build(new DataQueryRequest(present), columns, timeZone, errors);
-        if (query is null || errors.Any)
+        var (dashboard, notFiltered) = PlanDashboardFilters(dashboardFilters ?? [], byName, columns, timeZone, errors);
+        if (query is null || dashboard is null || errors.Any)
         {
             return new IndicatorQueryPlan(null, missing, errors.ToDictionary());
         }
@@ -171,7 +180,7 @@ public static class IndicatorQueryBuilder
 
         string Q(string name) => DataSources.Quote(byName[name].Name);
         var ratio = config.Ratio;
-        var filters = query.Where.Length == 0 ? "" : " AND " + query.Where;
+        var filters = string.Concat(new[] { query.Where, dashboard.Where }.Where(w => w.Length > 0).Select(w => " AND " + w));
         var grouped = config.GroupBy is not null;
         var rows = perRow && !grouped;
 
@@ -237,11 +246,57 @@ public static class IndicatorQueryBuilder
                 """;
         }
 
-        var parameters = new List<SqlParam>(query.Parameters)
-        {
-            new(IndicatorSql.LimitParameter, NpgsqlDbType.Integer, maxRows + 1),
-        };
+        // Both sets bind the project's zone as tz when they have a timestamp range: it is bound once.
+        var parameters = new List<SqlParam>(query.Parameters);
+        parameters.AddRange(dashboard.Parameters.Where(p => !parameters.Any(q => q.Name == p.Name)));
+        parameters.Add(new(IndicatorSql.LimitParameter, NpgsqlDbType.Integer, maxRows + 1));
         return new IndicatorQueryPlan(
-            new IndicatorSql(sql, parameters, isMap ? tooltip.Select(item => byName[item.Column].Type).ToList() : null), missing, null);
+            new IndicatorSql(sql, parameters, isMap ? tooltip.Select(item => byName[item.Column].Type).ToList() : null), missing, null, notFiltered);
+    }
+
+    /// <summary>
+    /// The dashboard filters the table can take, as a second set of filters with parameters <c>d0</c>, <c>d1min</c>…, and the columns of
+    /// those it cannot. An error is keyed <c>dashboardFilters[i]</c> at the filter's index in the request. Null when there is an error.
+    /// </summary>
+    private static (DataQuery? Query, IReadOnlyList<string> NotFiltered) PlanDashboardFilters(
+        IReadOnlyList<AppliedDashboardFilter> dashboardFilters, Dictionary<string, TableColumn> byName, IReadOnlyList<TableColumn> columns,
+        string timeZone, FieldErrors errors)
+    {
+        var notFiltered = new List<string>();
+        var applied = new List<(int Index, AppliedDashboardFilter Filter)>();
+        for (var i = 0; i < dashboardFilters.Count; i++)
+        {
+            var filter = dashboardFilters[i];
+            if (byName.TryGetValue(filter.Column!, out var column) && DashboardFilterKinds.Matches(filter.Kind!, column.Type))
+            {
+                applied.Add((i, filter));
+            }
+            else
+            {
+                notFiltered.Add(filter.Column!);
+            }
+        }
+
+        // Each applied filter is built against its column as its kind reads it: a number filter compares as a decimal on an integer column.
+        var kinds = applied.ToDictionary(a => a.Filter.Column!, a => a.Filter.Kind!, StringComparer.Ordinal);
+        var asFiltered = columns.Select(c => kinds.TryGetValue(c.Name, out var kind) ? DashboardFilterKinds.AsFiltered(kind, c) : c).ToList();
+        var dashboardErrors = new FieldErrors();
+        var query = DataQueryBuilder.Build(
+            new DataQueryRequest(applied.Select(a => DashboardFilterKinds.ToDataFilter(a.Filter.Column!, a.Filter.Kind!, a.Filter.Value)).ToList()),
+            asFiltered, timeZone, dashboardErrors, parameterPrefix: "d", fieldName: "dashboardFilters");
+        foreach (var (field, messages) in dashboardErrors.ToDictionary())
+        {
+            // dashboardFilters[j] is the j-th applied filter; the request knows it by its own index.
+            var key = field.StartsWith("dashboardFilters[", StringComparison.Ordinal)
+                && int.TryParse(field["dashboardFilters[".Length..^1], System.Globalization.CultureInfo.InvariantCulture, out var j)
+                ? $"dashboardFilters[{applied[j].Index}]"
+                : field;
+            foreach (var message in messages)
+            {
+                errors.Add(key, message);
+            }
+        }
+
+        return (query, notFiltered);
     }
 }

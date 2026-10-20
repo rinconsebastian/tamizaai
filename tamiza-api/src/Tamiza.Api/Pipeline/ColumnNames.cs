@@ -78,6 +78,12 @@ public static partial class ColumnNames
     /// <summary>Table names chosen by people must already be valid: scripts and dashboards select them by name.</summary>
     public static bool IsValidTableName(string? name) => name is not null && TableName().IsMatch(name);
 
+    /// <summary>
+    /// A name a published column can have once reduced: lowercase letters, digits and underscores, not starting with a digit, at most
+    /// 63 characters (<c>tamiza.names</c>' identifier rule). Kobo's own columns start with an underscore (<c>_version</c>).
+    /// </summary>
+    public static bool IsValidColumnName(string? name) => name is not null && ColumnName().IsMatch(name);
+
     [GeneratedRegex("[^a-z0-9_]+")]
     private static partial Regex Invalid();
 
@@ -86,4 +92,8 @@ public static partial class ColumnNames
 
     [GeneratedRegex("^[a-z][a-z0-9_]{0,62}$")]
     private static partial Regex TableName();
+
+    // \z, not $: $ also matches before a final line break.
+    [GeneratedRegex(@"^[a-z_][a-z0-9_]{0,62}\z")]
+    private static partial Regex ColumnName();
 }

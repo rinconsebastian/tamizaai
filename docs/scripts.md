@@ -169,6 +169,7 @@ An indicator is one function that receives the cleaned tables and returns **one 
 - `numerator` and `denominator` let a widget plot a **rate** as `sum(numerator) / sum(denominator)` over any group of rows. Return them next to `value` whenever the indicator is a ratio: a widget that groups several rows into one then gets the right rate, while summing `value` would add up percentages.
 - Every other column is a **dimension** the dashboard can group and filter by: `municipality`, a `round` or `year` column for a trend, `sex`.
 - For a map, add a geometry column: a geopandas column, or text in WKT (`POINT`, `POLYGON` or `MULTIPOLYGON`), projected to degrees (longitude and latitude) before you return it; see [Maps](indicators-dashboard.md#maps).
+- For a dashboard that members filter (by municipality, sex, round), group by every column it filters by and return measures that add up; see [Preparing indicators for dashboard filters](indicators-dashboard.md#preparing-indicators-for-dashboard-filters). The **Count by group** and **Rate by group** templates take the list of columns to group by in `GROUPS`.
 
 #### The indicator's name and metadata
 
