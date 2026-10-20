@@ -41,17 +41,20 @@ public sealed class FormVersionsApiTests(PostgresFixture postgres) : IDisposable
             ("code", (object?)errorCode ?? DBNull.Value), ("attempts", attempts));
 
     [Fact]
-    public async Task A_viewer_reads_the_versions_with_their_counts_and_states()
+    public async Task An_analyst_reads_the_versions_with_their_counts_and_states_and_a_viewer_gets_403()
     {
         await using var harness = await IngestionHarness.CreateAsync(postgres, _kobo);
+        using var analyst = await MemberAsync(harness, "ana", "analyst");
         using var viewer = await MemberAsync(harness, "vera", "viewer");
         await SubmissionsAsync(harness, "vA", 120);
         await SubmissionsAsync(harness, "vB", 15);
         await RecordAsync(harness, "vA", "available", deployedAt: "2026-09-01T10:00:00Z");
         await RecordAsync(harness, "vB", "failed", errorCode: "kobo.unreachable", attempts: 1);
 
-        var list = await viewer.GetFromJsonAsync<JsonElement>(Path(harness));
+        var list = await analyst.GetFromJsonAsync<JsonElement>(Path(harness));
+        var refused = await viewer.GetAsync(Path(harness));
 
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
         var versions = list.GetProperty("versions").EnumerateArray().ToList();
         Assert.Equal(["vA", "vB"], versions.Select(v => v.GetProperty("uid").GetString()));
         var a = versions[0];

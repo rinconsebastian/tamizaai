@@ -87,7 +87,7 @@ const versionTones: Record<FormVersionStatus, Tone> = { available: 'success', pe
         }
       </tmz-card>
 
-      <!-- The schedules are set once: read as a line by everyone, changed on request by an admin. -->
+      <!-- The schedules are set once: read as a line by analysts and admins, changed on request by an admin. -->
       @if (status(); as status) {
         <section data-testid="schedules" [attr.aria-label]="t('data.scheduleTitle')">
           <div class="flex flex-wrap items-start justify-between gap-3">
@@ -306,12 +306,8 @@ const versionTones: Record<FormVersionStatus, Tone> = { available: 'success', pe
           }
           @if (hasUnreadable(list)) {
             <div class="mt-4 flex flex-wrap items-center gap-3 text-sm text-body" data-testid="versions-retry-hint">
-              @if (context.can('analyst')) {
-                <p>{{ t('data.versions.retryHint') }}</p>
-                <button tmzButton variant="secondary" size="sm" type="button" [disabled]="busy()" (click)="recheck()" data-testid="versions-recheck">{{ t('overview.recheck') }}</button>
-              } @else {
-                <p>{{ t('data.versions.retryHintViewer') }}</p>
-              }
+              <p>{{ t('data.versions.retryHint') }}</p>
+              <button tmzButton variant="secondary" size="sm" type="button" [disabled]="busy()" (click)="recheck()" data-testid="versions-recheck">{{ t('overview.recheck') }}</button>
             </div>
           }
         } @else {
@@ -342,7 +338,7 @@ export class ProjectData {
   protected readonly status = signal<IngestionStatus | null>(null);
   protected readonly log = signal<SyncPage | null>(null);
   protected readonly formVersions = signal<FormVersionList | null>(null);
-  /** When the script chain runs; read as a line by everyone, edited by admins. */
+  /** When the script chain runs; read as a line by analysts and admins, edited by admins. */
   protected readonly pipeline = signal<PipelineSettings | null>(null);
   protected readonly editingSchedules = signal(false);
   protected readonly page = signal(1);

@@ -2,6 +2,7 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { TranslocoDirective } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
+import { CurrentUserService } from '../../core/current-user.service';
 import { ProjectSummary, ProjectsService } from '../../core/projects/projects.service';
 import { Badge, Button, Card, Skeleton } from '../../shared/ui';
 
@@ -12,7 +13,7 @@ import { Badge, Button, Card, Skeleton } from '../../shared/ui';
     <section *transloco="let t">
       <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 class="text-2xl font-semibold text-heading">{{ t('projects.title') }}</h1>
-        @if (projects()?.length) {
+        @if (projects()?.length && canCreate()) {
           <a tmzButton routerLink="/projects/new" data-testid="new-project">{{ t('projects.new') }}</a>
         }
       </div>
@@ -41,8 +42,12 @@ import { Badge, Button, Card, Skeleton } from '../../shared/ui';
         } @else {
           <tmz-card class="mx-auto max-w-xl text-center" data-testid="empty-state">
             <h2 class="text-lg font-semibold text-heading">{{ t('projects.emptyTitle') }}</h2>
-            <p class="mt-2 text-body">{{ t('projects.emptyBody') }}</p>
-            <a tmzButton class="mt-6" routerLink="/projects/new">{{ t('projects.createFirst') }}</a>
+            @if (canCreate()) {
+              <p class="mt-2 text-body">{{ t('projects.emptyBody') }}</p>
+              <a tmzButton class="mt-6" routerLink="/projects/new">{{ t('projects.createFirst') }}</a>
+            } @else if (profileSettled()) {
+              <p class="mt-2 text-body">{{ t('projects.emptyBodyNoCreate') }}</p>
+            }
           </tmz-card>
         }
       } @else {
@@ -58,9 +63,14 @@ import { Badge, Button, Card, Skeleton } from '../../shared/ui';
 export class ProjectListPage implements OnInit {
   private readonly service = inject(ProjectsService);
   private readonly errors = inject(ApiErrors);
+  private readonly currentUser = inject(CurrentUserService);
+  protected readonly canCreate = this.currentUser.canCreateProjects;
+  protected readonly profileSettled = this.currentUser.settled;
   protected readonly projects = signal<ProjectSummary[] | null>(null);
 
   ngOnInit(): void {
+    // A promotion or demotion made elsewhere shows on the next visit.
+    this.currentUser.refresh();
     this.service.list().subscribe({
       next: (projects) => this.projects.set(projects),
       error: (error) => {

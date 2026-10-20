@@ -31,7 +31,7 @@ const cellInput =
 const fullScreenOnPhones = { maxWidth: '100vw', maxHeight: '100dvh' };
 
 /**
- * The project's sampling frame. Everyone reads it as a summary line and a paginated table, and can download it as a workbook.
+ * The project's sampling frame. Analysts and admins read it as a summary line and a paginated table, and can download it as a workbook.
  * An analyst or admin changes it from the "Edit" and "Import from file" actions, and the editor goes away again once the frame is
  * saved. A project without a frame offers them three ways to start: choose questions, import a file or type it in.
  */
@@ -106,7 +106,7 @@ const fullScreenOnPhones = { maxWidth: '100vw', maxHeight: '100dvh' };
             </table>
           </tmz-table-container>
           <div class="mt-3"><ng-container [ngTemplateOutlet]="pager" [ngTemplateOutletContext]="{ total: saved.targets.length, label: t('frame.title') }" /></div>
-        } @else if (canEdit()) {
+        } @else {
           <tmz-card data-testid="frame-start">
             <h3 class="text-base font-medium text-heading">{{ t('frame.start.heading') }}</h3>
             <p class="mt-1 text-sm text-body">{{ t('frame.start.intro') }}</p>
@@ -119,8 +119,6 @@ const fullScreenOnPhones = { maxWidth: '100vw', maxHeight: '100dvh' };
               <app-frame-file-guide [fields]="context.formFields()" [choices]="context.formChoices()" [templateLink]="!!context.formFields()" (template)="openPicker()" />
             </tmz-disclosure>
           </tmz-card>
-        } @else {
-          <p class="text-sm text-body" data-testid="frame-empty">{{ t('frame.emptyViewer') }}</p>
         }
       } @else {
         <tmz-card>

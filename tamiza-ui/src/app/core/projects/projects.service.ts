@@ -34,17 +34,18 @@ export interface DashboardEntry {
 export interface ProjectDetails {
   id: string;
   name: string;
-  koboServerUrl: string;
-  assetUid: string;
+  /** The values that only Settings shows (Kobo server and asset, form check, token state, unavailable versions, enumerator question) are `null` for a viewer. */
+  koboServerUrl: string | null;
+  assetUid: string | null;
   formName: string;
-  formCheckedAt: string;
+  formCheckedAt: string | null;
   enumeratorField: string | null;
-  fieldCheck: MetricAvailability[];
+  fieldCheck: MetricAvailability[] | null;
   myRole: ProjectRole;
-  tokenUnreadable: boolean;
+  tokenUnreadable: boolean | null;
   createdAt: string;
   /** Form versions used by the project's submissions whose definition (and so labels) is not available. */
-  unavailableFormVersions: number;
+  unavailableFormVersions: number | null;
   /** IANA name of the zone that defines the dashboard's days; `UTC` until an admin sets another. */
   timeZone: string;
   /** The project's own dashboards, in the order of their tabs: at least one. */

@@ -133,7 +133,7 @@ Script 1, script 2 and the flattening SHALL write their tables to a temporary sc
 - **THEN** the output schema contains exactly those two tables, and tables from earlier runs that script 2 no longer returns are gone
 
 ### Requirement: Script versioning
-An `analyst` or `admin` SHALL be able to save a script; every save SHALL create a new immutable version with its author and time, and the latest version SHALL be the one runs use. For an indicator script the version SHALL also hold the indicator's metadata. Removing a script SHALL also create a version, marked as removed. Every member SHALL be able to read every version of every script. Restoring an older version SHALL save its code, and for an indicator its metadata, as a new version. A script larger than 200 KB SHALL be rejected.
+An `analyst` or `admin` SHALL be able to save a script; every save SHALL create a new immutable version with its author and time, and the latest version SHALL be the one runs use. For an indicator script the version SHALL also hold the indicator's metadata. Removing a script SHALL also create a version, marked as removed. Only an `analyst` or `admin` SHALL be able to read the project's scripts and every version of every script; a `viewer` SHALL be refused with 403. Restoring an older version SHALL save its code, and for an indicator its metadata, as a new version. A script larger than 200 KB SHALL be rejected.
 
 #### Scenario: Save creates a version
 - **WHEN** an analyst saves script 1 twice
@@ -151,11 +151,15 @@ An `analyst` or `admin` SHALL be able to save a script; every save SHALL create 
 - **WHEN** an analyst saves the indicator `coverage` three times and the indicator `attendance` once
 - **THEN** `coverage` is at version 3 and `attendance` at version 1
 
+#### Scenario: Viewer reads a script
+- **WHEN** a `viewer` asks for the project's scripts, the versions of script 1 or version 2 of the indicator `coverage`
+- **THEN** the API responds 403 and returns no code
+
 ### Requirement: Runs and the run log
-Each run SHALL record its trigger, the user who started it when manual, its status (`queued`, `running`, `succeeded` or `failed`), its start and end, the version of script 1 and script 2 it used and the version of each indicator script by name, the reference tables it used with their row counts and the time each was last updated, and one entry per step (flatten, clean, output, and one per indicator with its name) with its status (`succeeded`, `failed` or `skipped`), duration, input and output row counts, log and error. A run SHALL read the reference tables once when it starts, so replacing a reference table during a run SHALL NOT affect that run. A run SHALL succeed only when no step failed; a run with a failed indicator step SHALL name that indicator in its error. Every project member SHALL be able to list the project's runs, newest first, and read each run's details. A run interrupted by a restart of the worker SHALL be recorded as failed.
+Each run SHALL record its trigger, the user who started it when manual, its status (`queued`, `running`, `succeeded` or `failed`), its start and end, the version of script 1 and script 2 it used and the version of each indicator script by name, the reference tables it used with their row counts and the time each was last updated, and one entry per step (flatten, clean, output, and one per indicator with its name) with its status (`succeeded`, `failed` or `skipped`), duration, input and output row counts, log and error. A run SHALL read the reference tables once when it starts, so replacing a reference table during a run SHALL NOT affect that run. A run SHALL succeed only when no step failed; a run with a failed indicator step SHALL name that indicator in its error. Only an `analyst` or `admin` SHALL be able to list the project's runs, newest first, and read each run's details; a `viewer` SHALL be refused with 403. A run interrupted by a restart of the worker SHALL be recorded as failed.
 
 #### Scenario: Run details
-- **WHEN** a member opens a finished run
+- **WHEN** an `analyst` opens a finished run
 - **THEN** they see each step, the indicator steps by label and name, with status, duration, rows in and out, its log and, for a failed step, the error and traceback, and the reference tables the run used
 
 #### Scenario: Run uses the current versions
@@ -173,6 +177,10 @@ Each run SHALL record its trigger, the user who started it when manual, its stat
 #### Scenario: Worker restarted
 - **WHEN** the worker restarts while a run is running
 - **THEN** that run is recorded as failed because it was interrupted, and later runs proceed
+
+#### Scenario: Viewer asks for the runs
+- **WHEN** a `viewer` asks for the project's run list or for the details of a finished run
+- **THEN** the API responds 403 and returns no step, log or traceback
 
 ### Requirement: Run triggers
 A run SHALL start manually when an `analyst` or `admin` requests it, after a synchronization that created, updated or deleted submissions when the project's run-after-synchronization setting is on, and on the project's schedule when one is set. A webhook delivery SHALL NEVER start a run. A project SHALL have at most one queued run: a trigger while a run is queued SHALL NOT add another, and a trigger while a run is running SHALL queue one run to follow it.
@@ -202,7 +210,7 @@ A run SHALL start manually when an `analyst` or `admin` requests it, after a syn
 - **THEN** the API responds 403 and nothing is queued
 
 ### Requirement: Pipeline settings
-A project `admin` SHALL be able to turn running after synchronization on or off (on by default) and to set a schedule as a whole number of hours from 1 to 168, or no schedule (the default). A scheduled run SHALL be due one interval after the start of the project's last run. Every member SHALL be able to read the settings.
+A project `admin` SHALL be able to turn running after synchronization on or off (on by default) and to set a schedule as a whole number of hours from 1 to 168, or no schedule (the default). A scheduled run SHALL be due one interval after the start of the project's last run. Only an `analyst` or `admin` SHALL be able to read the settings; a `viewer` SHALL be refused with 403.
 
 #### Scenario: Schedule set
 - **WHEN** an admin sets the schedule to 24 hours
@@ -215,6 +223,14 @@ A project `admin` SHALL be able to turn running after synchronization on or off 
 #### Scenario: Analyst changes the settings
 - **WHEN** an `analyst` tries to change the pipeline settings
 - **THEN** the API responds 403 and the settings are unchanged
+
+#### Scenario: Analyst reads the settings
+- **WHEN** an `analyst` asks for the project's pipeline settings
+- **THEN** the API returns whether running after synchronization is on and the schedule
+
+#### Scenario: Viewer reads the settings
+- **WHEN** a `viewer` asks for the project's pipeline settings
+- **THEN** the API responds 403 and returns no schedule
 
 ### Requirement: Run limits
 Each script SHALL run with a time limit and a memory limit that the operator configures for the deployment, by default 10 minutes and 1024 MB. A script that exceeds either SHALL be stopped and its step SHALL fail with a message naming the limit. Scripts SHALL only use the libraries installed in the analytics image and SHALL NOT be able to install packages.
@@ -289,7 +305,7 @@ A finished test SHALL show, for each step it ran (flatten, the saved script 1 wh
 - **THEN** the test shows the failed step with the traceback pointing at the draft's line, and the tables of the steps before it
 
 ### Requirement: Reference tables
-An `analyst` or `admin` SHALL be able to upload a CSV or XLSX file of at most 10 MB as a project reference table with a name, to replace a reference table's rows with a new file, and to delete a reference table. A project SHALL have at most 50 reference tables. Names SHALL be unique in the project and SHALL consist of lowercase letters, digits and underscores, start with a letter and have at most 63 characters. Every project member SHALL be able to list the project's reference tables, with name, original file name, row and column counts, and who last updated each one and when, and to preview a table's columns with their types and its first 100 rows.
+An `analyst` or `admin` SHALL be able to upload a CSV or XLSX file of at most 10 MB as a project reference table with a name, to replace a reference table's rows with a new file, and to delete a reference table. A project SHALL have at most 50 reference tables. Names SHALL be unique in the project and SHALL consist of lowercase letters, digits and underscores, start with a letter and have at most 63 characters. Only an `analyst` or `admin` SHALL be able to list the project's reference tables, with name, original file name, row and column counts, and who last updated each one and when, and to preview a table's columns with their types and its first 100 rows; a `viewer` SHALL be refused with 403.
 
 #### Scenario: Upload
 - **WHEN** an analyst uploads `population.xlsx` as `population`
@@ -311,9 +327,13 @@ An `analyst` or `admin` SHALL be able to upload a CSV or XLSX file of at most 10
 - **WHEN** a `viewer` tries to upload, replace or delete a reference table
 - **THEN** the API responds 403 and nothing changes
 
-#### Scenario: Viewer previews
-- **WHEN** a `viewer` opens the reference table `population`
+#### Scenario: Analyst previews
+- **WHEN** an `analyst` opens the reference table `population`
 - **THEN** they see its columns with types and its first 100 rows
+
+#### Scenario: Viewer previews
+- **WHEN** a `viewer` asks for the list of reference tables or for the reference table `population`
+- **THEN** the API responds 403 and returns no rows
 
 ### Requirement: Reference table file reading
 The header SHALL be the first non-empty row; XLSX files SHALL be read from their first sheet, and CSV files SHALL be UTF-8 with commas or semicolons as separators. A file SHALL have at least one data row, at most 200 columns and at most 5,000,000 values (rows times columns). Column names SHALL be reduced with the naming rules for question names and, when two reduce to the same name, the later ones SHALL get a numbered suffix (`age`, `age_2`); the upload SHALL report every column it renamed. Each column's type SHALL be detected from its non-empty values: integer when all are whole numbers, decimal when all are numbers, date when all are dates, and text otherwise. Numbers SHALL use a dot as decimal separator, or a comma in files separated by semicolons. A value with a leading zero followed by more digits, such as `05001`, SHALL NOT count as a number, so codes keep their zeros. Empty cells SHALL be empty values.

@@ -150,8 +150,10 @@ public sealed class SamplingFrameFilesApiTests(PostgresFixture postgres)
     {
         await using var s = await ProjectAsync();
 
-        var choices = await s.Viewer.GetFromJsonAsync<JsonElement[]>($"{s.ProjectUrl}/form-choices");
+        var choices = await s.Analyst.GetFromJsonAsync<JsonElement[]>($"{s.ProjectUrl}/form-choices");
+        var refused = await s.Viewer.GetAsync($"{s.ProjectUrl}/form-choices");
 
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
         Assert.Equal(9, choices!.Length);
         Assert.Equal(["05001", "05088", "05266"], choices.Where(c => c.GetProperty("listName").GetString() == "municipios").Select(c => c.GetProperty("name").GetString()));
         var medellin = choices[0];
@@ -354,12 +356,16 @@ public sealed class SamplingFrameFilesApiTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task Viewer_downloads_the_frame()
+    public async Task Viewer_cannot_download_the_frame_and_analyst_does()
     {
         await using var s = await ProjectAsync();
         Assert.Equal(HttpStatusCode.OK, (await s.Analyst.PutAsJsonAsync(s.FrameUrl, SavedFrame)).StatusCode);
 
-        var file = await ExportAsync(s, s.Viewer);
+        var refused = await s.Viewer.PostAsync($"{s.FrameUrl}/export", null);
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        Assert.Equal(0, s.Pending);
+        Assert.Empty(s.ExportFiles);
+        var file = await ExportAsync(s, s.Analyst);
         var xlsx = await FetchAsync(s, file);
 
         Assert.Equal(3, file.GetProperty("rowCount").GetInt32());
@@ -376,9 +382,11 @@ public sealed class SamplingFrameFilesApiTests(PostgresFixture postgres)
     {
         await using var s = await ProjectAsync();
 
-        var response = await s.Viewer.PostAsync($"{s.FrameUrl}/export", null);
+        var response = await s.Analyst.PostAsync($"{s.FrameUrl}/export", null);
         var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var viewer = await s.Viewer.PostAsync($"{s.FrameUrl}/export", null);
 
+        Assert.Equal(HttpStatusCode.Forbidden, viewer.StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         Assert.Equal("samplingFrame.none", problem.GetProperty("code").GetString());
         Assert.Equal("This project has no sampling frame yet.", problem.GetProperty("detail").GetString());
@@ -432,7 +440,7 @@ public sealed class SamplingFrameFilesApiTests(PostgresFixture postgres)
         var frame = new { dimensions = new[] { new { name = "sexo", field = "sexo" } }, targets = Array.Empty<object>() };
         Assert.Equal(HttpStatusCode.OK, (await s.Analyst.PutAsJsonAsync(s.FrameUrl, frame)).StatusCode);
 
-        var file = await ExportAsync(s, s.Viewer);
+        var file = await ExportAsync(s, s.Analyst);
         var xlsx = await FetchAsync(s, file);
         var preview = await ImportAsync(s, xlsx);
 

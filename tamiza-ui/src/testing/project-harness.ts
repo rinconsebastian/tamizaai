@@ -7,12 +7,24 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import { vi } from 'vitest';
 import { routes } from '../app/app.routes';
 import { AuthService } from '../app/core/auth/auth.service';
+import { CurrentUser } from '../app/core/current-user.service';
 import { FormField, ProjectDetails, ProjectRole } from '../app/core/projects/projects.service';
 import { provideVisibleElements, tick } from './cdk';
 import { InterfaceLanguage } from '../app/core/i18n/interface-language';
 import { localeTesting, translocoTesting } from './transloco-testing';
 
 export const projectId = 'p1';
+
+/** What the API leaves out of a viewer's project details: the values only Settings shows. */
+const settingsOnlyForViewer: Partial<ProjectDetails> = {
+  koboServerUrl: null,
+  assetUid: null,
+  formCheckedAt: null,
+  enumeratorField: null,
+  fieldCheck: null,
+  tokenUnreadable: null,
+  unavailableFormVersions: null,
+};
 
 export function details(role: ProjectRole, overrides: Partial<ProjectDetails> = {}): ProjectDetails {
   return {
@@ -35,8 +47,19 @@ export function details(role: ProjectRole, overrides: Partial<ProjectDetails> = 
     unavailableFormVersions: 0,
     timeZone: 'UTC',
     dashboards: [{ id: 'd1', name: 'Indicators' }],
+    ...(role === 'viewer' ? settingsOnlyForViewer : {}),
     ...overrides,
   };
+}
+
+/** The profile `GET /api/v1/me` answers; by default a user who may create projects. */
+export function me(overrides: Partial<CurrentUser> = {}): CurrentUser {
+  return { id: 'user-1', name: 'Ada Lovelace', email: 'ada@example.org', isSuperAdmin: false, canCreateProjects: true, ...overrides };
+}
+
+/** Answers the one pending `GET /api/v1/me`. */
+export function flushMe(http: HttpTestingController, overrides: Partial<CurrentUser> = {}): void {
+  http.expectOne('/api/v1/me').flush(me(overrides));
 }
 
 export const formFields: FormField[] = [
@@ -65,13 +88,22 @@ export function configureApp(extraProviders: Provider[] = [], lang: InterfaceLan
   return TestBed.inject(HttpTestingController);
 }
 
-/** Opens a project section the way the router would, answering the project and form-field requests. */
+/** The requests only the Settings sections make; a viewer's pages never send them, because the API answers a viewer 403. */
+const settingsRequest = /\/api\/v1\/projects\/[^/]+\/(members|sampling-frame|ingestion|syncs|form-versions|runs|pipeline|reference-tables|scripts|script-inputs|form-fields|form-choices)(\/|\?|$)/;
+
+/** Takes the pending requests to Settings data out of the controller, to assert that a viewer's page sent none. */
+export function settingsRequests(http: HttpTestingController) {
+  return http.match((request) => settingsRequest.test(request.url));
+}
+
+/** Opens a project section the way the router would, answering the project and, unless `formFields` is false, form-field requests. */
 export async function openProjectSection(
   section: string,
   role: ProjectRole,
   overrides: Partial<ProjectDetails> = {},
   providers: Provider[] = [],
   lang: InterfaceLanguage = 'en',
+  { formFields: answerFormFields = true }: { formFields?: boolean } = {},
 ) {
   const http = configureApp(providers, lang);
   const harness = await RouterTestingHarness.create();
@@ -80,7 +112,9 @@ export async function openProjectSection(
   http.expectOne(`/api/v1/projects/${projectId}`).flush(details(role, overrides));
   await navigation;
   await settle(harness);
-  http.match(`/api/v1/projects/${projectId}/form-fields`).forEach((r) => r.flush(formFields));
+  if (answerFormFields) {
+    http.match(`/api/v1/projects/${projectId}/form-fields`).forEach((r) => r.flush(formFields));
+  }
   await settle(harness);
   return { http, harness, element: harness.routeNativeElement as HTMLElement, root: harness.fixture.nativeElement as HTMLElement };
 }

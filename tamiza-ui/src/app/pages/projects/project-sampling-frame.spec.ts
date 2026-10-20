@@ -67,14 +67,14 @@ describe('ProjectSamplingFrame', () => {
 
   describe('reading', () => {
     it('shows a skeleton while the frame loads', async () => {
-      const { http, root } = await openProjectSection('sampling-frame', 'viewer');
+      const { http, root } = await openProjectSection('sampling-frame', 'analyst');
 
       expect(byTestId(root, 'frame-loading')?.getAttribute('aria-busy')).toBe('true');
       http.expectOne(url);
     });
 
-    it('shows viewers the summary line and a read-only table without any action', async () => {
-      const { http, harness, root } = await openProjectSection('sampling-frame', 'viewer');
+    it('shows the summary line and a table of the targets, with no inputs until the analyst edits', async () => {
+      const { http, harness, root } = await openProjectSection('sampling-frame', 'analyst');
       http.expectOne(url).flush(frame);
       await settle(harness);
 
@@ -84,21 +84,10 @@ describe('ProjectSamplingFrame', () => {
       expect(table.textContent).toContain('Municipality');
       expect(table.textContent).toContain('120');
       expect(root.querySelector('input')).toBeNull();
-      expect(byTestId(root, 'edit-frame')).toBeNull();
-      expect(byTestId(root, 'open-import')).toBeNull();
     });
 
-    it('says plainly that a viewer has no frame to read', async () => {
-      const { http, harness, root } = await openProjectSection('sampling-frame', 'viewer');
-      http.expectOne(url).flush(null);
-      await settle(harness);
-
-      expect(byTestId(root, 'frame-empty')!.textContent).toContain('No sampling frame has been defined');
-      expect(byTestId(root, 'save-frame')).toBeNull();
-    });
-
-    it('pages a long frame for viewers', async () => {
-      const { http, harness, root } = await openProjectSection('sampling-frame', 'viewer');
+    it('pages a long frame', async () => {
+      const { http, harness, root } = await openProjectSection('sampling-frame', 'analyst');
       http.expectOne(url).flush(bigFrame);
       await settle(harness);
 
@@ -143,16 +132,6 @@ describe('ProjectSamplingFrame', () => {
       expect(byTestId(root, 'download-frame')).toBeNull();
     });
 
-    it('Viewer without a frame', async () => {
-      const { http, harness, root } = await openProjectSection('sampling-frame', 'viewer');
-      http.expectOne(url).flush(null);
-      await settle(harness);
-
-      expect(byTestId(root, 'frame-empty')!.textContent).toContain('No sampling frame has been defined');
-      expect(byTestId(root, 'frame-start')).toBeNull();
-      expect(root.querySelector('section button')).toBeNull();
-    });
-
     it('Typing the frame in', async () => {
       const { http, harness, root } = await openProjectSection('sampling-frame', 'analyst');
       http.expectOne(url).flush(null);
@@ -179,7 +158,7 @@ describe('ProjectSamplingFrame', () => {
       expect(failure.textContent).toContain('The database is not available.');
       expect(failure.querySelector('[lang="en"]')!.textContent).toBe('The database is not available.');
       expect(failure.querySelector('p')!.hasAttribute('lang')).toBe(false); // the heading is the UI's
-      for (const id of ['frame-start', 'add-dimension', 'open-import', 'download-frame', 'edit-frame', 'frame-empty']) {
+      for (const id of ['frame-start', 'add-dimension', 'open-import', 'download-frame', 'edit-frame']) {
         expect(byTestId(root, id)).toBeNull();
       }
 
@@ -488,16 +467,16 @@ describe('ProjectSamplingFrame', () => {
   describe('downloading', () => {
     const exportUrl = `${url}/export`;
 
-    async function openWithDownloader(role: 'viewer' | 'analyst') {
+    async function openWithDownloader() {
       const downloader = { start: vi.fn() };
-      const context = await openProjectSection('sampling-frame', role, {}, [{ provide: Downloader, useValue: downloader }]);
+      const context = await openProjectSection('sampling-frame', 'analyst', {}, [{ provide: Downloader, useValue: downloader }]);
       context.http.expectOne(url).flush(frame);
       await settle(context.harness);
       return { ...context, downloader };
     }
 
-    it('lets a viewer download the frame, busy while it is prepared, ending in one success toast', async () => {
-      const { http, harness, root, downloader } = await openWithDownloader('viewer');
+    it('lets an analyst download the frame, busy while it is prepared, ending in one success toast', async () => {
+      const { http, harness, root, downloader } = await openWithDownloader();
 
       byTestId<HTMLButtonElement>(root, 'download-frame')!.click();
       await settle(harness);
@@ -516,7 +495,7 @@ describe('ProjectSamplingFrame', () => {
     });
 
     it('shows one error toast with the API message when the download is refused', async () => {
-      const { http, harness, root, downloader } = await openWithDownloader('viewer');
+      const { http, harness, root, downloader } = await openWithDownloader();
 
       byTestId<HTMLButtonElement>(root, 'download-frame')!.click();
       await settle(harness);

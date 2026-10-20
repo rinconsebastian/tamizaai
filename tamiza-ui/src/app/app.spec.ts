@@ -44,7 +44,7 @@ describe('App shell', () => {
     return fixture;
   }
 
-  const ada: CurrentUser = { id: '0192f0c4-0000-7000-8000-000000000001', name: 'Ada Lovelace', email: 'ada@example.org', isSuperAdmin: false };
+  const ada: CurrentUser = { id: '0192f0c4-0000-7000-8000-000000000001', name: 'Ada Lovelace', email: 'ada@example.org', isSuperAdmin: false, canCreateProjects: false };
 
   it('shows the signed-in user name from /api/v1/me', async () => {
     const fixture = await renderWithUser(ada);

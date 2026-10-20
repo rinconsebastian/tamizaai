@@ -45,7 +45,8 @@
         "exists": "Este correo ya tiene una invitación pendiente."
       },
       "project": {
-        "last_admin": "El proyecto necesita al menos un administrador. Primero haz administrador a otro miembro."
+        "last_admin": "El proyecto necesita al menos un administrador. Primero haz administrador a otro miembro.",
+        "create_not_allowed": "Solo los administradores de un proyecto y los superadministradores pueden crear proyectos."
       },
       "sync": {
         "in_progress": "Ya hay una sincronización de este proyecto en curso. Espera a que termine.",
@@ -156,6 +157,7 @@
     "new": "Nuevo proyecto",
     "emptyTitle": "Aún no hay proyectos",
     "emptyBody": "Un proyecto vincula Tamiza con un formulario de KoboToolbox. Crea uno para empezar o pide a un administrador del proyecto que te invite.",
+    "emptyBodyNoCreate": "Un proyecto vincula Tamiza con un formulario de KoboToolbox. Pide a un administrador del proyecto que te invite a uno.",
     "createFirst": "Crear un proyecto"
   },
   "createProject": {
@@ -224,9 +226,7 @@
     "unavailableVersionsAction": "Ver las versiones del formulario",
     "hints": {
       "defineSamplingFrame": "Define un marco muestral para ver la cobertura.",
-      "defineSamplingFrameViewer": "Pide a quien tenga el rol de Analista o Administrador que defina el marco muestral.",
       "updateSamplingFrame": "El marco muestral usa campos que el formulario ya no tiene. Actualiza el marco o vuelve a poner esas preguntas en el formulario.",
-      "updateSamplingFrameViewer": "El marco muestral usa campos que el formulario ya no tiene. Pide a quien tenga el rol de Analista o Administrador que lo actualice.",
       "selectEnumeratorField": "Elige la pregunta que identifica al encuestador.",
       "selectEnumeratorFieldViewer": "Pide a quien tenga el rol de Administrador del proyecto que elija la pregunta que identifica al encuestador.",
       "openFrame": "Abrir el marco muestral"
@@ -416,8 +416,7 @@
         "pending": "Pendiente",
         "failed": "Fallida",
         "not_found": "No encontrada"
-      },
-      "retryHintViewer": "Las respuestas hechas con una versión que Tamiza no pudo leer usan las etiquetas del formulario actual. Pide a quien tenga el rol de Analista o Administrador que revise el formulario de nuevo; así se reintentan las versiones fallidas y las no encontradas."
+      }
     },
     "scheduleLine": "Sincroniza cada {{ sync }} horas · verifica eliminaciones cada {{ reconcile }} horas",
     "runsAfterSync": "Los scripts se ejecutan después de cada sincronización con cambios",
@@ -504,7 +503,6 @@
     "indicators": "Indicadores",
     "addIndicator": "Agregar indicador",
     "indicatorLimit": "El proyecto tiene el máximo de indicadores permitido ({{ max }}). Elimina uno para agregar otro.",
-    "noIndicators": "Este proyecto aún no tiene indicadores.",
     "noIndicatorsEditor": "Este proyecto aún no tiene indicadores. Agrega uno para publicar una tabla en el tablero de indicadores.",
     "newBadge": "nuevo",
     "editorLabelIndicator": "Código Python del indicador {{ name }}",
@@ -946,7 +944,6 @@
   },
   "frame": {
     "target": "Meta",
-    "emptyViewer": "Aún no se ha definido un marco muestral para este proyecto.",
     "importTitle": "Importar desde un archivo",
     "importIntro": "Sube un archivo CSV o XLSX con una columna por dimensión y una columna de meta. Revisas las filas y eliges la pregunta de cada columna antes de guardar nada.",
     "previewErrors": "Corrige estas filas en el archivo e impórtalo de nuevo:",
@@ -1238,7 +1235,6 @@
     "title": "Datos de referencia",
     "add": "Subir tabla",
     "emptyEditor": "Aún no hay tablas de referencia. Sube un archivo CSV o XLSX; los scripts lo leen con ctx.reference[\"name\"] desde la próxima ejecución.",
-    "emptyViewer": "Este proyecto no tiene tablas de referencia.",
     "size": "{{ rows }}, {{ columns }}",
     "rowCount": "{{ count }} filas",
     "rowCountOne": "{{ count }} fila",

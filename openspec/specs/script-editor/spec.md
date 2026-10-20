@@ -7,7 +7,7 @@ The editor of the Scripts section: what it shows beside the code (the tables a s
 ## Requirements
 
 ### Requirement: Script inputs panel
-Beside the editor, the Scripts section SHALL show the tables the selected script receives, as the last run published them: the flattened tables for script 1, the clean tables for script 2 and the indicator scripts. It SHALL give each table's name and row count, each column's name, type and question label when it has one, and when the tables were published. Every project member SHALL see it.
+Beside the editor, the Scripts section SHALL show the tables the selected script receives, as the last run published them: the flattened tables for script 1, the clean tables for script 2 and the indicator scripts. It SHALL give each table's name and row count, each column's name, type and question label when it has one, and when the tables were published. Every `analyst` and `admin` of the project SHALL see it. The API SHALL refuse a `viewer`'s request for the script inputs with 403.
 
 #### Scenario: Inputs of script 1
 - **WHEN** an analyst selects script 1 in a project whose last run flattened a form with a repeat group `members`
@@ -22,12 +22,12 @@ Beside the editor, the Scripts section SHALL show the tables the selected script
 - **THEN** the panel of an indicator does not list the new column, and shows the publish time of the tables it lists
 
 #### Scenario: Nothing published yet
-- **WHEN** a member opens the Scripts section of a project that has never run
+- **WHEN** an analyst opens the Scripts section of a project that has never run
 - **THEN** the panel says that the tables appear after the first run, and the editor works without them
 
 #### Scenario: Viewer sees the inputs
-- **WHEN** a `viewer` opens the Scripts section
-- **THEN** the panel lists the same tables and columns as for an analyst
+- **WHEN** a `viewer` of the project requests its script inputs from the API
+- **THEN** the API responds 403 and returns no table, column, reference table or question
 
 #### Scenario: Not a member
 - **WHEN** a user who is not a member of the project requests its script inputs from the API
@@ -45,14 +45,18 @@ The panel SHALL also list the project's reference tables with their columns and 
 - **THEN** the panel shows the columns and questions whose name or label contains `water`, under their tables, and hides the rest
 
 ### Requirement: Names inserted from the panel
-Activating a table, a column or a reference table in the panel with a click or with Enter SHALL insert its name as a quoted Python string at the editor's cursor, while the editor can be edited. While it cannot (a `viewer`, or an older version on view), activating a name SHALL copy it instead.
+Activating a table, a column or a reference table in the panel with a click or with Enter SHALL insert its name as a quoted Python string at the editor's cursor, while the editor can be edited. While it cannot, because an older version is on view, activating a name SHALL copy it instead.
 
 #### Scenario: Column inserted
 - **WHEN** an analyst places the cursor after `main[` and activates the column `has_water` in the panel
 - **THEN** the editor reads `main["has_water"` and the cursor follows the inserted text
 
 #### Scenario: Viewer copies a name
-- **WHEN** a `viewer` activates the column `has_water`
+- **WHEN** a `viewer` opens the address of the project's Scripts section
+- **THEN** the project's performance dashboard opens instead, and no panel is shown to insert or copy a name from
+
+#### Scenario: Older version copies a name
+- **WHEN** an analyst views version 3 of a script whose current version is 5 and activates the column `has_water`
 - **THEN** the name is copied to the clipboard and the code does not change
 
 ### Requirement: Completion of ctx
@@ -145,7 +149,7 @@ Hovering a member of `ctx`, `ctx.form` or `ctx.log` in the editor SHALL show its
 - **THEN** a tooltip shows `column_label(table, column)` and that it returns the question label of a flattened column, or nothing
 
 #### Scenario: Reference of an indicator
-- **WHEN** a `viewer` opens the reference tab while an indicator is selected
+- **WHEN** an analyst opens the reference tab while an indicator is selected
 - **THEN** it shows the `compute(cleaned, ctx)` contract, that the result is one DataFrame with at least one numeric column, and the conventions for `value`, `numerator` and `denominator`
 
 ### Requirement: Script templates
@@ -179,7 +183,11 @@ A line whose text, after leading spaces, starts with `# %%` SHALL begin a cell t
 - **THEN** a test through the second cell starts
 
 #### Scenario: Viewer
-- **WHEN** a `viewer` opens a script with cells
+- **WHEN** a `viewer` opens the address of the Scripts section of a project whose scripts have cells
+- **THEN** the project's performance dashboard opens instead, and no "Run cell" action is shown
+
+#### Scenario: Older version on view
+- **WHEN** an analyst views an older version of a script with cells
 - **THEN** no "Run cell" action is shown and Ctrl+Enter does nothing
 
 #### Scenario: Result names the cell

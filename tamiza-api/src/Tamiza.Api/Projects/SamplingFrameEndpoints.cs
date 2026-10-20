@@ -20,7 +20,7 @@ public static class SamplingFrameEndpoints
     public static RouteGroupBuilder MapSamplingFrameEndpoints(this RouteGroupBuilder api)
     {
         var project = api.MapGroup("/projects/{projectId:guid}/sampling-frame").WithTags("Sampling frame");
-        project.MapGet("", GetAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetSamplingFrame");
+        project.MapGet("", GetAsync).RequireProjectRole(ProjectRole.Analyst).WithName("GetSamplingFrame");
         project.MapPut("", SaveAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveSamplingFrame");
         project.MapPost("/import", ImportAsync)
             .RequireProjectRole(ProjectRole.Analyst)
@@ -28,7 +28,7 @@ public static class SamplingFrameEndpoints
             .WithMetadata(new RequestSizeLimitAttribute(2 * SamplingFrameImport.MaxFileBytes))
             .WithName("PreviewSamplingFrameImport");
         project.MapPost("/template", DownloadTemplateAsync).RequireProjectRole(ProjectRole.Analyst).WithName("DownloadSamplingFrameTemplate");
-        project.MapPost("/export", DownloadAsync).RequireProjectRole(ProjectRole.Viewer).WithName("DownloadSamplingFrame");
+        project.MapPost("/export", DownloadAsync).RequireProjectRole(ProjectRole.Analyst).WithName("DownloadSamplingFrame");
         return api;
     }
 

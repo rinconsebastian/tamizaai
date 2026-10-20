@@ -19,9 +19,9 @@ public static class RunEndpoints
     {
         var project = api.MapGroup("/projects/{projectId:guid}").WithTags("Pipeline");
         project.MapPost("/runs", StartAsync).RequireProjectRole(ProjectRole.Analyst).WithName("StartRun");
-        project.MapGet("/runs", ListAsync).RequireProjectRole(ProjectRole.Viewer).WithName("ListRuns");
-        project.MapGet("/runs/{runId:guid}", GetAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetRun");
-        project.MapGet("/pipeline", GetSettingsAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetPipelineSettings");
+        project.MapGet("/runs", ListAsync).RequireProjectRole(ProjectRole.Analyst).WithName("ListRuns");
+        project.MapGet("/runs/{runId:guid}", GetAsync).RequireProjectRole(ProjectRole.Analyst).WithName("GetRun");
+        project.MapGet("/pipeline", GetSettingsAsync).RequireProjectRole(ProjectRole.Analyst).WithName("GetPipelineSettings");
         project.MapPut("/pipeline", UpdateSettingsAsync).RequireProjectRole(ProjectRole.Admin).WithName("UpdatePipelineSettings");
         return api;
     }

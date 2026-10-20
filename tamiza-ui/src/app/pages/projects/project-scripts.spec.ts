@@ -382,12 +382,18 @@ describe('ProjectScripts', () => {
   beforeEach(() => downloader.start.mockClear());
   afterEach(() => document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = '')));
 
-  it('shows the current script read-only to viewers, without editing actions', async () => {
-    const { root, editor } = await open('viewer');
+  it('shows an older version read-only, without the actions that change or test the script', async () => {
+    const opened = await open('analyst');
+    const { root, http, harness, editor } = opened;
+    await openVersions(opened);
+    byTestId<HTMLButtonElement>(root, 'version-1')!.click();
+    await settle(harness);
+    http.expectOne(`${scriptsUrl}/clean/versions/1`).flush(version(1));
+    await settle(harness);
 
-    expect(editor().text()).toContain('# v2');
+    expect(editor().text()).toContain('# v1');
     expect(root.querySelector('.cm-content')?.getAttribute('contenteditable')).toBe('false');
-    for (const id of ['save', 'remove', 'upload', 'template', 'run-now', 'test-on-sample', 'sample-size']) {
+    for (const id of ['save', 'remove', 'upload', 'template', 'test-on-sample', 'sample-size']) {
       expect(byTestId(root, id)).toBeNull();
     }
     expect(byTestId(root, 'script-clean')?.textContent).toContain('v2');
@@ -629,7 +635,7 @@ describe('ProjectScripts', () => {
       run({ id: 'd', status: 'failed', errorCode: 'run.interrupted', error: 'The run was interrupted.' }),
       run({ id: 'e' }),
     ];
-    const { root } = await open('viewer', { runs: { items: runs, total: 5 } });
+    const { root } = await open('analyst', { runs: { items: runs, total: 5 } });
     const table = byTestId(root, 'run-table')!;
 
     for (const status of ['queued', 'running', 'failed', 'succeeded']) {
@@ -653,7 +659,7 @@ describe('ProjectScripts', () => {
 
   it('opens the details of a run with each step', async () => {
     const failed = run({ id: 'c', status: 'failed', errorCode: 'step.clean', error: "KeyError: 'age'" });
-    const { root, http, harness } = await open('viewer', { runs: { items: [failed], total: 1 } });
+    const { root, http, harness } = await open('analyst', { runs: { items: [failed], total: 1 } });
 
     byTestId<HTMLButtonElement>(root, 'run-details-c')!.click();
     await settle(harness);
@@ -681,7 +687,7 @@ describe('ProjectScripts', () => {
 
   it('writes a reference table of one row in the singular in the details of a run', async () => {
     const done = run({ id: 'd' });
-    const { root, http, harness } = await open('viewer', { runs: { items: [done], total: 1 } });
+    const { root, http, harness } = await open('analyst', { runs: { items: [done], total: 1 } });
 
     byTestId<HTMLButtonElement>(root, 'run-details-d')!.click();
     await settle(harness);
@@ -697,7 +703,7 @@ describe('ProjectScripts', () => {
   });
 
   it('says when a run used no reference tables', async () => {
-    const { root, http, harness } = await open('viewer');
+    const { root, http, harness } = await open('analyst');
 
     byTestId<HTMLButtonElement>(root, 'run-details-r1')!.click();
     await settle(harness);
@@ -708,7 +714,7 @@ describe('ProjectScripts', () => {
   });
 
   it('polls while a run is active and stops when the page is destroyed', async () => {
-    const { http, harness } = await open('viewer', { runs: { items: [run({ status: 'running' })], total: 1 }, pollMs: 30 });
+    const { http, harness } = await open('analyst', { runs: { items: [run({ status: 'running' })], total: 1 }, pollMs: 30 });
 
     await new Promise((resolve) => setTimeout(resolve, 60));
     http.expectOne((r) => r.url === runsUrl && r.method === 'GET').flush({ items: [run({ status: 'running' })], total: 1 });
@@ -720,7 +726,7 @@ describe('ProjectScripts', () => {
   });
 
   it('stops polling when no run is active', async () => {
-    const { http } = await open('viewer', { runs: { items: [run()], total: 1 }, pollMs: 30 });
+    const { http } = await open('analyst', { runs: { items: [run()], total: 1 }, pollMs: 30 });
 
     await new Promise((resolve) => setTimeout(resolve, 60));
 
@@ -907,31 +913,14 @@ describe('ProjectScripts', () => {
 
   // Indicator scripts
 
-  it('lists the indicators with their label, name and version, read-only to viewers', async () => {
+  it('lists the indicators with their label, name and version', async () => {
     const attendance = indicatorVersion('attendance', 1, { label: 'Attendance' });
     const coverage = indicatorVersion('coverage', 3);
-    const opened = await open('viewer', { scripts: withIndicators(attendance, coverage) });
-    const { root, http } = opened;
+    const opened = await open('analyst', { scripts: withIndicators(attendance, coverage) });
 
-    expect(textOf(byTestId(root, 'indicator-menu'))).toBe('Indicators (2)');
+    expect(textOf(byTestId(opened.root, 'indicator-menu'))).toBe('Indicators (2)');
     await openIndicatorMenu(opened);
     expect(indicatorEntries()).toEqual(['Attendance attendance v1', 'Label of coverage coverage v3']);
-    document.querySelector<HTMLElement>('[data-testid="indicator-list"] [role="menuitem"]')!.click(); // closes the menu again
-    await settle(opened.harness);
-    expect(byTestId(root, 'add-indicator')).toBeNull();
-
-    // The details are text, not inputs that look editable.
-    http.expectOne(`${scriptsUrl}/indicators/attendance/versions`).flush([summary(attendance)]);
-    await selectIndicator(opened, coverage);
-    const details = textOf(byTestId(root, 'indicator-meta-readonly'));
-    expect(details).toContain('Label of coverage');
-    expect(details).toContain('What it measures');
-    expect(details).toContain('Count · households');
-    expect(byTestId(root, 'meta-label')).toBeNull();
-    expect(byTestId(root, 'edit-details')).toBeNull();
-    for (const id of ['save', 'remove', 'template', 'test-on-sample']) {
-      expect(byTestId(root, id)).toBeNull();
-    }
   });
 
   it('says so when the project has no indicators, inside the menu rather than above the editor', async () => {
@@ -1270,7 +1259,7 @@ describe('ProjectScripts', () => {
         { step: 'indicator', name: 'coverage', status: 'succeeded', inputRows: 8, outputRows: 12 },
       ],
     });
-    const { root, http, harness } = await open('viewer', { runs: { items: [failed], total: 1 } });
+    const { root, http, harness } = await open('analyst', { runs: { items: [failed], total: 1 } });
 
     const table = byTestId(root, 'run-table')!;
     expect(byTestId(table, 'run-error')?.textContent?.trim()).toBe("An indicator script failed: attendance: KeyError: 'age'");
@@ -1351,10 +1340,18 @@ describe('ProjectScripts', () => {
     expect(editor().text()).toBe('# still works');
   });
 
-  it('shows the same tables to a viewer, who copies a name instead of inserting it', async () => {
+  it('copies a name instead of inserting it while an older version is on view', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    const { root, editor } = await open('viewer');
+    const opened = await open('analyst');
+    const { root, http, harness, editor } = opened;
+    await openVersions(opened);
+    byTestId<HTMLButtonElement>(root, 'version-1')!.click();
+    await settle(harness);
+    http.expectOne(`${scriptsUrl}/clean/versions/1`).flush(version(1));
+    await settle(harness);
+    byTestId<HTMLButtonElement>(root, 'side-tab-inputs')!.click();
+    await settle(harness);
     const before = editor().text();
 
     expect(byTestId(root, 'input-table-main')).not.toBeNull();
@@ -1488,9 +1485,9 @@ describe('ProjectScripts', () => {
     expect(byTestId(root, 'editor-keys')?.textContent).toContain('Press Esc, then Tab, to leave the editor');
   });
 
-  it('shows a viewer the reference of the selected indicator: its contract and what it returns', async () => {
+  it('shows the reference of the selected indicator: its contract and what it returns', async () => {
     const coverage = indicatorVersion('coverage', 1);
-    const opened = await open('viewer', { scripts: withIndicators(coverage) });
+    const opened = await open('analyst', { scripts: withIndicators(coverage) });
     await selectIndicator(opened, coverage);
     opened.http.expectOne((r) => r.url === inputsUrl && r.params.get('kind') === 'indicator');
 
@@ -1555,13 +1552,6 @@ describe('ProjectScripts', () => {
 
       const request = http.expectOne((r) => r.url === testsUrl && r.method === 'POST');
       expect(request.request.body).toEqual({ kind: 'clean', code: cellScript, sampleSize: 120, stopAtLine: 6 });
-    });
-
-    it('offers no cell actions to a viewer', async () => {
-      const { root, http } = await open('viewer');
-
-      expect(root.querySelectorAll('.cm-run-cell')).toHaveLength(0);
-      http.expectNone((r) => r.url === testsUrl);
     });
 
     it('offers no cell actions while an older version is on view', async () => {
@@ -1865,13 +1855,6 @@ describe('ProjectScripts', () => {
     expect(downloader.start.mock.calls.map((call) => call[0])).toEqual(['/api/v1/data-exports/one', '/api/v1/data-exports/two']);
   });
 
-  it('does not offer sample downloads to a viewer', async () => {
-    const { root } = await open('viewer');
-
-    expect(byTestId(root, 'download-sample')).toBeNull();
-    expect(byTestId(root, 'sample-download')).toBeNull();
-  });
-
   it('checks the sample size before asking, as a test does', async () => {
     const opened = await open('analyst');
 
@@ -2061,7 +2044,7 @@ describe('ProjectScripts', () => {
 
     it('filters a long list of indicators in the menu', async () => {
       const many = Array.from({ length: 12 }, (_, i) => indicatorVersion(`indicator_${String(i).padStart(2, '0')}`, 1));
-      const opened = await open('viewer', { scripts: withIndicators(...many) });
+      const opened = await open('analyst', { scripts: withIndicators(...many) });
       await openIndicatorMenu(opened);
       expect(indicatorEntries()).toHaveLength(12);
 
@@ -2075,7 +2058,7 @@ describe('ProjectScripts', () => {
     });
 
     it('offers no filter for a short list', async () => {
-      const opened = await open('viewer', { scripts: withIndicators(indicatorVersion('coverage', 1)) });
+      const opened = await open('analyst', { scripts: withIndicators(indicatorVersion('coverage', 1)) });
       await openIndicatorMenu(opened);
       expect(document.querySelector('[data-testid="indicator-filter"]')).toBeNull();
     });
@@ -2088,14 +2071,21 @@ describe('ProjectScripts', () => {
       expect(root.textContent).not.toContain('receives the flattened tables and returns the cleaned ones');
     });
 
-    it.each<[ProjectRole, boolean]>([
-      ['analyst', true],
-      ['viewer', false],
-    ])('tells a %s about the cell shortcut: %s', async (role, shown) => {
-      const { root } = await open(role);
-      const keys = textOf(byTestId(root, 'editor-keys'));
-      expect(keys).toContain('Press Esc, then Tab, to leave the editor');
-      expect(keys.includes('Ctrl+Enter')).toBe(shown);
+    it('tells an analyst about the cell shortcut, and not while an older version is on view', async () => {
+      const opened = await open('analyst');
+      const { root, http, harness } = opened;
+      const keys = () => textOf(byTestId(root, 'editor-keys'));
+      expect(keys()).toContain('Press Esc, then Tab, to leave the editor');
+      expect(keys()).toContain('Ctrl+Enter');
+
+      await openVersions(opened);
+      byTestId<HTMLButtonElement>(root, 'version-1')!.click();
+      await settle(harness);
+      http.expectOne(`${scriptsUrl}/clean/versions/1`).flush(version(1));
+      await settle(harness);
+
+      expect(keys()).toContain('Press Esc, then Tab, to leave the editor');
+      expect(keys()).not.toContain('Ctrl+Enter');
     });
 
     it('keeps save, the sample size, test and download in one row, with one hint', async () => {
@@ -2170,12 +2160,6 @@ describe('ProjectScripts', () => {
       await settle(harness);
     });
 
-    it('gives a viewer the run but not the button', async () => {
-      const { root } = await open('viewer');
-      expect(byTestId(root, 'last-run-status')).not.toBeNull();
-      expect(byTestId(root, 'run-now')).toBeNull();
-    });
-
     it('names the step that failed', async () => {
       const failed = run({
         id: 'f',
@@ -2187,13 +2171,13 @@ describe('ProjectScripts', () => {
           { step: 'indicator', name: 'attendance', status: 'failed', inputRows: 8, outputRows: null },
         ],
       });
-      const { root } = await open('viewer', { runs: { items: [failed], total: 1 } });
+      const { root } = await open('analyst', { runs: { items: [failed], total: 1 } });
       expect(textOf(byTestId(root, 'last-run-status'))).toBe('Failed');
       expect(textOf(byTestId(root, 'last-run-failed'))).toBe('attendance failed');
     });
 
     it('says when there is no run yet', async () => {
-      const { root } = await open('viewer', { runs: { items: [], total: 0 } });
+      const { root } = await open('analyst', { runs: { items: [], total: 0 } });
       expect(textOf(byTestId(root, 'last-run-none'))).toBe('No runs yet.');
     });
 
@@ -2206,7 +2190,7 @@ describe('ProjectScripts', () => {
         ],
       });
       const bad = run({ id: 'bad', status: 'failed', errorCode: 'step.clean', error: 'x' });
-      const { root } = await open('viewer', { runs: { items: [clean, bad], total: 2 } });
+      const { root } = await open('analyst', { runs: { items: [clean, bad], total: 2 } });
       const rows = byTestId(root, 'run-table')!.querySelectorAll('tbody tr');
       expect(textOf(rows[0])).toContain('All succeeded');
       expect(rows[0].querySelector('tmz-badge[data-testid="run-indicators"]')).toBeNull();
@@ -2214,7 +2198,7 @@ describe('ProjectScripts', () => {
     });
 
     it('names the versions of script 1 and script 2 in the details of a run', async () => {
-      const { root, http, harness } = await open('viewer');
+      const { root, http, harness } = await open('analyst');
       byTestId<HTMLButtonElement>(root, 'run-details-r1')!.click();
       await settle(harness);
       http.expectOne(`${runsUrl}/r1`).flush({ run: run(), steps: [], referenceTables: [] });
@@ -2232,13 +2216,9 @@ describe('ProjectScripts', () => {
       expect([...byTestId(opened.root, 'versions')!.querySelectorAll('li')]).toHaveLength(2);
     });
 
-    it('offers analysts a link to manage the reference tables, and viewers none', async () => {
+    it('offers analysts a link to manage the reference tables', async () => {
       const analyst = await open('analyst');
       expect(byTestId(analyst.root, 'inputs-manage-reference')!.getAttribute('href')).toBe(`/projects/${projectId}/reference`);
-      TestBed.resetTestingModule();
-
-      const viewer = await open('viewer');
-      expect(byTestId(viewer.root, 'inputs-manage-reference')).toBeNull();
     });
 
     it('keeps the questions in a closed disclosure that a filter opens', async () => {
@@ -2291,12 +2271,6 @@ describe('ProjectScripts', () => {
       const opened = await open('analyst', { assistant: true });
       await settle(opened.harness);
       expect(tabNames(opened.root)).toEqual(['Tables', 'Reference', 'Versions', 'Assistant']);
-    });
-
-    it('is not shown to a viewer, even when the deployment has the assistant (Viewer)', async () => {
-      const opened = await open('viewer', { assistant: true });
-      await settle(opened.harness);
-      expect(tabNames(opened.root)).toEqual(['Tables', 'Reference', 'Versions']);
     });
 
     it('keeps Versions working as its own tab with the assistant present', async () => {

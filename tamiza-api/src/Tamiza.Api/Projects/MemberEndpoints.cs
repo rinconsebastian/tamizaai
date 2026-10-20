@@ -36,7 +36,7 @@ public static class MemberEndpoints
     public static RouteGroupBuilder MapMemberEndpoints(this RouteGroupBuilder api)
     {
         var project = api.MapGroup("/projects/{projectId:guid}").WithTags("Members");
-        project.MapGet("/members", ListMembersAsync).RequireProjectRole(ProjectRole.Viewer).WithName("ListMembers");
+        project.MapGet("/members", ListMembersAsync).RequireProjectRole(ProjectRole.Analyst).WithName("ListMembers");
         project.MapPost("/members", InviteAsync).RequireProjectRole(ProjectRole.Admin).WithName("InviteMember");
         project.MapPatch("/members/{userId:guid}", ChangeMemberRoleAsync).RequireProjectRole(ProjectRole.Admin).WithName("ChangeMemberRole");
         project.MapDelete("/members/{userId:guid}", RemoveMemberAsync).RequireProjectRole(ProjectRole.Admin).WithName("RemoveMember");

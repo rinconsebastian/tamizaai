@@ -9,7 +9,7 @@ const tabs = (root: HTMLElement) => Array.from(root.querySelector('nav')!.queryS
 const settingsPills = (root: HTMLElement) =>
   Array.from(root.querySelectorAll('nav[aria-label="Settings"] a')).map((a) => a.textContent?.trim());
 const performanceUrl = `/api/v1/projects/${projectId}/performance`;
-const sectionsForEveryMember = ['General', 'Submissions', 'Scripts', 'Reference data', 'Sampling frame', 'Members'];
+const sectionsForAnalysts = ['General', 'Submissions', 'Scripts', 'Reference data', 'Sampling frame', 'Members'];
 
 /** The plain options of the sections' select (the page's first), before the Settings group. */
 const plainOptions = (root: HTMLElement) =>
@@ -25,16 +25,24 @@ const threeDashboards = {
 
 describe('ProjectPage tabs in Spanish', () => {
   it('names the permanent tabs in Spanish and shows the dashboards as they were named (Project sections in Spanish)', async () => {
-    const { root } = await openProjectSection('overview', 'viewer', twoDashboards, [], 'es');
+    const { root } = await openProjectSection('overview', 'analyst', twoDashboards, [], 'es');
 
     expect(tabs(root)).toEqual(['Desempeño', 'Datos limpios', 'Indicators', 'Field', 'Configuración']);
     expect(plainOptions(root)).toEqual(['Desempeño', 'Datos limpios', 'Indicators', 'Field']);
   });
+
+  it('offers a viewer no Configuración, in the tab row or in the select', async () => {
+    const { root } = await openProjectSection('performance', 'viewer', twoDashboards, [], 'es');
+
+    expect(tabs(root)).toEqual(['Desempeño', 'Datos limpios', 'Indicators', 'Field']);
+    expect(root.querySelector('select optgroup')).toBeNull();
+    expect(root.textContent).not.toContain('Configuración');
+  });
 });
 
 describe('ProjectPage tabs', () => {
-  it.each<ProjectRole>(['viewer', 'analyst', 'admin'])(
-    'shows Performance, Clean data, the project\'s dashboards and Settings for a %s, nothing else (Viewer at desktop width)',
+  it.each<ProjectRole>(['analyst', 'admin'])(
+    'shows Performance, Clean data, the project\'s dashboards and Settings for an %s, nothing else (Analyst at desktop width)',
     async (role) => {
       const { root } = await openProjectSection('overview', role, twoDashboards);
       expect(tabs(root)).toEqual(['Performance', 'Clean data', 'Indicators', 'Field', 'Settings']);
@@ -44,9 +52,31 @@ describe('ProjectPage tabs', () => {
     },
   );
 
+  it('shows a viewer Performance, Clean data and the project\'s dashboards, and no Settings anywhere (Viewer at desktop width)', async () => {
+    const { root } = await openProjectSection('performance', 'viewer', twoDashboards);
+
+    expect(tabs(root)).toEqual(['Performance', 'Clean data', 'Indicators', 'Field']);
+    expect(byTestId(root, 'settings-tab')).toBeNull();
+    expect(root.textContent).not.toContain('Settings');
+    expect(root.querySelector('nav[aria-label="Settings"]')).toBeNull();
+    expect(plainOptions(root)).toEqual(['Performance', 'Clean data', 'Indicators', 'Field']);
+    expect(byTestId(root, 'dashboard-tab-d1')?.getAttribute('href')).toBe(`/projects/${projectId}/dashboards/d1`);
+    expect(byTestId(root, 'dashboard-tab-d2')?.getAttribute('href')).toBe(`/projects/${projectId}/dashboards/d2`);
+  });
+
+  it('offers a viewer one select with no Settings group (Viewer at phone width)', async () => {
+    const { root } = await openProjectSection('performance', 'viewer');
+    const select = root.querySelector('select')!;
+
+    expect(root.querySelectorAll('select')).toHaveLength(1);
+    expect(select.querySelector('optgroup')).toBeNull();
+    expect(Array.from(select.querySelectorAll('option')).map((o) => o.textContent?.trim())).toEqual(['Performance', 'Clean data', 'Indicators']);
+    expect(select.selectedOptions[0].textContent?.trim()).toBe('Performance');
+  });
+
   it('offers every dashboard after Clean data, in their order, in the tab row and in the select (Viewer sees every dashboard)', async () => {
     const { root } = await openProjectSection('performance', 'viewer', threeDashboards);
-    expect(tabs(root)).toEqual(['Performance', 'Clean data', 'Housing', 'Health', 'Field', 'Settings']);
+    expect(tabs(root)).toEqual(['Performance', 'Clean data', 'Housing', 'Health', 'Field']);
     expect(plainOptions(root)).toEqual(['Performance', 'Clean data', 'Housing', 'Health', 'Field']);
     expect(Array.from(root.querySelector('select')!.querySelectorAll(':scope > option')).map((o) => o.getAttribute('value'))).toEqual([
       `/projects/${projectId}/performance`,
@@ -56,7 +86,7 @@ describe('ProjectPage tabs', () => {
   });
 
   it('marks the open dashboard\'s tab, and only it, as the current page (Dashboard marked as current)', async () => {
-    const { root } = await openProjectSection('dashboards/d2', 'viewer', twoDashboards);
+    const { root } = await openProjectSection('dashboards/d2', 'analyst', twoDashboards);
     const current = root.querySelectorAll('[aria-current="page"]');
     expect(current).toHaveLength(1);
     expect(current[0]).toBe(byTestId(root, 'dashboard-tab-d2'));
@@ -76,7 +106,7 @@ describe('ProjectPage tabs', () => {
 
   it('shows a dashboard\'s name as typed, never as markup or as a translation (Name shown as typed)', async () => {
     const names = ['<b>Avance</b>', 'project.tabs.settings'];
-    const { root } = await openProjectSection('performance', 'viewer', { dashboards: names.map((name, i) => ({ id: `d${i + 1}`, name })) });
+    const { root } = await openProjectSection('performance', 'analyst', { dashboards: names.map((name, i) => ({ id: `d${i + 1}`, name })) });
 
     expect(tabs(root)).toEqual(['Performance', 'Clean data', ...names, 'Settings']);
     expect(plainOptions(root)).toEqual(['Performance', 'Clean data', ...names]);
@@ -85,7 +115,7 @@ describe('ProjectPage tabs', () => {
   });
 
   it('links the first tab to the performance dashboard', async () => {
-    const { root } = await openProjectSection('overview', 'viewer');
+    const { root } = await openProjectSection('overview', 'analyst');
     expect(root.querySelector('nav a')?.getAttribute('href')).toBe(`/projects/${projectId}/performance`);
     expect(root.querySelector('select option')?.getAttribute('value')).toBe(`/projects/${projectId}/performance`);
   });
@@ -96,7 +126,7 @@ describe('ProjectPage tabs', () => {
   });
 
   it('marks Settings as current, not as the page, while a configuration section is open', async () => {
-    const { root } = await openProjectSection('members', 'viewer');
+    const { root } = await openProjectSection('members', 'analyst');
     const settings = byTestId(root, 'settings-tab')!;
     expect(settings.getAttribute('aria-current')).toBe('true');
     expect(settings.className).toContain('border-brand');
@@ -112,16 +142,15 @@ describe('ProjectPage tabs', () => {
   });
 
   it('does not mark Settings as current on a dashboard', async () => {
-    const { root } = await openProjectSection('clean-data', 'viewer');
+    const { root } = await openProjectSection('clean-data', 'analyst');
     expect(byTestId(root, 'settings-tab')?.getAttribute('aria-current')).toBeNull();
     expect(root.querySelector('nav a[aria-current="page"]')?.textContent?.trim()).toBe('Clean data');
   });
 
   it.each<[ProjectRole, string[]]>([
-    ['viewer', sectionsForEveryMember],
-    ['analyst', sectionsForEveryMember],
-    ['admin', [...sectionsForEveryMember, 'Webhook']],
-  ])('lists the configuration sections for a %s as pills, Webhook only for admins (Admin opens a configuration section)', async (role, expected) => {
+    ['analyst', sectionsForAnalysts],
+    ['admin', [...sectionsForAnalysts, 'Webhook']],
+  ])('lists the configuration sections for an %s as pills, Webhook only for admins (Admin opens a configuration section)', async (role, expected) => {
     const { root } = await openProjectSection('members', role);
     expect(settingsPills(root)).toEqual(expected);
     expect(root.querySelector('nav[aria-label="Settings"] a[aria-current="page"]')?.textContent?.trim()).toBe('Members');
@@ -129,7 +158,7 @@ describe('ProjectPage tabs', () => {
 
   it('lists the configuration sections without Webhook for an analyst on Scripts (Analyst opens a configuration section)', async () => {
     const { root } = await openProjectSection('scripts', 'analyst');
-    expect(settingsPills(root)).toEqual(sectionsForEveryMember);
+    expect(settingsPills(root)).toEqual(sectionsForAnalysts);
   });
 
   it.each(['performance', 'clean-data', 'dashboards/d1', 'dashboards/d2'])('shows no settings navigation on the dashboard %s (Dashboard open)', async (section) => {
@@ -138,8 +167,8 @@ describe('ProjectPage tabs', () => {
   });
 
   it.each<[ProjectRole, string[]]>([
-    ['analyst', sectionsForEveryMember],
-    ['admin', [...sectionsForEveryMember, 'Webhook']],
+    ['analyst', sectionsForAnalysts],
+    ['admin', [...sectionsForAnalysts, 'Webhook']],
   ])('groups the configuration sections under Settings in the select for a %s', async (role, expected) => {
     const { root } = await openProjectSection('scripts', role);
     const select = root.querySelector('select')!;
@@ -164,7 +193,7 @@ describe('ProjectPage tabs', () => {
     expect(navs.every((nav) => nav.classList.contains('hidden'))).toBe(true);
     expect(plainOptions(root)).toEqual(['Performance', 'Clean data', 'Indicators']);
     expect(group.label).toBe('Settings');
-    expect(Array.from(group.querySelectorAll('option')).map((o) => o.textContent?.trim())).toEqual(sectionsForEveryMember);
+    expect(Array.from(group.querySelectorAll('option')).map((o) => o.textContent?.trim())).toEqual(sectionsForAnalysts);
     expect(select.selectedOptions[0].textContent?.trim()).toBe('Submissions');
   });
 

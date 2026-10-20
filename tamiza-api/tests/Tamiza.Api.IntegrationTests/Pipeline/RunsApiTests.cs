@@ -63,9 +63,10 @@ public sealed class RunsApiTests(PostgresFixture postgres) : IDisposable
     }
 
     [Fact]
-    public async Task The_list_pages_newest_first_and_details_show_each_step()
+    public async Task The_list_pages_newest_first_and_details_show_each_step_to_analysts_and_not_to_viewers()
     {
         await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        using var analyst = await MemberAsync(h, "ana", "analyst");
         using var viewer = await MemberAsync(h, "vera", "viewer");
         await TestData.ExecuteAsync(h.Db, """
             INSERT INTO tamiza.runs (id, project_id, trigger, status, queued_at, started_at, finished_at)
@@ -84,9 +85,12 @@ public sealed class RunsApiTests(PostgresFixture postgres) : IDisposable
                 (@id, 'indicator', 'coverage', 'skipped', NULL, NULL, '[]', 'Not run: the clean step failed.', NULL);
             """, ("id", runId), ("p", h.ProjectId));
 
-        var page = await viewer.GetFromJsonAsync<JsonElement>($"{Runs(h)}?page=1&pageSize=10");
-        var details = await viewer.GetFromJsonAsync<JsonElement>($"{Runs(h)}/{runId}");
-        var missing = await viewer.GetAsync($"{Runs(h)}/{Guid.CreateVersion7()}");
+        var page = await analyst.GetFromJsonAsync<JsonElement>($"{Runs(h)}?page=1&pageSize=10");
+        var details = await analyst.GetFromJsonAsync<JsonElement>($"{Runs(h)}/{runId}");
+        var missing = await analyst.GetAsync($"{Runs(h)}/{Guid.CreateVersion7()}");
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync(Runs(h))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync($"{Runs(h)}/{runId}")).StatusCode);
 
         Assert.Equal(26, page.GetProperty("total").GetInt32());
         Assert.Equal(10, page.GetProperty("items").GetArrayLength());
@@ -107,7 +111,7 @@ public sealed class RunsApiTests(PostgresFixture postgres) : IDisposable
         Assert.Equal(1123, reference.GetProperty("rows").GetInt64());
         Assert.Equal(DateTimeOffset.Parse("2026-10-04T12:00:00Z"), reference.GetProperty("updatedAt").GetDateTimeOffset());
         var older = page.GetProperty("items")[1].GetProperty("id").GetString();
-        Assert.Empty((await viewer.GetFromJsonAsync<JsonElement>($"{Runs(h)}/{older}")).GetProperty("referenceTables").EnumerateArray());
+        Assert.Empty((await analyst.GetFromJsonAsync<JsonElement>($"{Runs(h)}/{older}")).GetProperty("referenceTables").EnumerateArray());
     }
 
     // Indicator steps and the versions a run used
@@ -128,7 +132,7 @@ public sealed class RunsApiTests(PostgresFixture postgres) : IDisposable
     public async Task A_run_lists_its_indicator_steps_by_name_and_the_versions_it_used_not_the_current_ones()
     {
         await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
-        using var viewer = await MemberAsync(h, "vera", "viewer");
+        using var analyst = await MemberAsync(h, "ana", "analyst");
         var clean4 = await InsertVersionAsync(h, "clean", null, 4, null);
         var coverage2 = await InsertVersionAsync(h, "indicator", "coverage", 2, "Coverage (as the run saw it)");
         var attendance1 = await InsertVersionAsync(h, "indicator", "attendance", 1, "Attendance");
@@ -150,8 +154,8 @@ public sealed class RunsApiTests(PostgresFixture postgres) : IDisposable
             // Stored in no particular order: the API lists them by name.
             ("versions", $$"""[{"name":"coverage","versionId":"{{coverage2}}","number":2},{"name":"attendance","versionId":"{{attendance1}}","number":1}]"""));
 
-        var list = await viewer.GetFromJsonAsync<JsonElement>(Runs(h));
-        var details = await viewer.GetFromJsonAsync<JsonElement>($"{Runs(h)}/{runId}");
+        var list = await analyst.GetFromJsonAsync<JsonElement>(Runs(h));
+        var details = await analyst.GetFromJsonAsync<JsonElement>($"{Runs(h)}/{runId}");
 
         var versions = list.GetProperty("items")[0].GetProperty("versions");
         Assert.Equal(4, versions.GetProperty("clean").GetInt32());

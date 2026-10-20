@@ -39,7 +39,7 @@ public static class ScriptInputEndpoints
     public static RouteGroupBuilder MapScriptInputEndpoints(this RouteGroupBuilder api)
     {
         api.MapGroup("/projects/{projectId:guid}/script-inputs").WithTags("Pipeline")
-            .MapGet("", GetAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetScriptInputs");
+            .MapGet("", GetAsync).RequireProjectRole(ProjectRole.Analyst).WithName("GetScriptInputs");
         return api;
     }
 

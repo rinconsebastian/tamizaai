@@ -6,9 +6,9 @@ export interface SectionLink {
 }
 
 /**
- * The configuration sections grouped under Settings, in the order members see them. Webhook is listed for admins only; the
- * other sections are readable by every member, as the capability specs require. Both the project page and the settings layout
- * build their lists from here so they never disagree.
+ * The configuration sections grouped under Settings, in the order they are shown. Settings is for analysts and admins, so the
+ * callers list these only for them; Webhook is listed for admins only. Both the project page and the settings layout build their
+ * lists from here so they never disagree.
  */
 export function projectSections(id: string, isAdmin: boolean): SectionLink[] {
   const base = `/projects/${id}`;

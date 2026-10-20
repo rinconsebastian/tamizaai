@@ -2,7 +2,7 @@
 
 Each project can have up to two Python scripts that clean the raw Kobo submissions and prepare tables for reading, and any number of **indicator scripts** that each compute one indicator, up to 100. Tamiza runs them in order every time the project's data changes, publishes each result only if it succeeds, and records what happened in the run log.
 
-Analysts and admins write scripts in the project's **Settings > Scripts** page; viewers can read them. Every save creates a version you can view and restore.
+Analysts and admins write scripts in the project's **Settings > Scripts** page; viewers do not open Settings. Every save creates a version you can view and restore.
 
 ## The chain
 
@@ -182,7 +182,7 @@ Create an indicator with **Add indicator** in the Scripts section (under **Setti
 | **Unit** | Optional, up to 32 characters (`households`, `COP`, `%`). |
 | **Format** | How the dashboard shows the numbers: `count` (a whole number with thousands separators), `decimal` (two decimals), `percent` (a **fraction** shown as a percentage: 0.42 reads `42%`) or `currency` (two decimals; the unit is the currency code, such as `COP`). |
 
-The metadata is saved with every version of the script, so restoring a version brings back its label, unit and format too. Above the editor the indicator is one line (label, name, format and unit) with an **Edit details** button that opens the fields; they stay open while they hold edits or the API refused one. Viewers, and anyone looking at an older version, see the same details as plain text. If you store 42 for 42 %, choose `decimal` with the unit `%` instead of `percent`.
+The metadata is saved with every version of the script, so restoring a version brings back its label, unit and format too. Above the editor the indicator is one line (label, name, format and unit) with an **Edit details** button that opens the fields; they stay open while they hold edits or the API refused one. Anyone looking at an older version sees the same details as plain text. If you store 42 for 42 %, choose `decimal` with the unit `%` instead of `percent`.
 
 A project can have up to **100 indicators**. Each has its own versions, its own sample test and its own step in the run, so an indicator that fails never stops the others.
 
@@ -240,13 +240,13 @@ Asking for a reference table the project does not have, such as `ctx.reference["
 
 The Scripts section lives under **Settings**. Above the editor one row picks the script: **1. Clean**, **2. Output** and an **Indicators** menu that lists each indicator with its label, name and version (a project with more than ten gets a filter), next to **Add indicator**. The selected script shows its version. Under the row, a line shows the **latest run** (its status, when it started and, if a step failed, which one) with a link to the run list at the bottom of the page and, for analysts and admins, **Run now**.
 
-Under the editor, one row holds **Save**, the **Sample size**, **Test on sample**, **Download sample**, **Templates** and a **More actions** menu with **Upload .py** and **Remove script**. The result of a test appears right below the editor, and the sample download below it. **Checks** lists what the editor found while you type (every role sees it; the note that checks never block saving is for those who can save). The signature the script has to define is shown above the editor.
+Under the editor, one row holds **Save**, the **Sample size**, **Test on sample**, **Download sample**, **Templates** and a **More actions** menu with **Upload .py** and **Remove script**. The result of a test appears right below the editor, and the sample download below it. **Checks** lists what the editor found while you type (it also shows while an older version is on view; the note that checks never block saving is for those who can save). The signature the script has to define is shown above the editor.
 
 The editor is for writing a script without leaving the page. It knows the tables your script receives, what `ctx` offers and what the contract asks for, and it tells you what it can before you run anything. None of this blocks saving or testing: a test and a run decide whether a script works.
 
 **The side panel.** Beside the editor (below it on a phone) there are three tabs, and four when the administrator has turned on the [assistant](#writing-with-the-assistant).
 
-- **Tables** lists what the selected script receives *as the last run published it*: the flattened tables for script 1, the clean tables for script 2 and the indicators, with each table's row count and each column's type and [question label](#question-labels), and when they were published. It also lists the project's [reference tables](#reference-data) with their columns (analysts and admins get a **Manage** link to them), and, in a collapsed group, the form's questions (a filter opens it). A script you saved after the last run does not change the list until the next run (a test shows the tables its draft really received). Before the first run the panel says so, and the editor works without it. **Filter** matches names and labels; the refresh button reads the tables again, which also happens when a run ends. Click a name to put it in the editor at the cursor as a quoted string (`"has_water"`); when you cannot edit (a viewer, or an old version on view) the click copies the name instead.
+- **Tables** lists what the selected script receives *as the last run published it*: the flattened tables for script 1, the clean tables for script 2 and the indicators, with each table's row count and each column's type and [question label](#question-labels), and when they were published. It also lists the project's [reference tables](#reference-data) with their columns (analysts and admins get a **Manage** link to them), and, in a collapsed group, the form's questions (a filter opens it). A script you saved after the last run does not change the list until the next run (a test shows the tables its draft really received). Before the first run the panel says so, and the editor works without it. **Filter** matches names and labels; the refresh button reads the tables again, which also happens when a run ends. Click a name to put it in the editor at the cursor as a quoted string (`"has_water"`); when you cannot edit (an old version on view) the click copies the name instead.
 - **Reference** lists the contract of the selected script, what it must return, cells and `ctx.show`, and every member of `ctx`, `ctx.form`, `ctx.log` and `ctx.reference` with a description and an example.
 - **Versions** lists the saved versions of the script, newest first. Click one to read it (read-only); analysts and admins can restore it.
 - **Assistant**, only if your administrator configured one, and only for analysts and admins: it drafts a script, rewrites a cell or fixes a failed test. See [Writing with the assistant](#writing-with-the-assistant).
@@ -288,7 +288,7 @@ A template replaces the text of the editor as one edit, so Ctrl+Z brings the pre
 
 ## Testing on a sample
 
-**Test on sample**, under the editor, runs the code in the editor on a sample of the project's submissions, whether you saved it or not. It is how to try a change before saving it: nothing is saved, no version is created, nothing is published and the test does not appear in **Runs**. Analysts and admins can test; viewers cannot.
+**Test on sample**, under the editor, runs the code in the editor on a sample of the project's submissions, whether you saved it or not. It is how to try a change before saving it: nothing is saved, no version is created, nothing is published and the test does not appear in **Runs**. Analysts and admins can test.
 
 - **What runs.** The test flattens the sample, then runs the script you are editing. When that is script 2 or an indicator, the current saved version of script 1 runs first, as in a run (or the flattened tables are used when there is no script 1). To test a change to script 1 together with script 2 or an indicator, save script 1 first. A test runs **one** indicator, the one selected, and its preview shows the table named after that indicator.
 - **The sample.** 500 submissions by default; choose from 1 to 5,000. They are spread across the whole project, not only the newest, and consecutive tests use the same submissions as long as the data does not change, so you can compare one attempt with the next. Submissions deleted in Kobo are left out. A project with fewer submissions than the sample size uses all of them.
@@ -391,7 +391,7 @@ A test runs your script from the start every time. To explore the data the way y
 
 ### Download a sample
 
-In **Settings > Scripts**, set the **Sample size** (the same field as a test) and click **Download sample**. Analysts and admins can; viewers cannot. The worker prepares the sample like a test, after the tests that are waiting and before the runs, reusing the flattened sample a recent test kept, and a strip under the test result shows when it is ready: the number of submissions, the size and until when it is kept, the tables of the zip on one line (flattened, clean and reference), and a notice that the file holds the project's submissions. **Download .zip** then saves a file named after the project and the date.
+In **Settings > Scripts**, set the **Sample size** (the same field as a test) and click **Download sample**. Analysts and admins can. The worker prepares the sample like a test, after the tests that are waiting and before the runs, reusing the flattened sample a recent test kept, and a strip under the test result shows when it is ready: the number of submissions, the size and until when it is kept, the tables of the zip on one line (flattened, clean and reference), and a notice that the file holds the project's submissions. **Download .zip** then saves a file named after the project and the date.
 
 | In the zip | What it is |
 |---|---|
@@ -495,7 +495,7 @@ In **Settings > Scripts**, select the script (or add the indicator with the same
 
 ## Reference data
 
-Reference tables hold data that does not come from the form but that scripts need: population projections, municipality codes, price lists. They are per project, in the **Settings > Reference data** page. Every member can list them and preview their first 100 rows (a column whose header was renamed shows the file's original header under its name); analysts and admins upload, replace and delete them. **Preview** is the button of each row; **Replace** and **Delete** are in the row's actions menu. The script editor's **Tables** tab links to this page with **Manage**.
+Reference tables hold data that does not come from the form but that scripts need: population projections, municipality codes, price lists. They are per project, in the **Settings > Reference data** page. Analysts and admins can list them and preview their first 100 rows (a column whose header was renamed shows the file's original header under its name), and upload, replace and delete them. **Preview** is the button of each row; **Replace** and **Delete** are in the row's actions menu. The script editor's **Tables** tab links to this page with **Manage**.
 
 **Uploading.** Choose a CSV or XLSX file of up to 10 MB and a name. The name is how scripts find the table (`ctx.reference["population"]`): lowercase letters, digits and underscores, starting with a letter, at most 63 characters, unique in the project. A project can have up to 50 reference tables.
 
@@ -553,7 +553,7 @@ A step that fails publishes nothing: the dashboards keep showing the last succes
 - **On a schedule**, every 1 to 168 hours, counted from the start of the last run.
 - **Run now**, for analysts and admins.
 
-Everyone reads these settings as a line on **Settings > Submissions** (the Scripts section only links to the latest run) ("Scripts run after each synchronization with changes · also run every 24 hours · Next scheduled run …"). Admins change the first two with **Edit schedules** on that page, under **When scripts run**. A webhook delivery never starts a run by itself. A project has at most one run waiting: if one is already queued, another trigger does not add a second; if one is running, one more is queued to follow it.
+Analysts and admins read these settings as a line on **Settings > Submissions** (the Scripts section only links to the latest run) ("Scripts run after each synchronization with changes · also run every 24 hours · Next scheduled run …"). Admins change the first two with **Edit schedules** on that page, under **When scripts run**. A webhook delivery never starts a run by itself. A project has at most one run waiting: if one is already queued, another trigger does not add a second; if one is running, one more is queued to follow it.
 
 Saving a script does not start a run; the next run uses the latest version of each script. A run records which version of script 1, script 2 and each indicator it used. An indicator you create while a run is running is computed from the next run.
 

@@ -10,10 +10,19 @@ public sealed class ProjectsApiTests(PostgresFixture postgres) : IDisposable
 {
     private readonly KoboStub _kobo = new KoboStub().WithForm();
 
-    private async Task<(TamizaApiFactory Factory, string Db)> FactoryAsync(bool allowPrivate = true, Dictionary<string, string?>? extra = null)
+    /// <summary>
+    /// Only admins of a project and superadmins can create projects, so "ada" is the superadmin by default, which lets her create the
+    /// first project. <paramref name="superAdmin"/> <c>false</c> gives a factory without any, for the creation-rule tests.
+    /// </summary>
+    private async Task<(TamizaApiFactory Factory, string Db)> FactoryAsync(
+        bool allowPrivate = true, Dictionary<string, string?>? extra = null, bool superAdmin = true)
     {
         var db = await postgres.CreateDatabaseAsync();
-        var settings = new Dictionary<string, string?> { ["TAMIZA_KOBO_ALLOW_PRIVATE_NETWORKS"] = allowPrivate ? "true" : "false" };
+        var settings = new Dictionary<string, string?>
+        {
+            ["TAMIZA_KOBO_ALLOW_PRIVATE_NETWORKS"] = allowPrivate ? "true" : "false",
+            ["TAMIZA_SUPERADMIN_EMAILS"] = superAdmin ? "ada@example.org" : "",
+        };
         foreach (var (key, value) in extra ?? new())
         {
             settings[key] = value;
@@ -38,6 +47,16 @@ public sealed class ProjectsApiTests(PostgresFixture postgres) : IDisposable
     /// <summary>The <c>dashboards</c> of project details as <c>(id, name)</c>, in the order listed.</summary>
     private static (Guid Id, string Name)[] Dashboards(JsonElement details) =>
         details.GetProperty("dashboards").EnumerateArray().Select(d => (d.GetProperty("id").GetGuid(), d.GetProperty("name").GetString()!)).ToArray();
+
+    /// <summary>Seeds a project whose member is <paramref name="subject"/> (their email is <c>subject@example.org</c>), in <paramref name="role"/>.</summary>
+    private static async Task<Guid> SeedProjectAsync(
+        TamizaApiFactory factory, string db, string subject, string name = "Seeded project", string role = "admin")
+    {
+        var userId = await TestData.SignInAsync(factory, subject, $"{subject}@example.org");
+        var projectId = await TestData.InsertProjectAsync(db, userId, name);
+        await TestData.AddMemberAsync(db, projectId, userId, role);
+        return projectId;
+    }
 
     // 3.2 — creation
 
@@ -115,18 +134,203 @@ public sealed class ProjectsApiTests(PostgresFixture postgres) : IDisposable
         Assert.Equal(0L, await TestData.ScalarAsync<long>(db, "SELECT count(*) FROM tamiza.projects"));
     }
 
+    // Who may create a project
+
+    private async Task<HttpResponseMessage> TryCreateAsync(HttpClient client) =>
+        await client.PostAsJsonAsync("/api/v1/projects", CreateRequest());
+
+    private static async Task AssertNotAllowedAsync(HttpResponseMessage response)
+    {
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal("project.create_not_allowed", await CodeAsync(response));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("analyst")]
+    [InlineData("viewer")]
+    public async Task A_user_who_is_not_admin_of_any_project_gets_403_and_nothing_is_saved_or_sent_to_kobo(string? role)
+    {
+        var (factory, db) = await FactoryAsync(superAdmin: false);
+        await using var owner = factory;
+        var projects = 0L;
+        if (role is not null)
+        {
+            var projectId = await SeedProjectAsync(factory, db, "ada");
+            var userId = await TestData.SignInAsync(factory, "mallory", "mallory@example.org");
+            await TestData.AddMemberAsync(db, projectId, userId, role);
+            projects = 1;
+        }
+
+        using var client = TestData.ClientFor(factory, "mallory", "mallory@example.org");
+        var response = await TryCreateAsync(client);
+
+        await AssertNotAllowedAsync(response);
+        Assert.Equal(projects, await TestData.ScalarAsync<long>(db, "SELECT count(*) FROM tamiza.projects"));
+        Assert.Empty(_kobo.Server.LogEntries);
+    }
+
+    [Fact]
+    public async Task The_refusal_comes_before_the_fields_and_the_server_address_are_checked()
+    {
+        var (factory, db) = await FactoryAsync(allowPrivate: false, superAdmin: false);
+        await using var owner = factory;
+        using var client = TestData.ClientFor(factory, "mallory", "mallory@example.org");
+
+        var response = await client.PostAsJsonAsync("/api/v1/projects",
+            new { name = " ", koboServerUrl = "http://kf.kobotoolbox.org", assetUid = "../etc", apiToken = "" });
+
+        await AssertNotAllowedAsync(response);
+        Assert.Equal(0L, await TestData.ScalarAsync<long>(db, "SELECT count(*) FROM tamiza.projects"));
+        Assert.Empty(_kobo.Server.LogEntries);
+    }
+
+    [Fact]
+    public async Task An_admin_of_a_seeded_project_creates_another_one_and_becomes_its_admin()
+    {
+        var (factory, db) = await FactoryAsync(superAdmin: false);
+        await using var owner = factory;
+        await SeedProjectAsync(factory, db, "grace");
+        await SeedProjectAsync(factory, db, "ada");
+        using var client = TestData.ClientFor(factory, "ada", "ada@example.org");
+
+        var response = await TryCreateAsync(client);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(2L, await TestData.ScalarAsync<long>(db, "SELECT count(*) FROM tamiza.project_members m JOIN tamiza.users u ON u.id = m.user_id WHERE u.keycloak_sub = 'ada' AND m.role = 'admin'"));
+        Assert.Equal(3L, await TestData.ScalarAsync<long>(db, "SELECT count(*) FROM tamiza.projects"));
+    }
+
+    [Fact]
+    public async Task A_verified_superadmin_creates_the_first_project_of_an_empty_installation_and_becomes_its_admin()
+    {
+        var (factory, db) = await FactoryAsync(superAdmin: false, extra: new() { ["TAMIZA_SUPERADMIN_EMAILS"] = "root@example.org" });
+        await using var owner = factory;
+        using var client = TestData.ClientFor(factory, "root", "root@example.org");
+
+        var response = await TryCreateAsync(client);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(1L, await TestData.ScalarAsync<long>(db, "SELECT count(*) FROM tamiza.projects"));
+        Assert.Equal("admin", await TestData.ScalarAsync<string>(db, "SELECT m.role FROM tamiza.project_members m JOIN tamiza.users u ON u.id = m.user_id WHERE u.keycloak_sub = 'root'"));
+    }
+
+    [Fact]
+    public async Task A_pending_admin_invitation_does_not_allow_creating_until_a_verified_sign_in_accepts_it()
+    {
+        var (factory, db) = await FactoryAsync(superAdmin: false);
+        await using var owner = factory;
+        var projectId = await SeedProjectAsync(factory, db, "ada");
+        using var ada = TestData.ClientFor(factory, "ada", "ada@example.org");
+        (await ada.PostAsJsonAsync($"/api/v1/projects/{projectId}/members", new { email = "newbie@example.org", role = "admin" })).EnsureSuccessStatusCode();
+
+        using var unverified = TestData.ClientFor(factory, "newbie", "newbie@example.org", emailVerified: false);
+        var refused = await TryCreateAsync(unverified);
+        using var verified = TestData.ClientFor(factory, "newbie", "newbie@example.org");
+        var created = await TryCreateAsync(verified);
+
+        await AssertNotAllowedAsync(refused);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        Assert.Equal(2L, await TestData.ScalarAsync<long>(db, "SELECT count(*) FROM tamiza.projects"));
+    }
+
+    [Theory]
+    [InlineData("demoted")]
+    [InlineData("removed")]
+    public async Task Losing_the_only_admin_role_takes_away_the_right_to_create_on_the_next_attempt(string how)
+    {
+        var (factory, db) = await FactoryAsync(superAdmin: false);
+        await using var owner = factory;
+        var projectId = await SeedProjectAsync(factory, db, "ada");
+        var bobId = await TestData.SignInAsync(factory, "bob", "bob@example.org");
+        await TestData.AddMemberAsync(db, projectId, bobId, "admin");
+        using var ada = TestData.ClientFor(factory, "ada", "ada@example.org");
+        using var bob = TestData.ClientFor(factory, "bob", "bob@example.org");
+
+        var change = how == "demoted"
+            ? await ada.PatchAsJsonAsync($"/api/v1/projects/{projectId}/members/{bobId}", new { role = "analyst" })
+            : await ada.DeleteAsync($"/api/v1/projects/{projectId}/members/{bobId}");
+        var next = await TryCreateAsync(bob);
+
+        Assert.True(change.IsSuccessStatusCode);
+        await AssertNotAllowedAsync(next);
+    }
+
+    [Fact]
+    public async Task The_openapi_document_lists_the_refusal_to_create_and_the_optional_configuration_values()
+    {
+        var (factory, _) = await FactoryAsync();
+        await using var owner = factory;
+        using var client = TestData.ClientFor(factory, "ada", "ada@example.org");
+
+        var document = await client.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var responses = document.GetProperty("paths").GetProperty("/api/v1/projects").GetProperty("post").GetProperty("responses");
+        Assert.True(responses.TryGetProperty("403", out _));
+        var details = document.GetProperty("components").GetProperty("schemas").GetProperty("ProjectDetails");
+        foreach (var name in ConfigurationValues)
+        {
+            Assert.Contains("null", details.GetProperty("properties").GetProperty(name).GetRawText());
+        }
+    }
+
     // 3.3 — list, details, update
+
+    private static readonly string[] ConfigurationValues =
+        ["koboServerUrl", "assetUid", "formCheckedAt", "enumeratorField", "fieldCheck", "tokenUnreadable", "unavailableFormVersions"];
+
+    [Fact]
+    public async Task A_viewers_details_leave_out_the_configuration_values_and_an_analysts_carry_them_all()
+    {
+        var (factory, db) = await FactoryAsync();
+        await using var owner = factory;
+        using var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
+        var created = (await CreateProjectAsync(admin)).GetProperty("project");
+        var id = created.GetProperty("id").GetGuid();
+        (await admin.PatchAsJsonAsync($"/api/v1/projects/{id}", new { enumeratorField = "enumerator", timeZone = "America/Bogota" })).EnsureSuccessStatusCode();
+        foreach (var (subject, role) in new[] { ("vic", "viewer"), ("grace", "analyst") })
+        {
+            await TestData.AddMemberAsync(db, id, await TestData.SignInAsync(factory, subject, $"{subject}@example.org"), role);
+        }
+
+        using var viewer = TestData.ClientFor(factory, "vic", "vic@example.org");
+        using var analyst = TestData.ClientFor(factory, "grace", "grace@example.org");
+        var viewerRaw = await viewer.GetStringAsync($"/api/v1/projects/{id}");
+        var seenByViewer = JsonDocument.Parse(viewerRaw).RootElement;
+        var seenByAnalyst = await analyst.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{id}");
+
+        Assert.Equal("Household survey 2026", seenByViewer.GetProperty("name").GetString());
+        Assert.Equal("Household survey", seenByViewer.GetProperty("formName").GetString());
+        Assert.Equal("viewer", seenByViewer.GetProperty("myRole").GetString());
+        Assert.Equal("America/Bogota", seenByViewer.GetProperty("timeZone").GetString());
+        Assert.Equal(Dashboards(created), Dashboards(seenByViewer));
+        Assert.Contains("createdAt", viewerRaw);
+        foreach (var name in ConfigurationValues)
+        {
+            // Present and null, not left out.
+            Assert.Equal(JsonValueKind.Null, seenByViewer.GetProperty(name).ValueKind);
+            Assert.NotEqual(JsonValueKind.Null, seenByAnalyst.GetProperty(name).ValueKind);
+        }
+
+        Assert.DoesNotContain(KoboStub.AssetUid, viewerRaw);
+        Assert.Equal(created.GetProperty("koboServerUrl").GetString(), seenByAnalyst.GetProperty("koboServerUrl").GetString());
+        Assert.Equal(KoboStub.AssetUid, seenByAnalyst.GetProperty("assetUid").GetString());
+        Assert.Equal("enumerator", seenByAnalyst.GetProperty("enumeratorField").GetString());
+        Assert.False(seenByAnalyst.GetProperty("tokenUnreadable").GetBoolean());
+        Assert.Equal(0, seenByAnalyst.GetProperty("unavailableFormVersions").GetInt32());
+        Assert.NotEmpty(seenByAnalyst.GetProperty("fieldCheck").EnumerateArray());
+    }
 
     [Fact]
     public async Task The_list_shows_own_projects_and_superadmins_see_all()
     {
-        var (factory, _) = await FactoryAsync(extra: new() { ["TAMIZA_SUPERADMIN_EMAILS"] = "root@example.org" });
+        var (factory, db) = await FactoryAsync(extra: new() { ["TAMIZA_SUPERADMIN_EMAILS"] = "root@example.org" });
         await using var owner = factory;
         using var ada = TestData.ClientFor(factory, "ada", "ada@example.org");
         using var grace = TestData.ClientFor(factory, "grace", "grace@example.org");
         using var root = TestData.ClientFor(factory, "root", "root@example.org");
-        await CreateProjectAsync(ada);
-        await CreateProjectAsync(grace);
+        await SeedProjectAsync(factory, db, "ada", "Ada's project");
+        await SeedProjectAsync(factory, db, "grace", "Grace's project");
 
         var adaList = await ada.GetFromJsonAsync<JsonElement[]>("/api/v1/projects");
         var rootList = await root.GetFromJsonAsync<JsonElement[]>("/api/v1/projects");
@@ -434,19 +638,25 @@ public sealed class ProjectsApiTests(PostgresFixture postgres) : IDisposable
     // 3.5 — form fields and webhook
 
     [Fact]
-    public async Task Form_fields_are_readable_by_viewers()
+    public async Task Form_fields_are_readable_by_analysts_and_admins_but_not_by_viewers()
     {
         var (factory, db) = await FactoryAsync();
         await using var owner = factory;
         using var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
         var id = (await CreateProjectAsync(admin)).GetProperty("project").GetProperty("id").GetGuid();
-        var viewerId = await TestData.SignInAsync(factory, "vic", "vic@example.org");
-        await TestData.AddMemberAsync(db, id, viewerId, "viewer");
-        using var viewer = TestData.ClientFor(factory, "vic", "vic@example.org");
+        foreach (var (subject, role) in new[] { ("vic", "viewer"), ("grace", "analyst") })
+        {
+            await TestData.AddMemberAsync(db, id, await TestData.SignInAsync(factory, subject, $"{subject}@example.org"), role);
+        }
 
-        var fields = await viewer.GetFromJsonAsync<JsonElement[]>($"/api/v1/projects/{id}/form-fields");
+        using var viewer = TestData.ClientFor(factory, "vic", "vic@example.org");
+        using var analyst = TestData.ClientFor(factory, "grace", "grace@example.org");
+
+        var fields = await analyst.GetFromJsonAsync<JsonElement[]>($"/api/v1/projects/{id}/form-fields");
+        var forbidden = await viewer.GetAsync($"/api/v1/projects/{id}/form-fields");
 
         Assert.Equal(["start", "end", "municipality", "sex", "enumerator"], fields!.Select(f => f.GetProperty("xpath").GetString()));
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
     }
 
     [Fact]

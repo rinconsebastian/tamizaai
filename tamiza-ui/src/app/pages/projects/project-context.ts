@@ -97,7 +97,10 @@ export class ProjectContext {
     }
   }
 
-  /** Replaces the details after an update; a new form check invalidates the field list and the choices. */
+  /**
+   * Replaces the details after an update; a new form check invalidates the field list and the choices. A viewer's details carry
+   * no check time (`null`), so for them it never changes.
+   */
   update(project: ProjectDetails): void {
     if (project.formCheckedAt !== this.project()?.formCheckedAt) {
       this.formFields.set(null);

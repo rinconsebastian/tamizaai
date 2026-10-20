@@ -91,16 +91,19 @@ public sealed class ScriptInputsApiTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task A_viewer_sees_the_same_tables_as_an_analyst()
+    public async Task An_analyst_and_an_admin_see_the_same_tables_and_a_viewer_is_refused()
     {
         await using var h = await CleanDataHarness.CreateAsync(postgres);
         await h.PublishAsync("clean", ("main", "_id bigint, note text", "(1, 'a')"));
 
-        var viewer = await h.Viewer.GetStringAsync(Url(h, "output"));
         var analyst = await h.Analyst.GetStringAsync(Url(h, "output"));
+        var admin = await h.Admin.GetStringAsync(Url(h, "output"));
+        var viewer = await h.Viewer.GetAsync(Url(h, "output"));
 
-        Assert.Equal(analyst, viewer);
-        Assert.Contains("\"note\"", viewer);
+        Assert.Equal(analyst, admin);
+        Assert.Contains("\"note\"", analyst);
+        Assert.Equal(HttpStatusCode.Forbidden, viewer.StatusCode);
+        Assert.DoesNotContain("note", await viewer.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -137,7 +140,7 @@ public sealed class ScriptInputsApiTests(PostgresFixture postgres)
 
         foreach (var kind in new[] { "clean", "output", "indicator" })
         {
-            var inputs = await h.Viewer.GetFromJsonAsync<JsonElement>(Url(h, kind));
+            var inputs = await h.Analyst.GetFromJsonAsync<JsonElement>(Url(h, kind));
 
             var reference = inputs.GetProperty("referenceTables").EnumerateArray().Single();
             Assert.Equal("population", reference.GetProperty("name").GetString());

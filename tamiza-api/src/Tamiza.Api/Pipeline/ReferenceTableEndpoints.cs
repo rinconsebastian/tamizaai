@@ -22,8 +22,8 @@ public static class ReferenceTableEndpoints
     public static RouteGroupBuilder MapReferenceTableEndpoints(this RouteGroupBuilder api)
     {
         var tables = api.MapGroup("/projects/{projectId:guid}/reference-tables").WithTags("Pipeline");
-        tables.MapGet("", ListAsync).RequireProjectRole(ProjectRole.Viewer).WithName("ListReferenceTables");
-        tables.MapGet("/{name}", GetAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetReferenceTable");
+        tables.MapGet("", ListAsync).RequireProjectRole(ProjectRole.Analyst).WithName("ListReferenceTables");
+        tables.MapGet("/{name}", GetAsync).RequireProjectRole(ProjectRole.Analyst).WithName("GetReferenceTable");
         tables.MapPost("", UploadAsync)
             .RequireProjectRole(ProjectRole.Analyst)
             .DisableAntiforgery() // bearer-token API: no cookies to forge

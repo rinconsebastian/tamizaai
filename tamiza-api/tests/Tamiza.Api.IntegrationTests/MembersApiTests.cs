@@ -39,20 +39,24 @@ public sealed class MembersApiTests(PostgresFixture postgres)
     // 4.1
 
     [Fact]
-    public async Task Members_are_listed_to_viewers_and_invitations_only_to_admins()
+    public async Task Members_are_listed_to_analysts_and_not_to_viewers_and_invitations_only_to_admins()
     {
         await using var s = await ProjectAsync();
         var analystId = await TestData.SignInAsync(s.Factory, "grace", "grace@example.org");
         await TestData.AddMemberAsync(s.Db, s.ProjectId, analystId, "analyst");
         using var analyst = TestData.ClientFor(s.Factory, "grace", "grace@example.org");
+        await TestData.AddMemberAsync(s.Db, s.ProjectId, await TestData.SignInAsync(s.Factory, "vic", "vic@example.org"), "viewer");
+        using var viewer = TestData.ClientFor(s.Factory, "vic", "vic@example.org");
         await InviteAsync(s.Admin, s.ProjectId, "later@example.org", "viewer");
 
         var members = await analyst.GetFromJsonAsync<JsonElement[]>($"/api/v1/projects/{s.ProjectId}/members");
         var forbidden = await analyst.GetAsync($"/api/v1/projects/{s.ProjectId}/invitations");
         var invitations = await s.Admin.GetFromJsonAsync<JsonElement[]>($"/api/v1/projects/{s.ProjectId}/invitations");
+        var viewerRead = await viewer.GetAsync($"/api/v1/projects/{s.ProjectId}/members");
 
-        Assert.Equal([("ada", "admin"), ("grace", "analyst")], members!.Select(m => (m.GetProperty("name").GetString(), m.GetProperty("role").GetString())));
+        Assert.Equal([("ada", "admin"), ("grace", "analyst"), ("vic", "viewer")], members!.Select(m => (m.GetProperty("name").GetString(), m.GetProperty("role").GetString())));
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, viewerRead.StatusCode);
         Assert.Equal("later@example.org", Assert.Single(invitations!).GetProperty("email").GetString());
     }
 

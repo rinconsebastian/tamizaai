@@ -1,13 +1,18 @@
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { byTestId, configureApp, details, settle, typeInto } from '../../../testing/project-harness';
+import { InterfaceLanguage } from '../../core/i18n/interface-language';
+import { tick } from '../../../testing/cdk';
+import { byTestId, configureApp, details, flushMe, settle, typeInto } from '../../../testing/project-harness';
 
 describe('CreateProjectPage', () => {
-  async function open() {
-    const http = configureApp();
+  async function open(lang: InterfaceLanguage = 'en') {
+    const http = configureApp([], lang);
     const harness = await RouterTestingHarness.create();
-    await harness.navigateByUrl('/projects/new');
+    const navigation = harness.navigateByUrl('/projects/new');
+    await tick(); // the guard holds the navigation until the profile arrives
+    flushMe(http);
+    await navigation;
     await settle(harness);
     const page = harness.routeNativeElement as HTMLElement;
     const field = (id: string) => page.querySelector<HTMLInputElement>(`#${id}`)!;
@@ -80,5 +85,38 @@ describe('CreateProjectPage', () => {
     await settle(harness);
 
     expect(TestBed.inject(Router).url).toBe('/projects/p1/webhook');
+  });
+
+  it('leads to the project list, with no form, when the user may not create projects', async () => {
+    const http = configureApp();
+    const harness = await RouterTestingHarness.create();
+    const navigation = harness.navigateByUrl('/projects/new');
+    await tick(); // the guard holds the navigation until the profile arrives
+    flushMe(http, { canCreateProjects: false });
+    await navigation;
+    await settle(harness);
+    http.expectOne('/api/v1/projects').flush([]);
+    await settle(harness);
+
+    expect(TestBed.inject(Router).url).toBe('/projects');
+    expect(harness.routeNativeElement?.querySelector('form')).toBeNull();
+  });
+
+  it('shows the refusal of a lost right in the interface language and reads the profile again', async () => {
+    const { http, harness, page, fill, submit } = await open('es');
+    fill();
+
+    (await submit()).flush(
+      { title: 'Not allowed.', detail: 'Only admins of a project and superadmins can create projects.', code: 'project.create_not_allowed' },
+      { status: 403, statusText: 'Forbidden' },
+    );
+    await settle(harness);
+
+    const error = byTestId(page, 'form-error')!;
+    expect(error.textContent).toContain('Solo los administradores de un proyecto y los superadministradores pueden crear proyectos.');
+    expect(error.hasAttribute('lang')).toBe(false); // translated from the code: the UI wrote it
+    expect(page.querySelector('[id$="-error"]')).toBeNull();
+    expect(TestBed.inject(Router).url).toBe('/projects/new');
+    flushMe(http, { canCreateProjects: false });
   });
 });

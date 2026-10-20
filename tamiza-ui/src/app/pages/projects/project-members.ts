@@ -1,5 +1,7 @@
 import { Dialog } from '@angular/cdk/dialog';
+import { HttpErrorResponse } from '@angular/common/http';
 import { Component, LOCALE_ID, computed, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { forkJoin, of } from 'rxjs';
 import { ApiErrors } from '../../core/api-error';
@@ -15,7 +17,7 @@ const roles: ProjectRole[] = ['admin', 'analyst', 'viewer'];
 
 /**
  * The project's people: one list at every width with the members first and, for admins, the people invited who have not signed
- * in yet. Everyone reads the members; an admin adds a person in a dialog and changes roles, removes and revokes from each row's menu.
+ * in yet. Analysts and admins read the members; an admin adds a person in a dialog and changes roles, removes and revokes from each row's menu.
  */
 @Component({
   selector: 'app-project-members',
@@ -77,7 +79,9 @@ export class ProjectMembers {
   private readonly confirmDialog = inject(ConfirmDialog);
   private readonly dialog = inject(Dialog);
   private readonly context = inject(ProjectContext);
-  private readonly currentUser = inject(CurrentUserService).user;
+  private readonly currentUserService = inject(CurrentUserService);
+  private readonly currentUser = this.currentUserService.user;
+  private readonly router = inject(Router);
   private readonly locale = inject(LOCALE_ID);
   /** Whether the identity provider can email people: invitations, resends and password resets. */
   protected readonly emailsEnabled = inject(SystemConfigService).accountEmailsEnabled;
@@ -212,13 +216,39 @@ export class ProjectMembers {
         tone: 'danger',
       });
       if (confirmed) {
-        this.service.removeMember(this.projectId(), member.userId).subscribe({ next: () => this.load(), error: (e) => this.errors.report(e) });
+        this.service.removeMember(this.projectId(), member.userId).subscribe({
+          next: () => (self ? this.afterOwnChange() : this.load()),
+          error: (e) => this.errors.report(e),
+        });
       }
       return;
     }
     this.service.changeMemberRole(this.projectId(), member.userId, action as ProjectRole).subscribe({
-      next: () => this.load(),
+      next: () => (this.isYou(member) ? this.afterOwnChange() : this.load()),
       error: (e) => this.errors.report(e),
+    });
+  }
+
+  /**
+   * The user changed their own role or removed themselves: the role the page and the profile hold may be stale. Read both again,
+   * and the list only with the new role in place, so a lowered role does not ask for what it can no longer read. A viewer leaves
+   * Settings through the layout; a user who is no longer a member (404) leaves for the project list.
+   */
+  private afterOwnChange(): void {
+    this.currentUserService.refresh();
+    this.context.reload().subscribe({
+      next: () => {
+        if (this.context.can('analyst')) {
+          this.load();
+        }
+      },
+      error: (e) => {
+        if (e instanceof HttpErrorResponse && e.status === 404) {
+          void this.router.navigate(['/projects'], { replaceUrl: true });
+        } else {
+          this.errors.report(e);
+        }
+      },
     });
   }
 

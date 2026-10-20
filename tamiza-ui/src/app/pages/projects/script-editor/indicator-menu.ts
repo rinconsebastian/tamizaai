@@ -81,7 +81,7 @@ export const indicatorFilterThreshold = 10;
             </button>
           } @empty {
             <p class="px-4 py-2 text-sm text-body" data-testid="no-indicators">
-              {{ items().length ? t('scripts.inputs.noMatch') : canEdit() ? t('scripts.noIndicatorsEditor') : t('scripts.noIndicators') }}
+              {{ items().length ? t('scripts.inputs.noMatch') : t('scripts.noIndicatorsEditor') }}
             </p>
           }
         </div>
@@ -93,7 +93,6 @@ export class IndicatorMenu {
   readonly items = input.required<IndicatorMenuItem[]>();
   /** The name of the indicator whose script is selected; null while script 1 or script 2 is. */
   readonly selected = input<string | null>(null);
-  readonly canEdit = input(false);
   readonly chosen = output<string>();
 
   protected readonly filterThreshold = indicatorFilterThreshold;

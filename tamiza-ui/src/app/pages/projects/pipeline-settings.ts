@@ -7,7 +7,7 @@ import { ProjectContext } from './project-context';
 
 /**
  * The form for when the script chain runs on its own: after synchronizations that changed data, and on a schedule. Admins only;
- * the page that hosts it reads the settings, shows them as a line for everyone and offers this form on request (design D6).
+ * the page that hosts it reads the settings, shows them as a line for analysts and admins and offers this form on request (design D6).
  */
 @Component({
   selector: 'app-pipeline-settings',

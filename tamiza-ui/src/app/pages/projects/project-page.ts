@@ -92,8 +92,8 @@ export class ProjectPage {
       { label: t('project.tabs.performance'), link: `/projects/${id}/performance` },
       { label: t('project.tabs.cleanData'), link: `/projects/${id}/clean-data` },
       ...dashboards,
-      // Settings opens the first configuration section and stands for all of them.
-      { label: t('project.tabs.settings'), link: sections[0].link, children: sections },
+      // Settings opens the first configuration section and stands for all of them. A viewer gets no group at all, not an empty one.
+      ...(this.context.can('analyst') ? [{ label: t('project.tabs.settings'), link: sections[0].link, children: sections }] : []),
     ];
   });
 

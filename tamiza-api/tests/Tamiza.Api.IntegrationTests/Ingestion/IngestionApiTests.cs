@@ -27,9 +27,9 @@ public sealed class IngestionApiTests(PostgresFixture postgres) : IDisposable
     public async Task Status_counts_submissions_and_shows_the_last_webhook_and_the_active_run()
     {
         await using var harness = await IngestionHarness.CreateAsync(postgres, _kobo);
-        using var viewer = await MemberAsync(harness, "vera", "viewer");
+        using var analyst = await MemberAsync(harness, "ana", "analyst");
 
-        var empty = await viewer.GetFromJsonAsync<JsonElement>(harness.IngestionPath);
+        var empty = await analyst.GetFromJsonAsync<JsonElement>(harness.IngestionPath);
         Assert.Equal(JsonValueKind.Null, empty.GetProperty("lastWebhookAt").ValueKind);
         Assert.Equal(JsonValueKind.Null, empty.GetProperty("lastSync").ValueKind);
         Assert.Equal(12, empty.GetProperty("syncIntervalHours").GetInt32());
@@ -40,7 +40,7 @@ public sealed class IngestionApiTests(PostgresFixture postgres) : IDisposable
         await TestData.ExecuteAsync(harness.Db, "UPDATE tamiza.raw_submissions SET deleted = true WHERE kobo_id = 2");
         await harness.StartSyncAsync();
 
-        var status = await viewer.GetFromJsonAsync<JsonElement>(harness.IngestionPath);
+        var status = await analyst.GetFromJsonAsync<JsonElement>(harness.IngestionPath);
         Assert.Equal(1, status.GetProperty("submissionCount").GetInt64());
         Assert.Equal(1, status.GetProperty("deletedCount").GetInt64());
         Assert.Equal(JsonValueKind.String, status.GetProperty("lastWebhookAt").ValueKind);
@@ -97,13 +97,15 @@ public sealed class IngestionApiTests(PostgresFixture postgres) : IDisposable
     // 6.2 — starting runs and the log
 
     [Fact]
-    public async Task Viewers_cannot_start_runs_and_non_members_get_404()
+    public async Task Viewers_cannot_start_runs_or_read_the_status_and_the_log_and_non_members_get_404()
     {
         await using var harness = await IngestionHarness.CreateAsync(postgres, _kobo);
         using var viewer = await MemberAsync(harness, "vera", "viewer");
         using var stranger = TestData.ClientFor(harness.Factory, "sam", "sam@example.org");
 
         Assert.Equal(HttpStatusCode.Forbidden, (await viewer.PostAsJsonAsync(harness.SyncsPath, new { kind = "incremental" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync(harness.SyncsPath)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync(harness.IngestionPath)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await stranger.GetAsync(harness.SyncsPath)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await stranger.GetAsync(harness.IngestionPath)).StatusCode);
         Assert.Equal(0L, await TestData.ScalarAsync<long>(harness.Db, "SELECT count(*) FROM tamiza.syncs"));
@@ -143,16 +145,16 @@ public sealed class IngestionApiTests(PostgresFixture postgres) : IDisposable
     public async Task The_log_is_paged_newest_first()
     {
         await using var harness = await IngestionHarness.CreateAsync(postgres, _kobo);
-        using var viewer = await MemberAsync(harness, "vera", "viewer");
+        using var analyst = await MemberAsync(harness, "ana", "analyst");
         await TestData.ExecuteAsync(harness.Db, """
             INSERT INTO tamiza.syncs (id, project_id, kind, trigger, status, queued_at, started_at, finished_at, created_count)
             SELECT gen_random_uuid(), @p, 'incremental', 'schedule', 'succeeded', t, t, t + interval '1 minute', n
             FROM generate_series(1, 25) AS n, LATERAL (SELECT timestamptz '2026-10-01T00:00:00Z' + n * interval '1 hour' AS t) AS times
             """, ("p", harness.ProjectId));
 
-        var page2 = await viewer.GetFromJsonAsync<JsonElement>($"{harness.SyncsPath}?page=2&pageSize=10");
-        var page3 = await viewer.GetFromJsonAsync<JsonElement>($"{harness.SyncsPath}?page=3&pageSize=10");
-        var defaults = await viewer.GetFromJsonAsync<JsonElement>(harness.SyncsPath);
+        var page2 = await analyst.GetFromJsonAsync<JsonElement>($"{harness.SyncsPath}?page=2&pageSize=10");
+        var page3 = await analyst.GetFromJsonAsync<JsonElement>($"{harness.SyncsPath}?page=3&pageSize=10");
+        var defaults = await analyst.GetFromJsonAsync<JsonElement>(harness.SyncsPath);
 
         Assert.Equal(25, page2.GetProperty("total").GetInt32());
         Assert.Equal(Enumerable.Range(6, 10).Reverse(), page2.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("createdCount").GetInt32()));

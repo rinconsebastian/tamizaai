@@ -69,16 +69,14 @@ describe('ProjectData', () => {
 
   afterEach(() => document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = '')));
 
-  it('shows the Submissions section and the status to viewers, without actions and with the schedules as a line', async () => {
-    const { root } = await open('viewer');
+  it('shows the Submissions section and the status to analysts, with the schedules as a line they cannot edit', async () => {
+    const { root } = await open('analyst');
 
     expect(root.querySelector(`a[href="/projects/${projectId}/data"]`)?.textContent).toContain('Submissions');
     expect(byTestId(root, 'submission-count')?.textContent?.trim()).toBe('117');
     expect(byTestId(root, 'deleted-count')?.textContent?.trim()).toBe('3');
     expect(byTestId(root, 'last-webhook')?.textContent).toContain('None received yet');
     expect(byTestId(root, 'last-sync')?.textContent).toContain('Succeeded');
-    expect(byTestId(root, 'sync-now')).toBeNull();
-    expect(byTestId(root, 'full-sync')).toBeNull();
     expect(byTestId(root, 'schedule-form')).toBeNull();
     expect(text(byTestId(root, 'schedule-line'))).toBe('Synchronizes every 12 hours · checks for deletions every 24 hours');
     expect(text(byTestId(root, 'runs-line'))).toContain('Scripts run after each synchronization with changes · also run every 24 hours');
@@ -86,7 +84,7 @@ describe('ProjectData', () => {
   });
 
   it('writes an hourly script schedule in the singular', async () => {
-    const { root } = await open('viewer', status(), undefined, undefined, undefined, { ...runs, runIntervalHours: 1 });
+    const { root } = await open('analyst', status(), undefined, undefined, undefined, { ...runs, runIntervalHours: 1 });
 
     expect(text(byTestId(root, 'runs-line'))).toContain('also run every 1 hour');
     expect(text(byTestId(root, 'runs-line'))).not.toContain('1 hours');
@@ -226,7 +224,7 @@ describe('ProjectData', () => {
       sync({ id: 'd', status: 'failed', errorCode: 'kobo.something_new', error: 'A message from the API.' }),
       sync({ id: 'e', status: 'succeeded', kind: 'reconciliation', deletedCount: 2 }),
     ];
-    const { root } = await open('viewer', status(), { items, total: items.length });
+    const { root } = await open('analyst', status(), { items, total: items.length });
     const table = byTestId(root, 'log-table')!;
 
     for (const state of ['queued', 'running', 'failed', 'succeeded']) {
@@ -246,7 +244,7 @@ describe('ProjectData', () => {
   });
 
   it('reads the log in four columns, with the end of each run under its start', async () => {
-    const { root } = await open('viewer');
+    const { root } = await open('analyst');
     const headings = Array.from(byTestId(root, 'log-table')!.querySelectorAll('th')).map((th) => text(th));
     expect(headings).toEqual(['Started', 'Kind', 'Status', 'Changes']);
     expect(text(byTestId(root, 'log-ended'))).toMatch(/^Ended .*2026/);
@@ -255,14 +253,14 @@ describe('ProjectData', () => {
 
   it('shows the requester under the kind of a manual run, and nothing for a scheduled one', async () => {
     const items = [sync({ id: 'a', trigger: 'manual', requestedBy: { id: 'u1', name: 'Ada' } }), sync({ id: 'b' })];
-    const { root } = await open('viewer', status(), { items, total: 2 });
+    const { root } = await open('analyst', status(), { items, total: 2 });
     const rows = Array.from(byTestId(root, 'log-table')!.querySelectorAll('tbody tr')).map((row) => text(row.children[1]));
     expect(rows[0]).toContain('Started by Ada');
     expect(rows[1]).not.toContain('Started by');
   });
 
   it('puts the log before the form versions, and only the stored count in large type', async () => {
-    const { root } = await open('viewer');
+    const { root } = await open('analyst');
     const log = byTestId(root, 'log-table')!;
     const versions = byTestId(root, 'form-versions')!;
     expect(log.compareDocumentPosition(versions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -272,12 +270,12 @@ describe('ProjectData', () => {
   });
 
   it('shows an empty log and pages through a long one', async () => {
-    const first = await open('viewer', status({ lastSync: null }), { items: [], total: 0 });
+    const first = await open('analyst', status({ lastSync: null }), { items: [], total: 0 });
     expect(byTestId(first.root, 'log-empty')).not.toBeNull();
     expect(byTestId(first.root, 'last-sync')?.textContent).toContain('Never');
     TestBed.resetTestingModule();
 
-    const { root, http, harness } = await open('viewer', status(), { items: Array.from({ length: 10 }, (_, i) => sync({ id: `s${i}` })), total: 25 });
+    const { root, http, harness } = await open('analyst', status(), { items: Array.from({ length: 10 }, (_, i) => sync({ id: `s${i}` })), total: 25 });
     expect(byTestId(root, 'log-page-info')?.textContent).toContain('1–10 of 25');
 
     byTestId<HTMLButtonElement>(root, 'log-next')!.click();
@@ -291,7 +289,7 @@ describe('ProjectData', () => {
   });
 
   it('polls while a run is active and reloads the log when it ends', async () => {
-    const { http, harness } = await open('viewer', status({ activeSync: sync({ status: 'running' }) }), undefined, 30);
+    const { http, harness } = await open('analyst', status({ activeSync: sync({ status: 'running' }) }), undefined, 30);
 
     await new Promise((resolve) => setTimeout(resolve, 60));
     http.expectOne(statusUrl).flush(status({ activeSync: sync({ status: 'running' }) }));
@@ -307,7 +305,7 @@ describe('ProjectData', () => {
   });
 
   it('stops polling when the page is destroyed while a run is active', async () => {
-    const { http, harness } = await open('viewer', status({ activeSync: sync({ status: 'queued' }) }), undefined, 30);
+    const { http, harness } = await open('analyst', status({ activeSync: sync({ status: 'queued' }) }), undefined, 30);
 
     harness.fixture.destroy();
     await new Promise((resolve) => setTimeout(resolve, 60));
@@ -340,7 +338,7 @@ describe('ProjectData', () => {
       ],
     };
 
-    it.each<ProjectRole>(['viewer', 'analyst', 'admin'])('shows the card to %s', async (role) => {
+    it.each<ProjectRole>(['analyst', 'admin'])('shows the card to %s', async (role) => {
       const { root } = await open(role, status(), undefined, undefined, mixed);
 
       expect(byTestId(root, 'form-versions')?.textContent).toContain('Form versions');
@@ -348,7 +346,7 @@ describe('ProjectData', () => {
     });
 
     it('shows each status with its count, reason and next attempt', async () => {
-      const { root } = await open('viewer', status(), undefined, undefined, mixed);
+      const { root } = await open('analyst', status(), undefined, undefined, mixed);
       const table = byTestId(root, 'versions-table')!;
 
       const available = byTestId(table, 'version-row-available')!;
@@ -382,7 +380,7 @@ describe('ProjectData', () => {
           version({ uid: 'vOtherOtherOtherOther5', status: 'failed', errorCode: 'kobo.something_new', error: 'A message from the worker.', deployedAt: null }),
         ],
       };
-      const { root } = await open('viewer', status(), undefined, undefined, list);
+      const { root } = await open('analyst', status(), undefined, undefined, list);
       const table = byTestId(root, 'versions-table')!;
 
       const errors = [...table.querySelectorAll('[data-testid="version-error"]')];
@@ -391,7 +389,7 @@ describe('ProjectData', () => {
     });
 
     it('lists the versions as cards for phones too', async () => {
-      const { root } = await open('viewer', status(), undefined, undefined, mixed);
+      const { root } = await open('analyst', status(), undefined, undefined, mixed);
 
       const cards = byTestId(root, 'versions-cards')!;
       expect(cards.children.length).toBe(4);
@@ -402,7 +400,7 @@ describe('ProjectData', () => {
     it('shortens the version id, keeps the full one in the tooltip and copies it', async () => {
       const writeText = vi.fn(() => Promise.resolve());
       Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-      const { root } = await open('viewer', status(), undefined, undefined, { versions: [version()], withoutVersion: 0 });
+      const { root } = await open('analyst', status(), undefined, undefined, { versions: [version()], withoutVersion: 0 });
 
       const uid = byTestId<HTMLButtonElement>(root, 'version-uid')!;
       expect(uid.textContent?.trim()).toBe('vAbCdEfGh…rStU');
@@ -412,15 +410,15 @@ describe('ProjectData', () => {
     });
 
     it('says how many submissions have no form version', async () => {
-      const { root } = await open('viewer', status(), undefined, undefined, mixed);
+      const { root } = await open('analyst', status(), undefined, undefined, mixed);
       expect(byTestId(root, 'without-version')?.textContent).toContain('3 submissions have no form version');
       TestBed.resetTestingModule();
 
-      const single = await open('viewer', status(), undefined, undefined, { versions: [version()], withoutVersion: 1 });
+      const single = await open('analyst', status(), undefined, undefined, { versions: [version()], withoutVersion: 1 });
       expect(byTestId(single.root, 'without-version')?.textContent).toContain('1 submission has no form version');
       TestBed.resetTestingModule();
 
-      const none = await open('viewer', status(), undefined, undefined, { versions: [version()], withoutVersion: 0 });
+      const none = await open('analyst', status(), undefined, undefined, { versions: [version()], withoutVersion: 0 });
       expect(byTestId(none.root, 'without-version')).toBeNull();
     });
 
@@ -431,7 +429,7 @@ describe('ProjectData', () => {
       expect(hint.querySelector('a')).toBeNull(); // no round trip to another page: the action is right here
       TestBed.resetTestingModule();
 
-      const healthy = await open('viewer', status(), undefined, undefined, { versions: [version(), version({ uid: 'vOther', status: 'pending' })], withoutVersion: 0 });
+      const healthy = await open('analyst', status(), undefined, undefined, { versions: [version(), version({ uid: 'vOther', status: 'pending' })], withoutVersion: 0 });
       expect(byTestId(healthy.root, 'versions-retry-hint')).toBeNull();
     });
 
@@ -451,20 +449,13 @@ describe('ProjectData', () => {
       expect(byTestId(root, 'versions-retry-hint')).toBeNull();
     });
 
-    it('tells a viewer whom to ask, without a button or a link', async () => {
-      const { root } = await open('viewer', status(), undefined, undefined, mixed);
-      const hint = byTestId(root, 'versions-retry-hint')!;
-      expect(text(hint)).toContain('Ask an analyst or admin to re-check the form');
-      expect(hint.querySelector('a, button')).toBeNull();
-    });
-
     it('explains the labels in the empty state instead of in an introduction', async () => {
-      const { root } = await open('viewer');
+      const { root } = await open('analyst');
       expect(text(byTestId(root, 'versions-empty'))).toContain('use the labels of the form version their submission was made with');
     });
 
     it('explains an empty list', async () => {
-      const { root } = await open('viewer');
+      const { root } = await open('analyst');
 
       expect(byTestId(root, 'versions-empty')?.textContent).toContain('No form versions yet');
       expect(byTestId(root, 'versions-table')).toBeNull();
@@ -472,7 +463,7 @@ describe('ProjectData', () => {
 
     it('polls while a version is pending and stops when none is left', async () => {
       const pending: FormVersionList = { versions: [version({ status: 'pending' })], withoutVersion: 0 };
-      const { http, harness, root } = await open('viewer', status(), undefined, 30, pending);
+      const { http, harness, root } = await open('analyst', status(), undefined, 30, pending);
 
       await new Promise((resolve) => setTimeout(resolve, 60));
       http.expectOne(versionsUrl).flush({ ...pending }); // a response is a new object, as in production
@@ -487,7 +478,7 @@ describe('ProjectData', () => {
     });
 
     it('does not poll when every version has its labels and no run is active', async () => {
-      const { http } = await open('viewer', status(), undefined, 30, { versions: [version()], withoutVersion: 0 });
+      const { http } = await open('analyst', status(), undefined, 30, { versions: [version()], withoutVersion: 0 });
 
       await new Promise((resolve) => setTimeout(resolve, 80));
 
@@ -496,7 +487,7 @@ describe('ProjectData', () => {
 
     it('reloads the versions when a synchronization ends, because it fetched them', async () => {
       const waiting: FormVersionList = { versions: [version({ status: 'pending' })], withoutVersion: 0 };
-      const { http, harness, root } = await open('viewer', status({ activeSync: sync({ status: 'running' }) }), undefined, 30, waiting);
+      const { http, harness, root } = await open('analyst', status({ activeSync: sync({ status: 'running' }) }), undefined, 30, waiting);
 
       await new Promise((resolve) => setTimeout(resolve, 60));
       http.match(versionsUrl).forEach((request) => request.flush({ ...waiting }));

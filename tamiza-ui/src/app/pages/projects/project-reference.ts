@@ -10,7 +10,7 @@ import { ReferencePreviewData, ReferencePreviewDialog } from './reference-previe
 import { ReferenceUploadData, ReferenceUploadDialog } from './reference-upload-dialog';
 
 /**
- * The project's reference tables: every member lists and previews them; analysts and admins upload, replace and delete. Preview
+ * The project's reference tables: analysts and admins list and preview them, and upload, replace and delete. Preview
  * is the one action a row shows; replacing and deleting wait in the row's menu.
  */
 @Component({
@@ -46,10 +46,8 @@ import { ReferenceUploadData, ReferenceUploadDialog } from './reference-upload-d
       @if (tables(); as tables) {
         @if (tables.length === 0) {
           <div class="flex flex-col items-start gap-3" data-testid="reference-empty">
-            <p class="text-sm text-body">{{ t(canEdit() ? 'reference.emptyEditor' : 'reference.emptyViewer') }}</p>
-            @if (canEdit()) {
-              <button tmzButton type="button" (click)="openUpload()" data-testid="reference-add-empty">{{ t('reference.add') }}</button>
-            }
+            <p class="text-sm text-body">{{ t('reference.emptyEditor') }}</p>
+            <button tmzButton type="button" (click)="openUpload()" data-testid="reference-add-empty">{{ t('reference.add') }}</button>
           </div>
         } @else {
           <!-- Phones: a name and one line about the table. md and up: a table. -->

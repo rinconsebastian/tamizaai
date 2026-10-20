@@ -6,7 +6,7 @@ The page opens with a strip of the three headline figures: the **total** of subm
 
 It is computed from the copy of the submissions that Tamiza stores (see [kobo.md](kobo.md)), with those deleted in Kobo left out. It never contacts Kobo, so it works when Kobo is down, and it does not depend on the [scripts](scripts.md): it works before any script exists and is not affected when a run fails. It uses the answers as Kobo sent them, which matters for [coverage](#sampling-frame-coverage): the values it compares are the form's codes, not their labels.
 
-Which parts a project can show depends on its form; the **Form check** card in **Settings > General** lists what is missing (see [kobo.md](kobo.md#5-check-the-form-for-the-performance-dashboard)).
+Which parts a project can show depends on its form; the **Form check** card in **Settings > General**, for analysts and admins, lists what is missing (see [kobo.md](kobo.md#5-check-the-form-for-the-performance-dashboard)); viewers see the message of each part that is unavailable.
 
 ## Days and the date range
 

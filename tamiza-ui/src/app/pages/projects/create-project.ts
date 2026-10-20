@@ -3,6 +3,7 @@ import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angula
 import { Router } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
+import { CurrentUserService } from '../../core/current-user.service';
 import { ProjectsService } from '../../core/projects/projects.service';
 import { Alert, ApiLang, Button, Card, FormField, Input, ToastService } from '../../shared/ui';
 
@@ -80,6 +81,7 @@ export class CreateProjectPage {
   private readonly toasts = inject(ToastService);
   private readonly transloco = inject(TranslocoService);
   private readonly router = inject(Router);
+  private readonly currentUser = inject(CurrentUserService);
 
   protected readonly servers = koboServers;
   protected readonly choice = signal<ServerChoice>('kf');
@@ -110,6 +112,10 @@ export class CreateProjectPage {
       },
       error: (error) => {
         const parsed = this.errors.parse(error);
+        if (parsed.code === 'project.create_not_allowed') {
+          // The right was lost since the profile was read: keep it in step.
+          this.currentUser.refresh();
+        }
         this.fieldErrors.set(parsed.fieldErrors);
         if (!Object.keys(parsed.fieldErrors).length) {
           this.formError.set(parsed.message);

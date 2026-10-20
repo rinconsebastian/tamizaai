@@ -1,8 +1,10 @@
 import { HttpTestingController, TestRequest } from '@angular/common/http/testing';
+import { TestBed } from '@angular/core/testing';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { PerformanceDashboard } from '../../core/projects/performance.service';
 import { ProjectDetails, ProjectRole } from '../../core/projects/projects.service';
-import { byTestId, openProjectSection, projectId, settle } from '../../../testing/project-harness';
+import { ToastService } from '../../shared/ui';
+import { byTestId, openProjectSection, projectId, settingsRequests, settle } from '../../../testing/project-harness';
 
 const url = `/api/v1/projects/${projectId}/performance`;
 
@@ -720,5 +722,16 @@ describe('ProjectPerformance', () => {
       expect(summaries).toContain('1 submission · mean — · outliers 0 · last —');
       expect(summaries.some((summary) => summary.startsWith('5 submissions · '))).toBe(true);
     });
+  });
+});
+
+describe('ProjectPerformance for a viewer', () => {
+  it('asks for nothing that Settings reads and shows no error (No failed request for a viewer)', async () => {
+    const { http, harness } = await openProjectSection('performance', 'viewer', {}, [], 'en', { formFields: false });
+    http.expectOne(isPerformance).flush(dashboard());
+    await settle(harness);
+
+    expect(settingsRequests(http)).toEqual([]);
+    expect(TestBed.inject(ToastService).toasts()).toEqual([]);
   });
 });

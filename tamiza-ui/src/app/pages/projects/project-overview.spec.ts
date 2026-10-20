@@ -24,7 +24,6 @@ describe('ProjectOverview', () => {
   });
 
   it.each<[ProjectRole, ReturnType<typeof controls>]>([
-    ['viewer', { recheck: false, replaceToken: false, enumeratorChange: false, settings: false }],
     ['analyst', { recheck: true, replaceToken: false, enumeratorChange: false, settings: false }],
     ['admin', { recheck: true, replaceToken: true, enumeratorChange: true, settings: true }],
   ])('shows %s the controls for that role', async (role, expected) => {
@@ -32,10 +31,9 @@ describe('ProjectOverview', () => {
     expect(controls(root)).toEqual(expected);
   });
 
-  it('shows everyone when the form was last checked, and gives a viewer no empty row of buttons', async () => {
-    const { root } = await openProjectSection('overview', 'viewer');
+  it('shows when the form was last checked, and gives an analyst no token control', async () => {
+    const { root } = await openProjectSection('overview', 'analyst');
     expect(text(byTestId(root, 'checked-at'))).toMatch(/^Last checked: Oct 2, 2026/);
-    expect(byTestId(root, 'recheck')).toBeNull();
     expect(byTestId(root, 'replace-token-toggle')).toBeNull();
   });
 
@@ -46,19 +44,19 @@ describe('ProjectOverview', () => {
   });
 
   it('lists the server and the asset UID, not the form name (the header has it)', async () => {
-    const { root } = await openProjectSection('overview', 'viewer');
+    const { root } = await openProjectSection('overview', 'analyst');
     const labels = Array.from(root.querySelectorAll('dl dt')).map((dt) => text(dt));
     expect(labels).toEqual(['Server', 'Asset UID', 'Time zone']);
   });
 
-  it('shows a viewer and an analyst the time zone, read-only', async () => {
+  it('shows an analyst the time zone, read-only', async () => {
     const { root } = await openProjectSection('overview', 'analyst', { timeZone: 'America/Bogota' });
     expect(text(byTestId(root, 'time-zone-row'))).toContain('America/Bogota');
     expect(byTestId(root, 'settings-form')).toBeNull();
   });
 
   it('renders unavailable metrics with the missing fields', async () => {
-    const { root } = await openProjectSection('overview', 'viewer');
+    const { root } = await openProjectSection('overview', 'analyst');
 
     const completion = byTestId(root, 'metric-completionTime')!;
     expect(completion.textContent).toContain('Unavailable');
@@ -68,7 +66,7 @@ describe('ProjectOverview', () => {
 
   describe('form check', () => {
     it('is titled Form check, without an introduction or a link paragraph', async () => {
-      const { root } = await openProjectSection('overview', 'viewer');
+      const { root } = await openProjectSection('overview', 'analyst');
       const headings = Array.from(root.querySelectorAll('h2')).map((h) => text(h));
       expect(headings).toContain('Form check');
       expect(headings).not.toContain('Performance dashboard');
@@ -82,25 +80,14 @@ describe('ProjectOverview', () => {
       expect(byTestId(root, 'metric-coverage')!.textContent).toContain('Available');
     });
 
-    describe.each<[ProjectRole, boolean]>([
-      ['analyst', true],
-      ['admin', true],
-      ['viewer', false],
-    ])('without a sampling frame, for a %s', (role, canEdit) => {
-      it(canEdit ? 'invites them to define it, with a link' : 'tells them whom to ask, without a link', async () => {
-        const fieldCheck = check({ coverage: { available: false, hint: 'defineSamplingFrame' } });
-        const { root } = await openProjectSection('overview', role, { fieldCheck });
+    it.each<ProjectRole>(['analyst', 'admin'])('invites an %s to define the sampling frame, with a link', async (role) => {
+      const fieldCheck = check({ coverage: { available: false, hint: 'defineSamplingFrame' } });
+      const { root } = await openProjectSection('overview', role, { fieldCheck });
 
-        const hint = byTestId(root, 'hint-coverage')!;
-        expect(byTestId(root, 'metric-coverage')!.textContent).toContain('Unavailable');
-        if (canEdit) {
-          expect(text(hint)).toContain('Define a sampling frame to see coverage.');
-          expect(byTestId(hint, 'hint-link')?.getAttribute('href')).toBe(`/projects/${projectId}/sampling-frame`);
-        } else {
-          expect(text(hint)).toBe('Ask an analyst or admin to define the sampling frame.');
-          expect(byTestId(root, 'hint-link')).toBeNull();
-        }
-      });
+      const hint = byTestId(root, 'hint-coverage')!;
+      expect(byTestId(root, 'metric-coverage')!.textContent).toContain('Unavailable');
+      expect(text(hint)).toContain('Define a sampling frame to see coverage.');
+      expect(byTestId(hint, 'hint-link')?.getAttribute('href')).toBe(`/projects/${projectId}/sampling-frame`);
     });
 
     it('names the missing frame fields and suggests updating the frame', async () => {
@@ -111,13 +98,6 @@ describe('ProjectOverview', () => {
       expect(byTestId(root, 'hint-link')?.getAttribute('href')).toBe(`/projects/${projectId}/sampling-frame`);
     });
 
-    it('tells a viewer to ask when the frame needs updating', async () => {
-      const fieldCheck = check({ coverage: { available: false, missingFields: ['municipality'], hint: 'updateSamplingFrame' } });
-      const { root } = await openProjectSection('overview', 'viewer', { fieldCheck });
-      expect(text(byTestId(root, 'hint-coverage'))).toContain('Ask an analyst or admin to update it.');
-      expect(byTestId(root, 'hint-link')).toBeNull();
-    });
-
     it('tells an admin to select the enumerator question, and opens the select for them', async () => {
       const fieldCheck = check({ perEnumerator: { available: false, missingFields: ['username'], hint: 'selectEnumeratorField' } });
       const { root } = await openProjectSection('overview', 'admin', { fieldCheck });
@@ -126,9 +106,9 @@ describe('ProjectOverview', () => {
       expect(byTestId(root, 'enumerator-change')).toBeNull(); // and there is nothing to reveal
     });
 
-    it.each<ProjectRole>(['analyst', 'viewer'])('tells a %s to ask an admin to select the enumerator question', async (role) => {
+    it('tells an analyst to ask an admin to select the enumerator question', async () => {
       const fieldCheck = check({ perEnumerator: { available: false, missingFields: ['username'], hint: 'selectEnumeratorField' } });
-      const { root } = await openProjectSection('overview', role, { fieldCheck });
+      const { root } = await openProjectSection('overview', 'analyst', { fieldCheck });
       expect(text(byTestId(root, 'hint-perEnumerator'))).toBe('Ask a project admin to select the question that identifies the enumerator.');
       expect(byTestId(root, 'enumerator-form')).toBeNull();
       expect(byTestId(root, 'enumerator-summary')).toBeNull();
@@ -203,8 +183,8 @@ describe('ProjectOverview', () => {
       expect(byTestId(root, 'enumerator-form')).toBeNull();
     });
 
-    it.each<ProjectRole>(['analyst', 'viewer'])('is never offered to a %s', async (role) => {
-      const { root, http } = await openProjectSection('overview', role, { fieldCheck: check({}) });
+    it('is never offered to an analyst', async () => {
+      const { root, http } = await openProjectSection('overview', 'analyst', { fieldCheck: check({}) });
       expect(byTestId(root, 'enumerator-form')).toBeNull();
       expect(byTestId(root, 'enumerator-change')).toBeNull();
       http.expectNone(`/api/v1/projects/${projectId}/form-fields`); // the questions are only read for the admin's setting
@@ -337,15 +317,15 @@ describe('ProjectOverview', () => {
 
   describe('unavailable form versions', () => {
     it('shows nothing when every version has its labels', async () => {
-      const { root } = await openProjectSection('overview', 'viewer', { unavailableFormVersions: 0 });
+      const { root } = await openProjectSection('overview', 'analyst', { unavailableFormVersions: 0 });
       expect(byTestId(root, 'unavailable-versions')).toBeNull();
     });
 
     it.each<[number, string]>([
       [1, '1 form version has no labels yet'],
       [3, '3 form versions have no labels yet'],
-    ])('shows %i unavailable to every role, with a link to the form versions', async (count, text) => {
-      const { root } = await openProjectSection('overview', 'viewer', { unavailableFormVersions: count });
+    ])('shows %i unavailable, with a link to the form versions', async (count, text) => {
+      const { root } = await openProjectSection('overview', 'analyst', { unavailableFormVersions: count });
 
       const notice = byTestId(root, 'unavailable-versions')!;
       expect(notice.textContent).toContain(text);

@@ -22,7 +22,7 @@ Written against Keycloak 26. Older versions use the same settings, but the admin
 | `OIDC_AUDIENCE` | The audience the mapper adds, for example `tamiza-api`. |
 | `OIDC_METADATA_ADDRESS` | Leave empty unless the `api` container cannot reach `OIDC_AUTHORITY` (see [Keycloak on the same host](#keycloak-on-the-same-host)). |
 | `OIDC_REQUIRE_HTTPS_METADATA` | `true`, except for a development realm served over plain HTTP. |
-| `TAMIZA_SUPERADMIN_EMAILS` | Comma-separated emails of the people who administer the installation. |
+| `TAMIZA_SUPERADMIN_EMAILS` | Comma-separated emails of the people who administer the installation. Set your own before you first sign in: only admins of a project and superadmins can create projects, so on a new installation a superadmin creates the first one. |
 
 ## Option A: admin console
 
@@ -129,8 +129,8 @@ Plain HTTP works only because everything runs on `localhost`. Browsers allow sig
 Run these checks after configuring the realm and starting Tamiza. Use a test user whose email is listed in `TAMIZA_SUPERADMIN_EMAILS` and verified.
 
 1. **Sign-in.** Open `<TAMIZA_PUBLIC_URL>/`. The browser goes to the Keycloak login page. After signing in, the top bar shows your name and the home page says "Welcome, <name>".
-2. **Return to the requested route.** Sign out, then open `<TAMIZA_PUBLIC_URL>/projects`. After signing in, the address bar shows `/projects` again. The page reads "Page not found" until projects exist.
-3. **Profile and role.** With the session open, `GET <TAMIZA_PUBLIC_URL>/api/v1/me` with the access token returns your name, email and `"isSuperAdmin": true`.
+2. **Return to the requested route.** Sign out, then open `<TAMIZA_PUBLIC_URL>/projects`. After signing in, the address bar shows `/projects` again. On a new installation the page reads "No projects yet" and offers "Create a project".
+3. **Profile and role.** With the session open, `GET <TAMIZA_PUBLIC_URL>/api/v1/me` with the access token returns your name, email, `"isSuperAdmin": true` and `"canCreateProjects": true`.
 4. **Sign-out.** Click *Sign out*. You return to Tamiza, which sends you to the Keycloak login page again instead of signing you back in silently.
 5. **Session expiry.** Sign in, then end the session in Keycloak (*Users → (user) → Sessions → Sign out*). Within one access-token lifetime, the UI sends you back to the login page when it fails to renew the token.
 6. **Keycloak unavailable.** Stop Keycloak (or point `OIDC_AUTHORITY` at an unreachable URL) and reload Tamiza. The page reads "Sign-in is unavailable" instead of staying blank.
@@ -249,7 +249,7 @@ What the provider needs:
 | Refresh tokens | Tamiza renews the session with them. If the provider only issues them with `offline_access`, add that scope to `OIDC_SCOPE`. |
 | Sign-out | Used when the provider publishes an `end_session_endpoint`. |
 
-What depends on the claims: invitations match the **verified** `email` of the person signing in, and the superadmin role from `TAMIZA_SUPERADMIN_EMAILS` needs `email_verified` true. A provider whose tokens lack them still signs people in, but invitations never turn into memberships and nobody becomes superadmin.
+What depends on the claims: invitations match the **verified** `email` of the person signing in, and the superadmin role from `TAMIZA_SUPERADMIN_EMAILS` needs `email_verified` true. A provider whose tokens lack them still signs people in, but invitations never turn into memberships and nobody becomes superadmin, so on a new installation nobody can create the first project.
 
 ## Troubleshooting
 
@@ -260,6 +260,7 @@ What depends on the claims: invitations match the **verified** `email` of the pe
 | Sign-in loops, and API calls return 401 | Access tokens lack the audience: check the audience mapper and `OIDC_AUDIENCE`. A mismatch between `OIDC_AUTHORITY` and the token's `iss` causes the same symptom. |
 | API logs show "IDX20803: Unable to obtain configuration" | The `api` container cannot reach the discovery document. Set `OIDC_METADATA_ADDRESS` to a reachable URL. |
 | `isSuperAdmin` is false for a listed email | The email is not verified in Keycloak, or `api` was not restarted after editing `.env`. |
+| No **New project** button, or `/projects/new` returns to the project list | Only admins of a project and superadmins can create projects, and a pending invitation does not count. On a new installation, list your verified email in `TAMIZA_SUPERADMIN_EMAILS` and check that `isSuperAdmin` is true (see the row above); otherwise ask an admin of a project to make you admin. |
 | Inviting says the email "could not be requested" (`failed`) | Keycloak could not send it. Check *Realm settings → Email* with *Test connection*, and that the `api` reaches Keycloak (`TAMIZA_KEYCLOAK_ADMIN_URL`). The `api` log names the step and the HTTP status. The invitation is kept: use *Resend invitation email* once it is fixed. |
 | The `api` log says an admin request was refused (401 or 403) | The `tamiza-admin` client lacks the `manage-users` and `view-users` roles of `realm-management`, or its secret is wrong. |
 | Inviting says the person "already has an account" (`existingAccount`) | The email already has an account in Keycloak that Tamiza did not create, or the person already verified theirs. No email was sent: tell them yourself. |

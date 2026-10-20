@@ -49,23 +49,20 @@ async function chooseAction(opened: Awaited<ReturnType<typeof open>>, row: strin
 describe('ProjectReference', () => {
   afterEach(() => document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = '')));
 
-  it('lists the tables for viewers without editing actions', async () => {
-    const { root } = await open('viewer');
+  it('lists the tables with their file, size and who updated them', async () => {
+    const { root } = await open('analyst');
 
     const row = byTestId(root, 'reference-row-population')!;
     expect(row.textContent).toContain('population.xlsx');
     expect(row.textContent).toContain('1,123 rows, 2 columns');
     expect(row.textContent).toContain('Ada');
     expect(byTestId(root, 'reference-preview-population')).not.toBeNull();
-    for (const id of ['reference-add', 'reference-add-empty', 'menu-trigger']) {
-      expect(byTestId(root, id), id).toBeNull();
-    }
     expect(byTestId(root, 'reference-cards')?.children.length).toBe(1);
   });
 
   it('words the size of a table with one row and one column in the singular', async () => {
     const lookup: ReferenceTable = { ...population, name: 'lookup', fileName: 'lookup.csv', rowCount: 1, columns: [population.columns[0]] };
-    const { root } = await open('viewer', [lookup]);
+    const { root } = await open('analyst', [lookup]);
 
     expect(text(byTestId(root, 'reference-row-lookup'))).toContain('1 row, 1 column');
     expect(text(byTestId(root, 'reference-cards')!.children[0])).toContain('lookup.csv · 1 row, 1 column ·');
@@ -73,7 +70,7 @@ describe('ProjectReference', () => {
 
   it('words the preview note for one row in the singular', async () => {
     const lookup: ReferenceTable = { ...population, name: 'lookup', fileName: 'lookup.csv', rowCount: 1 };
-    const { root, http, harness } = await open('viewer', [lookup]);
+    const { root, http, harness } = await open('analyst', [lookup]);
 
     byTestId<HTMLButtonElement>(root, 'reference-preview-lookup')!.click();
     await settle(harness);
@@ -90,7 +87,7 @@ describe('ProjectReference', () => {
   });
 
   it('puts one line about each table in the phone cards, with formatted counts and the same update text as the table', async () => {
-    const { root } = await open('viewer');
+    const { root } = await open('analyst');
     const card = byTestId(root, 'reference-cards')!.children[0];
     expect(text(card)).toContain('population.xlsx · 1,123 rows, 2 columns · Updated by Ada, Oct 2, 2026');
     expect(text(byTestId(root, 'reference-row-population'))).toContain('Updated by Ada, Oct 2, 2026');
@@ -117,16 +114,10 @@ describe('ProjectReference', () => {
       expect(empty.contains(byTestId(root, 'reference-add-empty'))).toBe(true);
       expect(byTestId(root, 'reference-add')).toBeNull(); // the header button waits until there is a list
     });
-
-    it('tells a viewer there are none, without a button', async () => {
-      const { root } = await open('viewer', []);
-      expect(text(byTestId(root, 'reference-empty'))).toBe('This project has no reference tables.');
-      expect(byTestId(root, 'reference-add-empty')).toBeNull();
-    });
   });
 
   it('previews a table with its column types and rows, and shows the original header of a renamed column', async () => {
-    const { root, http, harness } = await open('viewer');
+    const { root, http, harness } = await open('analyst');
 
     byTestId<HTMLButtonElement>(root, 'reference-preview-population')!.click();
     await settle(harness);

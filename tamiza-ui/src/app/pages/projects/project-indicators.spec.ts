@@ -8,7 +8,7 @@ import { Widget } from '../../core/projects/indicators.service';
 import { DashboardEntry, ProjectRole } from '../../core/projects/projects.service';
 import { ToastService } from '../../shared/ui';
 import { pressKey } from '../../../testing/cdk';
-import { byTestId, configureApp, details, openProjectSection, projectId, settle, typeInto } from '../../../testing/project-harness';
+import { byTestId, configureApp, details, openProjectSection, projectId, settingsRequests, settle, typeInto } from '../../../testing/project-harness';
 import {
   Context,
   all,
@@ -2114,5 +2114,17 @@ describe('ProjectIndicators', () => {
         expect(text(document.activeElement)).toBe('Housing');
       });
     });
+  });
+});
+
+describe('ProjectIndicators for a viewer', () => {
+  it('asks for nothing that Settings reads and shows no error (No failed request for a viewer)', async () => {
+    const context = await openProjectSection('dashboards/d1', 'viewer', {}, [{ provide: Downloader, useValue: downloader }], 'en', { formFields: false });
+    await answerLoad(context, two, {}, 'd1');
+    await answerQueries(context, answer);
+
+    expect(all(context.root, 'widget-title').map(text)).toEqual(['Coverage by municipality', 'Response rate']);
+    expect(settingsRequests(context.http)).toEqual([]);
+    expect(TestBed.inject(ToastService).toasts()).toEqual([]);
   });
 });

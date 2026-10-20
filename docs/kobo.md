@@ -8,7 +8,7 @@ Tamiza is compatible with KoboToolbox but is not affiliated with it.
 
 - A KoboToolbox account that can **view the form's submissions**: the form's owner, or an account the form is shared with, holding the *View submissions* permission. A dedicated account with view-only access is a good choice: Tamiza never changes anything in Kobo.
 - The form must be deployed.
-- Sign-in to Tamiza. Any signed-in user can create a project and becomes its admin.
+- Sign-in to Tamiza as a superadmin or as an admin of at least one project: only they can create a project, and the creator becomes its admin. On a new installation nobody is admin yet, so the operator lists your email in `TAMIZA_SUPERADMIN_EMAILS` (see [operations.md](operations.md#common-changes)). Anyone else asks a project admin for an invitation to an existing project.
 
 ## 1. Find the form's asset UID
 
@@ -28,7 +28,7 @@ The token acts as your Kobo account, so treat it like a password. Tamiza stores 
 
 ## 3. Create the project
 
-In Tamiza, open **Projects → New project** and fill in:
+In Tamiza, open **Projects → New project** (offered only to people who may create projects) and fill in:
 
 | Field | Value |
 |---|---|
@@ -69,7 +69,7 @@ The project's **Settings > General** page has a **Form check** card that shows w
 
 To add the metadata fields, edit the form in Kobo's form builder, open **Layout & Settings → Meta questions**, enable *start time*, *end time* and *username*, then redeploy the form. If the form has no `username` field but asks for the enumerator's name or code in a question, a project admin can select that question as the **enumerator question**: General shows the current one as a line (a question, `username`, or none) with a **Change** button, and opens the select by itself while the check asks for it. A selected question takes precedence over `username`, and admins can select one even when the form has `username`. If a redeploy removes the selected question, Tamiza goes back to `username` when the form has it.
 
-**Time zone.** The dashboard counts submissions per day, and a day depends on the time zone. Admins set the project's time zone in **Settings > General**, next to the project name and saved with it (for example `America/Bogota`; **Use my browser's time zone** picks yours); until they do, days are counted in UTC. Analysts and viewers see the time zone as a read-only line.
+**Time zone.** The dashboard counts submissions per day, and a day depends on the time zone. Admins set the project's time zone in **Settings > General**, next to the project name and saved with it (for example `America/Bogota`; **Use my browser's time zone** picks yours); until they do, days are counted in UTC. Analysts see the time zone as a read-only line; viewers, who do not open Settings, see it on the Performance and Clean data dashboards.
 
 After changing and redeploying the form in Kobo, press **Re-check the form** (admins and analysts) so Tamiza reads the new version. Tamiza describes the form's **deployed** version: questions you add or edit in Kobo's form builder do not count until you redeploy the form (see [Form versions and choice labels](#7-form-versions-and-choice-labels)).
 
@@ -90,7 +90,7 @@ Admins and analysts have two buttons:
 
 Only one synchronization of a project runs at a time; the buttons are disabled while one is queued or running, and the page updates by itself until it ends.
 
-Everyone sees the schedules as a line under the status ("Synchronizes every 12 hours · checks for deletions every 24 hours"). Admins press **Edit schedules** to change them: how often to synchronize and how often to check for deletions, each from 1 to 168 hours. The same button opens the settings for when scripts run (see [scripts.md](scripts.md#when-scripts-run)); the inputs hide again after a save. A new interval counts from the start of the last run of that kind. When a scheduled synchronization fails, Tamiza tries again after an hour.
+Analysts and admins see the schedules as a line under the status ("Synchronizes every 12 hours · checks for deletions every 24 hours"). Admins press **Edit schedules** to change them: how often to synchronize and how often to check for deletions, each from 1 to 168 hours. The same button opens the settings for when scripts run (see [scripts.md](scripts.md#when-scripts-run)); the inputs hide again after a save. A new interval counts from the start of the last run of that kind. When a scheduled synchronization fails, Tamiza tries again after an hour.
 
 Every synchronization records when it ran, what started it, how many submissions were new, updated or deleted, and the error if it failed. A submission received again with the same content counts as neither new nor updated.
 
@@ -107,7 +107,7 @@ How Tamiza gets those labels:
 - Labels are always in the form's default language, the first language of the form. A choice without a label in that language has no label: Tamiza does not borrow another language's text, and its answers keep their code.
 - The project's **current form**, which General's checks and `ctx.form` in the scripts describe, is the form's deployed version, not the latest draft in the form builder. If Kobo cannot return the deployed version, Tamiza uses the form's latest content and tries again later.
 
-The **Form versions** list at the end of the project's **Settings > Submissions** page lists the versions the project's submissions use, with how many submissions each has and the state of its definition. **Settings > General** also shows how many definitions are unavailable. Admins, analysts and viewers can all see them. Next to a failed or not found version, analysts and admins get a **Re-check the form** button that retries it in place; viewers are told to ask an analyst or admin.
+The **Form versions** list at the end of the project's **Settings > Submissions** page lists the versions the project's submissions use, with how many submissions each has and the state of its definition. **Settings > General** also shows how many definitions are unavailable. Admins and analysts can see them; viewers do not open Settings, and the API refuses their request. Next to a failed or not found version, they get a **Re-check the form** button that retries it in place.
 
 | Status | Meaning | What to do |
 |---|---|---|
@@ -134,11 +134,12 @@ The tables' columns also carry the text of their questions, as labels (see [scri
 
 | Role | Can |
 |---|---|
-| Admin | Everything below, plus project settings, the synchronization and script schedules, the Kobo token, the webhook and members. |
-| Analyst | Edit the sampling frame, re-check the form, run **Sync now** and **Full resync**, write and run the [scripts](scripts.md), and build the project's [indicators dashboards](indicators-dashboard.md): add, rename, move, duplicate and remove [dashboards](indicators-dashboard.md#dashboards), and add, edit, arrange, remove and move widgets between them. |
-| Viewer | Read the project, including every dashboard and its widgets, the Settings > Submissions page and its synchronization log. |
+| Admin | Everything below, plus project settings, the synchronization and script schedules, the Kobo token, the webhook, members, and creating new projects. |
+| Analyst | Open every Settings section except Webhook, see the member list (without pending invitations), edit the sampling frame, re-check the form, run **Sync now** and **Full resync**, write and run the [scripts](scripts.md), and build the project's [indicators dashboards](indicators-dashboard.md): add, rename, move, duplicate and remove [dashboards](indicators-dashboard.md#dashboards), and add, edit, arrange, remove and move widgets between them. |
+| Viewer | Read the project's dashboards: Performance, Clean data and every indicators dashboard with its widgets, and export their data. Viewers do not open Settings, and the API refuses their requests for what only Settings shows. |
+| Superadmin | Set by the operator in `TAMIZA_SUPERADMIN_EMAILS`. Acts as admin on every project, member or not, and can create projects even when none exists. |
 
-Everyone in the project sees its people in **Settings > Members**, with their role (you are marked **You**). Admins press **Add member** to add a person by email and role in a dialog, and use each row's menu to change a role, remove someone or revoke an invitation; people invited who have not signed in yet are rows of the same list, marked with the role they are invited as. The only admin has no demotion or removal in their menu, because a project always keeps one:
+Analysts and admins see the project's people in **Settings > Members**, with their role (you are marked **You**); analysts do not see pending invitations. Admins press **Add member** to add a person by email and role in a dialog, and use each row's menu to change a role, remove someone or revoke an invitation; people invited who have not signed in yet are rows of the same list, marked with the role they are invited as. The only admin has no demotion or removal in their menu, because a project always keeps one:
 
 - If someone with that email has already signed in to Tamiza with the email **verified** in Keycloak, they become a member at once.
 - Otherwise the invitation stays pending and turns into a membership the first time that person signs in with the email verified. By default Tamiza sends no email, so tell the person yourself.
@@ -146,15 +147,15 @@ Everyone in the project sees its people in **Settings > Members**, with their ro
 
 With account emails on, a member's menu also has **Send password reset email**, for a member who forgot their password; Keycloak emails them a link to set a new one. Each admin can cause 20 such emails per hour, and the same person is never sent two within 10 minutes.
 
-Make someone else admin before stepping down. A superadmin (configured by the operator in `TAMIZA_SUPERADMIN_EMAILS`) acts as admin on every project.
+Make someone else admin before stepping down. Being admin of a project also lets a person create projects, and they lose that right when they are no longer admin of any project. A superadmin (configured by the operator in `TAMIZA_SUPERADMIN_EMAILS`) acts as admin on every project and can create projects even when none exists.
 
 ## Sampling frame
 
-The sampling frame lists the dimensions of the sample (for example municipality, sex, age range), the form field each one maps to, and the target number of surveys for each combination of values. Every member reads it in **Settings > Sampling frame**: a summary line (dimensions, combinations and the date it was saved) over a table that pages after 50 rows. Every member can **Download** it as an Excel workbook in the layout of the [template](#the-import-template), with its targets. Admins and analysts press **Edit** to change it, or **Import from file** to load it from a file. The performance dashboard measures coverage against it.
+The sampling frame lists the dimensions of the sample (for example municipality, sex, age range), the form field each one maps to, and the target number of surveys for each combination of values. Analysts and admins read it in **Settings > Sampling frame**: a summary line (dimensions, combinations and the date it was saved) over a table that pages after 50 rows. They can **Download** it as an Excel workbook in the layout of the [template](#the-import-template), with its targets, press **Edit** to change it, or use **Import from file** to load it from a file. The performance dashboard, which every member sees, measures coverage against it.
 
 ### Starting a frame
 
-On a project without a frame, admins and analysts see **Plan your sample** with three ways to start, and a closed **How to organize a file** guide below them (viewers only read that no frame is defined yet):
+On a project without a frame, admins and analysts see **Plan your sample** with three ways to start, and a closed **How to organize a file** guide below them:
 
 - **Choose questions** opens the question picker, which writes the rows for you from the form's choices.
 - **Import a file** opens the import dialog described [below](#importing-a-file).

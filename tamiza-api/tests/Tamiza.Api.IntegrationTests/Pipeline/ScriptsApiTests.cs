@@ -52,14 +52,20 @@ public sealed class ScriptsApiTests(PostgresFixture postgres) : IDisposable
     }
 
     [Fact]
-    public async Task Viewers_read_scripts_but_cannot_save_and_non_members_get_404()
+    public async Task Viewers_cannot_read_or_save_scripts_analysts_read_them_and_non_members_get_404()
     {
         await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
         await SaveAsync(h.Admin, h, "clean", Clean);
+        using var analyst = await MemberAsync(h, "ana", "analyst");
         using var viewer = await MemberAsync(h, "vera", "viewer");
         using var stranger = TestData.ClientFor(h.Factory, "sam", "sam@example.org");
 
-        Assert.Equal(HttpStatusCode.OK, (await viewer.GetAsync($"{Scripts(h)}/clean/versions/1")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await analyst.GetAsync($"{Scripts(h)}/clean/versions/1")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await analyst.GetAsync($"{Scripts(h)}/clean/versions")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await analyst.GetAsync(Scripts(h))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync(Scripts(h))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync($"{Scripts(h)}/clean/versions")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync($"{Scripts(h)}/clean/versions/1")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await viewer.PutAsJsonAsync($"{Scripts(h)}/clean", new { code = Clean })).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await viewer.DeleteAsync($"{Scripts(h)}/clean")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await stranger.GetAsync(Scripts(h))).StatusCode);
@@ -369,10 +375,11 @@ public sealed class ScriptsApiTests(PostgresFixture postgres) : IDisposable
     }
 
     [Fact]
-    public async Task A_viewer_reads_indicator_scripts_but_cannot_save_remove_or_restore_them()
+    public async Task A_viewer_cannot_read_save_remove_or_restore_indicator_scripts_and_an_analyst_reads_them()
     {
         await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
         await SaveIndicatorAsync(h.Admin, h, "coverage");
+        using var analyst = await MemberAsync(h, "ana", "analyst");
         using var viewer = await MemberAsync(h, "vera", "viewer");
 
         var save = await viewer.PutAsJsonAsync(IndicatorUrl(h, "coverage"), new { code = Compute, label = "L", format = "count" });
@@ -383,9 +390,12 @@ public sealed class ScriptsApiTests(PostgresFixture postgres) : IDisposable
         Assert.Equal([HttpStatusCode.Forbidden, HttpStatusCode.Forbidden, HttpStatusCode.Forbidden, HttpStatusCode.Forbidden],
             [save.StatusCode, create.StatusCode, remove.StatusCode, restore.StatusCode]);
         Assert.Equal(1L, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
-        Assert.Equal(1, (await viewer.GetFromJsonAsync<JsonElement>(Scripts(h))).GetProperty("indicators").GetArrayLength());
-        Assert.Equal(HttpStatusCode.OK, (await viewer.GetAsync($"{IndicatorUrl(h, "coverage")}/versions/1")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await viewer.GetAsync($"{IndicatorUrl(h, "coverage")}/versions")).StatusCode);
+        Assert.Equal(1, (await analyst.GetFromJsonAsync<JsonElement>(Scripts(h))).GetProperty("indicators").GetArrayLength());
+        Assert.Equal(HttpStatusCode.OK, (await analyst.GetAsync($"{IndicatorUrl(h, "coverage")}/versions/1")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await analyst.GetAsync($"{IndicatorUrl(h, "coverage")}/versions")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync(Scripts(h))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync($"{IndicatorUrl(h, "coverage")}/versions/1")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync($"{IndicatorUrl(h, "coverage")}/versions")).StatusCode);
     }
 
     [Fact]

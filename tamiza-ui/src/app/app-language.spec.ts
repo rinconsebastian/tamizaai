@@ -35,7 +35,7 @@ describe('App shell in Spanish', () => {
 
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
-    backend.expectOne('/api/v1/me').flush({ id: 'u1', name: 'Ada Lovelace', email: 'ada@example.org', isSuperAdmin: false });
+    backend.expectOne('/api/v1/me').flush({ id: 'u1', name: 'Ada Lovelace', email: 'ada@example.org', isSuperAdmin: false, canCreateProjects: false });
     await fixture.whenStable();
 
     const element = fixture.nativeElement as HTMLElement;

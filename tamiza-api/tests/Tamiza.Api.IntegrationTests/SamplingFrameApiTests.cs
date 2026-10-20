@@ -66,12 +66,12 @@ public sealed class SamplingFrameApiTests(PostgresFixture postgres)
         await using var s = await ProjectAsync();
         var projectUrl = $"/api/v1/projects/{s.ProjectId}";
 
-        var without = Coverage(await s.Viewer.GetFromJsonAsync<JsonElement>(projectUrl));
+        var without = Coverage(await s.Analyst.GetFromJsonAsync<JsonElement>(projectUrl));
         await s.Analyst.PutAsJsonAsync(s.Url, ValidFrame);
-        var saved = Coverage(await s.Viewer.GetFromJsonAsync<JsonElement>(projectUrl));
+        var saved = Coverage(await s.Analyst.GetFromJsonAsync<JsonElement>(projectUrl));
         await TestData.ExecuteAsync(s.Db,
             """UPDATE tamiza.projects SET form_fields = '[{"name":"sex","xpath":"sex","type":"select_one","label":"Sex"}]'::jsonb""");
-        var removed = Coverage(await s.Viewer.GetFromJsonAsync<JsonElement>(projectUrl));
+        var removed = Coverage(await s.Analyst.GetFromJsonAsync<JsonElement>(projectUrl));
 
         Assert.False(without.GetProperty("available").GetBoolean());
         Assert.Equal("defineSamplingFrame", without.GetProperty("hint").GetString());
@@ -84,15 +84,19 @@ public sealed class SamplingFrameApiTests(PostgresFixture postgres)
     // 5.2
 
     [Fact]
-    public async Task A_saved_frame_reads_back_the_same_for_viewers()
+    public async Task A_saved_frame_reads_back_for_analysts_and_a_viewer_gets_403_with_or_without_one()
     {
         await using var s = await ProjectAsync();
-        Assert.Equal(HttpStatusCode.NoContent, (await s.Viewer.GetAsync(s.Url)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await s.Analyst.GetAsync(s.Url)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await s.Viewer.GetAsync(s.Url)).StatusCode);
 
         var saved = await s.Analyst.PutAsJsonAsync(s.Url, ValidFrame);
-        var read = await s.Viewer.GetFromJsonAsync<JsonElement>(s.Url);
+        var read = await s.Analyst.GetFromJsonAsync<JsonElement>(s.Url);
+        var refused = await s.Viewer.GetAsync(s.Url);
 
         Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        Assert.DoesNotContain("Municipality", await refused.Content.ReadAsStringAsync());
         Assert.Equal(["Municipality", "Sex"], read.GetProperty("dimensions").EnumerateArray().Select(d => d.GetProperty("name").GetString()));
         Assert.Equal(["Cali", "M"], read.GetProperty("targets")[1].GetProperty("values").EnumerateArray().Select(v => v.GetString()));
         Assert.Equal(110, read.GetProperty("targets")[1].GetProperty("target").GetInt32());
@@ -123,12 +127,12 @@ public sealed class SamplingFrameApiTests(PostgresFixture postgres)
     {
         await using var s = await ProjectAsync();
         await s.Analyst.PutAsJsonAsync(s.Url, ValidFrame);
-        var before = await s.Viewer.GetStringAsync(s.Url);
+        var before = await s.Analyst.GetStringAsync(s.Url);
 
         var response = await s.Viewer.PutAsJsonAsync(s.Url, new { dimensions = new[] { new { name = "Sex", field = "sex" } }, targets = Array.Empty<object>() });
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        Assert.Equal(before, await s.Viewer.GetStringAsync(s.Url));
+        Assert.Equal(before, await s.Analyst.GetStringAsync(s.Url));
     }
 
     // 5.3
@@ -147,7 +151,7 @@ public sealed class SamplingFrameApiTests(PostgresFixture postgres)
         Assert.Equal(["Municipality", "Sex", "Age range"], preview.GetProperty("dimensions").EnumerateArray().Select(d => d.GetString()));
         Assert.Equal([120, 110], preview.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("target").GetInt32()));
         Assert.Empty(preview.GetProperty("errors").EnumerateArray());
-        Assert.Equal(HttpStatusCode.NoContent, (await s.Viewer.GetAsync(s.Url)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await s.Analyst.GetAsync(s.Url)).StatusCode);
     }
 
     [Fact]
@@ -245,7 +249,7 @@ public sealed class SamplingFrameApiTests(PostgresFixture postgres)
     {
         await using var s = await ProjectAsync();
         await s.Analyst.PutAsJsonAsync(s.Url, ValidFrame);
-        var before = await s.Viewer.GetStringAsync(s.Url);
+        var before = await s.Analyst.GetStringAsync(s.Url);
         var csv = new StringBuilder("Municipality,target\n");
         for (var i = 0; i <= 10_000; i++)
         {
@@ -256,7 +260,7 @@ public sealed class SamplingFrameApiTests(PostgresFixture postgres)
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("10,000", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors").GetProperty("file")[0].GetString());
-        Assert.Equal(before, await s.Viewer.GetStringAsync(s.Url));
+        Assert.Equal(before, await s.Analyst.GetStringAsync(s.Url));
     }
 
     private static class SamplingFrameImportLimits

@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { authGuard } from './core/auth/auth.guard';
+import { canCreateProjectsGuard } from './core/auth/can-create-projects.guard';
 import { AuthUnavailablePage } from './pages/auth-unavailable/auth-unavailable';
 import { NotFoundPage } from './pages/not-found/not-found';
 
@@ -12,7 +13,7 @@ export const routes: Routes = [
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'projects' },
       { path: 'projects', loadComponent: () => import('./pages/projects/project-list').then((m) => m.ProjectListPage) },
-      { path: 'projects/new', loadComponent: () => import('./pages/projects/create-project').then((m) => m.CreateProjectPage) },
+      { path: 'projects/new', canActivate: [canCreateProjectsGuard], loadComponent: () => import('./pages/projects/create-project').then((m) => m.CreateProjectPage) },
       {
         path: 'projects/:id',
         loadComponent: () => import('./pages/projects/project-page').then((m) => m.ProjectPage),
@@ -34,15 +35,16 @@ export const routes: Routes = [
               {
                 path: 'scripts',
                 loadComponent: () => import('./pages/projects/project-scripts').then((m) => m.ProjectScripts),
-                // Inline rather than imported from the page, so the editor's chunk stays lazy.
-                canDeactivate: [(component: { confirmDiscard(): Promise<boolean> }) => component.confirmDiscard()],
+                // Inline rather than imported from the page, so the editor's chunk stays lazy. The component is null when a viewer is
+                // sent away from an address whose section never activated.
+                canDeactivate: [(component: { confirmDiscard(): Promise<boolean> } | null) => component?.confirmDiscard() ?? true],
               },
               { path: 'reference', loadComponent: () => import('./pages/projects/project-reference').then((m) => m.ProjectReference) },
               { path: 'members', loadComponent: () => import('./pages/projects/project-members').then((m) => m.ProjectMembers) },
               {
                 path: 'sampling-frame',
                 loadComponent: () => import('./pages/projects/project-sampling-frame').then((m) => m.ProjectSamplingFrame),
-                canDeactivate: [(component: { confirmDiscard(): Promise<boolean> }) => component.confirmDiscard()],
+                canDeactivate: [(component: { confirmDiscard(): Promise<boolean> } | null) => component?.confirmDiscard() ?? true],
               },
               { path: 'webhook', loadComponent: () => import('./pages/projects/project-webhook').then((m) => m.ProjectWebhook) },
             ],

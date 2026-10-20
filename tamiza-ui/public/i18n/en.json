@@ -45,7 +45,8 @@
         "exists": "This email already has a pending invitation."
       },
       "project": {
-        "last_admin": "The project needs at least one admin. Make someone else admin first."
+        "last_admin": "The project needs at least one admin. Make someone else admin first.",
+        "create_not_allowed": "Only project admins and superadmins can create projects."
       },
       "sync": {
         "in_progress": "A synchronization of this project is already in progress. Wait for it to finish.",
@@ -156,6 +157,7 @@
     "new": "New project",
     "emptyTitle": "No projects yet",
     "emptyBody": "A project links Tamiza to one KoboToolbox form. Create one to start, or ask a project admin to invite you.",
+    "emptyBodyNoCreate": "A project links Tamiza to one KoboToolbox form. Ask a project admin to invite you to one.",
     "createFirst": "Create a project"
   },
   "createProject": {
@@ -224,9 +226,7 @@
     "unavailableVersionsAction": "See the form versions",
     "hints": {
       "defineSamplingFrame": "Define a sampling frame to see coverage.",
-      "defineSamplingFrameViewer": "Ask an analyst or admin to define the sampling frame.",
       "updateSamplingFrame": "The sampling frame uses fields the form no longer has. Update the frame, or put those questions back in the form.",
-      "updateSamplingFrameViewer": "The sampling frame uses fields the form no longer has. Ask an analyst or admin to update it.",
       "selectEnumeratorField": "Select the question that identifies the enumerator.",
       "selectEnumeratorFieldViewer": "Ask a project admin to select the question that identifies the enumerator.",
       "openFrame": "Open the sampling frame"
@@ -416,8 +416,7 @@
         "pending": "Pending",
         "failed": "Failed",
         "not_found": "Not found"
-      },
-      "retryHintViewer": "Answers made with a version Tamiza could not read use the current form’s labels. Ask an analyst or admin to re-check the form; that retries failed and not found versions."
+      }
     },
     "scheduleLine": "Synchronizes every {{ sync }} hours · checks for deletions every {{ reconcile }} hours",
     "runsAfterSync": "Scripts run after each synchronization with changes",
@@ -504,7 +503,6 @@
     "indicators": "Indicators",
     "addIndicator": "Add indicator",
     "indicatorLimit": "The project has the most indicators it can hold ({{ max }}). Remove one to add another.",
-    "noIndicators": "This project has no indicators yet.",
     "noIndicatorsEditor": "This project has no indicators yet. Add one to publish a table for the indicators dashboard.",
     "newBadge": "new",
     "editorLabelIndicator": "Python code of indicator {{ name }}",
@@ -946,7 +944,6 @@
   },
   "frame": {
     "target": "Target",
-    "emptyViewer": "No sampling frame has been defined for this project yet.",
     "importTitle": "Import from a file",
     "importIntro": "Upload a CSV or XLSX file with one column per dimension and a target column. You review the rows and choose the question of each column before anything is saved.",
     "previewErrors": "Fix these rows in the file and import it again:",
@@ -1238,7 +1235,6 @@
     "title": "Reference data",
     "add": "Upload table",
     "emptyEditor": "No reference tables yet. Upload a CSV or XLSX file; scripts read it with ctx.reference[\"name\"] from the next run.",
-    "emptyViewer": "This project has no reference tables.",
     "size": "{{ rows }}, {{ columns }}",
     "rowCount": "{{ count }} rows",
     "rowCountOne": "{{ count }} row",

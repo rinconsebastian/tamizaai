@@ -152,8 +152,8 @@ describe('ProjectWebhook', () => {
     expect(byTestId(root, 'webhook-steps')!.querySelector('details')!.open).toBe(true);
   });
 
-  it.each<'viewer' | 'analyst'>(['viewer', 'analyst'])('tells a %s that only admins see the webhook settings, without asking the API', async (role) => {
-    const { http, harness, root } = await openProjectSection('webhook', role);
+  it('tells an analyst that only admins see the webhook settings, without asking the API', async () => {
+    const { http, harness, root } = await openProjectSection('webhook', 'analyst');
     await settle(harness);
     expect(byTestId(root, 'webhook-admins-only')?.textContent).toContain('Only project admins');
     http.expectNone(webhookUrl);

@@ -112,7 +112,7 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
                   }
                 </button>
               }
-              <app-indicator-menu [items]="indicatorItems()" [selected]="indicatorName()" [canEdit]="canEdit()" (chosen)="select({ kind: 'indicator', name: $event })" />
+              <app-indicator-menu [items]="indicatorItems()" [selected]="indicatorName()" (chosen)="select({ kind: 'indicator', name: $event })" />
               @if (canEdit()) {
                 <button
                   tmzButton

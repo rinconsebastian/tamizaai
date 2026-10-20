@@ -27,18 +27,18 @@ public static class ScriptEndpoints
     public static RouteGroupBuilder MapScriptEndpoints(this RouteGroupBuilder api)
     {
         var scripts = api.MapGroup("/projects/{projectId:guid}/scripts").WithTags("Pipeline");
-        scripts.MapGet("", ListAsync).RequireProjectRole(ProjectRole.Viewer).WithName("ListScripts");
+        scripts.MapGet("", ListAsync).RequireProjectRole(ProjectRole.Analyst).WithName("ListScripts");
         scripts.MapPut("/{kind}", SaveAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveScript");
         scripts.MapDelete("/{kind}", RemoveAsync).RequireProjectRole(ProjectRole.Analyst).WithName("RemoveScript");
-        scripts.MapGet("/{kind}/versions", VersionsAsync).RequireProjectRole(ProjectRole.Viewer).WithName("ListScriptVersions");
-        scripts.MapGet("/{kind}/versions/{number:int}", VersionAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetScriptVersion");
+        scripts.MapGet("/{kind}/versions", VersionsAsync).RequireProjectRole(ProjectRole.Analyst).WithName("ListScriptVersions");
+        scripts.MapGet("/{kind}/versions/{number:int}", VersionAsync).RequireProjectRole(ProjectRole.Analyst).WithName("GetScriptVersion");
         scripts.MapPost("/{kind}/versions/{number:int}/restore", RestoreAsync).RequireProjectRole(ProjectRole.Analyst).WithName("RestoreScriptVersion");
 
         var indicators = scripts.MapGroup("/indicators");
         indicators.MapPut("/{name}", SaveIndicatorAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveIndicatorScript");
         indicators.MapDelete("/{name}", RemoveIndicatorAsync).RequireProjectRole(ProjectRole.Analyst).WithName("RemoveIndicatorScript");
-        indicators.MapGet("/{name}/versions", IndicatorVersionsAsync).RequireProjectRole(ProjectRole.Viewer).WithName("ListIndicatorScriptVersions");
-        indicators.MapGet("/{name}/versions/{number:int}", IndicatorVersionAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetIndicatorScriptVersion");
+        indicators.MapGet("/{name}/versions", IndicatorVersionsAsync).RequireProjectRole(ProjectRole.Analyst).WithName("ListIndicatorScriptVersions");
+        indicators.MapGet("/{name}/versions/{number:int}", IndicatorVersionAsync).RequireProjectRole(ProjectRole.Analyst).WithName("GetIndicatorScriptVersion");
         indicators.MapPost("/{name}/versions/{number:int}/restore", RestoreIndicatorAsync).RequireProjectRole(ProjectRole.Analyst).WithName("RestoreIndicatorScriptVersion");
         return api;
     }

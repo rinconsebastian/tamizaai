@@ -18,11 +18,11 @@ public static class IngestionEndpoints
     public static RouteGroupBuilder MapIngestionEndpoints(this RouteGroupBuilder api)
     {
         var project = api.MapGroup("/projects/{projectId:guid}").WithTags("Ingestion");
-        project.MapGet("/ingestion", GetStatusAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetIngestionStatus");
+        project.MapGet("/ingestion", GetStatusAsync).RequireProjectRole(ProjectRole.Analyst).WithName("GetIngestionStatus");
         project.MapPatch("/ingestion", UpdateAsync).RequireProjectRole(ProjectRole.Admin).WithName("UpdateIngestionSettings");
         project.MapPost("/syncs", StartAsync).RequireProjectRole(ProjectRole.Analyst).WithName("StartSync");
-        project.MapGet("/syncs", ListAsync).RequireProjectRole(ProjectRole.Viewer).WithName("ListSyncs");
-        project.MapGet("/form-versions", ListFormVersionsAsync).RequireProjectRole(ProjectRole.Viewer).WithName("ListFormVersions");
+        project.MapGet("/syncs", ListAsync).RequireProjectRole(ProjectRole.Analyst).WithName("ListSyncs");
+        project.MapGet("/form-versions", ListFormVersionsAsync).RequireProjectRole(ProjectRole.Analyst).WithName("ListFormVersions");
         return api;
     }
 

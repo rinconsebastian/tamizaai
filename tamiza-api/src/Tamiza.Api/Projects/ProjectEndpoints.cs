@@ -15,6 +15,9 @@ namespace Tamiza.Api.Projects;
 
 public static partial class ProjectEndpoints
 {
+    /// <summary>The code of the 403 for a user who may not create projects.</summary>
+    public const string CreateNotAllowed = "project.create_not_allowed";
+
     private const int MaxNameLength = 200;
 
     [GeneratedRegex("^[A-Za-z0-9]{1,64}$")]
@@ -24,15 +27,15 @@ public static partial class ProjectEndpoints
     {
         var projects = api.MapGroup("/projects").WithTags("Projects");
         projects.MapGet("", ListAsync).WithName("ListProjects");
-        projects.MapPost("", CreateAsync).WithName("CreateProject");
+        projects.MapPost("", CreateAsync).WithName("CreateProject").ProducesProblem(StatusCodes.Status403Forbidden);
 
         var project = projects.MapGroup("/{projectId:guid}");
         project.MapGet("", GetAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetProject");
         project.MapPatch("", UpdateAsync).RequireProjectRole(ProjectRole.Admin).WithName("UpdateProject");
         project.MapPut("/kobo-token", ReplaceTokenAsync).RequireProjectRole(ProjectRole.Admin).WithName("ReplaceKoboToken");
         project.MapPost("/kobo-check", RecheckAsync).RequireProjectRole(ProjectRole.Analyst).WithName("RecheckKoboConnection");
-        project.MapGet("/form-fields", GetFormFieldsAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetFormFields");
-        project.MapGet("/form-choices", GetFormChoicesAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetFormChoices");
+        project.MapGet("/form-fields", GetFormFieldsAsync).RequireProjectRole(ProjectRole.Analyst).WithName("GetFormFields");
+        project.MapGet("/form-choices", GetFormChoicesAsync).RequireProjectRole(ProjectRole.Analyst).WithName("GetFormChoices");
         project.MapGet("/webhook", GetWebhookAsync).RequireProjectRole(ProjectRole.Admin).WithName("GetWebhookSettings");
         project.MapPost("/webhook/secret", RegenerateSecretAsync).RequireProjectRole(ProjectRole.Admin).WithName("RegenerateWebhookSecret");
         return api;
@@ -58,8 +61,15 @@ public static partial class ProjectEndpoints
 
     private static async Task<Results<Created<CreatedProject>, ValidationProblem, ProblemHttpResult>> CreateAsync(
         CreateProjectRequest request, TamizaDbContext db, ICurrentUser user, KoboClient kobo, FormSnapshot snapshot, SecretProtector secrets,
-        IOptions<TamizaOptions> options, TimeProvider time, IngestionSignal ingestion, CancellationToken ct)
+        IOptions<TamizaOptions> options, TimeProvider time, IngestionSignal ingestion, ProjectAccess access, CancellationToken ct)
     {
+        // First, before the fields, the address policy and any request to Kobo.
+        if (!await access.CanCreateProjectsAsync(ct))
+        {
+            return Problems.Status(
+                StatusCodes.Status403Forbidden, CreateNotAllowed, "Not allowed.", "Only admins of a project and superadmins can create projects.");
+        }
+
         var errors = new FieldErrors();
         var name = ValidateName(request.Name, errors);
         var assetUid = request.AssetUid?.Trim() ?? "";
@@ -308,31 +318,46 @@ public static partial class ProjectEndpoints
 
     private static async Task<ProjectDetails> DetailsAsync(
         TamizaDbContext db, Project project, HttpContext http, FormVersionStore versions, SecretProtector secrets, CancellationToken ct,
-        bool? tokenUnreadable = null) =>
-        ToDetails(
+        bool? tokenUnreadable = null)
+    {
+        var role = http.GetProjectRole();
+        var dashboards = await DashboardEndpoints.EntriesAsync(db, project.Id, ct);
+        if (role < ProjectRole.Analyst)
+        {
+            // A viewer gets none of the configuration values, so nothing is read or decrypted for them.
+            return ToDetails(project, role, tokenUnreadable: false, unavailableFormVersions: 0, frameDimensions: null, dashboards);
+        }
+
+        return ToDetails(
             project,
-            http.GetProjectRole(),
+            role,
             tokenUnreadable ?? !secrets.TryUnprotect(project.EncryptedApiToken, out _),
             await versions.CountUnavailableAsync(project.Id, ct),
             // Only the dimensions: the check needs the fields they map to, not the frame's thousands of targets.
             await db.SamplingFrames.AsNoTracking().Where(f => f.ProjectId == project.Id).Select(f => f.Dimensions).SingleOrDefaultAsync(ct),
-            await DashboardEndpoints.EntriesAsync(db, project.Id, ct));
+            dashboards);
+    }
 
+    /// <summary>The values only Settings &gt; General shows (see <see cref="ProjectDetails"/>) are filled for <c>analyst</c> and above.</summary>
     private static ProjectDetails ToDetails(
         Project project, ProjectRole role, bool tokenUnreadable, int unavailableFormVersions, IReadOnlyList<SamplingDimension>? frameDimensions,
-        IReadOnlyList<DashboardEntry> dashboards) => new(
-        project.Id,
-        project.Name,
-        project.KoboServerUrl,
-        project.KoboAssetUid,
-        project.FormName,
-        project.FormCheckedAt,
-        project.EnumeratorField,
-        FieldCheck.Evaluate(project.FormFields, project.EnumeratorField, frameDimensions),
-        role,
-        tokenUnreadable,
-        project.CreatedAt,
-        unavailableFormVersions,
-        project.TimeZone,
-        dashboards);
+        IReadOnlyList<DashboardEntry> dashboards)
+    {
+        var configured = role >= ProjectRole.Analyst;
+        return new ProjectDetails(
+            project.Id,
+            project.Name,
+            configured ? project.KoboServerUrl : null,
+            configured ? project.KoboAssetUid : null,
+            project.FormName,
+            configured ? project.FormCheckedAt : null,
+            configured ? project.EnumeratorField : null,
+            configured ? FieldCheck.Evaluate(project.FormFields, project.EnumeratorField, frameDimensions) : null,
+            role,
+            configured ? tokenUnreadable : null,
+            project.CreatedAt,
+            configured ? unavailableFormVersions : null,
+            project.TimeZone,
+            dashboards);
+    }
 }

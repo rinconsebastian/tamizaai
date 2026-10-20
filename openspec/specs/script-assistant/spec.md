@@ -22,15 +22,15 @@ The assistant SHALL exist only when the operator has set the provider's base URL
 - **THEN** the system configuration reports the assistant as enabled, without the provider, the model or the key
 
 ### Requirement: Who can use the assistant
-Only analysts and admins of the project SHALL be able to use the assistant, and only on the text being edited. A `viewer` SHALL see no Assistant tab and SHALL be refused by its API routes; a user who is not a member SHALL get the answer given for a project that does not exist. While an older version is on view, the tab SHALL say that the assistant works on the current text and offer no new request.
+Only analysts and admins of the project SHALL be able to use the assistant, and only on the text being edited. A `viewer` SHALL be refused by its API routes; a user who is not a member SHALL get the answer given for a project that does not exist. While an older version is on view, the tab SHALL say that the assistant works on the current text and offer no new request.
 
 #### Scenario: Analyst
 - **WHEN** an analyst opens the Scripts section of a deployment with the assistant enabled
 - **THEN** the side panel has a fourth tab, Assistant, after Tables, Reference and Versions
 
 #### Scenario: Viewer
-- **WHEN** a `viewer` opens the Scripts section, or calls the assistant API of the project
-- **THEN** no Assistant tab is shown, and the API answers 403
+- **WHEN** a `viewer` calls the assistant API of the project
+- **THEN** the API answers 403
 
 #### Scenario: Not a member
 - **WHEN** a user who is not a member of the project calls its assistant API

@@ -19,9 +19,12 @@ How to install, run and upgrade a self-hosted Tamiza. The quick start in the [RE
 git clone https://github.com/rinconsebastian/tamizaai.git
 cd tamizaai
 cp .env.example .env
-# Edit .env: fill in every REQUIRED value. Generate the database password with: openssl rand -hex 24
+# Edit .env: fill in every REQUIRED value, and set TAMIZA_SUPERADMIN_EMAILS to your verified email.
+# Generate the database password with: openssl rand -hex 24
 docker compose up -d --build --wait
 ```
+
+Set `TAMIZA_SUPERADMIN_EMAILS` to your own email, as it is verified in Keycloak, before you first sign in. Only admins of a project and superadmins can create projects, so on a new installation a superadmin creates the first one; with the variable empty, nobody can (see [Common changes](#common-changes)).
 
 `--wait` returns once all four services report healthy. On first start, `api` creates the database schema before it reports healthy. Check the state at any time with:
 
@@ -79,6 +82,13 @@ Replace `tamiza` after `-U` with your `POSTGRES_USER` if you changed it.
 
 **Databases from early development builds.** Development builds that predate the SQL scripts tracked the schema in a `tamiza.__ef_migrations_history` table. On its first start, a newer `api` takes such a database over once: it keeps all data, records the initial script as applied and drops the old table. A database from an even older build is refused, and the `api` log says it must be recreated. Recreating deletes all data, including the encryption key ring: run `docker compose down -v`, then `docker compose up -d --build --wait`.
 
+### Who can open Settings and create projects
+
+This upgrade closes Settings to viewers and project creation to project admins. It changes no data and needs no migration. Install the new images as above. To go back, deploy the previous images; there is nothing to undo.
+
+- **Project creation.** A user who is not admin of any project (an accepted membership, not a pending invitation) and is not a superadmin can no longer create projects: the API answers 403 with the code `project.create_not_allowed`. Admins and superadmins keep the right, so an existing installation needs no change. A new installation needs `TAMIZA_SUPERADMIN_EMAILS` for its first project (see [Install](#install)).
+- **Settings data.** A viewer no longer opens Settings, and the API answers 403 to a viewer on the reads that only Settings used: members, sampling frame and its download, scripts and their versions, script inputs, runs, pipeline settings, reference tables, ingestion status, synchronization log, form versions, form fields and form choices. A script or integration that reads them with a viewer account needs an analyst account. A viewer's project details also leave out the Kobo server, the asset UID, the form check, the enumerator question, the unavailable form versions count and whether the token can be read (they are `null`). Dashboards, Clean data, exports and the dashboard endpoints stay open to viewers.
+
 ### Rolling back the multiple dashboards upgrade
 
 The script `0012_add_multiple_dashboards.sql` lets a project have several indicators dashboards (see [Dashboards](indicators-dashboard.md#dashboards)). It runs at `api` startup in one transaction: every project gets one dashboard, **Indicators**, and all its widgets move to it with their layout and query unchanged. No configuration needs to change; `IndicatorDashboard__MaxWidgetsPerProject` keeps working (see [Common changes](#common-changes)).
@@ -128,9 +138,9 @@ Change a value in `.env` and run `docker compose up -d` to recreate the affected
 
 ## Common changes
 
-**Superadmins.** Edit `TAMIZA_SUPERADMIN_EMAILS` in `.env`, then recreate `api` with `docker compose up -d api`. The list is read at startup.
+**Superadmins.** Edit `TAMIZA_SUPERADMIN_EMAILS` in `.env`, then recreate `api` with `docker compose up -d api`. The list is read at startup. A superadmin acts as admin on every project and can create projects even when none exists, which is how a new installation gets its first project. Other users can create projects only while they are admin of at least one project (a pending invitation does not count); they get a 403 with the code `project.create_not_allowed` otherwise.
 
-**Kobo on a private network.** By default Tamiza only connects to Kobo servers that use HTTPS and resolve to public addresses. For a self-hosted Kobo on the same network, set `TAMIZA_KOBO_ALLOW_PRIVATE_NETWORKS=true` in `.env` and run `docker compose up -d api`. This also allows plain HTTP, and lets anyone who can create projects point the API at internal addresses, so enable it only when those users are trusted. See [kobo.md](kobo.md).
+**Kobo on a private network.** By default Tamiza only connects to Kobo servers that use HTTPS and resolve to public addresses. For a self-hosted Kobo on the same network, set `TAMIZA_KOBO_ALLOW_PRIVATE_NETWORKS=true` in `.env` and run `docker compose up -d api`. This also allows plain HTTP, and lets every admin of a project, and every superadmin, point the API at internal addresses, so enable it only when those users are trusted. See [kobo.md](kobo.md).
 
 **Synchronization tuning.** The defaults suit forms of up to 500,000 submissions on the reference VPS: a back-fill of that size takes about a minute and keeps `api` well under its memory limit. They can be changed with environment variables on the `api` service, for example in a `compose.override.yaml`:
 

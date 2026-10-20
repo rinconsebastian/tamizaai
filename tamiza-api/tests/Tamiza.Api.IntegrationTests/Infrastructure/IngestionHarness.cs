@@ -6,7 +6,11 @@ using System.Text.Json;
 
 namespace Tamiza.Api.IntegrationTests.Infrastructure;
 
-/// <summary>An API with one project created through the API against <see cref="KoboStub"/>, signed in as its admin.</summary>
+/// <summary>
+/// An API with one project created through the API against <see cref="KoboStub"/>, signed in as its admin.
+/// Only admins of a project and superadmins can create projects, and there is no project yet, so "ada" is
+/// the superadmin by default (<c>TAMIZA_SUPERADMIN_EMAILS</c>); <c>settings</c> can override it.
+/// </summary>
 public sealed class IngestionHarness : IAsyncDisposable
 {
     private IngestionHarness(TamizaApiFactory factory, string db, HttpClient admin, Guid projectId, string secret)
@@ -48,6 +52,7 @@ public sealed class IngestionHarness : IAsyncDisposable
             ["TAMIZA_KOBO_ALLOW_PRIVATE_NETWORKS"] = "true",
             ["Ingestion:SchedulerEnabled"] = scheduler ? "true" : "false",
             ["Ingestion:Tick"] = "00:00:00.200",
+            ["TAMIZA_SUPERADMIN_EMAILS"] = "ada@example.org",
         };
         foreach (var (key, value) in settings ?? new())
         {

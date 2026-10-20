@@ -16,20 +16,25 @@ public sealed record ReplaceTokenRequest(string? ApiToken);
 
 public sealed record ProjectSummary(Guid Id, string Name, string FormName, ProjectRole MyRole);
 
+/// <param name="KoboServerUrl">
+/// This value, <paramref name="AssetUid"/>, <paramref name="FormCheckedAt"/>, <paramref name="EnumeratorField"/>, <paramref name="FieldCheck"/>,
+/// <paramref name="TokenUnreadable"/> and <paramref name="UnavailableFormVersions"/> are the ones only Settings &gt; General shows. A <c>viewer</c>
+/// gets them as <c>null</c>.
+/// </param>
 /// <param name="Dashboards">The project's own dashboards in their order, at least one: what the tab row shows after Performance and Clean data.</param>
 public sealed record ProjectDetails(
     Guid Id,
     string Name,
-    string KoboServerUrl,
-    string AssetUid,
+    string? KoboServerUrl,
+    string? AssetUid,
     string FormName,
-    DateTimeOffset FormCheckedAt,
+    DateTimeOffset? FormCheckedAt,
     string? EnumeratorField,
-    IReadOnlyList<MetricAvailability> FieldCheck,
+    IReadOnlyList<MetricAvailability>? FieldCheck,
     ProjectRole MyRole,
-    bool TokenUnreadable,
+    bool? TokenUnreadable,
     DateTimeOffset CreatedAt,
-    int UnavailableFormVersions,
+    int? UnavailableFormVersions,
     string TimeZone,
     IReadOnlyList<DashboardEntry> Dashboards);
 

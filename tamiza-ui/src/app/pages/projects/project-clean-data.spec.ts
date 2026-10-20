@@ -9,7 +9,7 @@ import { DataColumn, DataExport, DataFilter, DataOverview, DataPage } from '../.
 import { ProjectRole } from '../../core/projects/projects.service';
 import { ToastService } from '../../shared/ui';
 import { pressKey, tick } from '../../../testing/cdk';
-import { byTestId, openProjectSection, projectId, settle, typeInto } from '../../../testing/project-harness';
+import { byTestId, openProjectSection, projectId, settingsRequests, settle, typeInto } from '../../../testing/project-harness';
 import { encodeFilters } from './data-view';
 import { valueSearchDelayMs } from './data-filter-dialog';
 
@@ -942,3 +942,15 @@ describe('ProjectCleanData', () => {
   });
 });
 
+describe('ProjectCleanData for a viewer', () => {
+  it('asks for nothing that Settings reads and shows no error (No failed request for a viewer)', async () => {
+    const { http, harness } = await openProjectSection('clean-data', 'viewer', {}, [{ provide: Downloader, useValue: downloader }], 'en', { formFields: false });
+    http.expectOne(isOverview).flush(overview());
+    await settle(harness);
+    http.expectOne(isQuery).flush(page());
+    await settle(harness);
+
+    expect(settingsRequests(http)).toEqual([]);
+    expect(TestBed.inject(ToastService).toasts()).toEqual([]);
+  });
+});

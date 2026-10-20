@@ -50,7 +50,7 @@ public sealed class ReferenceTablesApiTests(PostgresFixture postgres) : IDisposa
     }
 
     [Fact]
-    public async Task An_analyst_uploads_a_table_that_members_list_and_preview()
+    public async Task An_analyst_uploads_a_table_that_analysts_and_admins_list_and_preview_and_viewers_cannot()
     {
         await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
         using var analyst = await MemberAsync(h, "ana", "analyst");
@@ -61,16 +61,18 @@ public sealed class ReferenceTablesApiTests(PostgresFixture postgres) : IDisposa
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.Equal(["Municipality code", "Year", "Population"], upload.GetProperty("renamed").EnumerateArray().Select(r => r.GetProperty("header").GetString()));
-        var listed = Assert.Single((await viewer.GetFromJsonAsync<JsonElement>(Tables(h))).EnumerateArray());
+        var listed = Assert.Single((await analyst.GetFromJsonAsync<JsonElement>(Tables(h))).EnumerateArray());
         Assert.Equal("population", listed.GetProperty("name").GetString());
         Assert.Equal("population.csv", listed.GetProperty("fileName").GetString());
         Assert.Equal(2, listed.GetProperty("rowCount").GetInt32());
         Assert.Equal("ana", listed.GetProperty("updatedBy").GetProperty("name").GetString());
         Assert.Equal(["text", "integer", "integer"], listed.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("type").GetString()));
 
-        var preview = await viewer.GetFromJsonAsync<JsonElement>($"{Tables(h)}/population");
+        var preview = await h.Admin.GetFromJsonAsync<JsonElement>($"{Tables(h)}/population");
         Assert.Equal("05001", preview.GetProperty("rows")[0][0].GetString());
         Assert.Equal(7968095, preview.GetProperty("rows")[1][2].GetInt64());
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync(Tables(h))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync($"{Tables(h)}/population")).StatusCode);
     }
 
     [Fact]
@@ -159,7 +161,7 @@ public sealed class ReferenceTablesApiTests(PostgresFixture postgres) : IDisposa
     }
 
     [Fact]
-    public async Task A_viewer_cannot_upload_replace_or_delete()
+    public async Task A_viewer_cannot_list_preview_upload_replace_or_delete()
     {
         await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
         await UploadAsync(h.Admin, h, "population", Population);
@@ -168,7 +170,9 @@ public sealed class ReferenceTablesApiTests(PostgresFixture postgres) : IDisposa
         Assert.Equal(HttpStatusCode.Forbidden, (await UploadAsync(viewer, h, "other", Population)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await viewer.PutAsync($"{Tables(h)}/population", Form("a\n1\n"u8.ToArray(), "a.csv"))).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await viewer.DeleteAsync($"{Tables(h)}/population")).StatusCode);
-        Assert.Single((await viewer.GetFromJsonAsync<JsonElement>(Tables(h))).EnumerateArray());
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync(Tables(h))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync($"{Tables(h)}/population")).StatusCode);
+        Assert.Single((await h.Admin.GetFromJsonAsync<JsonElement>(Tables(h))).EnumerateArray());
     }
 
     [Fact]

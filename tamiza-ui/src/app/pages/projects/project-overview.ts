@@ -44,12 +44,12 @@ const metadataTypes = new Set(['start', 'end', 'today', 'deviceid', 'username', 
               <div class="sm:flex sm:gap-3" data-testid="time-zone-row"><dt class="text-body sm:w-28 sm:shrink-0">{{ t('overview.timeZone') }}</dt><dd class="text-heading">{{ project.timeZone }}</dd></div>
             }
           </dl>
-          @if (project.unavailableFormVersions > 0) {
+          @if (project.unavailableFormVersions; as unavailable) {
             <tmz-alert tone="warning" class="mt-5" data-testid="unavailable-versions">
               {{
-                singular(project.unavailableFormVersions)
+                singular(unavailable)
                   ? t('overview.unavailableVersionsOne')
-                  : t('overview.unavailableVersions', { count: project.unavailableFormVersions })
+                  : t('overview.unavailableVersions', { count: unavailable })
               }}
               <a [routerLink]="['..', 'data']" fragment="form-versions" class="font-medium underline">{{ t('overview.unavailableVersionsAction') }}</a>
             </tmz-alert>
@@ -111,7 +111,7 @@ const metadataTypes = new Set(['start', 'end', 'today', 'deviceid', 'username', 
                 @if (!metric.available && metric.hint; as hint) {
                   <p class="text-sm text-body" [attr.data-testid]="'hint-' + metric.metric">
                     {{ t(hintKey(hint)) }}
-                    @if (hint !== 'selectEnumeratorField' && context.can('analyst')) {
+                    @if (hint !== 'selectEnumeratorField') {
                       <a [routerLink]="['..', 'sampling-frame']" class="font-medium text-fg-brand hover:underline" data-testid="hint-link">{{ t('overview.hints.openFrame') }}</a>
                     }
                   </p>
@@ -224,7 +224,7 @@ export class ProjectOverview {
 
   /** The check asks for the question (nothing identifies the enumerator yet), so the select is open for the admin. */
   protected readonly enumeratorAutoOpen = computed(() => {
-    const metric = this.project()?.fieldCheck.find((m) => m.metric === 'perEnumerator');
+    const metric = this.project()?.fieldCheck?.find((m) => m.metric === 'perEnumerator');
     return !!metric && !metric.available && metric.hint === 'selectEnumeratorField' && this.questionFields().length > 0;
   });
   protected readonly enumeratorOpen = computed(() => this.editingEnumerator() || this.enumeratorAutoOpen());
@@ -253,7 +253,7 @@ export class ProjectOverview {
       const field = this.questionFields().find((f) => f.xpath === saved);
       return field ? `${field.label ?? field.name} (${field.xpath})` : t('overview.enumeratorGone', { xpath: saved });
     }
-    const metric = project.fieldCheck.find((m) => m.metric === 'perEnumerator');
+    const metric = project.fieldCheck?.find((m) => m.metric === 'perEnumerator');
     return metric?.available ? t('overview.enumeratorUsername') : t('overview.noEnumerator');
   }
 
@@ -290,10 +290,10 @@ export class ProjectOverview {
     this.run(this.service.update(this.id(), { enumeratorField: field }), 'overview.enumeratorSaved', undefined, () => this.editingEnumerator.set(false));
   }
 
-  /** Hints name who can act: admins are told to act, other roles whom to ask. */
+  /** Hints name who can act: admins are told to choose the enumerator question, analysts whom to ask. */
   protected hintKey(hint: string): string {
-    const canAct = hint === 'selectEnumeratorField' ? this.context.can('admin') : this.context.can('analyst');
-    return `overview.hints.${hint}${canAct ? '' : 'Viewer'}`;
+    const askAdmin = hint === 'selectEnumeratorField' && !this.context.can('admin');
+    return `overview.hints.${hint}${askAdmin ? 'Viewer' : ''}`;
   }
 
   /** The name and the time zone are saved together; the API's message for either appears next to its field. */

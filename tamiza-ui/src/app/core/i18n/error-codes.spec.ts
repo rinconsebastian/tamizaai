@@ -15,6 +15,7 @@ const apiErrorCodes = [
   'member.exists',
   'invitation.exists',
   'project.last_admin',
+  'project.create_not_allowed',
   'sync.in_progress',
   'sync.interrupted',
   'sync.failed',

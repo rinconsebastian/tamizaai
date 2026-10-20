@@ -1,11 +1,12 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { Router } from '@angular/router';
 import { CurrentUserService } from '../../core/current-user.service';
 import { InterfaceLanguage } from '../../core/i18n/interface-language';
 import { Member, ProjectRole } from '../../core/projects/projects.service';
 import { SystemConfigService } from '../../core/system-config';
 import { ToastService } from '../../shared/ui';
-import { byTestId, openProjectSection, projectId, settle, typeInto } from '../../../testing/project-harness';
+import { byTestId, details, flushMe, me, openProjectSection, projectId, settle, typeInto } from '../../../testing/project-harness';
 import { tick } from '../../../testing/cdk';
 
 describe('ProjectMembers', () => {
@@ -69,7 +70,7 @@ describe('ProjectMembers', () => {
   });
 
   it('shows a skeleton until the list arrives, with the heading in place', async () => {
-    const opened = await openProjectSection('members', 'viewer');
+    const opened = await openProjectSection('members', 'analyst');
     expect(byTestId(opened.root, 'members-loading')).not.toBeNull();
     expect(text(opened.root.querySelector('h2'))).toBe('Members');
     opened.http.expectOne(`${base}/members`).flush(members);
@@ -85,7 +86,7 @@ describe('ProjectMembers', () => {
   });
 
   it('leaves out the email line of a member who has none', async () => {
-    const { root } = await open('viewer', [{ userId: 'u9', name: 'No Mail', email: null, role: 'viewer' }]);
+    const { root } = await open('analyst', [{ userId: 'u9', name: 'No Mail', email: null, role: 'viewer' }]);
     expect(byTestId(root, 'member-row-u9')!.querySelectorAll('p')).toHaveLength(1);
   });
 
@@ -175,15 +176,15 @@ describe('ProjectMembers', () => {
 
   describe('a member’s row', () => {
     it('marks the signed-in person', async () => {
-      const { root, harness } = await open('viewer');
-      TestBed.inject(CurrentUserService).user.set({ id: 'u2', name: 'Grace', email: 'grace@example.org', isSuperAdmin: false });
+      const { root, harness } = await open('analyst');
+      TestBed.inject(CurrentUserService).user.set({ id: 'u2', name: 'Grace', email: 'grace@example.org', isSuperAdmin: false, canCreateProjects: false });
       await settle(harness);
       expect(byTestId(byTestId(root, 'member-row-u2')!, 'you-badge')?.textContent?.trim()).toBe('You');
       expect(byTestId(root, 'member-row-u1')!.querySelector('[data-testid="you-badge"]')).toBeNull();
     });
 
     it('marks no one until the profile is known', async () => {
-      const { root } = await open('viewer');
+      const { root } = await open('analyst');
       expect(root.querySelectorAll('[data-testid="you-badge"]')).toHaveLength(0);
     });
 
@@ -232,13 +233,118 @@ describe('ProjectMembers', () => {
 
     it('asks the person removing themselves in the second person', async () => {
       const opened = await open('admin', twoAdmins);
-      TestBed.inject(CurrentUserService).user.set({ id: 'u3', name: 'Linus', email: 'linus@example.org', isSuperAdmin: false });
+      TestBed.inject(CurrentUserService).user.set({ id: 'u3', name: 'Linus', email: 'linus@example.org', isSuperAdmin: false, canCreateProjects: false });
       await settle(opened.harness);
       const items = await openMenu(opened, 'member-row-u3');
       items.at(-1)!.click();
       await settle(opened.harness);
       expect(overlay().textContent).toContain('Remove yourself?');
       expect(overlay().textContent).toContain('You lose access to this project immediately');
+    });
+  });
+
+  describe('a change to the user’s own place', () => {
+    const projectUrl = `/api/v1/projects/${projectId}`;
+
+    /** An admin of a project with another admin, signed in as Ada. */
+    async function openAsAda(isSuperAdmin = false) {
+      const opened = await open('admin', twoAdmins);
+      TestBed.inject(CurrentUserService).user.set(me({ id: 'u1', name: 'Ada', isSuperAdmin, canCreateProjects: true }));
+      await settle(opened.harness);
+      return opened;
+    }
+
+    async function chooseMenuItem(opened: Awaited<ReturnType<typeof open>>, label: string) {
+      const items = await openMenu(opened, 'member-row-u1');
+      items.find((item) => text(item) === label)!.click();
+      await settle(opened.harness);
+    }
+
+    async function confirmRemoval(opened: Awaited<ReturnType<typeof open>>) {
+      await chooseMenuItem(opened, 'Remove from project');
+      (document.querySelector('[data-testid="confirm"]') as HTMLButtonElement).click();
+      await tick();
+      await settle(opened.harness);
+    }
+
+    const toasts = () => TestBed.inject(ToastService).toasts();
+
+    it('reads the project again before the list when the admin makes themselves analyst, and asks for no invitations', async () => {
+      const opened = await openAsAda();
+      const { http, harness } = opened;
+      await chooseMenuItem(opened, 'Make analyst');
+
+      http.expectOne(`${base}/members/u1`).flush({ ...twoAdmins[0], role: 'analyst' });
+      await settle(harness);
+      http.expectNone(`${base}/members`); // the list waits for the new details
+      flushMe(http);
+      http.expectOne(projectUrl).flush(details('analyst'));
+      await settle(harness);
+      http.expectOne(`${base}/members`).flush(twoAdmins);
+      await settle(harness);
+
+      http.expectNone(`${base}/invitations`);
+      expect(byTestId(opened.root, 'member-list')).not.toBeNull();
+      expect(opened.root.querySelectorAll('[data-testid^="invitation-row-"]')).toHaveLength(0);
+      expect(toasts()).toEqual([]);
+    });
+
+    it('takes the admin who makes themselves viewer to the performance dashboard without asking for the list again', async () => {
+      const opened = await openAsAda();
+      const { http, harness } = opened;
+      await chooseMenuItem(opened, 'Make viewer');
+
+      http.expectOne(`${base}/members/u1`).flush({ ...twoAdmins[0], role: 'viewer' });
+      await settle(harness);
+      flushMe(http);
+      http.expectOne(projectUrl).flush(details('viewer'));
+      await settle(harness);
+
+      const router = TestBed.inject(Router);
+      expect(router.url).toBe(`/projects/${projectId}/performance`);
+      expect(router.lastSuccessfulNavigation()?.extras.replaceUrl).toBe(true);
+      http.expectNone(`${base}/members`);
+      http.expectNone(`${base}/invitations`);
+      expect(toasts()).toEqual([]);
+    });
+
+    it('takes an admin who removes themselves from a project with another admin to the project list, without an error', async () => {
+      const opened = await openAsAda();
+      const { http, harness } = opened;
+      await confirmRemoval(opened);
+
+      const removal = http.expectOne(`${base}/members/u1`);
+      expect(removal.request.method).toBe('DELETE');
+      removal.flush(null);
+      await settle(harness);
+      flushMe(http, { id: 'u1' });
+      http.expectOne(projectUrl).flush({ title: 'Not found' }, { status: 404, statusText: 'Not Found' });
+      await settle(harness);
+
+      const router = TestBed.inject(Router);
+      expect(router.url).toBe('/projects');
+      expect(router.lastSuccessfulNavigation()?.extras.replaceUrl).toBe(true);
+      http.expectNone(`${base}/members`);
+      expect(toasts()).toEqual([]);
+    });
+
+    it('keeps a superadmin on the list after they remove their membership, and reads it again', async () => {
+      const opened = await openAsAda(true);
+      const { http, harness } = opened;
+      await confirmRemoval(opened);
+
+      http.expectOne(`${base}/members/u1`).flush(null);
+      await settle(harness);
+      flushMe(http, { id: 'u1', isSuperAdmin: true });
+      http.expectOne(projectUrl).flush(details('admin')); // a superadmin is admin of every project
+      await settle(harness);
+      http.expectOne(`${base}/members`).flush([twoAdmins[1], members[1]]);
+      http.expectOne(`${base}/invitations`).flush([]);
+      await settle(harness);
+
+      expect(TestBed.inject(Router).url).toBe(`/projects/${projectId}/members`);
+      expect(byTestId(opened.root, 'member-row-u1')).toBeNull();
+      expect(toasts()).toEqual([]);
     });
   });
 

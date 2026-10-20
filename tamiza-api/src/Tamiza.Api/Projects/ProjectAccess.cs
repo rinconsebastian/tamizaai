@@ -4,9 +4,21 @@ using Tamiza.Api.Data;
 
 namespace Tamiza.Api.Projects;
 
-/// <summary>Resolves the caller's role in a project. Superadmins act as admin on every project.</summary>
+/// <summary>
+/// Resolves the caller's role in a project, and whether the caller may create projects. Superadmins act as admin on every
+/// project and may always create one.
+/// </summary>
 public sealed class ProjectAccess(TamizaDbContext db, ICurrentUser user)
 {
+    /// <summary>
+    /// Whether the caller is a superadmin or <c>admin</c> of at least one project. Only a membership counts: a pending
+    /// invitation lives in another table until the first verified sign-in turns it into one.
+    /// </summary>
+    public async Task<bool> CanCreateProjectsAsync(CancellationToken cancellationToken) =>
+        user.IsAuthenticated
+        && (user.IsSuperAdmin
+            || await db.ProjectMembers.AnyAsync(m => m.UserId == user.Id && m.Role == ProjectRole.Admin, cancellationToken));
+
     public async Task<ProjectRole?> GetRoleAsync(Guid projectId, CancellationToken cancellationToken)
     {
         if (!user.IsAuthenticated)

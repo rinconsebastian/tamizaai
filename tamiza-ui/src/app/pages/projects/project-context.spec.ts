@@ -44,6 +44,21 @@ describe('ProjectContext', () => {
     expect(context.formChoices()).toEqual([]);
   });
 
+  it('keeps what it read when a viewer’s details, which carry no check time, replace one another', () => {
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting(), ProjectContext] });
+    const context = TestBed.inject(ProjectContext);
+    context.update(details('viewer'));
+    context.formFields.set([]);
+    context.formChoices.set(choices);
+
+    context.update(details('viewer', { name: 'Renamed' }));
+
+    expect(context.formFields()).toEqual([]);
+    expect(context.formChoices()).toEqual(choices);
+    expect(context.project()?.name).toBe('Renamed');
+    expect(context.project()?.formCheckedAt).toBeNull();
+  });
+
   it('drops a read started before a new form check', () => {
     const { context, http } = setup();
     context.loadFormChoices();
