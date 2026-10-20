@@ -46,6 +46,8 @@ public static class DashboardEndpoints
         dashboards.MapPatch("/{dashboardId:guid}", RenameAsync).RequireProjectRole(ProjectRole.Analyst).WithName("RenameDashboard");
         dashboards.MapDelete("/{dashboardId:guid}", RemoveAsync).RequireProjectRole(ProjectRole.Analyst).WithName("RemoveDashboard");
         dashboards.MapPost("/{dashboardId:guid}/copies", DuplicateAsync).RequireProjectRole(ProjectRole.Analyst).WithName("DuplicateDashboard");
+        dashboards.MapPut("/{dashboardId:guid}/filters", SaveFiltersAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveDashboardFilters");
+        dashboards.MapGet("/{dashboardId:guid}/values", GetValuesAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetDashboardColumnValues");
         dashboards.MapPost("/{dashboardId:guid}/widgets", CreateWidgetAsync)
             .RequireProjectRole(ProjectRole.Analyst).WithName("CreateDashboardWidget");
         dashboards.MapPatch("/{dashboardId:guid}/widgets/{widgetId:guid}", UpdateWidgetAsync)
@@ -55,15 +57,15 @@ public static class DashboardEndpoints
         return api;
     }
 
-    /// <summary>The dashboard's name and its widgets in reading order, listed whether or not their indicator is published.</summary>
+    /// <summary>The dashboard's name, its filters and its widgets in reading order, listed whether or not their indicator is published.</summary>
     private static async Task<Results<Ok<DashboardView>, ProblemHttpResult>> GetDashboardAsync(
         Guid projectId, Guid dashboardId, TamizaDbContext db, CancellationToken ct)
     {
-        var name = await db.Dashboards.AsNoTracking()
+        var dashboard = await db.Dashboards.AsNoTracking()
             .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
-            .Select(d => d.Name)
+            .Select(d => new { d.Name, d.Filters })
             .SingleOrDefaultAsync(ct);
-        if (name is null)
+        if (dashboard is null)
         {
             return DashboardNotFound();
         }
@@ -73,7 +75,73 @@ public static class DashboardEndpoints
             .OrderBy(w => w.Widget.Layout.Y).ThenBy(w => w.Widget.Layout.X).ThenBy(w => w.CreatedAt)
             .Select(w => w.Widget)
             .ToList();
-        return TypedResults.Ok(new DashboardView(dashboardId, name, widgets));
+        return TypedResults.Ok(new DashboardView(dashboardId, dashboard.Name, ReadFilters(dashboard.Filters), widgets));
+    }
+
+    /// <summary>
+    /// The most frequent values of a text column across the indicator tables of the dashboard's widgets, optionally only those that
+    /// contain <c>search</c>, for a text filter (design D5). Empty when no table has the column as text.
+    /// </summary>
+    private static async Task<Results<Ok<DataValueList>, ValidationProblem, ProblemHttpResult>> GetValuesAsync(
+        Guid projectId, Guid dashboardId, string? column, string? search, IndicatorDashboard indicators, TamizaDbContext db, CancellationToken ct)
+    {
+        if (!await DashboardExistsAsync(db, projectId, dashboardId, ct))
+        {
+            return DashboardNotFound();
+        }
+
+        if (!Pipeline.ColumnNames.IsValidColumnName(column))
+        {
+            return Problems.Validation("column", "The column must be a published column's name.");
+        }
+
+        if (search is { Length: > DataQueryBuilder.MaxTextLength })
+        {
+            return Problems.Validation("search", $"The search text is longer than {DataQueryBuilder.MaxTextLength} characters.");
+        }
+
+        var configs = await db.DashboardWidgets.AsNoTracking().Where(w => w.DashboardId == dashboardId).ToListAsync(ct);
+        // Saved configs name valid indicators; the check keeps it so whatever a stored row holds.
+        var names = configs.Select(w => ReadConfig(w).Indicator).Where(Pipeline.ColumnNames.IsValidTableName).Distinct(StringComparer.Ordinal).ToList();
+        try
+        {
+            return TypedResults.Ok(new DataValueList(await indicators.ValuesAsync(projectId, names, column!, search, ct)));
+        }
+        catch (DataTimeoutException)
+        {
+            return DataEndpoints.Timeout();
+        }
+    }
+
+    /// <summary>
+    /// Replaces the dashboard's filters with the list sent, in its order (design D4). No lock: the last save wins. A dashboard removed
+    /// since the check updates no row.
+    /// </summary>
+    private static async Task<Results<Ok<DashboardFilterList>, ValidationProblem, ProblemHttpResult>> SaveFiltersAsync(
+        Guid projectId, Guid dashboardId, DashboardFiltersRequest? request, TamizaDbContext db, ICurrentUser user, TimeProvider time,
+        CancellationToken ct)
+    {
+        if (!await DashboardExistsAsync(db, projectId, dashboardId, ct))
+        {
+            return DashboardNotFound();
+        }
+
+        var errors = new FieldErrors();
+        var filters = DashboardValidation.Filters(request?.Filters, errors);
+        if (filters is null)
+        {
+            return Problems.Validation(errors.ToDictionary());
+        }
+
+        var json = JsonSerializer.Serialize(filters, Json);
+        var now = Now(time);
+        var updated = await db.Dashboards
+            .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(d => d.Filters, json)
+                .SetProperty(d => d.UpdatedBy, user.Id)
+                .SetProperty(d => d.UpdatedAt, now), ct);
+        return updated == 0 ? DashboardNotFound() : TypedResults.Ok(new DashboardFilterList(filters));
     }
 
     /// <summary>Adds a dashboard with no widgets after the project's others.</summary>
@@ -217,8 +285,8 @@ public static class DashboardEndpoints
     }
 
     /// <summary>
-    /// Adds a copy of the dashboard right after it, holding a copy of each of its widgets: same title, chart type, query and layout,
-    /// a new id, and the caller as their author. Later changes to one leave the other as it is.
+    /// Adds a copy of the dashboard right after it, holding its filters and a copy of each of its widgets: same title, chart type,
+    /// query and layout, a new id, and the caller as their author. Later changes to one leave the other as it is.
     /// </summary>
     private static async Task<Results<Created<DashboardEntry>, ValidationProblem, ProblemHttpResult>> DuplicateAsync(
         Guid projectId, Guid dashboardId, DashboardNameRequest? request, TamizaDbContext db, ICurrentUser user,
@@ -268,6 +336,8 @@ public static class DashboardEndpoints
 
         var now = Now(time);
         var copy = NewDashboard(projectId, name!, source + 1, user, now);
+        // The filters as they are now, read under the lock with the source (design D4); the widgets keep what they ignore in their config.
+        copy.Filters = dashboards[source].Filters;
         db.Dashboards.Add(copy);
         dashboards.Insert(source + 1, copy);
         Renumber(dashboards);
@@ -646,6 +716,9 @@ public static class DashboardEndpoints
         (JsonSerializer.Deserialize<WidgetConfigInput>(widget.Config, Json) ?? new WidgetConfigInput()).Normalize();
 
     private static WidgetLayout ReadLayout(string json) => JsonSerializer.Deserialize<WidgetLayout>(json, Json) ?? new WidgetLayout(0, 0, 1, 1);
+
+    /// <summary>The filters as <see cref="SaveFiltersAsync"/> stored them, which validated them first.</summary>
+    private static List<DashboardFilter> ReadFilters(string json) => JsonSerializer.Deserialize<List<DashboardFilter>>(json, Json) ?? [];
 
     private static ProblemHttpResult WidgetNotFound() =>
         TypedResults.Problem(statusCode: StatusCodes.Status404NotFound, title: "Widget not found.");

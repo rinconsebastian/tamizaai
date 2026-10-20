@@ -3,15 +3,18 @@ import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { NgTemplateOutlet } from '@angular/common';
 import { Component, DestroyRef, ElementRef, Injector, LOCALE_ID, afterNextRender, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { EMPTY, Observable, Subject, catchError, forkJoin, switchMap } from 'rxjs';
 import { ApiErrors } from '../../core/api-error';
 import { Downloader } from '../../core/download.service';
 import { ExportFormat } from '../../core/projects/data.service';
-import { IndicatorEntry, IndicatorsOverview, IndicatorsService, Layout, Widget, maxDashboards } from '../../core/projects/indicators.service';
+import { DashboardFilter, IndicatorEntry, IndicatorsOverview, IndicatorsService, Layout, Widget, maxDashboards } from '../../core/projects/indicators.service';
 import { DashboardEntry } from '../../core/projects/projects.service';
 import { Alert, ApiLang, Badge, Button, Card, ConfirmDialog, Disclosure, DropdownMenu, MenuItem, Skeleton, ToastService, DateTimePipe, NumberPipe, numberText } from '../../shared/ui';
+import { DashboardFilterBar, FilterChange } from './indicators/dashboard-filter-bar';
+import { FilterValues, activeFilters, defaultsOf, readAddress, writeAddress } from './indicators/dashboard-filters';
+import { DashboardFiltersData, DashboardFiltersDialog, DashboardFiltersResult } from './indicators/dashboard-filters-dialog';
 import { DashboardNameAction, DashboardNameData, DashboardNameDialog, DashboardNameResult } from './indicators/dashboard-name-dialog';
 import { Placed } from './indicators/grid-layout';
 import { WidgetDialog, WidgetDialogData, WidgetDialogResult } from './indicators/widget-dialog';
@@ -49,6 +52,7 @@ export const layoutSaveDelayMs = 400;
     Disclosure,
     DropdownMenu,
     Skeleton,
+    DashboardFilterBar,
     WidgetGrid,
   ],
   template: `
@@ -90,6 +94,30 @@ export const layoutSaveDelayMs = 400;
             <button tmzButton variant="ghost" size="sm" type="button" class="shrink-0" (click)="dismissNotice()" data-testid="dashboard-notice-dismiss">{{ t('dashboards.notice.dismiss') }}</button>
           </div>
         </tmz-alert>
+      }
+
+      @if (dropped().length) {
+        <!-- Not itself a live region: the header's announces the same text once. -->
+        <tmz-alert tone="warning" [heading]="t('dashboardFilters.dropped.title')" data-testid="dashboard-filters-dropped">
+          <ul class="list-inside list-disc">
+            @for (name of dropped(); track $index) {
+              <li class="break-words">{{ t('dashboardFilters.dropped.item', { name }) }}</li>
+            }
+          </ul>
+        </tmz-alert>
+      }
+
+      @if (!loading() && !error()) {
+        <app-dashboard-filter-bar
+          [projectId]="projectId"
+          [dashboardId]="dashboardId()"
+          [filters]="filters()"
+          [values]="filterValues()"
+          [timeZone]="context.project()?.timeZone ?? 'UTC'"
+          (changed)="filterChanged($event)"
+          (cleared)="clearFilters()"
+          (reset)="resetFilters()"
+        />
       }
 
       @if (loading()) {
@@ -211,6 +239,7 @@ export const layoutSaveDelayMs = 400;
             [editable]="context.can('analyst')"
             [indicators]="overview.indicators"
             [allTables]="allTables()"
+            [dashboardFilters]="active()"
             (layoutsChange)="layoutsChanged($event)"
             (edit)="editWidget($event)"
             (remove)="removeWidget($event)"
@@ -247,12 +276,18 @@ export class ProjectIndicators {
   private readonly confirm = inject(ConfirmDialog);
   private readonly downloader = inject(Downloader);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
   private readonly injector = inject(Injector);
   private readonly destroyRef = inject(DestroyRef);
   protected readonly context = inject(ProjectContext);
 
   /** Bound from the `:dashboardId` route parameter; it changes when another dashboard opens. */
   readonly dashboardId = input.required<string>();
+  /**
+   * Bound from the `f` query parameter: the dashboard filter values in force, written as clean data writes its filters. Absent,
+   * every filter is at its default; present, exactly what it holds (dashboard filters, design D7). A tab's link has none.
+   */
+  readonly f = input<string | undefined>();
 
   /**
    * The project the page belongs to. The page renders only once the project is read, and leaves with it, so the id is read once:
@@ -290,6 +325,7 @@ export class ProjectIndicators {
       },
       { id: 'moveLeft', label: t('dashboards.menu.moveLeft'), disabled: moving || first, description: moveHint(first, 'first'), testId: 'dashboard-move-left' },
       { id: 'moveRight', label: t('dashboards.menu.moveRight'), disabled: moving || last, description: moveHint(last, 'last'), testId: 'dashboard-move-right' },
+      { id: 'filters', label: t('dashboards.menu.filters'), testId: 'dashboard-filters' },
       {
         id: 'remove',
         label: t('dashboards.menu.remove'),
@@ -321,6 +357,17 @@ export class ProjectIndicators {
   protected readonly exporting = signal<string | null>(null);
   protected readonly allTables = signal(false);
 
+  /** The open dashboard's filters, in order; none until it is read. */
+  protected readonly filters = signal<DashboardFilter[]>([]);
+  /** The open dashboard has been read, so an entry of the address for a filter it lacks is known to be stale. */
+  private readonly filtersRead = signal(false);
+  private readonly address = computed(() => readAddress(this.f(), this.filters()));
+  /** The value in force of each filter on the member's screen, never saved. */
+  protected readonly filterValues = computed(() => this.address().values);
+  /** The filters with a value, in the bar's order, for the widgets. */
+  protected readonly active = computed(() => activeFilters(this.filters(), this.filterValues()));
+  /** The filters of an address that no longer apply, named, until the member changes a value or another dashboard opens. */
+  protected readonly dropped = signal<string[]>([]);
 
   /** True once any indicator has a published table; until then the page explains how an indicator publishes. */
   protected readonly anyPublished = computed(() => !!this.overview()?.indicators.some((i: IndicatorEntry) => i.published));
@@ -379,6 +426,8 @@ export class ProjectIndicators {
       )
       .subscribe(({ overview, dashboard }) => {
         this.overview.set(overview);
+        this.filters.set(dashboard.filters ?? []);
+        this.filtersRead.set(true);
         this.widgets.set(dashboard.widgets);
         this.error.set(null);
         this.loading.set(false);
@@ -388,6 +437,22 @@ export class ProjectIndicators {
     effect(() => {
       const id = this.dashboardId();
       untracked(() => this.open(id));
+    });
+
+    // An address that names filters the dashboard no longer has, or values their kinds cannot take: the page drops them from the
+    // address, which it replaces, and says so once (dashboard filters, design D7).
+    effect(() => {
+      const { values, dropped } = this.address();
+      if (!this.filtersRead() || !dropped.length) {
+        return;
+      }
+      untracked(() => {
+        this.dropped.set(dropped);
+        void this.router.navigate([], { relativeTo: this.route, queryParams: { f: writeAddress(this.filters(), values) }, replaceUrl: true });
+        const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
+        const text = [t('dashboardFilters.dropped.title'), ...dropped.map((name) => t('dashboardFilters.dropped.item', { name }))].join(' ');
+        afterNextRender(() => this.announce(text), { injector: this.injector });
+      });
     });
 
     // Written after the render that shows the notice, into a region that was already there, so it is read once, focus staying put.
@@ -404,6 +469,9 @@ export class ProjectIndicators {
     // The previous dashboard's layouts go out now, each to its own dashboard; the new one does not wait for them.
     void this.flushSaves();
     this.widgets.set([]);
+    this.filters.set([]);
+    this.filtersRead.set(false);
+    this.dropped.set([]);
     this.allTables.set(false);
     this.exporting.set(null);
     this.error.set(null);
@@ -444,6 +512,32 @@ export class ProjectIndicators {
     // The same words twice in a row would not be read again; a zero-width mark makes them a change.
     this.announced = !this.announced;
     this.announcement.set(this.announced ? text : `${text}​`);
+  }
+
+  // Dashboard filters: the values live in the address, so a link shows the same view; changing one never saves anything (design D7).
+
+  protected filterChanged(change: FilterChange): void {
+    this.setFilterValues({ ...this.filterValues(), [change.column]: change.value });
+  }
+
+  protected clearFilters(): void {
+    this.setFilterValues(Object.fromEntries(this.filters().map((f) => [f.column, null])));
+  }
+
+  protected resetFilters(): void {
+    this.setFilterValues(defaultsOf(this.filters()));
+  }
+
+  /** Writes the values to the address, which every widget follows, and says what the dashboard is filtered by; focus stays put. */
+  private setFilterValues(values: FilterValues): void {
+    this.dropped.set([]);
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { f: writeAddress(this.filters(), values) } });
+    const names = activeFilters(this.filters(), values).map((a) => a.filter.label);
+    this.announce(
+      names.length
+        ? this.transloco.translate('dashboardFilters.announce.filtered', { names: names.join(', ') })
+        : this.transloco.translate('dashboardFilters.announce.cleared'),
+    );
   }
 
   // Layout: applied at once, saved once the drag has been still for a moment.
@@ -561,6 +655,8 @@ export class ProjectIndicators {
         indicators: this.overview()?.indicators ?? [],
         timeZone: this.context.project()?.timeZone ?? 'UTC',
         refused: () => this.reloadProject(),
+        filters: this.filters(),
+        values: this.filterValues(),
       },
       ariaLabelledBy: 'widget-dialog-title',
       autoFocus: 'first-tabbable',
@@ -637,6 +733,9 @@ export class ProjectIndicators {
       case 'rename':
         this.rename();
         break;
+      case 'filters':
+        this.editFilters();
+        break;
       case 'duplicate':
         void this.duplicate();
         break;
@@ -682,6 +781,50 @@ export class ProjectIndicators {
       this.context.setDashboards(this.context.dashboards().map((d) => (d.id === renamed.id ? renamed : d)));
       this.toasts.success(this.transloco.translate('dashboards.renamed', { name: renamed.name }));
     });
+  }
+
+  /**
+   * Defines the dashboard's filters (dashboard filters, design D8). Once saved, the dashboard shows them at their defaults: the values
+   * in the address go. Focus returns to the actions button, where the form was opened from.
+   */
+  private editFilters(): void {
+    const dashboard = this.current();
+    if (!dashboard) {
+      return;
+    }
+    this.dialog
+      .open<DashboardFiltersResult, DashboardFiltersData>(DashboardFiltersDialog, {
+        data: {
+          projectId: this.projectId,
+          dashboardId: dashboard.id,
+          filters: this.filters(),
+          widgets: this.widgets(),
+          indicators: this.overview()?.indicators ?? [],
+          timeZone: this.context.project()?.timeZone ?? 'UTC',
+        },
+        ariaLabelledBy: 'dashboard-filters-dialog-title',
+        autoFocus: 'first-tabbable',
+        restoreFocus: true,
+        backdropClass: ['cdk-overlay-dark-backdrop'],
+        maxWidth: '100vw',
+        maxHeight: '100dvh',
+      })
+      .closed.subscribe((saved) => {
+        if (!saved) {
+          return;
+        }
+        if ('gone' in saved) {
+          this.gone(dashboard);
+          return;
+        }
+        if (!this.showing(dashboard.id)) {
+          return; // another dashboard opened meanwhile: it reads its own filters
+        }
+        this.filters.set(saved);
+        this.dropped.set([]);
+        void this.router.navigate([], { relativeTo: this.route, queryParams: { f: null } });
+        this.toasts.success(this.transloco.translate('dashboardFilters.saved'));
+      });
   }
 
   private async duplicate(): Promise<void> {

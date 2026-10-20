@@ -144,6 +144,34 @@ public static class IndicatorValidation
         CheckSort(config, chartType, prefix, errors);
         CheckTooltip(config, chartType, prefix, errors);
         CheckBasemap(config.Basemap, chartType, prefix, errors);
+        CheckIgnoredDashboardFilters(config.IgnoredDashboardFilters, prefix, errors);
+    }
+
+    /// <summary>
+    /// The dashboard filters a widget ignores, by column (design D6): at most 8, once each, each a published column's name. They are
+    /// not checked against any dashboard's filters, so a move, a copy or a filter defined again keeps them.
+    /// </summary>
+    private static void CheckIgnoredDashboardFilters(IReadOnlyList<string> columns, string prefix, FieldErrors errors)
+    {
+        if (columns.Count > DashboardFilterRules.MaxFilters)
+        {
+            errors.Add(prefix + "ignoredDashboardFilters", $"A widget can ignore at most {DashboardFilterRules.MaxFilters} dashboard filters.");
+            return;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < columns.Count; i++)
+        {
+            var field = $"{prefix}ignoredDashboardFilters[{i}]";
+            if (!ColumnNames.IsValidColumnName(columns[i]))
+            {
+                errors.Add(field, $"'{columns[i]}' is not a valid column name.");
+            }
+            else if (!seen.Add(columns[i]))
+            {
+                errors.Add(field, $"The filter on column '{columns[i]}' is already ignored.");
+            }
+        }
     }
 
     /// <summary>The checks of a map's tooltip columns that need no table: where they may be, how many, and the shape of each.</summary>
@@ -313,6 +341,46 @@ public static class IndicatorValidation
             else if (filter.Values is { Count: > DataQueryBuilder.MaxInValues })
             {
                 errors.Add(field, $"Column '{filter.Column}': at most {DataQueryBuilder.MaxInValues} values are allowed.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The checks of a query's dashboard filters, which need no table (design D3): at most 8, one per column, each a published column's
+    /// name, a known kind and a value of that kind. Errors are keyed <c>dashboardFilters[i]</c> and name the column.
+    /// </summary>
+    public static void CheckDashboardFilters(IReadOnlyList<AppliedDashboardFilter>? filters, FieldErrors errors)
+    {
+        if (filters is null)
+        {
+            return;
+        }
+
+        if (filters.Count > DashboardFilterRules.MaxFilters)
+        {
+            errors.Add("dashboardFilters", $"At most {DashboardFilterRules.MaxFilters} dashboard filters are allowed.");
+            return;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < filters.Count; i++)
+        {
+            var field = $"dashboardFilters[{i}]";
+            if (filters[i] is not { } filter || !ColumnNames.IsValidColumnName(filter.Column))
+            {
+                errors.Add(field, $"The dashboard filter's column '{filters[i]?.Column}' is not a valid column name.");
+            }
+            else if (!seen.Add(filter.Column!))
+            {
+                errors.Add(field, $"Column '{filter.Column}' has more than one dashboard filter.");
+            }
+            else if (!DashboardFilterKinds.IsKnown(filter.Kind))
+            {
+                errors.Add(field, $"Column '{filter.Column}': the kind must be one of {string.Join(", ", DashboardFilterKinds.All)}.");
+            }
+            else
+            {
+                DashboardFilterKinds.CheckValue(filter.Kind!, filter.Value, filter.Column!, field, errors);
             }
         }
     }

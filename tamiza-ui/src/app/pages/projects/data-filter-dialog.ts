@@ -19,6 +19,12 @@ export interface DataFilterDialogData {
   check: (filter: DataFilter) => Observable<unknown>;
   /** For tables that cannot list a column's values: the text typed in the search box is offered as a value to choose. */
   allowTypedValues?: boolean;
+  /** The heading, shown as text, in place of the column's name: a dashboard filter's label. */
+  title?: string;
+  /** The conditions offered, in place of every one the column's type has; with one, no choice of condition is shown. */
+  operations?: FilterOp[];
+  /** The text of the button that removes the filter, in place of "Remove filter". */
+  removeLabel?: string;
 }
 
 /** What the dialog closes with: the filter to apply, or the order to remove the column's filter. */
@@ -39,18 +45,20 @@ export const valueSearchDelayMs = 300;
       *transloco="let t"
       data-testid="filter-dialog"
     >
-      <h2 id="data-filter-title" class="break-words text-lg font-medium text-heading">{{ t('cleanData.filter.title', { name: data.column.name }) }}</h2>
+      <h2 id="data-filter-title" class="break-words text-lg font-medium text-heading">{{ data.title ?? t('cleanData.filter.title', { name: data.column.name }) }}</h2>
       @if (data.column.label) {
         <p class="mt-1 break-words text-sm text-body">{{ data.column.label }}</p>
       }
 
-      <tmz-form-field class="mt-4" [label]="t('cleanData.filter.operation')" fieldId="filterOp">
-        <select tmzInput id="filterOp" [value]="op()" (change)="setOp($any($event.target).value)" data-testid="filter-op">
-          @for (option of operations; track option) {
-            <option [value]="option" [selected]="option === op()">{{ t('cleanData.filter.ops.' + option) }}</option>
-          }
-        </select>
-      </tmz-form-field>
+      @if (operations.length > 1) {
+        <tmz-form-field class="mt-4" [label]="t('cleanData.filter.operation')" fieldId="filterOp">
+          <select tmzInput id="filterOp" [value]="op()" (change)="setOp($any($event.target).value)" data-testid="filter-op">
+            @for (option of operations; track option) {
+              <option [value]="option" [selected]="option === op()">{{ t('cleanData.filter.ops.' + option) }}</option>
+            }
+          </select>
+        </tmz-form-field>
+      }
 
       @switch (op()) {
         @case ('contains') {
@@ -127,7 +135,7 @@ export const valueSearchDelayMs = 300;
       <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
         <button tmzButton variant="secondary" type="button" (click)="ref.close()">{{ t('common.cancel') }}</button>
         @if (data.filter) {
-          <button tmzButton variant="secondary" type="button" (click)="ref.close({ remove: true })" data-testid="filter-remove">{{ t('cleanData.filter.remove') }}</button>
+          <button tmzButton variant="secondary" type="button" (click)="ref.close({ remove: true })" data-testid="filter-remove">{{ data.removeLabel ?? t('cleanData.filter.remove') }}</button>
         }
         <button tmzButton type="submit" [disabled]="busy()" data-testid="filter-apply">{{ busy() ? t('cleanData.filter.checking') : t('cleanData.filter.apply') }}</button>
       </div>
@@ -141,7 +149,7 @@ export class DataFilterDialog {
   private readonly transloco = inject(TranslocoService);
 
   protected readonly maxValues = 50;
-  protected readonly operations: FilterOp[] = operationsFor(this.data.column);
+  protected readonly operations: FilterOp[] = this.data.operations?.length ? this.data.operations : operationsFor(this.data.column);
   protected readonly isText = computed(() => this.data.column.type === 'text');
 
   protected readonly op = signal<FilterOp>(this.data.filter?.op ?? this.operations[0]);

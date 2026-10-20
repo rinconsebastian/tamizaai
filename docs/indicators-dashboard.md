@@ -10,21 +10,21 @@ The tab row of a project reads **Performance**, **Clean data**, the project's ow
 
 A dashboard's name is shown exactly as it was saved: never translated, and always as text, never as markup. From 768 pixels wide, tabs that do not fit scroll sideways inside the row, never the page: each side that hides tabs shows an arrow that scrolls the row, Settings (for analysts and admins) stays visible at its end, and the open tab is brought into view. A name too long for its tab is cut with an ellipsis; pointing at the tab or reaching it with the keyboard shows the whole name, and screen readers read it whole. Below 768 pixels one select lists Performance, Clean data and the project's dashboards in the same order, then, for analysts and admins, the Settings group.
 
-Each dashboard shows its name as a heading above its widgets. For analysts and admins the heading is followed by the **New dashboard** button and the **Dashboard actions** menu (the button with three dots), with **Rename**, **Duplicate**, **Move left**, **Move right** and **Remove**; on a narrow screen they wrap under the name. An item that is unavailable stays in the menu, dimmed, with a second line saying why (for example "It is already the first dashboard."); the arrow keys still reach it, so a screen reader reads the reason too, but it cannot be chosen. Viewers see the heading only.
+Each dashboard shows its name as a heading above its widgets. For analysts and admins the heading is followed by the **New dashboard** button and the **Dashboard actions** menu (the button with three dots), with **Rename**, **Duplicate**, **Move left**, **Move right**, **Filters** (see [Defining a dashboard's filters](#defining-a-dashboards-filters)) and **Remove**; on a narrow screen they wrap under the name. An item that is unavailable stays in the menu, dimmed, with a second line saying why (for example "It is already the first dashboard."); the arrow keys still reach it, so a screen reader reads the reason too, but it cannot be chosen. Viewers see the heading only.
 
 **New dashboard**, **Rename** and **Duplicate** open the same name form: one **Name** field, of up to 40 characters and different from the names of the project's other dashboards, then **Add dashboard**, **Rename** or **Duplicate** to save, or **Cancel** (or Escape) to close it without a change. A name that is refused (empty, too long, taken, the name of a permanent tab, or holding a control character) is explained under the field, and what you typed is kept.
 
 - **New dashboard** asks for a name, adds the dashboard after the project's others, with no widgets, and opens it with the focus on its heading.
 - **Rename** changes only the name: the dashboard keeps its widgets, its place and its address. A message confirms the new name (`Renamed to "Coverage".`), and the focus returns to the actions button.
 - **Move left** and **Move right** move the dashboard one place among the project's dashboards, for every member. The first dashboard cannot move left and the last cannot move right. Screen readers are told the dashboard's new position ("Health moved to position 3 of 4"), and the focus returns to the actions button, so a dashboard can be moved several places in a row. While a move is being saved, both items are unavailable.
-- **Duplicate** asks for the copy's name, proposed as the original's name followed by " (copy)", the original's name cut where needed so the whole fits in 40 characters (to its first 33 before " (copy)"); when the project already has that name, in any case, it proposes " (copy 2)", " (copy 3)" and so on, cut the same way. The copy is placed right after the original and holds a copy of each of its widgets, with the same title, type, query, position and size, and it opens with the focus on its heading. A widget you moved or resized a moment before is saved first, so the copy has it in its new place. From then on the two are independent: changing or removing a widget of one leaves the other as it is. A dashboard that holds more widgets than the [limit](#limits) allows, which happens only after an operator lowered it, cannot be duplicated: the name form says so ("A dashboard can have at most 50 widgets. Remove one or move it to another dashboard first.") and nothing is added.
+- **Duplicate** asks for the copy's name, proposed as the original's name followed by " (copy)", the original's name cut where needed so the whole fits in 40 characters (to its first 33 before " (copy)"); when the project already has that name, in any case, it proposes " (copy 2)", " (copy 3)" and so on, cut the same way. The copy is placed right after the original and holds a copy of each of its widgets, with the same title, type, query, ignored filters, position and size, and of its filters, in the same order with the same defaults, and it opens with the focus on its heading. A widget you moved or resized a moment before is saved first, so the copy has it in its new place. From then on the two are independent: changing or removing a widget of one leaves the other as it is. A dashboard that holds more widgets than the [limit](#limits) allows, which happens only after an operator lowered it, cannot be duplicated: the name form says so ("A dashboard can have at most 50 widgets. Remove one or move it to another dashboard first.") and nothing is added.
 - **Remove** asks for confirmation, saying how many widgets go with the dashboard, counted on the server when you ask ("Remove Health and its 5 widgets? This cannot be undone."), then, on **Remove dashboard**, removes the dashboard and all its widgets for every member. It cannot be undone. The dashboard now in its place opens, or the new last one when the removed dashboard was last, with the focus on its heading, and a message says what was removed (`"Health" and its 5 widgets were removed.`).
 
 The rules:
 
 - **1 to 7 dashboards.** A project always keeps one: on its only dashboard **Remove** is unavailable ("A project needs at least one dashboard."). At 7, **New dashboard** is unavailable, with a line below it that says why ("The project has the most dashboards it can hold (7)."), and so is **Duplicate** ("A project can have at most 7 dashboards."). Both can still be reached with the keyboard, so a screen reader reads why. The 7 is a rule of the product, not a setting.
 - **Names** are 1 to 40 characters once leading and trailing spaces are removed (`  Salud  ` is saved as `Salud`), with no control characters such as tabs or line breaks. Two dashboards of a project cannot have names that differ only in case (`Salud` and `SALUD`), and no dashboard can be named Performance, Clean data or Settings, in any case. Another project can use the same names.
-- **Who.** Analysts and admins add, rename, move, duplicate and remove dashboards. Viewers see every dashboard and its widgets but none of these actions, and the API refuses their requests (403). Someone who is not a member of the project gets the same answer as for a project that does not exist.
+- **Who.** Analysts and admins add, rename, move, duplicate and remove dashboards, and define their filters. Viewers see every dashboard and its widgets but none of these actions, and the API refuses their requests (403). Someone who is not a member of the project gets the same answer as for a project that does not exist.
 
 ### Dashboard addresses
 
@@ -42,6 +42,55 @@ Your tab row shows the dashboards as they were when the page loaded. Other membe
 - Adding or duplicating a dashboard just after another member reached the 7 is refused in the name form with the rule's message ("A project can have at most 7 dashboards. Remove one before adding another."); removing what has just become the project's only dashboard is refused with a notice ("A project needs at least one dashboard."). Either way your tab row is reloaded.
 - Otherwise the last change wins: when two members rename the same dashboard, the later name stays.
 
+## Dashboard filters
+
+A dashboard can have up to 8 **filters** that narrow all its widgets at once: a municipality, a round, a period. Analysts and admins define them for each dashboard (see [Defining a dashboard's filters](#defining-a-dashboards-filters)); every member, viewers included, changes their values on their own screen.
+
+### The filter bar
+
+The filters appear in a row between the dashboard's heading and its widgets, in the order they were defined, each as a button with its label and the value in force: `Municipality: All` while it has none, `Municipality: Cali, Palmira`, `Round: 2 to 5`, `Round: from 2`, `Visit: up to 2026-09-30`. A dashboard without filters shows no row. On a narrow screen the buttons wrap onto as many rows as they need; a button too long for the screen is cut with an ellipsis, and pointing at it shows the whole text, which screen readers read whole.
+
+Choose a filter to change it. It opens the same form as a clean data filter, titled with the filter's label, with the one condition its kind takes:
+
+| Kind | Columns it narrows | You choose |
+|---|---|---|
+| **Text** | Text columns | One or more values (up to 100). The list shows the 50 most frequent values of that column across the dashboard's indicator tables, without counts (a row of an indicator table is a group, not a submission), and **Search values** finds others that contain what you type, ignoring case. A value not listed can also be typed. |
+| **True/false** | True/false columns | True, false, or both. |
+| **Number** | Integer and decimal columns | A range: from, to, or both, both included. Decimals are allowed (`2.5`). |
+| **Date** | Date and timestamp columns | A range of days, both included, in the project's time zone; a timestamp on the last day counts until midnight. |
+
+**Apply** narrows the widgets at once; **Clear** in the same form sets the filter back to `All`. **Clear filters** after the buttons sets every filter to `All`, and **Default filters** puts each back to the value the analyst gave it, when there is one. Screen readers are told what the dashboard is filtered by ("Dashboard filtered by Municipality, Round."), and the focus returns to the filter you changed.
+
+What you choose changes **only your own screen**: it is never saved, and other members, even with the same dashboard open, keep seeing their own values. When you open a dashboard, each filter starts at its **default**: the value the analyst gave it, or `All`.
+
+### Which widgets a filter narrows
+
+A filter narrows a widget when the published table of the widget's indicator has a **column with the filter's column name and a type of its kind**: an integer and a decimal column both count as number, and a date and a timestamp column both count as date. The rows are narrowed before they are summed, so a column chart shows Cali's sums only, a stat tile sums Cali's rows only, and a map's shapes, row counts and tooltip sums count Cali's rows only. When the widget has a filter of its own on the same column, a row must match both: a widget that keeps Cali and Buga, filtered by the dashboard to Cali and Palmira, shows Cali.
+
+A widget that a filter in force does not narrow still shows all its rows, and says so in a line at its top: **Not filtered by: Municipality**. That happens when its table has no column of that name (or has it with another kind, such as `round` published as text), or when the widget ignores the filter (see [Ignoring dashboard filters](#ignoring-dashboard-filters)). It is not an error, and a filter set to `All` is never listed. For a filter to narrow every widget, the indicator scripts must publish its column; see [Preparing indicators for dashboard filters](#preparing-indicators-for-dashboard-filters).
+
+### Defining a dashboard's filters
+
+Analysts and admins define a dashboard's filters from its **Dashboard actions** menu, with **Filters**. The form lists the dashboard's filters in order, each with:
+
+- a **Label**, 1 to 40 characters once leading and trailing spaces are removed, different from the other filters' labels of the dashboard whatever its case, and shown exactly as typed, never translated;
+- a **Column**, chosen among the columns of the published tables of the dashboard's widgets' indicators. Each is offered with its kind and how many of the dashboard's widgets it would narrow (`municipality · text · narrows 4 of 5 widgets`), counting the widgets whose table has it with that kind and that do not ignore it. A column published as an integer by one script and as a decimal by another is offered once, as number; one published as text by one and as a number by another is offered once per kind. A dashboard has at most one filter per column. A saved filter whose column no table has any more stays, marked `in no table`;
+- an optional **Default**, set with **Set default** in the same form members use, and removed with **Clear default**. A column of another kind drops the default;
+- buttons to move it up or down, and to remove it.
+
+**Add filter** adds the next column not filtered yet, labelled after it (`visit_round` reads "Visit round"); it is unavailable at 8 filters, with a line saying why, and while the dashboard's indicators have published no table ("There are no columns to filter on yet…"). **Save filters** saves the whole list at once, for every member; **Cancel** (or Escape) closes the form without a change. A label that is empty, too long or taken is explained under it, and what you typed is kept. After saving, the dashboard shows the saved filters at their defaults (the values in the address go), a message confirms it ("Filters saved."), and the focus returns to the actions button.
+
+- A filter is checked against nothing but its own shape: it can name a column before the indicator that will have it publishes, as a widget can.
+- Viewers see the filters and change their values, but have no **Filters** action, and the API refuses their requests (403).
+- Two members saving the same dashboard's filters: the later save wins. Filters saved on a dashboard another member has just removed are not saved, and the first dashboard opens with a notice, as for any change to a removed dashboard.
+- Duplicating a dashboard copies its filters; the two lists change independently afterwards.
+
+### Filtered views in the address
+
+The values in force are kept in the page address (`…/dashboards/<dashboard id>?f=…`), so a link opens the dashboard with the same values for any member, and the browser's Back button undoes a change. Without `f`, every filter is at its default; a link made after clearing a filter keeps it at `All`, even when it has a default. Another dashboard, opened from its tab, starts at its own defaults.
+
+A value in the address for a filter the dashboard no longer has, or that its filter cannot take, is dropped instead of failing the page, and a notice above the dashboard says so (`The filter "round" was removed.`); it goes away when you change a filter or open another dashboard. A link holding many long values can be longer than some proxies accept for an address, as with clean data's filters; keep shared views to a few values.
+
 ## What an indicator script must provide
 
 An indicator script returns one DataFrame, published as the table named after the indicator, with **at least one numeric column** (integer or decimal) and any other columns you need (see [Rules for what scripts return](scripts.md#rules-for-what-scripts-return)). There is no fixed set of columns. These are the conventions the dashboard follows:
@@ -54,6 +103,16 @@ An indicator script returns one DataFrame, published as the table named after th
 | A geometry column | Where a map gets its shapes; see [Maps](#maps). |
 
 The columns listed in the widget form are the ones the published table has. A widget plots a numeric column or a ratio of two numeric columns.
+
+### Preparing indicators for dashboard filters
+
+A [dashboard filter](#dashboard-filters) narrows only the tables that have its column, and the dashboard computes nothing from the cleaned data: it reads what the script published. To let a dashboard be filtered by municipality, sex and round, every indicator on it should publish those columns:
+
+- **Group by every column the dashboard groups or filters by**, not only by the one a chart shows: `groupby(["municipality", "sex", "round"])` instead of `groupby("municipality")`. Nothing is lost: a widget grouped by `municipality` adds the rows of each municipality back up, so the same table serves the chart with and without filters. The [Count by group and Rate by group templates](scripts.md#3-indicator-scripts-computecleaned-ctx) take a list of columns, `GROUPS`, for this.
+- **Publish measures that can be added up.** Counts and sums can. A rate cannot: publish its `numerator` and `denominator` (the Rate by group template does) and plot it as a **ratio**, so `sum(numerator) / sum(denominator)` stays right over any rows the filters keep. For an average, publish the sum and the number of cases and plot their ratio. A median, or a count of distinct people across rounds, cannot be added up again: such an indicator does not suit dashboard filters.
+- **Count each submission once per row.** A column where one submission falls in several rows, such as a `select_multiple` question spread into one row per option, counts that submission once per option when its rows are added up. Filtering by one value of it is fine; adding it up across values is not.
+- **Name and type a dimension the same in every indicator**: always `municipality` as text, never `mpio` in one indicator and `municipality` in another, nor text in one and a number in another. A filter finds its column by name, and only then by kind. An integer and a decimal column count as the same kind, as do a date and a timestamp column, so a pandas column that turned into decimals because it has empty values still matches.
+- **Keep in mind the size.** Each column you group by multiplies the rows the table can have. The limit of 5,000 rows a widget plots counts its groups after adding up, not the rows of the table, so it rarely matters; a histogram without a group column is the exception, since it reads row by row.
 
 ## What a value means: format and unit
 
@@ -115,7 +174,7 @@ Line charts keep their natural order (`2` before `10`) and, like pie, histogram 
 
 ### Filters
 
-Filters work as in the [clean data dashboard](clean-data-dashboard.md#filters): **contains**, **is exactly** and **is one of** for text; **is between** for numbers, dates and timestamps; **is one of** for true/false; **is empty** and **is not empty** for any column. A row has to match all of them. A widget takes at most 50 filters, and **is one of** takes at most 100 values. Filters are added once the indicator's table is published, because they are chosen from its columns.
+Filters work as in the [clean data dashboard](clean-data-dashboard.md#filters): **contains**, **is exactly** and **is one of** for text; **is between** for numbers, dates and timestamps; **is one of** for true/false; **is empty** and **is not empty** for any column. A row has to match all of them. A widget takes at most 50 filters, and **is one of** takes at most 100 values. Filters are added once the indicator's table is published, because they are chosen from its columns. These are the widget's own filters, the same for everyone; a dashboard's [filters](#dashboard-filters) narrow it further, on each member's screen.
 
 ## Maps
 
@@ -229,9 +288,16 @@ The **Add widget** button opens the widget form, and the widget is added to the 
 - Every member sees the same dashboards: they are saved with the project, not per person. If two members change the same widget at the same time, the last change is kept.
 - Removing a widget asks for confirmation and removes it for everyone.
 
+### Ignoring dashboard filters
+
+On a dashboard with [filters](#dashboard-filters), the widget form lists them under **Dashboard filters**, one box each (**Narrow by Municipality**), all checked for a new widget. Uncheck a filter for a widget it must not narrow, such as a total for every municipality next to charts members filter by municipality: when a member sets that filter, the widget keeps all its rows and says **Not filtered by: Municipality**. A widget ignores at most 8 filters.
+
+- A widget ignores a filter **by its column**, not by its label: it keeps ignoring it when the filter is renamed, removed and defined again on the same column, when the widget is moved to another dashboard with a filter on that column, and in a copy of the dashboard.
+- The form's **preview** applies the values in force on your screen when you opened the form, except the filters the widget ignores, and says what it is filtered by ("Preview filtered by: Municipality"); checking or unchecking a box shows the preview again.
+
 ### Moving a widget to another dashboard
 
-When the project has more than one dashboard, **Edit widget** shows a **Dashboard** field after the title, set to the widget's own dashboard. Choose another one and save: the widget keeps its title, type, query and size, and goes to the left edge below the widgets of its new dashboard. It leaves the open dashboard, a message names the dashboard it went to ("Widget Coverage moved to Field."), and the focus moves to the open dashboard's heading.
+When the project has more than one dashboard, **Edit widget** shows a **Dashboard** field after the title, set to the widget's own dashboard. Choose another one and save: the widget keeps its title, type, query, the dashboard filters it ignores and its size, and goes to the left edge below the widgets of its new dashboard. It leaves the open dashboard, a message names the dashboard it went to ("Widget Coverage moved to Field."), and the focus moves to the open dashboard's heading.
 
 - A widget that cannot be drawn because its table lost a column can still be moved: change only the dashboard, and it moves and keeps naming what is missing. Changing anything else as well checks the whole widget again.
 - A dashboard that already holds the most widgets it can ("A dashboard can have at most 50 widgets. Remove one or move it to another dashboard first."), or that another member has just removed ("The dashboard does not exist."), refuses the widget with an error next to the field; the form stays open and the widget stays where it was. A removed dashboard then leaves the field and the tab row.
@@ -252,16 +318,16 @@ Every widget except the stat tile has a table button in its header (shown once t
 
 ## Export
 
-**Export**, the download button at the end of a published indicator's entry in the list, downloads the **whole published table of that indicator**, exactly as published and without the widgets' filters, as CSV or XLSX. Viewers can export. It is the same file, the same single-use download link and the same limits as the [clean data exports](clean-data-dashboard.md#exports): the CSV has a byte order mark, a geometry column is exported as its WKT text, and an XLSX is refused above 1,048,575 rows. While one indicator's file is being prepared only its button shows that it is busy, and the page ends with one message. Exporting one indicator never delays another indicator's publishing, and a widget does not export on its own; a chart cannot be saved as an image, so use **Show as table** to see its numbers.
+**Export**, the download button at the end of a published indicator's entry in the list, downloads the **whole published table of that indicator**, exactly as published and without the widgets' or the dashboard's filters, as CSV or XLSX. Viewers can export. It is the same file, the same single-use download link and the same limits as the [clean data exports](clean-data-dashboard.md#exports): the CSV has a byte order mark, a geometry column is exported as its WKT text, and an XLSX is refused above 1,048,575 rows. While one indicator's file is being prepared only its button shows that it is busy, and the page ends with one message. Exporting one indicator never delays another indicator's publishing, and a widget does not export on its own; a chart cannot be saved as an image, so use **Show as table** to see its numbers.
 
 ## When a table changes
 
 A run replaces each indicator's table on its own. The page shows when each indicator published and by which run; reload the page to see a newer one.
 
 - A widget whose **indicator has not published** (it was never run, its script was removed, or every run so far failed before publishing) does not break the page. It says `<label> has not published yet`; analysts and admins get a link to the scripts.
-- A widget that names a **measure**, a **ratio column**, a **group column**, a **geometry column**, a **tooltip column**, a **sort column** or a **filter column** the new table no longer has shows **This widget cannot be drawn** and lists what is missing. Edit the widget to choose others, or restore them in the script; the widget draws again as soon as the table has them.
+- A widget that names a **measure**, a **ratio column**, a **group column**, a **geometry column**, a **tooltip column**, a **sort column** or a column of **one of its own filters** the new table no longer has shows **This widget cannot be drawn** and lists what is missing. Edit the widget to choose others, or restore them in the script; the widget draws again as soon as the table has them.
 
-The other widgets keep working.
+The other widgets keep working. A dashboard filter on a column the new table no longer has is not a missing column: the widget draws, unfiltered by it, and says **Not filtered by** with the filter's label.
 
 ## Limits
 
@@ -272,6 +338,8 @@ The other widgets keep working.
 | Dashboards of a project's own | 7, and at least 1 |
 | Length of a dashboard's name | 40 characters |
 | Filters in a widget | 50 |
+| Filters on a dashboard | 8 |
+| Length of a dashboard filter's label | 40 characters |
 | Values in an **is one of** filter | 100 |
 | Ranges in a histogram | 100 (10 by default) |
 | Tooltip columns in a map | 5 |
@@ -287,7 +355,9 @@ An operator can change the first two; the others are fixed. See [operations.md](
 - A widget plots **one indicator**; it does not combine several indicator tables in one chart.
 - Its basemap is a background and nothing more: there is no satellite imagery from anyone but Google, no street labels over the imagery, no basemap you define yourself, and no administrative boundaries of its own, since the shapes come from your script.
 - It does not save a zoomed view as the map's starting view, and only maps have a tooltip with columns; a tooltip column's numbers are always summed, with no choice of minimum, maximum or average.
-- It does not filter across widgets or across the whole dashboard; each widget has its own filters.
+- Clicking a bar, slice or shape does not filter the other widgets, a filter's values do not depend on another filter (a department, then its municipalities), and there are no relative periods such as "the last 7 days".
+- A dashboard filter matches columns by name: it cannot narrow a column called `municipality` in one indicator and `mpio` in another. Name a dimension the same in every indicator.
+- Your filter values are not remembered between visits, except in the page address.
 - Every member sees every dashboard: there are no dashboards for some members only, and no dashboards of one's own.
 - It does not copy a dashboard or a widget to another project, and a removed dashboard cannot be brought back.
 - Tabs cannot be dragged: a dashboard moves with **Move left** and **Move right**, which also work from the keyboard and on a phone.

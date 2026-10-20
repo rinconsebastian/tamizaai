@@ -33,6 +33,8 @@ public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
             data.Add(role, "remove dashboard", Write(HttpStatusCode.NoContent));
             data.Add(role, "reorder dashboards", Write(HttpStatusCode.OK));
             data.Add(role, "duplicate dashboard", Write(HttpStatusCode.Created));
+            data.Add(role, "save filters", Write(HttpStatusCode.OK));
+            data.Add(role, "values", read);
         }
 
         return data;
@@ -64,6 +66,8 @@ public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
             "remove dashboard" => await client.DeleteAsync(h.DashboardUrl(await h.InsertDashboardAsync("Second"))),
             "reorder dashboards" => await ReorderAsync(h, client),
             "duplicate dashboard" => await client.PostAsJsonAsync(h.DashboardUrl() + "/copies", new { name = "Copy" }),
+            "save filters" => await client.PutAsJsonAsync(h.FiltersUrl(), new { filters = new[] { new { label = "Municipality", column = "municipality", kind = "text" } } }),
+            "values" => await client.GetAsync(h.DashboardUrl() + "/values?column=municipality"),
             _ => throw new ArgumentOutOfRangeException(nameof(action)),
         };
 
@@ -92,6 +96,7 @@ public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
             await client.DeleteAsync(h.DashboardUrl(second)),
             await client.PutAsJsonAsync(h.DashboardsUrl + "/order", new { expectedIds = new[] { h.DashboardId, second }, dashboardIds = new[] { second, h.DashboardId } }),
             await client.PostAsJsonAsync(h.DashboardUrl() + "/copies", new { name = "Copy" }),
+            await client.PutAsJsonAsync(h.FiltersUrl(), new { filters = new[] { new { label = "Municipality", column = "municipality", kind = "text" } } }),
         ];
 
         Assert.All(responses, response => Assert.Equal(expected, response.StatusCode));

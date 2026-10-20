@@ -48,8 +48,14 @@ public static class DataQueryBuilder
     private static readonly int[] PageSizes = [25, 50, 100];
 
     /// <param name="timeZone">The project's IANA zone, which gives timestamp ranges their days.</param>
+    /// <param name="parameterPrefix">
+    /// Starts the names of the filters' parameters (<c>f0</c>, <c>f1min</c>), so a second set built for the same command does not
+    /// clash. The time zone parameter is always <c>tz</c>: every set of one command uses the same zone.
+    /// </param>
+    /// <param name="fieldName">The name the filters' errors are keyed under (<c>filters[0]</c>).</param>
     /// <returns>The query, or null when <paramref name="errors"/> has any error.</returns>
-    public static DataQuery? Build(DataQueryRequest request, IReadOnlyList<TableColumn> columns, string timeZone, FieldErrors errors)
+    public static DataQuery? Build(
+        DataQueryRequest request, IReadOnlyList<TableColumn> columns, string timeZone, FieldErrors errors, string parameterPrefix = "f", string fieldName = "filters")
     {
         var byName = columns.ToDictionary(c => c.Name, StringComparer.Ordinal);
         var parameters = new List<SqlParam>();
@@ -58,14 +64,14 @@ public static class DataQueryBuilder
         var filters = request.Filters ?? [];
         if (filters.Count > MaxFilters)
         {
-            errors.Add("filters", $"At most {MaxFilters} filters are allowed.");
+            errors.Add(fieldName, $"At most {MaxFilters} filters are allowed.");
         }
 
         var seen = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < filters.Count && i < MaxFilters; i++)
         {
             var filter = filters[i];
-            var field = $"filters[{i}]";
+            var field = $"{fieldName}[{i}]";
             if (filter is null || string.IsNullOrEmpty(filter.Column) || !byName.TryGetValue(filter.Column, out var column))
             {
                 errors.Add(field, $"The table has no column '{filter?.Column}'.");
@@ -78,7 +84,7 @@ public static class DataQueryBuilder
                 continue;
             }
 
-            var condition = BuildFilter(filter, column, i, field, timeZone, parameters, errors);
+            var condition = BuildFilter(filter, column, $"{parameterPrefix}{i}", field, timeZone, parameters, errors);
             if (condition is not null)
             {
                 conditions.Add(condition);
@@ -135,12 +141,11 @@ public static class DataQueryBuilder
         value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal);
 
     private static string? BuildFilter(
-        DataFilter filter, TableColumn column, int index, string field, string timeZone, List<SqlParam> parameters, FieldErrors errors)
+        DataFilter filter, TableColumn column, string p, string field, string timeZone, List<SqlParam> parameters, FieldErrors errors)
     {
         var name = column.Name;
         var quoted = DataSources.Quote(name);
         var isText = column.Type == DataColumnType.Text;
-        var p = $"f{index}";
 
         switch (filter.Op)
         {

@@ -164,6 +164,21 @@ public sealed class IndicatorsHarness : IAsyncDisposable
     public Task<HttpResponseMessage> PostDashboardAsync(string name, HttpClient? client = null) =>
         (client ?? Analyst).PostAsJsonAsync(DashboardsUrl, new { name });
 
+    /// <summary>The filters of a dashboard of the project, the first one unless given another.</summary>
+    public string FiltersUrl(Guid? dashboardId = null) => DashboardUrl(dashboardId) + "/filters";
+
+    /// <summary>Asks the API to replace a dashboard's filters with <paramref name="filters"/>, as the analyst unless given another client.</summary>
+    public Task<HttpResponseMessage> PutFiltersAsync(object? filters, HttpClient? client = null, Guid? dashboardId = null) =>
+        (client ?? Analyst).PutAsJsonAsync(FiltersUrl(dashboardId), new { filters });
+
+    /// <summary>Replaces a dashboard's filters through the API and returns the saved list; fails the test when they are not saved.</summary>
+    public async Task<JsonElement> SaveFiltersAsync(object filters, HttpClient? client = null, Guid? dashboardId = null)
+    {
+        var response = await PutFiltersAsync(filters, client, dashboardId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("filters");
+    }
+
     /// <summary>Adds a dashboard through the API, after the project's others, and returns its id; fails the test when it is not created.</summary>
     public async Task<Guid> AddDashboardAsync(string name, HttpClient? client = null)
     {
@@ -180,14 +195,14 @@ public sealed class IndicatorsHarness : IAsyncDisposable
             .ToArray();
 
     /// <summary>
-    /// The project's dashboards in their order as <c>position|id|name|normalized name|updated_by|updated_at</c>, to check that a refused
-    /// request changed nothing.
+    /// The project's dashboards in their order as <c>position|id|name|normalized name|filters|updated_by|updated_at</c>, to check that a
+    /// refused request changed nothing.
     /// </summary>
     public async Task<string[]> StoredDashboardsAsync()
     {
         var rows = await TestData.ScalarAsync<string>(Db,
             """
-            SELECT coalesce(string_agg(concat_ws('|', position, id, name, normalized_name, updated_by, updated_at), E'\n'
+            SELECT coalesce(string_agg(concat_ws('|', position, id, name, normalized_name, filters, updated_by, updated_at), E'\n'
                                        ORDER BY position, created_at, id), '')
             FROM tamiza.dashboards WHERE project_id = @id
             """,
@@ -229,16 +244,21 @@ public sealed class IndicatorsHarness : IAsyncDisposable
     public async Task<JsonElement> GetWidgetsAsync(Guid? dashboardId = null, HttpClient? client = null) =>
         (await GetDashboardAsync(dashboardId, client)).GetProperty("widgets");
 
-    /// <summary>Runs a widget's query (<paramref name="config"/> is the widget's <c>config</c>) and returns the response.</summary>
-    public async Task<JsonElement> QueryAsync(object config, string? chartType = null, HttpClient? client = null)
+    /// <summary>
+    /// Runs a widget's query (<paramref name="config"/> is the widget's <c>config</c>) and returns the response. <paramref name="dashboardFilters"/>
+    /// are the dashboard filter values in force (<c>[{ column, kind, values | min, max }]</c>); left out of the body when null.
+    /// </summary>
+    public async Task<JsonElement> QueryAsync(object config, string? chartType = null, HttpClient? client = null, object? dashboardFilters = null)
     {
-        var response = await PostQueryAsync(config, chartType, client);
+        var response = await PostQueryAsync(config, chartType, client, dashboardFilters);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
-    public Task<HttpResponseMessage> PostQueryAsync(object config, string? chartType = null, HttpClient? client = null) =>
-        (client ?? Viewer).PostAsJsonAsync(Url + "/query", new { config, chartType });
+    public Task<HttpResponseMessage> PostQueryAsync(object config, string? chartType = null, HttpClient? client = null, object? dashboardFilters = null) =>
+        dashboardFilters is null
+            ? (client ?? Viewer).PostAsJsonAsync(Url + "/query", new { config, chartType })
+            : (client ?? Viewer).PostAsJsonAsync(Url + "/query", new { config, chartType, dashboardFilters });
 
     /// <summary>Adds a widget to a dashboard of the project, the first one unless given another.</summary>
     public Task<HttpResponseMessage> PostWidgetAsync(object body, HttpClient? client = null, Guid? dashboardId = null) =>

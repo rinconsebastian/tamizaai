@@ -43,6 +43,42 @@ describe('IndicatorsService', () => {
     expect(typed.request.body).toEqual({ config, chartType: 'histogram' });
   });
 
+  it('sends the dashboard filters in force with a query only when there are some', () => {
+    const filters = [
+      { column: 'municipality', kind: 'text' as const, values: ['Cali'] },
+      { column: 'round', kind: 'number' as const, min: '2', max: null },
+    ];
+    service.query('p1', config, 'column', filters).subscribe();
+    service.query('p1', config, undefined, []).subscribe();
+
+    const [filtered, none] = http.match(`${base}/query`);
+    expect(filtered.request.body).toEqual({ config, chartType: 'column', dashboardFilters: filters });
+    expect(none.request.body).toEqual({ config });
+  });
+
+  it('replaces a dashboard\'s filters with the whole list and answers them as saved', () => {
+    const filters = [{ column: 'municipality', label: 'Municipality', kind: 'text' as const, default: { values: ['Cali'] } }];
+    let saved: unknown;
+    service.saveDashboardFilters('p1', 'd2', filters).subscribe((answer) => (saved = answer));
+
+    const request = http.expectOne(`${dashboards}/d2/filters`);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.body).toEqual({ filters });
+    request.flush({ filters: [{ ...filters[0], label: 'Municipality' }] });
+    expect(saved).toEqual(filters);
+  });
+
+  it('reads the values a dashboard\'s text filter offers, with the search only when there is one', () => {
+    service.dashboardValues('p1', 'd2', 'municipality').subscribe();
+    service.dashboardValues('p1', 'd2', 'municipality', 'pal').subscribe();
+
+    const [all, searched] = http.match((r) => r.url === `${dashboards}/d2/values`);
+    expect(all.request.method).toBe('GET');
+    expect(all.request.params.keys()).toEqual(['column']);
+    expect(all.request.params.get('column')).toBe('municipality');
+    expect(searched.request.params.get('search')).toBe('pal');
+  });
+
   it('creates a widget on its dashboard, leaving the layout out when there is none', () => {
     service.create('p1', 'd1', { title: 'Coverage', chartType: 'column', config }).subscribe();
 
@@ -119,7 +155,19 @@ describe('IndicatorsService', () => {
   });
 
   it('starts a query with an indicator and nothing else chosen: the default measure, no group', () => {
-    expect(emptyConfig('coverage')).toEqual({ indicator: 'coverage', measure: null, ratio: null, groupBy: null, filters: [], geometryColumn: null, buckets: null, sort: null, tooltip: [], basemap: null });
+    expect(emptyConfig('coverage')).toEqual({
+      indicator: 'coverage',
+      measure: null,
+      ratio: null,
+      groupBy: null,
+      filters: [],
+      geometryColumn: null,
+      buckets: null,
+      sort: null,
+      tooltip: [],
+      basemap: null,
+      ignoredDashboardFilters: [],
+    });
   });
 
   it('knows which chart types need a column to group by', () => {

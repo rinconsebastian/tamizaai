@@ -108,7 +108,7 @@ An `analyst` or `admin` SHALL be able to move a dashboard one place to the left 
 - **THEN** it ends up third of 4
 
 ### Requirement: Duplicating a dashboard
-An `analyst` or `admin` SHALL be able to duplicate a dashboard under a new name, proposed as the original's name followed by " (copy)" and shortened to fit 40 characters. The copy SHALL be placed right after the original and SHALL hold a copy of each of its widgets, with the same title, chart type, query, position and size. Later changes to one SHALL NOT change the other. Duplicating SHALL be refused when the project already has 7 dashboards.
+An `analyst` or `admin` SHALL be able to duplicate a dashboard under a new name, proposed as the original's name followed by " (copy)" and shortened to fit 40 characters. The copy SHALL be placed right after the original and SHALL hold a copy of each of its widgets, with the same title, chart type, query, ignored filters, position and size, and a copy of its filters, in the same order with the same defaults. Later changes to one SHALL NOT change the other. Duplicating SHALL be refused when the project already has 7 dashboards.
 
 #### Scenario: Dashboard duplicated
 - **WHEN** an `analyst` duplicates "Housing", which holds 8 widgets, as "Housing 2026"
@@ -138,6 +138,14 @@ An `analyst` or `admin` SHALL be able to duplicate a dashboard under a new name,
 - **WHEN** an operator has lowered the widget limit to 20 and an `analyst` duplicates a dashboard that holds 30 widgets
 - **THEN** the API responds 400 with an error saying a dashboard can have at most 20 widgets, the analyst sees that message, and no dashboard is added
 
+#### Scenario: Filters duplicated
+- **WHEN** an `analyst` duplicates "Housing", whose filters are "Municipality" and "Round" with the default 3, and one of whose widgets ignores "Municipality"
+- **THEN** "Housing (copy)" has the filters "Municipality" and "Round" with the default 3, and the copy of that widget ignores "Municipality"
+
+#### Scenario: Filters of a copy are independent
+- **WHEN** the `analyst` then removes the filter "Round" from "Housing (copy)"
+- **THEN** "Housing" still has the filter "Round"
+
 ### Requirement: Removing a dashboard
 An `analyst` or `admin` SHALL be able to remove a dashboard together with all its widgets, after confirming a message that says how many widgets will be removed. The last dashboard of a project SHALL NOT be removable. After a removal the member SHALL be told what was removed and taken to the dashboard now in its place, or to the new last dashboard when the removed one was last.
 
@@ -162,15 +170,15 @@ An `analyst` or `admin` SHALL be able to remove a dashboard together with all it
 - **THEN** one dashboard is removed and the other request is refused because a project needs at least one dashboard
 
 ### Requirement: Roles for dashboards
-Only an `analyst` or `admin` SHALL be able to add, rename, move, duplicate or remove a dashboard. A `viewer` SHALL be refused with 403 and SHALL NOT be offered these actions. A user who is not a member SHALL get the same answer as for a project that does not exist.
+Only an `analyst` or `admin` SHALL be able to add, rename, move, duplicate or remove a dashboard, or change its filters. A `viewer` SHALL be refused with 403 and SHALL NOT be offered these actions. A user who is not a member SHALL get the same answer as for a project that does not exist.
 
 #### Scenario: Viewer refused
-- **WHEN** a `viewer` asks the API to add, rename, move, duplicate or remove a dashboard
+- **WHEN** a `viewer` asks the API to add, rename, move, duplicate or remove a dashboard, or to change its filters
 - **THEN** the API responds 403 and the project's dashboards are unchanged
 
 #### Scenario: No actions for a viewer
 - **WHEN** a `viewer` opens a dashboard
-- **THEN** no action to add, rename, move, duplicate or remove a dashboard is shown
+- **THEN** no action to add, rename, move, duplicate or remove a dashboard, or to edit its filters, is shown
 
 #### Scenario: Not a member
 - **WHEN** a user who is not a member of the project requests one of its dashboards or asks to change them

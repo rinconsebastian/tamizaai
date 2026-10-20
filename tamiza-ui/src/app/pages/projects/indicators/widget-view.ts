@@ -5,10 +5,11 @@ import { RouterLink } from '@angular/router';
 import { TranslocoDirective } from '@jsverse/transloco';
 import { catchError, distinctUntilChanged, map, of, switchMap, tap, timer } from 'rxjs';
 import { ApiErrors } from '../../../core/api-error';
-import { ChartType, IndicatorEntry, IndicatorsService, QueryResult, WidgetConfig, WidgetSort } from '../../../core/projects/indicators.service';
+import { AppliedDashboardFilter, ChartType, IndicatorEntry, IndicatorsService, QueryResult, WidgetConfig, WidgetSort } from '../../../core/projects/indicators.service';
 import { Alert, ApiLang, Button, Skeleton } from '../../../shared/ui';
 import { AxisChart } from './axis-chart';
 import { plainIndicator, valueFormatter } from './format';
+import { ActiveDashboardFilter, appliedOf } from './dashboard-filters';
 import { MapWidget } from './map-widget';
 import { PieWidget } from './pie-widget';
 import { StatWidget } from './stat-widget';
@@ -36,15 +37,23 @@ export function queryFor(type: ChartType, config: WidgetConfig): WidgetConfig {
     // (A config from an API that predates the tooltip has neither field; it reads as none.)
     tooltip: type === 'map' ? (config.tooltip ?? []).map((item) => ({ column: item.column, label: null, format: null })) : [],
     basemap: null,
+    // Which dashboard filters the widget ignores decides what the page sends with the query, not the query itself.
+    ignoredDashboardFilters: [],
   };
 }
 
 /**
- * What a widget is saved with, and what its preview is given: the query, plus (for a map) the whole tooltip items and the basemap.
- * Any other chart type keeps neither, so changing a map into one saves no tooltip columns.
+ * What a widget is saved with, and what its preview is given: the query, plus (for a map) the whole tooltip items and the basemap,
+ * and the dashboard filters it ignores. Any other chart type keeps no tooltip or basemap, so changing a map into one saves no tooltip
+ * columns.
  */
 export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig {
-  return { ...queryFor(type, config), tooltip: type === 'map' ? (config.tooltip ?? []) : [], basemap: type === 'map' ? (config.basemap ?? null) : null };
+  return {
+    ...queryFor(type, config),
+    tooltip: type === 'map' ? (config.tooltip ?? []) : [],
+    basemap: type === 'map' ? (config.basemap ?? null) : null,
+    ignoredDashboardFilters: config.ignoredDashboardFilters ?? [],
+  };
 }
 
 /**
@@ -81,6 +90,10 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
                 <p class="mt-1">{{ t('indicators.missing.help') }}</p>
               </tmz-alert>
             } @else {
+              @if (notFiltered().length) {
+                <!-- Not a warning: the rows are right, only not narrowed by these filters (dashboard filters, design D7). -->
+                <p class="shrink-0 text-xs text-body" data-testid="widget-not-filtered">{{ t('dashboardFilters.notFiltered', { names: notFiltered().join(', ') }) }}</p>
+              }
               @if (result.rowLimitReached) {
                 <p class="shrink-0 text-xs text-fg-warning" data-testid="widget-row-limit">{{ t('indicators.widget.rowLimit', { count: result.rows.length }) }}</p>
               }
@@ -149,6 +162,11 @@ export class WidgetView {
   readonly asTable = model(false);
   /** Whether the widget shows its own chart/table toggle; the grid turns it off and puts the toggle in the tile header. */
   readonly showToggle = input(true);
+  /**
+   * The dashboard filters with a value in force, in the bar's order, each marked when the widget ignores it. Those it does not ignore
+   * go with the query; the widget says which ones did not narrow it.
+   */
+  readonly dashboardFilters = input<ActiveDashboardFilter[]>([]);
   /** True while the widget has rows it can show as a chart or as a table (never for a stat tile), so a host can offer the toggle. */
   readonly tableAvailable = output<boolean>();
   protected readonly state = signal<State>({ kind: 'idle' });
@@ -160,6 +178,15 @@ export class WidgetView {
   protected readonly result = computed(() => {
     const state = this.state();
     return state.kind === 'ready' ? state.result : null;
+  });
+  /** What the query sends of the dashboard filters: those the widget does not ignore. */
+  private readonly applied = computed(() => appliedOf(this.dashboardFilters()));
+  /** The labels of the active filters that do not narrow the rows: ignored by the widget, or not taken by its table. */
+  protected readonly notFiltered = computed(() => {
+    const missed = new Set(this.result()?.notFiltered ?? []);
+    return this.dashboardFilters()
+      .filter((active) => active.ignored || missed.has(active.filter.column))
+      .map((active) => active.filter.label);
   });
   protected readonly error = computed(() => {
     const state = this.state();
@@ -177,7 +204,7 @@ export class WidgetView {
 
   private readonly key = computed(() => {
     const config = this.config();
-    return config && !this.blocked() ? JSON.stringify({ type: this.chartType(), config: queryFor(this.chartType(), config) }) : null;
+    return config && !this.blocked() ? JSON.stringify({ type: this.chartType(), config: queryFor(this.chartType(), config), dashboardFilters: this.applied() }) : null;
   });
 
   constructor() {
@@ -193,8 +220,8 @@ export class WidgetView {
             : // A newer draft cancels both the wait and the request, so an old answer never lands on a changed draft.
               timer(this.debounceMs()).pipe(
                 switchMap(() => {
-                  const { type, config } = JSON.parse(key) as { type: ChartType; config: WidgetConfig };
-                  return this.service.query(this.projectId(), config, type);
+                  const { type, config, dashboardFilters } = JSON.parse(key) as { type: ChartType; config: WidgetConfig; dashboardFilters: AppliedDashboardFilter[] };
+                  return this.service.query(this.projectId(), config, type, dashboardFilters);
                 }),
                 map((result): State => ({ kind: 'ready', result })),
                 catchError((failure) => {

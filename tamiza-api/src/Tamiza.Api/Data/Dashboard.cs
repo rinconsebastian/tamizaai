@@ -19,6 +19,9 @@ public sealed class Dashboard
     /// <summary>0 to n - 1 among the project's dashboards, renumbered on every add, duplicate, removal and reorder.</summary>
     public int Position { get; set; }
 
+    /// <summary>The dashboard's filters, in order, as JSON text in a <c>jsonb</c> column: the indicators module validates and reads them.</summary>
+    public string Filters { get; set; } = "[]";
+
     public Guid CreatedBy { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }

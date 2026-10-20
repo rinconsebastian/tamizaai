@@ -4,7 +4,8 @@ import { Router } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { vi } from 'vitest';
 import { Downloader } from '../../core/download.service';
-import { Widget } from '../../core/projects/indicators.service';
+import { DataFilter } from '../../core/projects/data.service';
+import { DashboardFilter, Widget } from '../../core/projects/indicators.service';
 import { DashboardEntry, ProjectRole } from '../../core/projects/projects.service';
 import { ToastService } from '../../shared/ui';
 import { pressKey } from '../../../testing/cdk';
@@ -26,6 +27,7 @@ import {
   isColumns,
   isDashboard,
   isDashboardOf,
+  isDashboardValues,
   isOverview,
   isPatch,
   isQuery,
@@ -40,6 +42,7 @@ import {
   widgetUrl,
   widgetsUrl,
 } from './indicators/indicators-testing';
+import { decodeFilters, encodeFilters } from './data-view';
 import { ProjectContext } from './project-context';
 import { layoutSaveDelayMs } from './project-indicators';
 
@@ -2126,5 +2129,279 @@ describe('ProjectIndicators for a viewer', () => {
     expect(all(context.root, 'widget-title').map(text)).toEqual(['Coverage by municipality', 'Response rate']);
     expect(settingsRequests(context.http)).toEqual([]);
     expect(TestBed.inject(ToastService).toasts()).toEqual([]);
+  });
+});
+
+describe('ProjectIndicators dashboard filters (dashboard filters, design D7)', () => {
+  beforeEach(() => downloader.start.mockClear());
+  afterEach(clearOverlay);
+
+  const municipality: DashboardFilter = { column: 'municipality', label: 'Municipality', kind: 'text', default: null };
+  const round: DashboardFilter = { column: 'round', label: 'Round', kind: 'number', default: { min: '3', max: '3' } };
+  const f = (filters: DataFilter[]) => `f=${encodeFilters(filters)}`;
+  /** The filters the address holds now, or null when it has none. */
+  const addressFilters = () => {
+    const value = new URL(`http://tamiza${TestBed.inject(Router).url}`).searchParams.get('f');
+    return value === null ? null : decodeFilters(value);
+  };
+  const pill = (column: string) => document.querySelector<HTMLButtonElement>(`[data-testid="dashboard-filter"][data-column="${column}"]`)!;
+  const pills = (root: HTMLElement) => all(root, 'dashboard-filter').map(text);
+  const status = (root: HTMLElement) => text(byTestId(root, 'dashboard-status')).replace(/​/g, '');
+  const inDialog = <T extends HTMLElement = HTMLElement>(id: string) => overlay().querySelector<T>(`[data-testid="${id}"]`);
+  const sent = (requests: { request: { body: { dashboardFilters?: unknown } } }[]) => requests.map((r) => r.request.body.dashboardFilters ?? null);
+
+  async function choose(context: Context, column: string, value: string): Promise<void> {
+    pill(column).focus();
+    pill(column).click();
+    await settle(context.harness);
+    context.http.match(isDashboardValues).forEach((r) => r.flush({ values: [{ value: 'Cali', count: 3 }, { value: 'Palmira', count: 2 }] }));
+    await settle(context.harness);
+    Array.from(overlay().querySelectorAll<HTMLInputElement>('[data-testid="filter-option"]'))
+      .find((option) => text(option.closest('label')) === value)!
+      .click();
+    inDialog('filter-apply')!.click();
+    await settle(context.harness);
+  }
+
+  it('lets a viewer filter every widget on their own screen, saving nothing (Viewer filters a dashboard)', async () => {
+    const context = await open('viewer', two, answer, {}, { filters: [municipality] });
+
+    await choose(context, 'municipality', 'Cali');
+    const requests = await answerQueries(context, answer);
+
+    expect(addressFilters()).toEqual([{ column: 'municipality', op: 'in', values: ['Cali'] }]);
+    expect(pills(context.root)).toEqual(['Municipality: Cali']);
+    expect(sent(requests)).toEqual([
+      [{ column: 'municipality', kind: 'text', values: ['Cali'] }],
+      [{ column: 'municipality', kind: 'text', values: ['Cali'] }],
+    ]);
+    expect(context.http.match((r) => r.method !== 'GET' && !isQuery(r))).toEqual([]);
+    // Only the widgets ask again: the dashboard is not read again for a change of filter.
+    expect(context.http.match(isDashboard)).toEqual([]);
+    expect(context.http.match(isOverview)).toEqual([]);
+  });
+
+  it('says what the dashboard is filtered by without moving focus off the filter (Change announced)', async () => {
+    const context = await open('viewer', two, answer, {}, { filters: [municipality] });
+
+    await choose(context, 'municipality', 'Cali');
+
+    expect(status(context.root)).toBe('Dashboard filtered by Municipality.');
+    expect(document.activeElement).toBe(pill('municipality'));
+  });
+
+  it('shows every value again once a filter is cleared (Filter cleared)', async () => {
+    const context = await open('viewer', two, answer, {}, { filters: [municipality], query: f([{ column: 'municipality', op: 'in', values: ['Cali'] }]) });
+    expect(pills(context.root)).toEqual(['Municipality: Cali']);
+
+    pill('municipality').click();
+    await settle(context.harness);
+    context.http.match(isDashboardValues).forEach((r) => r.flush({ values: [] }));
+    await settle(context.harness);
+    inDialog('filter-remove')!.click();
+    await settle(context.harness);
+    const requests = await answerQueries(context, answer);
+
+    expect(addressFilters()).toBeNull();
+    expect(pills(context.root)).toEqual(['Municipality: All']);
+    expect(sent(requests)).toEqual([null, null]);
+    expect(status(context.root)).toBe('Dashboard filters cleared.');
+  });
+
+  it('starts at the defaults (Default in force)', async () => {
+    const context = await open('viewer', two, null, {}, { filters: [round] });
+    const requests = await answerQueries(context, answer);
+
+    expect(pills(context.root)).toEqual(['Round: 3']);
+    expect(sent(requests)).toEqual([
+      [{ column: 'round', kind: 'number', min: '3', max: '3' }],
+      [{ column: 'round', kind: 'number', min: '3', max: '3' }],
+    ]);
+  });
+
+  it('puts every filter back to its default from a changed view (Back to the defaults)', async () => {
+    const context = await open('viewer', two, answer, {}, { filters: [municipality, round], query: f([{ column: 'round', op: 'range', min: '1', max: '1' }]) });
+    expect(pills(context.root)).toEqual(['Municipality: All', 'Round: 1']);
+
+    byTestId(context.root, 'dashboard-filters-reset')!.click();
+    await settle(context.harness);
+    const requests = await answerQueries(context, answer);
+
+    expect(addressFilters()).toBeNull();
+    expect(pills(context.root)).toEqual(['Municipality: All', 'Round: 3']);
+    expect(sent(requests)[0]).toEqual([{ column: 'round', kind: 'number', min: '3', max: '3' }]);
+    expect(byTestId(context.root, 'dashboard-filters-reset')).toBeNull();
+  });
+
+  it('opens a shared address with its values for any member (Shared link)', async () => {
+    const context = await open('viewer', two, null, {}, { filters: [municipality], query: f([{ column: 'municipality', op: 'in', values: ['Cali'] }]) });
+    const requests = await answerQueries(context, answer);
+
+    expect(pills(context.root)).toEqual(['Municipality: Cali']);
+    expect(sent(requests)).toEqual([
+      [{ column: 'municipality', kind: 'text', values: ['Cali'] }],
+      [{ column: 'municipality', kind: 'text', values: ['Cali'] }],
+    ]);
+    expect(byTestId(context.root, 'dashboard-filters-dropped')).toBeNull();
+  });
+
+  it('keeps a cleared filter cleared in a link despite its default (Cleared filter in a link)', async () => {
+    const context = await open('viewer', two, null, {}, { filters: [round], query: f([]) });
+    const requests = await answerQueries(context, answer);
+
+    expect(pills(context.root)).toEqual(['Round: All']);
+    expect(sent(requests)).toEqual([null, null]);
+  });
+
+  it('drops a filter the dashboard no longer has from the address, with a notice it announces (Filter removed since)', async () => {
+    const context = await open('viewer', two, answer, {}, {
+      filters: [municipality],
+      query: f([
+        { column: 'municipality', op: 'in', values: ['Cali'] },
+        { column: 'round', op: 'range', min: '1' },
+      ]),
+    });
+
+    expect(text(byTestId(context.root, 'dashboard-filters-dropped'))).toContain('The filter "round" was removed.');
+    expect(addressFilters()).toEqual([{ column: 'municipality', op: 'in', values: ['Cali'] }]);
+    expect(status(context.root)).toContain('The filter "round" was removed.');
+    expect(pills(context.root)).toEqual(['Municipality: Cali']);
+  });
+
+  it('drops a value its filter\'s kind cannot take the same way', async () => {
+    const context = await open('viewer', two, answer, {}, { filters: [round], query: f([{ column: 'round', op: 'range', min: 'second' }]) });
+
+    expect(text(byTestId(context.root, 'dashboard-filters-dropped'))).toContain('The filter "Round" was removed.');
+    expect(pills(context.root)).toEqual(['Round: All']);
+  });
+
+  it('clears that notice once the member changes a value', async () => {
+    const context = await open('viewer', two, answer, {}, { filters: [municipality], query: f([{ column: 'zone', op: 'in', values: ['north'] }]) });
+    expect(byTestId(context.root, 'dashboard-filters-dropped')).not.toBeNull();
+
+    await choose(context, 'municipality', 'Palmira');
+
+    expect(byTestId(context.root, 'dashboard-filters-dropped')).toBeNull();
+  });
+
+  it('opens another dashboard at its own defaults (Another dashboard)', async () => {
+    const context = await open('viewer', two, answer, {}, {
+      dashboards: indicatorsAndField,
+      filters: [municipality],
+      query: f([{ column: 'municipality', op: 'in', values: ['Cali'] }]),
+    });
+
+    await go(context, 'd2');
+    await answerLoad(context, two, {}, 'd2', [municipality]);
+    const requests = await answerQueries(context, answer);
+
+    expect(addressFilters()).toBeNull();
+    expect(pills(context.root)).toEqual(['Municipality: All']);
+    expect(sent(requests)).toEqual([null, null]);
+  });
+
+  it('shows no filter bar on a dashboard without filters', async () => {
+    const context = await open('viewer', two, answer);
+
+    expect(byTestId(context.root, 'dashboard-filter-bar')).toBeNull();
+  });
+});
+
+describe('ProjectIndicators editing a dashboard\'s filters (dashboard filters, design D8)', () => {
+  beforeEach(() => downloader.start.mockClear());
+  afterEach(clearOverlay);
+
+  const filtersUrl = `${dashboardUrlOf('d1')}/filters`;
+  const projectUrl = `/api/v1/projects/${projectId}`;
+  const municipality: DashboardFilter = { column: 'municipality', label: 'Municipality', kind: 'text', default: null };
+  const round: DashboardFilter = { column: 'round', label: 'Round', kind: 'number', default: { min: '3', max: '3' } };
+  const item = (testId: string) => document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  const form = () => document.querySelector<HTMLElement>('[data-testid="dashboard-filters-dialog"]');
+  const pills = (root: HTMLElement) => all(root, 'dashboard-filter').map(text);
+  const toasts = () => TestBed.inject(ToastService).toasts().map((t) => t.message);
+
+  /** Opens the dashboard's actions from the keyboard, chooses Filters, and answers the columns the form reads. */
+  async function openFilters(context: Context): Promise<HTMLElement> {
+    const trigger = byTestId(context.root, 'dashboard-menu')!;
+    trigger.focus();
+    pressKey(trigger, 'ArrowDown');
+    await settle(context.harness);
+    // Rename, Duplicate, Move left, Move right, Filters.
+    for (let i = 0; i < 4; i++) {
+      pressKey(document.activeElement!, 'ArrowDown');
+    }
+    expect(document.activeElement).toBe(item('dashboard-filters'));
+    pressKey(document.activeElement!, 'Enter');
+    await settle(context.harness);
+    context.http.match(isColumns).forEach((r) => r.flush(catalog()));
+    await settle(context.harness);
+    return trigger;
+  }
+
+  it('saves the filters an analyst adds, shows them at their defaults and returns focus to the actions (Analyst adds a filter, Filters saved)', async () => {
+    const context = await open('analyst', two, answer, {}, { filters: [municipality], query: `f=${encodeFilters([{ column: 'municipality', op: 'in', values: ['Cali'] }])}` });
+    expect(pills(context.root)).toEqual(['Municipality: Cali']);
+    const trigger = await openFilters(context);
+
+    const rows = () => Array.from(form()!.querySelectorAll<HTMLElement>('[data-testid="dashboard-filters-row"]'));
+    byTestId(form()!, 'dashboard-filters-add')!.click();
+    await settle(context.harness);
+    const select = rows()[1].querySelector<HTMLSelectElement>('[data-testid="dashboard-filters-column"]')!;
+    typeInto(select, 'round|number');
+    await settle(context.harness);
+    typeInto(rows()[1].querySelector<HTMLInputElement>('[data-testid="dashboard-filters-label"]')!, 'Round');
+    await settle(context.harness);
+    byTestId(form()!, 'dashboard-filters-save')!.click();
+    await settle(context.harness);
+    const request = context.http.expectOne(filtersUrl);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.body.filters.map((f: DashboardFilter) => f.label)).toEqual(['Municipality', 'Round']);
+    request.flush({ filters: [municipality, round] });
+    await settle(context.harness);
+    await answerQueries(context, answer);
+
+    expect(form()).toBeNull();
+    expect(pills(context.root)).toEqual(['Municipality: All', 'Round: 3']);
+    expect(new URL(`http://tamiza${TestBed.inject(Router).url}`).searchParams.has('f')).toBe(false);
+    expect(toasts()).toContain('Filters saved.');
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('changes nothing when the form is cancelled, and returns focus to the actions', async () => {
+    const context = await open('analyst', two, answer, {}, { filters: [municipality] });
+    const trigger = await openFilters(context);
+
+    byTestId(form()!, 'dashboard-filters-cancel')!.click();
+    await settle(context.harness);
+
+    expect(form()).toBeNull();
+    context.http.expectNone(filtersUrl);
+    expect(pills(context.root)).toEqual(['Municipality: All']);
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('takes the member to the first dashboard when the dashboard was removed meanwhile (Filters saved on a removed dashboard)', async () => {
+    const context = await open('analyst', two, answer, {}, { dashboards: indicatorsAndField, filters: [municipality] });
+    await openFilters(context);
+
+    byTestId(form()!, 'dashboard-filters-save')!.click();
+    await settle(context.harness);
+    context.http.expectOne(filtersUrl).flush({ title: 'x', code: 'dashboards.notFound' }, { status: 404, statusText: 'Not Found' });
+    await settle(context.harness);
+    context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: [{ id: 'd2', name: 'Field' }] }));
+    await settle(context.harness);
+    await answerLoad(context, [], {}, 'd2');
+
+    expect(form()).toBeNull();
+    expect(TestBed.inject(Router).url).toBe(`/projects/${projectId}/dashboards/d2`);
+    expect(text(byTestId(context.root, 'dashboard-notice'))).toContain('"Indicators" no longer exists');
+  });
+
+  it('offers a viewer no action to edit the filters (Viewer cannot edit the filters)', async () => {
+    const context = await open('viewer', two, answer, {}, { filters: [municipality] });
+
+    expect(byTestId(context.root, 'dashboard-menu')).toBeNull();
+    expect(item('dashboard-filters')).toBeNull();
+    expect(pills(context.root)).toEqual(['Municipality: All']);
   });
 });

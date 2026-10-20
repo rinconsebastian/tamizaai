@@ -98,6 +98,10 @@ public sealed record WidgetTooltipItem(string Column, string? Label = null, stri
 /// <param name="Sort">Bar and column only: the order of the bars; left out, the group column's own order.</param>
 /// <param name="Tooltip">Map only: up to <see cref="WidgetConfig.MaxTooltipItems"/> columns of the table shown in each shape's tooltip, in order.</param>
 /// <param name="Basemap">Map only: <c>streets</c>, <c>satellite</c> or null for none. A kind, never checked against what the deployment offers.</param>
+/// <param name="IgnoredDashboardFilters">
+/// The columns of the dashboard filters the widget ignores, at most 8 (design D6). Kept by column, so they hold on any dashboard the
+/// widget is moved or copied to, and for a filter removed and defined again. Not a query setting: a query ignores it.
+/// </param>
 public sealed record WidgetConfigInput(
     string? Indicator = null,
     string? Measure = null,
@@ -108,7 +112,8 @@ public sealed record WidgetConfigInput(
     int? Buckets = null,
     WidgetSort? Sort = null,
     IReadOnlyList<WidgetTooltipItem>? Tooltip = null,
-    string? Basemap = null)
+    string? Basemap = null,
+    IReadOnlyList<string>? IgnoredDashboardFilters = null)
 {
     public WidgetConfig Normalize() => new(
         Indicator ?? "",
@@ -121,7 +126,8 @@ public sealed record WidgetConfigInput(
         Sort?.Normalize(),
         // A null item is kept so validation can name it.
         Tooltip?.Select(item => item?.Normalize()!).ToList() ?? [],
-        string.IsNullOrEmpty(Basemap) ? null : Basemap);
+        string.IsNullOrEmpty(Basemap) ? null : Basemap,
+        IgnoredDashboardFilters ?? []);
 }
 
 /// <summary>A widget's query with its defaults applied. With no <see cref="Measure"/> and no <see cref="Ratio"/>, the table's default measure is plotted.</summary>
@@ -135,7 +141,8 @@ public sealed record WidgetConfig(
     int? Buckets,
     WidgetSort? Sort = null,
     IReadOnlyList<WidgetTooltipItem>? Tooltip = null,
-    string? Basemap = null)
+    string? Basemap = null,
+    IReadOnlyList<string>? IgnoredDashboardFilters = null)
 {
     public const int DefaultBuckets = 10;
     public const int MaxBuckets = 100;
@@ -151,6 +158,9 @@ public sealed record WidgetConfig(
 
     /// <summary>The tooltip columns; a config stored before the field existed has none.</summary>
     public IReadOnlyList<WidgetTooltipItem> Tooltip { get; init; } = Tooltip ?? [];
+
+    /// <summary>The columns of the dashboard filters the widget ignores; a config stored before the field existed ignores none.</summary>
+    public IReadOnlyList<string> IgnoredDashboardFilters { get; init; } = IgnoredDashboardFilters ?? [];
 }
 
 /// <param name="DashboardId">The project dashboard the widget is on.</param>
@@ -173,9 +183,10 @@ public sealed record IndicatorEntry(
 /// <param name="Indicators">The project's current indicator scripts, ordered by name.</param>
 public sealed record IndicatorOverview(IReadOnlyList<IndicatorEntry> Indicators, IndicatorLimits Limits);
 
-/// <summary>One of the project's own dashboards with its widgets.</summary>
+/// <summary>One of the project's own dashboards with its filters and widgets.</summary>
+/// <param name="Filters">The dashboard's filters, in order; none for a dashboard that has not defined any.</param>
 /// <param name="Widgets">Ordered by <c>layout.y</c>, <c>layout.x</c>, then creation; listed whether or not their indicator is published.</param>
-public sealed record DashboardView(Guid Id, string Name, IReadOnlyList<Widget> Widgets);
+public sealed record DashboardView(Guid Id, string Name, IReadOnlyList<DashboardFilter> Filters, IReadOnlyList<Widget> Widgets);
 
 /// <summary>One of the project's own dashboards, without its widgets.</summary>
 public sealed record DashboardEntry(Guid Id, string Name);
@@ -218,12 +229,17 @@ public sealed record MissingReferences(bool Indicator, IReadOnlyList<string> Col
 }
 
 /// <param name="TooltipTypes">Map only: the type of each tooltip column, so the page formats the values without the catalog; left out for every other widget.</param>
+/// <param name="NotFiltered">
+/// The columns of the request's dashboard filters that did not narrow the rows: the table has no such column, or has it with a type
+/// of another kind. Left out when the request had no dashboard filters, and when nothing was drawn.
+/// </param>
 public sealed record IndicatorQueryResponse(
     bool Published,
     IReadOnlyList<IndicatorRow> Rows,
     bool RowLimitReached,
     MissingReferences Missing,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<DataColumnType>? TooltipTypes = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<DataColumnType>? TooltipTypes = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? NotFiltered = null);
 
 /// <summary>The outcome of a query: the response, or the validation errors of the request.</summary>
 public sealed record IndicatorQueryOutcome(IndicatorQueryResponse? Response, IDictionary<string, string[]>? Errors);
@@ -232,7 +248,12 @@ public sealed record IndicatorQueryOutcome(IndicatorQueryResponse? Response, IDi
 /// The body of the query endpoint. <paramref name="ChartType"/> is optional: a histogram with no group column plots each row's
 /// measure as it is instead of one sum.
 /// </summary>
-public sealed record IndicatorQueryRequest(WidgetConfigInput? Config, string? ChartType = null);
+/// <param name="DashboardFilters">
+/// At most 8 dashboard filter values in force, one per column, that narrow the rows too, on top of the widget's own filters. One whose
+/// column the table does not have, or has with another kind of type, is listed in the response's <c>notFiltered</c> instead.
+/// </param>
+public sealed record IndicatorQueryRequest(
+    WidgetConfigInput? Config, string? ChartType = null, IReadOnlyList<AppliedDashboardFilter>? DashboardFilters = null);
 
 /// <param name="Layout">Left out: the chart type's default size, placed under the existing widgets.</param>
 public sealed record CreateWidgetRequest(string? Title, string? ChartType, WidgetConfigInput? Config, WidgetLayout? Layout = null);

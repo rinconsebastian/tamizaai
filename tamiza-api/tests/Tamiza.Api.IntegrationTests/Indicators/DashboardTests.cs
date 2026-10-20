@@ -760,6 +760,50 @@ public sealed class DashboardTests(PostgresFixture postgres)
         Assert.Equal(copies[2].GetProperty("layout").GetRawText(), copy.Single(w => w.GetProperty("id").GetGuid() == copies[2].GetProperty("id").GetGuid()).GetProperty("layout").GetRawText());
     }
 
+    // Filters duplicated (custom-dashboards: Duplicating a dashboard)
+
+    private static readonly object[] HousingFilters =
+    [
+        new { label = "Municipality", column = "municipality", kind = "text", @default = (object?)null },
+        new { label = "Round", column = "round", kind = "number", @default = (object?)new { min = "3", max = "3" } },
+    ];
+
+    [Fact]
+    public async Task A_duplicate_holds_the_originals_filters_in_order_with_their_defaults_and_what_its_widgets_ignore()
+    {
+        await using var h = await PublishedAsync();
+        await h.SaveFiltersAsync(HousingFilters);
+        await h.AddWidgetAsync(new
+        {
+            title = "Households, all municipalities", chartType = "stat", config = new { indicator = "coverage", ignoredDashboardFilters = new[] { "municipality" } },
+        });
+
+        var response = await DuplicateAsync(h, h.DashboardId, "Housing (copy)");
+        var copyId = (await ReadAsync(response)).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var original = (await h.GetDashboardAsync(client: h.Viewer)).GetProperty("filters").GetRawText();
+        var copy = (await h.GetDashboardAsync(copyId, h.Viewer)).GetProperty("filters");
+        Assert.Equal(original, copy.GetRawText());
+        Assert.Equal(["Municipality", "Round"], copy.EnumerateArray().Select(f => f.GetProperty("label").GetString()));
+        Assert.Equal("3", copy[1].GetProperty("default").GetProperty("min").GetString());
+        var copiedWidget = (await h.GetWidgetsAsync(copyId))[0];
+        Assert.Equal(["municipality"], IndicatorsHarness.Strings(copiedWidget.GetProperty("config").GetProperty("ignoredDashboardFilters")));
+    }
+
+    [Fact]
+    public async Task The_filters_of_a_duplicate_and_its_original_change_independently()
+    {
+        await using var h = await PublishedAsync();
+        await h.SaveFiltersAsync(HousingFilters);
+        var copyId = (await ReadAsync(await DuplicateAsync(h, h.DashboardId, "Housing (copy)"))).GetProperty("id").GetGuid();
+
+        await h.SaveFiltersAsync(new[] { HousingFilters[0] }, dashboardId: copyId);
+
+        Assert.Equal(2, (await h.GetDashboardAsync()).GetProperty("filters").GetArrayLength());
+        Assert.Equal(1, (await h.GetDashboardAsync(copyId)).GetProperty("filters").GetArrayLength());
+    }
+
     // Duplicate at the limit
 
     [Fact]
@@ -865,6 +909,8 @@ public sealed class DashboardTests(PostgresFixture postgres)
                 "/dashboards/order put",
                 "/dashboards/{dashboardId} delete get patch",
                 "/dashboards/{dashboardId}/copies post",
+                "/dashboards/{dashboardId}/filters put",
+                "/dashboards/{dashboardId}/values get",
                 "/dashboards/{dashboardId}/widgets post",
                 "/dashboards/{dashboardId}/widgets/{widgetId} delete patch",
             ],
@@ -872,6 +918,11 @@ public sealed class DashboardTests(PostgresFixture postgres)
         var widgets = paths.GetProperty(project + "/dashboards/{dashboardId}/widgets");
         var widget = paths.GetProperty(project + "/dashboards/{dashboardId}/widgets/{widgetId}");
         var order = paths.GetProperty(project + "/dashboards/order");
+        var dashboard = paths.GetProperty(project + "/dashboards/{dashboardId}");
+        var filters = paths.GetProperty(project + "/dashboards/{dashboardId}/filters");
+        Assert.Equal(["filters", "id", "name", "widgets"], Properties(Component(document, Answer(dashboard.GetProperty("get"), "200"))));
+        Assert.Equal(["filters"], Properties(Component(document, Body(filters.GetProperty("put")))));
+        Assert.Equal(["filters"], Properties(Component(document, Answer(filters.GetProperty("put"), "200"))));
         Assert.Contains("dashboardId", Properties(Component(document, Answer(widgets.GetProperty("post"), "201"))));
         Assert.Contains("dashboardId", Properties(Component(document, Answer(widget.GetProperty("patch"), "200"))));
         Assert.Contains("dashboardId", Properties(Component(document, Body(widget.GetProperty("patch")))));

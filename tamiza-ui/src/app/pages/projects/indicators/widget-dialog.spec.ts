@@ -1,9 +1,10 @@
 import { MapStub, stubMap } from '../../../../testing/leaflet';
 import { details, projectId, settle, typeInto } from '../../../../testing/project-harness';
 import { BasemapList } from '../../../core/basemaps.service';
-import { IndicatorColumns, IndicatorEntry, Widget, WidgetConfig } from '../../../core/projects/indicators.service';
+import { DashboardFilter, IndicatorColumns, IndicatorEntry, Widget, WidgetConfig } from '../../../core/projects/indicators.service';
 import { DashboardEntry } from '../../../core/projects/projects.service';
 import { valueSearchDelayMs } from '../data-filter-dialog';
+import { encodeFilters } from '../data-view';
 import {
   Context,
   all,
@@ -42,11 +43,18 @@ interface Setup {
   indicators?: IndicatorEntry[];
   /** The project's dashboards, when they are not just "Indicators" (`d1`, where the dialog is opened). */
   dashboards?: DashboardEntry[];
+  /** The open dashboard's filters, and the query string of its address (`f=…`). */
+  filters?: DashboardFilter[];
+  query?: string;
 }
 
 /** Opens the dialog to add a widget, or to edit `existing`, and answers the request for the columns of the indicator it starts on. */
-async function openDialog({ existing = null, columns = catalog(), indicators, dashboards }: Setup = {}) {
-  const context = await open('analyst', existing ? [existing] : [], existing ? result([row('Cali', 75)]) : null, indicators ? { indicators } : {}, dashboards ? { dashboards } : {});
+async function openDialog({ existing = null, columns = catalog(), indicators, dashboards, filters, query }: Setup = {}) {
+  const context = await open('analyst', existing ? [existing] : [], existing ? result([row('Cali', 75)]) : null, indicators ? { indicators } : {}, {
+    ...(dashboards ? { dashboards } : {}),
+    ...(filters ? { filters } : {}),
+    ...(query ? { query } : {}),
+  });
   if (existing) {
     // Edit is an item of the widget's actions menu.
     context.root.querySelector<HTMLElement>('[data-testid="menu-trigger"]')!.click();
@@ -379,7 +387,19 @@ describe('the widget dialog', () => {
       expect(request.request.body).toEqual({
         title: 'Attendance by round',
         chartType: 'line',
-        config: { indicator: 'coverage', measure: 'numerator', ratio: null, groupBy: 'round', filters: [], geometryColumn: null, buckets: null, sort: null, tooltip: [], basemap: null },
+        config: {
+          indicator: 'coverage',
+          measure: 'numerator',
+          ratio: null,
+          groupBy: 'round',
+          filters: [],
+          geometryColumn: null,
+          buckets: null,
+          sort: null,
+          tooltip: [],
+          basemap: null,
+          ignoredDashboardFilters: [],
+        },
       });
       request.flush(widget('w9', { title: 'Attendance by round', chartType: 'line' }), { status: 201, statusText: 'Created' });
       await settle(context.harness);
@@ -1451,5 +1471,90 @@ describe('the widget dialog', () => {
       expect(errorOf('widgetDashboard')).toBe('');
       context.http.expectNone(projectUrl);
     });
+  });
+});
+
+// Ignoring dashboard filters, and the preview with the dashboard's filters (dashboard filters, design D6, D9).
+describe('the widget dialog on a dashboard with filters', () => {
+  afterEach(clearOverlay);
+
+  const municipality: DashboardFilter = { column: 'municipality', label: 'Municipality', kind: 'text', default: null };
+  const round: DashboardFilter = { column: 'round', label: 'Round', kind: 'number', default: null };
+  const cali = `f=${encodeFilters([{ column: 'municipality', op: 'in', values: ['Cali'] }])}`;
+  const box = (column: string) => dialog().querySelector<HTMLInputElement>(`[data-testid="dialog-dashboard-filter"][data-column="${column}"]`)!;
+  const indicatorsAndField: DashboardEntry[] = [{ id: 'd1', name: 'Indicators' }, { id: 'd2', name: 'Field' }];
+  const stat = widget('w1', { title: 'Households, all municipalities', chartType: 'stat', config: config({ groupBy: null }) });
+
+  it('saves the filters left unchecked as ignored (Total that does not change)', async () => {
+    const context = await openDialog({ existing: stat, filters: [municipality, round] });
+
+    expect(text(dialog().querySelector('[data-testid="dialog-dashboard-filters"] legend'))).toBe('Dashboard filters');
+    expect(box('municipality').checked).toBe(true);
+    await click(context, box('municipality'));
+    await click(context, field('dialog-save'));
+
+    expect(context.http.expectOne(isPatch).request.body.config.ignoredDashboardFilters).toEqual(['municipality']);
+  });
+
+  it('offers nothing to ignore on a dashboard with no filters (No filters to ignore)', async () => {
+    await openDialog({ existing: stat });
+
+    expect(dialog().querySelector('[data-testid="dialog-dashboard-filters"]')).toBeNull();
+  });
+
+  it('previews with the dashboard\'s values in force, and says so (Preview filtered)', async () => {
+    const context = await openDialog({ existing: widget('w1'), filters: [municipality], query: cali });
+
+    const body = (await previewAnswer(context, result([row('Cali', 75)]))) as { dashboardFilters?: unknown };
+
+    expect(body.dashboardFilters).toEqual([{ column: 'municipality', kind: 'text', values: ['Cali'] }]);
+    expect(text(field('dialog-preview-filtered'))).toBe('Preview filtered by: Municipality');
+  });
+
+  it('previews again without a filter once it is unchecked (Ignoring updates the preview)', async () => {
+    const context = await openDialog({ existing: widget('w1'), filters: [municipality], query: cali });
+    await previewAnswer(context, result([row('Cali', 75)]));
+
+    await click(context, box('municipality'));
+    const body = (await previewAnswer(context, result([row('Cali', 75), row('Palmira', 60)]))) as { dashboardFilters?: unknown };
+
+    expect(body.dashboardFilters).toBeUndefined();
+    expect(dialog().querySelector('[data-testid="dialog-preview-filtered"]')).toBeNull();
+    expect(text(dialog().querySelector('[data-testid="widget-not-filtered"]'))).toBe('Not filtered by: Municipality');
+  });
+
+  it('keeps ignoring a filter the dashboard does not have now', async () => {
+    const ignoring = widget('w1', { config: config({ ignoredDashboardFilters: ['district'] }) });
+    const context = await openDialog({ existing: ignoring, filters: [municipality] });
+
+    await click(context, box('municipality'));
+    await click(context, field('dialog-save'));
+
+    expect(context.http.expectOne(isPatch).request.body.config.ignoredDashboardFilters).toEqual(['district', 'municipality']);
+  });
+
+  it('counts a box changed as a change, so a move sends the whole form', async () => {
+    const context = await openDialog({ existing: widget('w1'), dashboards: indicatorsAndField, filters: [municipality] });
+
+    await click(context, box('municipality'));
+    await change(context, field('dialog-dashboard'), 'd2');
+    await click(context, field('dialog-save'));
+
+    const body = context.http.expectOne(isPatch).request.body;
+    expect(body.dashboardId).toBe('d2');
+    expect(body.config.ignoredDashboardFilters).toEqual(['municipality']);
+  });
+
+  it('shows the server\'s refusal of an ignored filter at the boxes', async () => {
+    const context = await openDialog({ existing: widget('w1'), filters: [municipality] });
+
+    await click(context, box('municipality'));
+    await click(context, field('dialog-save'));
+    context.http
+      .expectOne(isPatch)
+      .flush({ title: 'x', errors: { 'config.ignoredDashboardFilters[0]': ["'municipality' is not a valid column name."] } }, { status: 400, statusText: 'Bad Request' });
+    await settle(context.harness);
+
+    expect(text(dialog().querySelector('[data-testid="dialog-dashboard-filters"] [data-testid="field-error"]'))).toBe("'municipality' is not a valid column name.");
   });
 });
