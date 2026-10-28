@@ -70,13 +70,17 @@ public static class DashboardEndpoints
             return DashboardNotFound();
         }
 
-        var widgets = (await db.DashboardWidgets.AsNoTracking().Where(w => w.DashboardId == dashboardId).ToListAsync(ct))
+        var widgets = await ReadWidgetsAsync(db, dashboardId, ct);
+        return TypedResults.Ok(new DashboardView(dashboardId, dashboard.Name, ReadFilters(dashboard.Filters), widgets));
+    }
+
+    /// <summary>A dashboard's widgets in reading order: top to bottom, then left to right, then the older first.</summary>
+    internal static async Task<List<Widget>> ReadWidgetsAsync(TamizaDbContext db, Guid dashboardId, CancellationToken ct) =>
+        (await db.DashboardWidgets.AsNoTracking().Where(w => w.DashboardId == dashboardId).ToListAsync(ct))
             .Select(w => (Widget: ToWidget(w), w.CreatedAt))
             .OrderBy(w => w.Widget.Layout.Y).ThenBy(w => w.Widget.Layout.X).ThenBy(w => w.CreatedAt)
             .Select(w => w.Widget)
             .ToList();
-        return TypedResults.Ok(new DashboardView(dashboardId, dashboard.Name, ReadFilters(dashboard.Filters), widgets));
-    }
 
     /// <summary>
     /// The most frequent values of a text column across the indicator tables of the dashboard's widgets, optionally only those that
@@ -712,18 +716,18 @@ public static class DashboardEndpoints
     private static Widget ToWidget(DashboardWidget widget) =>
         new(widget.Id, widget.DashboardId, widget.Title, widget.ChartType, ReadConfig(widget), ReadLayout(widget.Layout), widget.UpdatedAt);
 
-    private static WidgetConfig ReadConfig(DashboardWidget widget) =>
+    internal static WidgetConfig ReadConfig(DashboardWidget widget) =>
         (JsonSerializer.Deserialize<WidgetConfigInput>(widget.Config, Json) ?? new WidgetConfigInput()).Normalize();
 
     private static WidgetLayout ReadLayout(string json) => JsonSerializer.Deserialize<WidgetLayout>(json, Json) ?? new WidgetLayout(0, 0, 1, 1);
 
     /// <summary>The filters as <see cref="SaveFiltersAsync"/> stored them, which validated them first.</summary>
-    private static List<DashboardFilter> ReadFilters(string json) => JsonSerializer.Deserialize<List<DashboardFilter>>(json, Json) ?? [];
+    internal static List<DashboardFilter> ReadFilters(string json) => JsonSerializer.Deserialize<List<DashboardFilter>>(json, Json) ?? [];
 
     private static ProblemHttpResult WidgetNotFound() =>
         TypedResults.Problem(statusCode: StatusCodes.Status404NotFound, title: "Widget not found.");
 
-    private static ProblemHttpResult DashboardNotFound() =>
+    internal static ProblemHttpResult DashboardNotFound() =>
         TypedResults.Problem(
             statusCode: StatusCodes.Status404NotFound,
             title: "Dashboard not found.",

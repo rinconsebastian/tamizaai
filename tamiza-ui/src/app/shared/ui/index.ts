@@ -6,7 +6,7 @@ export * from './card';
 export * from './chart-tooltip';
 export * from './confirm-dialog';
 export * from './format-pipes';
-export { dateText, dateTimeText, numberText, percentText, timestampText } from './formats';
+export { dateText, dateTimeText, numberText, percentText, timestampText, weekdayText } from './formats';
 export type { DateStyle } from './formats';
 export * from './disclosure';
 export * from './dropdown-menu';

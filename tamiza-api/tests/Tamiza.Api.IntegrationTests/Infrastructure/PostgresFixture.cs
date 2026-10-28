@@ -11,9 +11,13 @@ public sealed class PostgresFixture : IAsyncLifetime
     private readonly PostgreSqlContainer _container = CreateContainer();
 
     // Each test database keeps its idle pooled connections open for minutes after its test ends, so the suite
-    // needs more than PostgreSQL's default 100 connections.
+    // needs more than PostgreSQL's default 100 connections. Docker's default 64 MB of /dev/shm runs out late in a full run
+    // ("could not resize shared memory segment"): PostgreSQL keeps its shared memory there.
     public static PostgreSqlContainer CreateContainer() =>
-        new PostgreSqlBuilder(Image).WithCommand("-c", "max_connections=500").Build();
+        new PostgreSqlBuilder(Image)
+            .WithCommand("-c", "max_connections=500")
+            .WithCreateParameterModifier(parameters => parameters.HostConfig.ShmSize = 512L * 1024 * 1024)
+            .Build();
 
     public Task InitializeAsync() => _container.StartAsync();
 

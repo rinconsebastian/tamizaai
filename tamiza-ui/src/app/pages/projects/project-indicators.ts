@@ -11,11 +11,13 @@ import { Downloader } from '../../core/download.service';
 import { ExportFormat } from '../../core/projects/data.service';
 import { DashboardFilter, IndicatorEntry, IndicatorsOverview, IndicatorsService, Layout, Widget, maxDashboards } from '../../core/projects/indicators.service';
 import { DashboardEntry } from '../../core/projects/projects.service';
+import { SystemConfigService } from '../../core/system-config';
 import { Alert, ApiLang, Badge, Button, Card, ConfirmDialog, Disclosure, DropdownMenu, MenuItem, Skeleton, ToastService, DateTimePipe, NumberPipe, numberText } from '../../shared/ui';
 import { DashboardFilterBar, FilterChange } from './indicators/dashboard-filter-bar';
 import { FilterValues, activeFilters, defaultsOf, readAddress, writeAddress } from './indicators/dashboard-filters';
 import { DashboardFiltersData, DashboardFiltersDialog, DashboardFiltersResult } from './indicators/dashboard-filters-dialog';
 import { DashboardNameAction, DashboardNameData, DashboardNameDialog, DashboardNameResult } from './indicators/dashboard-name-dialog';
+import { DashboardReportData, DashboardReportDialog, DashboardReportResult } from './indicators/dashboard-report-dialog';
 import { Placed } from './indicators/grid-layout';
 import { WidgetDialog, WidgetDialogData, WidgetDialogResult } from './indicators/widget-dialog';
 import { WidgetGrid } from './indicators/widget-grid';
@@ -326,6 +328,7 @@ export class ProjectIndicators {
       { id: 'moveLeft', label: t('dashboards.menu.moveLeft'), disabled: moving || first, description: moveHint(first, 'first'), testId: 'dashboard-move-left' },
       { id: 'moveRight', label: t('dashboards.menu.moveRight'), disabled: moving || last, description: moveHint(last, 'last'), testId: 'dashboard-move-right' },
       { id: 'filters', label: t('dashboards.menu.filters'), testId: 'dashboard-filters' },
+      ...(this.emailEnabled() ? [{ id: 'report', label: t('dashboards.menu.report'), testId: 'dashboard-report' }] : []),
       {
         id: 'remove',
         label: t('dashboards.menu.remove'),
@@ -336,6 +339,15 @@ export class ProjectIndicators {
       },
     ];
   });
+  /**
+   * Whether Tamiza sends email itself: only then does a dashboard offer a scheduled email (dashboard reports, design D14). Only the
+   * actions ask, and only analysts and admins are shown them, so a viewer's page reads nothing of the deployment's configuration. The
+   * service is created outside the actions' tracking: its first read sends a request.
+   */
+  private emailEnabled(): boolean {
+    return untracked(() => this.injector.get(SystemConfigService)).emailEnabled();
+  }
+
   /**
    * The notice about a dashboard that does not exist, or about a refused change to the dashboards, shown only while the dashboard
    * it names is open (design D10, D12).
@@ -736,6 +748,9 @@ export class ProjectIndicators {
       case 'filters':
         this.editFilters();
         break;
+      case 'report':
+        this.editReport();
+        break;
       case 'duplicate':
         void this.duplicate();
         break;
@@ -824,6 +839,37 @@ export class ProjectIndicators {
         this.dropped.set([]);
         void this.router.navigate([], { relativeTo: this.route, queryParams: { f: null } });
         this.toasts.success(this.transloco.translate('dashboardFilters.saved'));
+      });
+  }
+
+  /**
+   * The dashboard's scheduled email (dashboard reports, design D14). Saving or removing it changes nothing the page shows, so a toast
+   * says what was done once the form has closed and focus is back on the actions button.
+   */
+  private editReport(): void {
+    const dashboard = this.current();
+    if (!dashboard) {
+      return;
+    }
+    this.dialog
+      .open<DashboardReportResult, DashboardReportData>(DashboardReportDialog, {
+        data: { projectId: this.projectId, dashboard },
+        ariaLabelledBy: 'dashboard-report-dialog-title',
+        autoFocus: 'first-tabbable',
+        restoreFocus: true,
+        backdropClass: ['cdk-overlay-dark-backdrop'],
+        maxWidth: '100vw',
+        maxHeight: '100dvh',
+      })
+      .closed.subscribe((result) => {
+        if (!result) {
+          return;
+        }
+        if ('gone' in result) {
+          this.gone(dashboard);
+          return;
+        }
+        this.toasts.success(this.transloco.translate('removed' in result ? 'dashboards.report.removed' : 'dashboards.report.saved', { name: dashboard.name }));
       });
   }
 

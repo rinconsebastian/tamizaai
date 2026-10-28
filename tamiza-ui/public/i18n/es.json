@@ -138,6 +138,20 @@
         "rateLimitedIn": "Todavía no se puede enviar este correo. Inténtalo de nuevo en {{ minutes }} minutos.",
         "rateLimitedInOne": "Todavía no se puede enviar este correo. Inténtalo de nuevo en 1 minuto.",
         "failed": "No se pudo enviar el correo. Inténtalo más tarde."
+      },
+      "reports": {
+        "unavailable": "Los envíos programados no están disponibles en esta instalación.",
+        "none": "Este tablero no tiene un envío programado. Guarda uno primero.",
+        "tooSoon": "Ya se usó Enviar ahora para este correo hace menos de 10 minutos. Inténtalo más tarde.",
+        "nothingToSend": "No había nada que enviar: el tablero no tiene widgets o no se pudo leer ninguno.",
+        "failed": "No se pudo preparar el correo por un error inesperado. Un administrador puede ver los detalles en el registro de la API.",
+        "authorNoAccess": "El miembro que configuró este correo ya no administra este proyecto, así que no se envió. Guárdalo de nuevo para que se siga enviando: tú quedarás como su autor."
+      },
+      "email": {
+        "unavailable": "No se pudo conectar con el servidor de correo, o no respondió a tiempo.",
+        "authFailed": "Falló la autenticación con el servidor de correo.",
+        "rejected": "El servidor de correo rechazó el mensaje.",
+        "rejectedAddress": "El servidor de correo rechazó la dirección {{ address }}, así que ningún destinatario recibió el correo."
       }
     }
   },
@@ -1640,7 +1654,8 @@
       "moveLeft": "Mover a la izquierda",
       "moveRight": "Mover a la derecha",
       "remove": "Eliminar",
-      "filters": "Filtros"
+      "filters": "Filtros",
+      "report": "Envío programado…"
     },
     "unavailable": {
       "limit": "Un proyecto puede tener como máximo {{ max }} tableros.",
@@ -1686,6 +1701,43 @@
       "missing": "El tablero que abriste no existe. Se muestra {{ name }} en su lugar.",
       "removed": "\"{{ removed }}\" ya no existe. Se muestra {{ name }} en su lugar.",
       "dismiss": "Cerrar aviso"
+    },
+    "report": {
+      "title": "Envío programado de {{ name }}",
+      "intro": "Tamiza envía por correo las cifras de este tablero los días y a la hora elegidos: en el mensaje, las cifras destacadas y las primeras filas de la tabla de cada widget; en un libro adjunto, la tabla completa de cada widget.",
+      "loading": "Leyendo la configuración del envío…",
+      "warning": "Los destinatarios no necesitan ser usuarios de Tamiza. Reciben los datos de este tablero por correo, fuera de Tamiza, y un correo enviado no se puede recuperar.",
+      "filtersNote": "El correo usa los valores predeterminados de los filtros del tablero. Son valores fijos: un rango de fechas predeterminado es el mismo en todos los correos.",
+      "lastSent": "Último envío",
+      "neverSent": "Aún no se ha enviado",
+      "lastSaved": "Guardado por última vez",
+      "savedBy": "{{ time }} por {{ name }}",
+      "lastFailure": "El último intento falló el {{ time }}: {{ reason }}",
+      "recipients": "Destinatarios",
+      "recipientsHint": "Hasta {{ max }} direcciones de correo, una por línea o separadas por comas o punto y coma.",
+      "days": "Días",
+      "time": "Hora",
+      "timeHint": "En la zona horaria del proyecto, {{ zone }}.",
+      "active": "Activo",
+      "activeHint": "Mientras está en pausa, no se envía ningún correo programado. La configuración se conserva y Enviar ahora sigue funcionando.",
+      "savingNote": "Al guardar, las respuestas te llegarán a ti y el correo usará tu idioma y formato regional.",
+      "save": "Guardar",
+      "saving": "Guardando…",
+      "sendNow": "Enviar ahora",
+      "sending": "Enviando…",
+      "sendNowHint": "Envía ahora con la configuración guardada, esté el correo activo o en pausa. La programación no cambia.",
+      "queued": "El correo quedó en cola y se enviará en breve.",
+      "remove": "Eliminar envío",
+      "removeTitle": "Eliminar envío programado",
+      "removeMessage": "¿Dejar de enviar {{ name }} por correo y eliminar su configuración? Esta acción no se puede deshacer.",
+      "removeConfirm": "Eliminar envío",
+      "saved": "Se guardó el envío programado de {{ name }}.",
+      "removed": "Se eliminó el envío programado de {{ name }}.",
+      "errors": {
+        "recipientsRequired": "Escribe al menos una dirección de correo.",
+        "daysRequired": "Elige al menos un día.",
+        "timeRequired": "Indica una hora."
+      }
     }
   },
   "dashboardFilters": {

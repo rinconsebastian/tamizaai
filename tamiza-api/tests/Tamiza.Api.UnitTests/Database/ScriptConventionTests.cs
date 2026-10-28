@@ -182,6 +182,32 @@ public sealed class ScriptConventionTests
     }
 
     [Fact]
+    public void The_dashboard_reports_script_names_every_constraint_and_index()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0015_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0015_add_dashboard_reports.sql", resource);
+        foreach (var constraint in new[]
+                 {
+                     "pk_dashboard_reports PRIMARY KEY", "ck_dashboard_reports_recipients CHECK", "ck_dashboard_reports_days CHECK",
+                     "fk_dashboard_reports_dashboards_dashboard_id FOREIGN KEY", "fk_dashboard_reports_users_updated_by FOREIGN KEY",
+                 })
+        {
+            Assert.Contains($"CONSTRAINT {constraint}", sql);
+        }
+
+        // Every key, check and foreign key is introduced by a CONSTRAINT name; every index has an ix_ name.
+        Assert.Equal(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count,
+            System.Text.RegularExpressions.Regex.Matches(sql, @"CONSTRAINT (?:pk|fk|ck)_\w+ (?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count);
+        Assert.All(System.Text.RegularExpressions.Regex.Matches(sql, @"CREATE (?:UNIQUE )?INDEX (\w+)").Select(m => m.Groups[1].Value),
+            name => Assert.StartsWith("ix_dashboard_reports_", name));
+        Assert.Contains("CREATE INDEX ix_dashboard_reports_updated_by ON tamiza.dashboard_reports (updated_by)", sql);
+        Assert.Contains("REFERENCES tamiza.dashboards (id) ON DELETE CASCADE", sql);
+    }
+
+    [Fact]
     public void The_dashboard_filters_script_adds_one_column()
     {
         var resource = Resources.Single(name => name.StartsWith("0014_", StringComparison.Ordinal));

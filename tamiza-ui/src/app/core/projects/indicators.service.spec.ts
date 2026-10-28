@@ -79,6 +79,35 @@ describe('IndicatorsService', () => {
     expect(searched.request.params.get('search')).toBe('pal');
   });
 
+  it('reads, saves and removes a dashboard\'s scheduled email', () => {
+    const settings = { recipients: ['ana@partner.org', 'luis@city.gov.co'], days: [1, 4], time: '07:00', active: true, locale: 'es-CO' };
+    const report = { settings, timeZone: 'America/Bogota', updatedBy: { name: 'Ada' }, updatedAt: '2026-10-27T10:00:00-05:00', lastSentAt: null, lastFailure: null };
+    let saved: unknown;
+    service.getReport('p1', 'd2').subscribe();
+    service.saveReport('p1', 'd2', settings).subscribe((answer) => (saved = answer));
+    service.removeReport('p1', 'd2').subscribe();
+
+    const read = http.expectOne((r) => r.method === 'GET');
+    expect(read.request.url).toBe(`${dashboards}/d2/report`);
+    expect(read.request.body).toBeNull();
+    const save = http.expectOne((r) => r.method === 'PUT');
+    expect(save.request.url).toBe(`${dashboards}/d2/report`);
+    expect(save.request.body).toEqual(settings);
+    save.flush(report);
+    expect(saved).toEqual(report);
+    const remove = http.expectOne((r) => r.method === 'DELETE');
+    expect(remove.request.url).toBe(`${dashboards}/d2/report`);
+    expect(remove.request.body).toBeNull();
+  });
+
+  it('asks for a dashboard\'s scheduled email to be sent now, with no body', () => {
+    service.sendReportNow('p1', 'd2').subscribe();
+
+    const request = http.expectOne(`${dashboards}/d2/report/send`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toBeNull();
+  });
+
   it('creates a widget on its dashboard, leaving the layout out when there is none', () => {
     service.create('p1', 'd1', { title: 'Coverage', chartType: 'column', config }).subscribe();
 

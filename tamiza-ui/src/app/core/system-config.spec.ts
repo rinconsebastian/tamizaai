@@ -3,12 +3,13 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { SYSTEM_CONFIG_URL, SystemConfig, SystemConfigService } from './system-config';
 
-function config(enabled: boolean, accountEmails = false): SystemConfig {
+function config(enabled: boolean, accountEmails = false, email = false): SystemConfig {
   return {
     oidc: { authority: 'https://kc.example.org/realms/tamiza', clientId: 'tamiza-ui', scope: 'openid' },
     version: '0.1.0',
     assistant: { enabled },
     accountEmails: { enabled: accountEmails },
+    email: { enabled: email },
   };
 }
 
@@ -90,6 +91,42 @@ describe('SystemConfigService', () => {
     http.expectOne(SYSTEM_CONFIG_URL).flush({ oidc: config(true).oidc, version: '0.0.9', assistant: { enabled: true } });
 
     expect(service.accountEmailsEnabled()).toBe(false);
+  });
+
+  it('reports email sending as off until the configuration arrives, and when it cannot be read', () => {
+    const { http, service } = setup();
+    expect(service.emailEnabled()).toBe(false);
+
+    http.expectOne(SYSTEM_CONFIG_URL).flush(null, { status: 503, statusText: 'Service Unavailable' });
+
+    expect(service.emailEnabled()).toBe(false);
+  });
+
+  it('reports email sending as enabled only when the deployment configured it, apart from account emails', () => {
+    const { http, service } = setup();
+
+    http.expectOne(SYSTEM_CONFIG_URL).flush(config(false, false, true));
+
+    expect(service.emailEnabled()).toBe(true);
+    expect(service.accountEmailsEnabled()).toBe(false);
+    expect(service.assistantEnabled()).toBe(false);
+  });
+
+  it('reports email sending as disabled when the deployment did not configure it (Not configured)', () => {
+    const { http, service } = setup();
+
+    http.expectOne(SYSTEM_CONFIG_URL).flush(config(true, true, false));
+
+    expect(service.emailEnabled()).toBe(false);
+    expect(service.accountEmailsEnabled()).toBe(true);
+  });
+
+  it('treats a configuration without the email key (an older API) as disabled', () => {
+    const { http, service } = setup();
+
+    http.expectOne(SYSTEM_CONFIG_URL).flush({ oidc: config(true).oidc, version: '0.0.9', assistant: { enabled: true }, accountEmails: { enabled: true } });
+
+    expect(service.emailEnabled()).toBe(false);
   });
 
   it('reads the configuration once, however often the service is used', () => {

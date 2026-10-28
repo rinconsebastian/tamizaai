@@ -10,6 +10,7 @@ const systemConfig: SystemConfig = {
   version: '0.1.0',
   assistant: { enabled: false },
   accountEmails: { enabled: false },
+  email: { enabled: false },
 };
 
 describe('OIDC configuration', () => {

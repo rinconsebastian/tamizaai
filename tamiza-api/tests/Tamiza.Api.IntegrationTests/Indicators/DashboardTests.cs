@@ -910,6 +910,8 @@ public sealed class DashboardTests(PostgresFixture postgres)
                 "/dashboards/{dashboardId} delete get patch",
                 "/dashboards/{dashboardId}/copies post",
                 "/dashboards/{dashboardId}/filters put",
+                "/dashboards/{dashboardId}/report delete get put",
+                "/dashboards/{dashboardId}/report/send post",
                 "/dashboards/{dashboardId}/values get",
                 "/dashboards/{dashboardId}/widgets post",
                 "/dashboards/{dashboardId}/widgets/{widgetId} delete patch",

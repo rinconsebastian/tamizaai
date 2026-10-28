@@ -12,16 +12,25 @@ public sealed class ExportSweeper(ExportRegistry registry, TimeProvider time, IL
 {
     public static readonly TimeSpan Interval = TimeSpan.FromMinutes(1);
 
+    /// <summary>
+    /// Clears the leftovers before the host goes on starting: <see cref="BackgroundService"/> runs <see cref="ExecuteAsync"/> on a
+    /// thread of its own, so a file another service writes early (a scheduled email's workbook) could otherwise be deleted.
+    /// </summary>
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        var left = registry.ClearDirectory();
+        if (left > 0)
+        {
+            logger.LogInformation("Deleted {Count} export files left by a previous run.", left);
+        }
+
+        return base.StartAsync(cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
         {
-            var left = registry.ClearDirectory();
-            if (left > 0)
-            {
-                logger.LogInformation("Deleted {Count} export files left by a previous run.", left);
-            }
-
             using var timer = new PeriodicTimer(Interval, time);
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
@@ -47,8 +56,11 @@ public static class ExportFileName
     public static string Create(string projectName, string table, DateOnly day, string extension) =>
         $"{Slug(projectName)}_{table}_{day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}.{extension}";
 
-    /// <summary>Lower-case ASCII letters and digits separated by single dashes; accents are dropped to their letters.</summary>
-    public static string Slug(string text)
+    /// <summary>
+    /// Lower-case ASCII letters and digits separated by single dashes; accents are dropped to their letters. A name that leaves no
+    /// letter or digit, such as "住房", gives <paramref name="fallback"/>.
+    /// </summary>
+    public static string Slug(string text, string fallback = "project")
     {
         var builder = new StringBuilder();
         foreach (var character in text.Normalize(NormalizationForm.FormD))
@@ -73,6 +85,6 @@ public static class ExportFileName
             slug = slug[..MaxProjectLength].TrimEnd('-');
         }
 
-        return slug.Length == 0 ? "project" : slug;
+        return slug.Length == 0 ? fallback : slug;
     }
 }
