@@ -7,6 +7,7 @@ import { Downloader } from '../../core/download.service';
 import { DataFilter } from '../../core/projects/data.service';
 import { DashboardFilter, Widget } from '../../core/projects/indicators.service';
 import { DashboardEntry, ProjectRole } from '../../core/projects/projects.service';
+import { SYSTEM_CONFIG_URL } from '../../core/system-config';
 import { ToastService } from '../../shared/ui';
 import { pressKey } from '../../../testing/cdk';
 import { byTestId, configureApp, details, openProjectSection, projectId, settingsRequests, settle, typeInto } from '../../../testing/project-harness';
@@ -2403,5 +2404,140 @@ describe('ProjectIndicators editing a dashboard\'s filters (dashboard filters, d
     expect(byTestId(context.root, 'dashboard-menu')).toBeNull();
     expect(item('dashboard-filters')).toBeNull();
     expect(pills(context.root)).toEqual(['Municipality: All']);
+  });
+});
+
+describe('ProjectIndicators scheduled email (dashboard reports, design D14)', () => {
+  beforeEach(() => downloader.start.mockClear());
+  afterEach(clearOverlay);
+
+  const reportUrl = `${dashboardUrlOf('d1')}/report`;
+  const projectUrl = `/api/v1/projects/${projectId}`;
+  const item = (testId: string) => document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  const form = () => document.querySelector<HTMLElement>('[data-testid="dashboard-report-dialog"]');
+  const menuItems = () => Array.from(document.querySelectorAll<HTMLElement>('[cdkmenuitem]')).map((i) => i.dataset['testid']);
+  const toasts = () => TestBed.inject(ToastService).toasts().map((t) => t.message);
+  const noEmail = { settings: null, timeZone: 'UTC', updatedBy: null, updatedAt: null, lastSentAt: null, lastFailure: null };
+
+  /** Answers the deployment's configuration, which the page reads once, with email sending on or off. */
+  async function email(context: Context, enabled: boolean): Promise<void> {
+    context.http.expectOne(SYSTEM_CONFIG_URL).flush({
+      oidc: { authority: 'https://kc.example.org/realms/tamiza', clientId: 'tamiza-ui', scope: 'openid' },
+      version: '0.1.0',
+      assistant: { enabled: false },
+      accountEmails: { enabled: false },
+      email: { enabled },
+    });
+    await settle(context.harness);
+  }
+
+  /** Opens the dashboard's actions with a click; returns its trigger. */
+  async function openMenu(context: Context): Promise<HTMLElement> {
+    const trigger = byTestId(context.root, 'dashboard-menu')!;
+    trigger.click();
+    await settle(context.harness);
+    return trigger;
+  }
+
+  it('lists Scheduled email… after Filters while email sending is enabled (Action offered)', async () => {
+    const context = await open('analyst', two, answer, {}, { dashboards: indicatorsAndField });
+    await email(context, true);
+
+    await openMenu(context);
+
+    expect(menuItems()).toEqual([
+      'dashboard-rename',
+      'dashboard-duplicate',
+      'dashboard-move-left',
+      'dashboard-move-right',
+      'dashboard-filters',
+      'dashboard-report',
+      'dashboard-remove',
+    ]);
+    expect(text(item('dashboard-report'))).toBe('Scheduled email…');
+  });
+
+  it('opens the dashboard\'s email, and once it is saved says so and returns focus to the actions', async () => {
+    const context = await open('analyst', two, answer);
+    await email(context, true);
+    const trigger = await openMenu(context);
+    item('dashboard-report')!.click();
+    await settle(context.harness);
+
+    context.http.expectOne((r) => r.method === 'GET' && r.url === reportUrl).flush(noEmail);
+    await settle(context.harness);
+    expect(text(form()!.querySelector('h2'))).toBe('Scheduled email for Indicators');
+    const recipients = form()!.querySelector<HTMLTextAreaElement>('[data-testid="dashboard-report-recipients"]')!;
+    recipients.value = 'ana@partner.org';
+    recipients.dispatchEvent(new Event('input'));
+    await settle(context.harness);
+    byTestId(form()!, 'dashboard-report-save')!.click();
+    await settle(context.harness);
+    const request = context.http.expectOne((r) => r.method === 'PUT' && r.url === reportUrl);
+    expect(request.request.body.recipients).toEqual(['ana@partner.org']);
+    request.flush({ ...noEmail, settings: request.request.body });
+    await settle(context.harness);
+
+    expect(form()).toBeNull();
+    expect(toasts()).toContain('Scheduled email for Indicators saved.');
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('takes the member to the first dashboard when the email finds the dashboard removed meanwhile', async () => {
+    const context = await open('analyst', two, answer, {}, { dashboards: indicatorsAndField });
+    await email(context, true);
+    await openMenu(context);
+    item('dashboard-report')!.click();
+    await settle(context.harness);
+
+    context.http.expectOne((r) => r.method === 'GET' && r.url === reportUrl).flush({ title: 'x', code: 'dashboards.notFound' }, { status: 404, statusText: 'Not Found' });
+    await settle(context.harness);
+    context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: [{ id: 'd2', name: 'Field' }] }));
+    await settle(context.harness);
+    await answerLoad(context, [], {}, 'd2');
+
+    expect(form()).toBeNull();
+    expect(TestBed.inject(Router).url).toBe(`/projects/${projectId}/dashboards/d2`);
+    expect(text(byTestId(context.root, 'dashboard-notice'))).toContain('"Indicators" no longer exists');
+  });
+
+  it('offers no scheduled email while email sending is disabled (Not offered without email)', async () => {
+    const context = await open('admin', two, answer);
+    await email(context, false);
+
+    await openMenu(context);
+
+    expect(menuItems()).toContain('dashboard-filters');
+    expect(item('dashboard-report')).toBeNull();
+  });
+
+  it('offers no scheduled email until the configuration says email sending is on', async () => {
+    const context = await open('analyst', two, answer);
+
+    await openMenu(context);
+
+    expect(item('dashboard-report')).toBeNull();
+  });
+
+  it('offers a viewer no dashboard actions, the scheduled email among them, and asks nothing about email (No actions for a viewer)', async () => {
+    const context = await open('viewer', two, answer);
+
+    expect(byTestId(context.root, 'dashboard-actions')).toBeNull();
+    expect(byTestId(context.root, 'dashboard-menu')).toBeNull();
+    expect(item('dashboard-report')).toBeNull();
+    context.http.expectNone(SYSTEM_CONFIG_URL);
+    context.http.expectNone(reportUrl);
+  });
+
+  it('offers the scheduled email to a member who becomes an analyst while the dashboard is open', async () => {
+    const context = await open('viewer', two, answer);
+
+    const project = context.harness.fixture.debugElement.query(By.css('app-project-indicators')).injector.get(ProjectContext);
+    project.update(details('analyst'));
+    await settle(context.harness);
+    await email(context, true);
+    await openMenu(context);
+
+    expect(item('dashboard-report')).not.toBeNull();
   });
 });

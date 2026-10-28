@@ -17,8 +17,9 @@ public sealed class SystemConfigTests(PostgresFixture postgres)
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal(["accountEmails", "assistant", "oidc", "version"], Keys(body.RootElement));
+        Assert.Equal(["accountEmails", "assistant", "email", "oidc", "version"], Keys(body.RootElement));
         Assert.Equal(["enabled"], Keys(body.RootElement.GetProperty("accountEmails")));
+        Assert.Equal(["enabled"], Keys(body.RootElement.GetProperty("email")));
         Assert.Equal(["enabled"], Keys(body.RootElement.GetProperty("assistant")));
         Assert.Equal(["authority", "clientId", "scope"], Keys(body.RootElement.GetProperty("oidc")));
         Assert.Equal(TestTokens.Issuer, body.RootElement.GetProperty("oidc").GetProperty("authority").GetString());
@@ -93,6 +94,43 @@ public sealed class SystemConfigTests(PostgresFixture postgres)
         Assert.DoesNotContain("secret-model-name", text);
         Assert.DoesNotContain("sk-secret-key-value", text);
         Assert.DoesNotContain("reasoning_effort", text);
+    }
+
+    [Fact]
+    public async Task Email_not_configured()
+    {
+        await using var factory = new TamizaApiFactory(await postgres.CreateDatabaseAsync());
+        using var client = factory.CreateClient();
+        using var body = JsonDocument.Parse(await client.GetStringAsync("/api/v1/system/config"));
+
+        Assert.False(body.RootElement.GetProperty("email").GetProperty("enabled").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Email_configured_without_the_server_the_user_the_password_or_the_sender()
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["TAMIZA_SMTP_HOST"] = "smtp.provider.test",
+            ["TAMIZA_SMTP_PORT"] = "2525",
+            ["TAMIZA_SMTP_USERNAME"] = "smtp-user-name",
+            ["TAMIZA_SMTP_PASSWORD"] = "smtp-secret-password",
+            ["TAMIZA_SMTP_FROM"] = "reports@sender.test",
+            ["TAMIZA_SMTP_FROM_NAME"] = "Census reports",
+        };
+        await using var factory = new TamizaApiFactory(await postgres.CreateDatabaseAsync(), settings);
+        using var client = factory.CreateClient();
+
+        var text = await client.GetStringAsync("/api/v1/system/config");
+
+        using var body = JsonDocument.Parse(text);
+        var email = body.RootElement.GetProperty("email");
+        Assert.True(email.GetProperty("enabled").GetBoolean());
+        Assert.Equal(["enabled"], Keys(email));
+        foreach (var secret in new[] { "provider.test", "2525", "smtp-user-name", "smtp-secret-password", "sender.test", "Census reports" })
+        {
+            Assert.DoesNotContain(secret, text);
+        }
     }
 
     private async Task<JsonElement> GetAssistantAsync(Dictionary<string, string?> overrides)

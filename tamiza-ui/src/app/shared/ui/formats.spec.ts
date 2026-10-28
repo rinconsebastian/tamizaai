@@ -1,4 +1,4 @@
-import { dateText, dateTimeText, numberText, percentText, timestampText } from './formats';
+import { dateText, dateTimeText, numberText, percentText, timestampText, weekdayText } from './formats';
 
 /** ICU versions differ in which space they put between the time and "p. m."; compare with plain spaces. */
 const plain = (text: string | null) => text?.replace(/[  ]/g, ' ') ?? null;
@@ -61,6 +61,17 @@ describe('timestampText', () => {
   it('returns text that is not a timestamp as it is', () => {
     expect(timestampText('not a time', 'en-US')).toBe('not a time');
     expect(timestampText('2026-13-45T10:00:00Z', 'en-US')).toBe('2026-13-45T10:00:00Z');
+  });
+});
+
+describe('weekdayText', () => {
+  const week = [1, 2, 3, 4, 5, 6, 7];
+
+  it('names the ISO weekdays from Monday, in full or short, as each locale writes them', () => {
+    expect(week.map((day) => weekdayText(day, 'en-US'))).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
+    expect(week.map((day) => weekdayText(day, 'en-GB', 'short'))).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+    expect(week.map((day) => weekdayText(day, 'es-CO'))).toEqual(['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']);
+    expect(week.map((day) => weekdayText(day, 'es-ES', 'short'))).toEqual(['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom']);
   });
 });
 

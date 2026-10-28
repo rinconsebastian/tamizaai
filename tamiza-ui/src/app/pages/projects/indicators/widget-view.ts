@@ -21,7 +21,10 @@ function sortFor(sort: WidgetSort): WidgetSort {
   return sort.by === 'value' ? { ...sort, column: null, compareAs: null } : sort;
 }
 
-/** The query a chart type actually uses: settings that belong to another chart type are not sent, and a stat tile never groups. */
+/**
+ * The query a chart type actually uses: settings that belong to another chart type are not sent, and a stat tile never groups.
+ * Twin of `WidgetQuery.For` in tamiza-api (scheduled dashboard emails); change both together.
+ */
 export function queryFor(type: ChartType, config: WidgetConfig): WidgetConfig {
   return {
     indicator: config.indicator,
@@ -181,7 +184,10 @@ export class WidgetView {
   });
   /** What the query sends of the dashboard filters: those the widget does not ignore. */
   private readonly applied = computed(() => appliedOf(this.dashboardFilters()));
-  /** The labels of the active filters that do not narrow the rows: ignored by the widget, or not taken by its table. */
+  /**
+   * The labels of the active filters that do not narrow the rows: ignored by the widget, or not taken by its table. Twin of
+   * `WidgetQuery.NotNarrowedBy` in tamiza-api.
+   */
   protected readonly notFiltered = computed(() => {
     const missed = new Set(this.result()?.notFiltered ?? []);
     return this.dashboardFilters()

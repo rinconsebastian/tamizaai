@@ -211,6 +211,48 @@ export interface WidgetDraft {
 /** A `dashboardId` other than the widget's moves it there, below that dashboard's widgets; a layout sent with it is ignored. */
 export type WidgetPatch = Partial<Pick<Widget, 'title' | 'chartType' | 'config' | 'layout' | 'dashboardId'>>;
 
+// Mirrors Tamiza.Api/Reports/ReportEndpoints.cs: a dashboard's scheduled email (tamiza.dashboard_reports), at most one per dashboard.
+
+/** The most recipients a scheduled email has (`ck_dashboard_reports_recipients`). */
+export const maxReportRecipients = 20;
+
+/** What a scheduled email is sent to, and when. */
+export interface DashboardReportSettings {
+  /** 1 to 20 addresses of any domain; the API keeps once those that differ only in case. */
+  recipients: string[];
+  /** ISO weekdays, 1 Monday to 7 Sunday, ascending. */
+  days: number[];
+  /** `HH:mm`, in the project's time zone. */
+  time: string;
+  /** False while paused: no scheduled email is sent, sending it now still works. */
+  active: boolean;
+  /** The interface locale of the member who saved the settings: the email's language and regional format. */
+  locale: string;
+}
+
+/**
+ * Why the last send failed: an outcome of the SMTP server (`email.unavailable`, `email.authFailed`, `email.rejected`, with the
+ * refused address when a recipient was refused), `reports.nothingToSend` or `reports.failed`. Never the server's own words.
+ */
+export interface DashboardReportFailure {
+  code: string;
+  at: string;
+  address: string | null;
+}
+
+/** A dashboard's scheduled email: its settings (null when it has none) and the results of its sends. */
+export interface DashboardReport {
+  settings: DashboardReportSettings | null;
+  /** The project's IANA time zone, which the time is in. */
+  timeZone: string;
+  /** The member who saved the settings last: replies go to them. */
+  updatedBy: { name: string } | null;
+  updatedAt: string | null;
+  lastSentAt: string | null;
+  /** The last attempt's failure; a later successful send clears it. */
+  lastFailure: DashboardReportFailure | null;
+}
+
 export function emptyConfig(indicator = ''): WidgetConfig {
   return {
     indicator,
@@ -310,6 +352,29 @@ export class IndicatorsService {
     return this.http.get<{ values: DataValueCount[] }>(`${this.dashboardUrl(projectId, dashboardId)}/values`, { params });
   }
 
+  // A dashboard's scheduled email, for analysts and admins. Saving or sending it while email is off is a 503 `reports.unavailable`.
+
+  getReport(projectId: string, dashboardId: string): Observable<DashboardReport> {
+    return this.http.get<DashboardReport>(this.reportUrl(projectId, dashboardId));
+  }
+
+  /** Creates or replaces the dashboard's scheduled email, and answers it as `getReport` does. */
+  saveReport(projectId: string, dashboardId: string, settings: DashboardReportSettings): Observable<DashboardReport> {
+    return this.http.put<DashboardReport>(this.reportUrl(projectId, dashboardId), settings);
+  }
+
+  removeReport(projectId: string, dashboardId: string): Observable<void> {
+    return this.http.delete<void>(this.reportUrl(projectId, dashboardId));
+  }
+
+  /**
+   * Queues the saved email to be sent now, whatever its schedule (202). Refused with a 409 `reports.none` when there are no settings,
+   * and `reports.tooSoon` within 10 minutes of the last request.
+   */
+  sendReportNow(projectId: string, dashboardId: string): Observable<void> {
+    return this.http.post<void>(`${this.reportUrl(projectId, dashboardId)}/send`, null);
+  }
+
   // Widgets, on the dashboard they belong to.
 
   create(projectId: string, dashboardId: string, draft: WidgetDraft): Observable<Widget> {
@@ -335,6 +400,10 @@ export class IndicatorsService {
 
   private dashboardUrl(projectId: string, dashboardId: string): string {
     return `${this.dashboardsUrl(projectId)}/${dashboardId}`;
+  }
+
+  private reportUrl(projectId: string, dashboardId: string): string {
+    return `${this.dashboardUrl(projectId, dashboardId)}/report`;
   }
 
   private widgetsUrl(projectId: string, dashboardId: string): string {

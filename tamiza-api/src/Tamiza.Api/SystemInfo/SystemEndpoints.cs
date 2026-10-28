@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Tamiza.Api.Accounts;
 using Tamiza.Api.Assistant;
 using Tamiza.Api.Configuration;
+using Tamiza.Api.Email;
 
 namespace Tamiza.Api.SystemInfo;
 
@@ -16,7 +17,11 @@ public static class SystemEndpoints
     /// <summary>Whether the identity provider can send account emails (invitation, resend, password reset). Nothing else about it is public.</summary>
     public sealed record AccountEmailsSettings(bool Enabled);
 
-    public sealed record SystemConfigResponse(OidcClientSettings Oidc, string Version, AssistantSettings Assistant, AccountEmailsSettings AccountEmails);
+    /// <summary>Whether Tamiza can send email itself (scheduled dashboard emails). Nothing else about it is public: not the server nor the sender.</summary>
+    public sealed record EmailSettings(bool Enabled);
+
+    public sealed record SystemConfigResponse(
+        OidcClientSettings Oidc, string Version, AssistantSettings Assistant, AccountEmailsSettings AccountEmails, EmailSettings Email);
 
     private static readonly string Version =
         typeof(SystemEndpoints).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
@@ -24,11 +29,13 @@ public static class SystemEndpoints
     public static RouteGroupBuilder MapSystemEndpoints(this RouteGroupBuilder api)
     {
         // Public: the UI needs these settings before it can sign anyone in. Nothing here is secret.
-        api.MapGet("/system/config", (IOptions<OidcOptions> oidc, IOptions<AssistantOptions> assistant, IAccountProviderSource accounts) => TypedResults.Ok(new SystemConfigResponse(
-                new OidcClientSettings(oidc.Value.Authority, oidc.Value.ClientId, oidc.Value.Scope),
-                Version,
-                new AssistantSettings(assistant.Value.Enabled),
-                new AccountEmailsSettings(accounts.Provider is not null))))
+        api.MapGet("/system/config", (IOptions<OidcOptions> oidc, IOptions<AssistantOptions> assistant, IAccountProviderSource accounts, IOptions<EmailOptions> email) =>
+                TypedResults.Ok(new SystemConfigResponse(
+                    new OidcClientSettings(oidc.Value.Authority, oidc.Value.ClientId, oidc.Value.Scope),
+                    Version,
+                    new AssistantSettings(assistant.Value.Enabled),
+                    new AccountEmailsSettings(accounts.Provider is not null),
+                    new EmailSettings(email.Value.Enabled))))
             .AllowAnonymous()
             .WithName("GetSystemConfig")
             .WithTags("System");

@@ -69,14 +69,15 @@ public sealed class IndicatorsHarness : IAsyncDisposable
 
     public string WidgetUrl(Guid widgetId, Guid? dashboardId = null) => $"{WidgetsUrl(dashboardId)}/{widgetId}";
 
-    public static async Task<IndicatorsHarness> CreateAsync(PostgresFixture postgres, Dictionary<string, string?>? settings = null)
+    public static async Task<IndicatorsHarness> CreateAsync(
+        PostgresFixture postgres, Dictionary<string, string?>? settings = null, Action<IServiceCollection>? configureServices = null)
     {
         var exportDirectory = Path.Combine(Path.GetTempPath(), "tamiza-indicator-export-tests-" + Guid.NewGuid().ToString("N"));
         settings = new Dictionary<string, string?> { ["DataDashboard:ExportDirectory"] = exportDirectory }
             .Concat(settings ?? []).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.Last().Value);
         // Idle connections of a finished test are pruned after a few seconds: the whole suite shares one server with a connection limit.
         var db = await postgres.CreateDatabaseAsync() + ";Connection Idle Lifetime=3;Connection Pruning Interval=1";
-        var factory = new TamizaApiFactory(db, settings);
+        var factory = new TamizaApiFactory(db, settings, configureServices);
         var adminId = await TestData.SignInAsync(factory, "ada", "ada@example.org");
         var projectId = await TestData.InsertProjectAsync(db, adminId, "Coverage 2026");
         await TestData.AddMemberAsync(db, projectId, adminId, "admin");

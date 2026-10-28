@@ -64,6 +64,15 @@ const apiErrorCodes = [
   'accountEmail.noAccount',
   'accountEmail.rateLimited',
   'accountEmail.failed',
+  'reports.unavailable',
+  'reports.none',
+  'reports.tooSoon',
+  'reports.nothingToSend',
+  'reports.failed',
+  'reports.authorNoAccess',
+  'email.unavailable',
+  'email.authFailed',
+  'email.rejected',
 ];
 
 function lookup(root: unknown, path: string): unknown {
@@ -83,6 +92,11 @@ describe('English translations', () => {
   it('have the account email message that names the minutes to wait, in both forms', () => {
     expect(en.errors.codes.accountEmail.rateLimitedIn).toContain('{{ minutes }}');
     expect(en.errors.codes.accountEmail.rateLimitedInOne).not.toContain('{{');
+  });
+
+  it('have the message for a refused recipient that names the address', () => {
+    expect(en.errors.codes.email.rejectedAddress).toContain('{{ address }}');
+    expect(en.errors.codes.email.rejected).not.toContain('{{');
   });
 
   it('name every run trigger, status, step and step status', () => {

@@ -74,6 +74,23 @@ export function timestampText(value: string, locale: string): string {
   return dateFormat(locale, 'dateTime', 'UTC').format(wall);
 }
 
+const weekdayFormats = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * The name of an ISO weekday, 1 Monday to 7 Sunday, in the locale: short (`Mon`, `lun`) or in full (`Monday`, `lunes`), as the
+ * locale writes it, without a trailing abbreviation point.
+ */
+export function weekdayText(day: number, locale: string, width: 'short' | 'long' = 'long'): string {
+  const key = `${locale}|${width}`;
+  let format = weekdayFormats.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, { weekday: width, timeZone: 'UTC' });
+    weekdayFormats.set(key, format);
+  }
+  // 1 January 2024 was a Monday.
+  return format.format(new Date(Date.UTC(2024, 0, day))).replace(/\.$/, '');
+}
+
 /** Minimum integer digits, then minimum and maximum fraction digits: `'1.0-1'`, as Angular's number pipe reads them. */
 function digitsOptions(digits: string | undefined): Intl.NumberFormatOptions {
   const match = digits ? /^(\d+)\.(\d+)-(\d+)$/.exec(digits) : null;

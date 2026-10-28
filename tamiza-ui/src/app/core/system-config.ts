@@ -17,6 +17,10 @@ export interface SystemConfig {
   accountEmails: {
     enabled: boolean;
   };
+  /** Whether the deployment configured an SMTP server, so Tamiza sends email itself (scheduled dashboard emails); nothing else about it is public. */
+  email: {
+    enabled: boolean;
+  };
 }
 
 export const SYSTEM_CONFIG_URL = '/api/v1/system/config';
@@ -35,6 +39,9 @@ export class SystemConfigService {
 
   /** Whether account emails are configured. False while the configuration loads, when it cannot be read, and for an older API. */
   readonly accountEmailsEnabled = computed(() => this.config()?.accountEmails?.enabled === true);
+
+  /** Whether Tamiza sends email itself. False while the configuration loads, when it cannot be read, and for an older API. */
+  readonly emailEnabled = computed(() => this.config()?.email?.enabled === true);
 
   constructor() {
     this.http.get<SystemConfig>(SYSTEM_CONFIG_URL).subscribe({

@@ -654,6 +654,49 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
         Assert.Equal("[]", await ScalarAsync<string>(connectionString, "SELECT filters::text FROM tamiza.dashboards WHERE name = 'Health'"));
     }
 
+    [Fact]
+    public async Task Dashboard_reports_script_adds_an_empty_table_removed_with_its_dashboard()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(
+            connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql", "0004_add_pipeline_authoring.sql",
+            "0005_add_choice_labels.sql", "0006_add_performance_dashboard.sql", "0007_add_indicators_dashboard.sql", "0008_split_indicator_scripts.sql",
+            "0009_add_script_workbench.sql", "0010_add_local_dev_kit.sql", "0011_add_script_assistant.sql", "0012_add_multiple_dashboards.sql",
+            "0013_add_account_emails.sql", "0014_add_dashboard_filters.sql");
+        const string project = "00000000-0000-0000-0000-0000000000aa";
+        const string ada = "00000000-0000-0000-0000-000000000001";
+        const string housing = "00000000-0000-0000-0000-0000000000d1";
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('{{ada}}', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('{{project}}', 'Survey', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(), '{{ada}}', now(), now());
+            INSERT INTO tamiza.dashboards (id, project_id, name, normalized_name, position, created_by, updated_by)
+            VALUES ('{{housing}}', '{{project}}', 'Housing', 'housing', 0, '{{ada}}', '{{ada}}');
+            """);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        Assert.Contains("0015_add_dashboard_reports.sql", Scripts);
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.dashboard_reports"));
+
+        // A report with its defaults, then the checks on its recipients and weekdays.
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.dashboard_reports (dashboard_id, recipients, days, send_time, active, locale, updated_by)
+            VALUES ('{{housing}}', ARRAY['ana@partner.org'], ARRAY[1,4]::smallint[], '07:00', true, 'es-CO', '{{ada}}')
+            """);
+        Assert.Equal("false", await ScalarAsync<string>(connectionString, "SELECT send_now_pending::text FROM tamiza.dashboard_reports"));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString,
+            "UPDATE tamiza.dashboard_reports SET days = ARRAY[0]::smallint[]"));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString,
+            "UPDATE tamiza.dashboard_reports SET recipients = ARRAY[]::text[]"));
+
+        // Removing the dashboard removes its report.
+        await ExecuteAsync(connectionString, $"DELETE FROM tamiza.dashboards WHERE id = '{housing}'");
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.dashboard_reports"));
+    }
+
     /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>
     private static void ApplyScripts(string connectionString, params string[] names)
     {

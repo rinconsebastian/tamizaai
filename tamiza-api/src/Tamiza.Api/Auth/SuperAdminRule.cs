@@ -11,8 +11,10 @@ public sealed class SuperAdminRule(IOptions<TamizaOptions> options)
 {
     private readonly HashSet<string> _emails = Parse(options.Value.SuperAdminEmails);
 
-    public bool IsSuperAdmin(TokenIdentity identity) =>
-        identity is { EmailVerified: true, Email: not null } && _emails.Contains(identity.Email.Trim());
+    public bool IsSuperAdmin(TokenIdentity identity) => IsSuperAdmin(identity.Email, identity.EmailVerified);
+
+    /// <summary>The same rule for a user's stored email, when no token is at hand (a scheduled email checks its author).</summary>
+    public bool IsSuperAdmin(string? email, bool emailVerified) => emailVerified && email is not null && _emails.Contains(email.Trim());
 
     internal static HashSet<string> Parse(string emails) =>
         emails.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

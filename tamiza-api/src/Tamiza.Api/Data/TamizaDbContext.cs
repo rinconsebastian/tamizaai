@@ -51,6 +51,8 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
 
     public DbSet<DashboardWidget> DashboardWidgets => Set<DashboardWidget>();
 
+    public DbSet<DashboardReport> DashboardReports => Set<DashboardReport>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(Schema);
@@ -415,6 +417,29 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             widget.HasOne<Dashboard>().WithMany().HasForeignKey(w => w.DashboardId).OnDelete(DeleteBehavior.Cascade);
             widget.HasOne<User>().WithMany().HasForeignKey(w => w.CreatedBy).OnDelete(DeleteBehavior.Restrict);
             widget.HasOne<User>().WithMany().HasForeignKey(w => w.UpdatedBy).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<DashboardReport>(report =>
+        {
+            report.ToTable("dashboard_reports", table =>
+            {
+                table.HasCheckConstraint(
+                    "ck_dashboard_reports_recipients", "cardinality(recipients) <= 20 AND (removed_at IS NOT NULL OR cardinality(recipients) >= 1)");
+                table.HasCheckConstraint(
+                    "ck_dashboard_reports_days", "cardinality(days) BETWEEN 1 AND 7 AND days <@ ARRAY[1,2,3,4,5,6,7]::smallint[]");
+            });
+            report.HasKey(r => r.DashboardId);
+            report.Property(r => r.Recipients).HasColumnType("text[]");
+            report.Property(r => r.Days).HasColumnType("smallint[]");
+            report.Property(r => r.SendTime).HasColumnType("time");
+            report.Property(r => r.Locale).HasColumnType("text");
+            report.Property(r => r.UpdatedAt).HasDefaultValueSql("now()");
+            report.Property(r => r.SendNowPending).HasDefaultValue(false);
+            report.Property(r => r.LastFailure).HasColumnType("text");
+            report.Property(r => r.LastFailureAddress).HasColumnType("text");
+            // Removing a dashboard, or its project, removes its scheduled email.
+            report.HasOne<Dashboard>().WithOne().HasForeignKey<DashboardReport>(r => r.DashboardId).OnDelete(DeleteBehavior.Cascade);
+            report.HasOne<User>().WithMany().HasForeignKey(r => r.UpdatedBy).OnDelete(DeleteBehavior.Restrict);
         });
     }
 

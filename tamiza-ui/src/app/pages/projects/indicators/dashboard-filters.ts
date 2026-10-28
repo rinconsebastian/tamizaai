@@ -148,7 +148,7 @@ export function activeFilters(filters: DashboardFilter[], values: FilterValues, 
   return filters.filter((f) => values[f.column]).map((filter) => ({ filter, value: values[filter.column]!, ignored: ignored.includes(filter.column) }));
 }
 
-/** What a widget's query is sent: the active filters it does not ignore. */
+/** What a widget's query is sent: the active filters it does not ignore. Twin of `WidgetQuery.AppliedDefaults` in tamiza-api. */
 export function appliedOf(active: ActiveDashboardFilter[]): AppliedDashboardFilter[] {
   return active
     .filter((a) => !a.ignored)

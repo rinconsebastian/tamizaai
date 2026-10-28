@@ -138,6 +138,20 @@
         "rateLimitedIn": "This email cannot be sent yet. Try again in {{ minutes }} minutes.",
         "rateLimitedInOne": "This email cannot be sent yet. Try again in 1 minute.",
         "failed": "The email could not be sent. Try again later."
+      },
+      "reports": {
+        "unavailable": "Scheduled emails are not available on this installation.",
+        "none": "This dashboard has no scheduled email. Save one first.",
+        "tooSoon": "Send now was used for this email less than 10 minutes ago. Try again later.",
+        "nothingToSend": "There was nothing to send: the dashboard has no widgets, or none of them could be read.",
+        "failed": "The email could not be prepared because of an unexpected error. An administrator can find the details in the API log.",
+        "authorNoAccess": "The member who set up this email no longer manages this project, so it was not sent. Save it again to keep sending it: you become its author."
+      },
+      "email": {
+        "unavailable": "The email server could not be reached, or did not answer in time.",
+        "authFailed": "Authentication with the email server failed.",
+        "rejected": "The email server refused the message.",
+        "rejectedAddress": "The email server refused the address {{ address }}, so no recipient received the email."
       }
     }
   },
@@ -1640,7 +1654,8 @@
       "moveLeft": "Move left",
       "moveRight": "Move right",
       "remove": "Remove",
-      "filters": "Filters"
+      "filters": "Filters",
+      "report": "Scheduled email…"
     },
     "unavailable": {
       "limit": "A project can have at most {{ max }} dashboards.",
@@ -1686,6 +1701,43 @@
       "missing": "The dashboard you opened does not exist. Showing {{ name }} instead.",
       "removed": "\"{{ removed }}\" no longer exists. Showing {{ name }} instead.",
       "dismiss": "Dismiss"
+    },
+    "report": {
+      "title": "Scheduled email for {{ name }}",
+      "intro": "Tamiza emails this dashboard's figures on the days and at the time chosen: the stat tiles and the first rows of each widget's table in the message, and every widget's full table in an attached workbook.",
+      "loading": "Reading the email settings…",
+      "warning": "The recipients need not be Tamiza users. They receive this dashboard's data by email, outside Tamiza, and an email sent cannot be recalled.",
+      "filtersNote": "The email uses the dashboard's filter defaults. They are fixed values: a default date range is the same in every email.",
+      "lastSent": "Last sent",
+      "neverSent": "Not sent yet",
+      "lastSaved": "Last saved",
+      "savedBy": "{{ time }} by {{ name }}",
+      "lastFailure": "The last attempt failed on {{ time }}: {{ reason }}",
+      "recipients": "Recipients",
+      "recipientsHint": "Up to {{ max }} email addresses, one per line or separated by commas or semicolons.",
+      "days": "Days",
+      "time": "Time",
+      "timeHint": "In the project's time zone, {{ zone }}.",
+      "active": "Active",
+      "activeHint": "While paused, no scheduled email is sent. The settings are kept, and Send now still works.",
+      "savingNote": "When you save, replies go to you and the email uses your language and regional format.",
+      "save": "Save",
+      "saving": "Saving…",
+      "sendNow": "Send now",
+      "sending": "Sending…",
+      "sendNowHint": "Sends the saved settings now, whether the email is active or paused. The schedule does not change.",
+      "queued": "The email was queued and will be sent shortly.",
+      "remove": "Remove email",
+      "removeTitle": "Remove scheduled email",
+      "removeMessage": "Stop emailing {{ name }} and remove its settings? This cannot be undone.",
+      "removeConfirm": "Remove email",
+      "saved": "Scheduled email for {{ name }} saved.",
+      "removed": "Scheduled email for {{ name }} removed.",
+      "errors": {
+        "recipientsRequired": "Enter at least one email address.",
+        "daysRequired": "Choose at least one day.",
+        "timeRequired": "Enter a time."
+      }
     }
   },
   "dashboardFilters": {

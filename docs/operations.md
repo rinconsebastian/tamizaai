@@ -10,6 +10,7 @@ How to install, run and upgrade a self-hosted Tamiza. The quick start in the [RE
 - **Outbound HTTPS from the `api` container** to the Kobo servers your projects use (for example `kf.kobotoolbox.org` or `eu.kobotoolbox.org`). Besides the checks users start, `api` synchronizes every project on a schedule (by default every 12 hours, plus a daily deletion check), so this traffic happens without anyone signed in. Tamiza connects to Kobo directly and does not use an outbound HTTP proxy: a proxy would make the connection on Tamiza's behalf and bypass its check that Kobo addresses are public. Installations that can only reach the Internet through a proxy cannot connect to Kobo yet.
 - **Outbound HTTPS from the `api` container to the model provider**, only if you turn on the [AI assistant](#ai-assistant). Each assistant request goes from `api` straight to the base URL you configure (a provider on the Internet, or a model server on your own network over plain HTTP), also without an outbound HTTP proxy. Without the three assistant variables nothing is sent anywhere.
 - **Outbound HTTPS from the `api` container to `tile.googleapis.com`**, only if you set `TAMIZA_MAP_BASEMAP_PROVIDER=google` (see [Map basemaps](#map-basemaps-optional)). Without a proxy, as for the other providers. With `osm`, viewers' browsers (not `api`) contact `tile.openstreetmap.org`; with no provider nothing is sent anywhere.
+- **Outbound SMTP from the `api` container to your mail server**, only if you turn on [email](#email-optional). `api` connects to `TAMIZA_SMTP_HOST` on its port (587, 465 or 25 by default). Many cloud hosts block outbound port 25, and some block the others until you ask them. Without the SMTP variables no connection is opened.
 - **Kobo must reach Tamiza** for the webhook: the `TAMIZA_PUBLIC_URL` must be reachable from the Kobo server (for kf or eu, from the Internet). If it is not, submissions still arrive, but only through the scheduled synchronization.
 - **HTTPS in front of Tamiza** for any address other than `localhost`. Browsers expose the WebCrypto API that sign-in (PKCE) needs only in a secure context, so plain HTTP on a server address breaks sign-in. Tamiza does not terminate TLS itself.
 
@@ -475,6 +476,155 @@ This is a data-protection decision of your organization, like [the assistant's](
 
 Restore the previous images (`docker compose up -d` with the earlier `TAMIZA_VERSION`). Widgets keep working. But an `api` that predates this change does not know the `tooltip` and `basemap` fields, so **any widget edited or moved under it loses its tooltip columns and its basemap** (a move saves the whole widget). Widgets are not changed otherwise, and nothing is lost until one is saved under the old `api`.
 
+## Email (optional)
+
+Analysts and admins can give each dashboard a **scheduled email**. On the weekdays they choose, at one time of day in the project's time zone, Tamiza emails the dashboard's figures to 1 to 20 addresses, which need not belong to Tamiza users. They set it up with *Scheduled email…* in the dashboard's menu; viewers neither see nor manage it. It is **off by default**: Tamiza sends through an SMTP server that you give `api`, and it ships with no mail account. Without one, the menu action is not shown and no SMTP connection is ever opened. Keycloak's [account emails](keycloak.md#account-emails-optional) are separate and keep using the realm's own SMTP settings.
+
+Each email holds:
+
+- **In its body:** the project, the dashboard, when the email was generated, how current the data is and the filters in force; each stat tile's value; a short table with the first rows of each other widget; notes for anything that could not be shown; and a link to the dashboard for members, under `TAMIZA_PUBLIC_URL`. A plain-text version goes with it.
+- **As an attachment:** an XLSX workbook. A *Summary* sheet holds the header and the stat tiles, then one sheet per widget holds its whole table, as *Show as table* shows it, with numbers as numbers. A workbook larger than 7 MB is left out, and the body says so.
+
+It holds no chart, no map drawn as a map, no image and no PDF. It uses the dashboard's filter defaults, as a member sees them on opening it, and widgets that ignore a filter keep ignoring it. Recipients are in Bcc, so none sees another's address, and replies go to the member who last saved the settings. A failed send is **not retried**: the dialog shows the failure until a later send succeeds. A scheduled time that passes while `api` is down is sent once, late, if it is still the same day in the project's time zone. Earlier days are not caught up, and no day gets two scheduled emails.
+
+### Turn it on
+
+Set these in `.env` and run `docker compose up -d api`. Only `api` reads them. The `ui` image of the release already has the dialog; members see *Scheduled email…* once they reload Tamiza in their browser.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TAMIZA_SMTP_HOST` | empty | The SMTP server's host name, such as `smtp.example.org`. `api` must reach it (see [Requirements](#requirements)). |
+| `TAMIZA_SMTP_PORT` | `587`, `465` or `25` | 1 to 65,535. The default depends on the security: 587 for `starttls`, 465 for `tls`, 25 for `none`. |
+| `TAMIZA_SMTP_SECURITY` | `starttls` | `starttls`: connect, then upgrade with STARTTLS before signing in. A server that does not offer STARTTLS fails the send, so nothing goes unencrypted. `tls`: TLS from the start (implicit TLS, usually port 465). `none`: no encryption, only for a relay inside your own network or a test server such as Mailpit (see [Checking delivery with Mailpit](#checking-delivery-with-mailpit)). |
+| `TAMIZA_SMTP_USERNAME` | empty | The user name to sign in with. Set it together with the password, or leave both empty to send without signing in, to a relay that trusts `api`'s address. |
+| `TAMIZA_SMTP_PASSWORD` | empty | Its password. It is never logged, returned by the API or shown. Spaces at either end are removed, like a pasted trailing newline. |
+| `TAMIZA_SMTP_FROM` | empty | The sender address, a plain address such as `reports@example.org`, without a display name. See [The sender address](#the-sender-address). |
+| `TAMIZA_SMTP_FROM_NAME` | `Tamiza` | The sender's display name, so that emails come from `Tamiza <reports@example.org>`. |
+| `TAMIZA_SMTP_TIMEOUT_SECONDS` | `30` | How long `api` waits for the server before the send fails as *server unavailable*, 5 to 300. |
+
+Email is on **only when `TAMIZA_SMTP_HOST` and `TAMIZA_SMTP_FROM` are both set**. Blank text means unset. With only one of them, email stays off and `api` logs one warning at startup naming the missing variable. A malformed value stops `api` at startup, and its log names the variable and the values it accepts: a port out of range, a security other than the three, a sender that is not a plain email address, a timeout out of range, or a user name without a password (or the reverse).
+
+With `starttls` and `tls`, `api` always checks the server's certificate: it must be valid for `TAMIZA_SMTP_HOST` and issued by an authority that the `api` image trusts. There is no setting to skip the check, so a relay with a self-signed certificate fails as *server unavailable*.
+
+Put the password in single quotes when it holds a `$`. Compose reads a `$` in `.env` as the start of a variable, so `TAMIZA_SMTP_PASSWORD=pa$word` reaches `api` as `pa`; write `TAMIZA_SMTP_PASSWORD='pa$word'`. As with the [assistant's key](#ai-assistant), **never put the password in a file that is committed**.
+
+**Check it with *Send now*.** Sign in as an analyst or admin, open a dashboard with at least one widget whose indicator is published, choose *Scheduled email…* in its menu, enter your own address, a weekday and a time, and save. Then choose *Send now*: the email is queued and sent shortly, ahead of scheduled emails that have not started yet. Look in your inbox, including the spam folder, then open the dialog again. It shows when the email was last sent or, when the send failed, when and why. *Send now* uses the saved settings, works while the email is paused and does not change the schedule. A second *Send now* for the same dashboard within 10 minutes is refused.
+
+### When a send fails
+
+The dialog names the failure in its own words and never shows the server's reply:
+
+| The dialog shows | What to check |
+|---|---|
+| Server unavailable | `api` could not connect, could not set up TLS, or got no answer within `TAMIZA_SMTP_TIMEOUT_SECONDS`. Check the host and the port, that `api` can reach them (many hosts block outbound port 25), that the security matches the port (`starttls` on 587, `tls` on 465), and that the server offers STARTTLS and has a valid certificate. |
+| Authentication failed | The server refused the user name and password; or they are set and the server offers no sign-in (a relay, or Mailpit); or they are empty and the server requires them. For Microsoft 365, see [Microsoft 365](#microsoft-365). |
+| Rejected | The server refused the sender, the message or a recipient, which the dialog names. **Nobody received the email**, not even the other recipients. Usually the account may not send as `TAMIZA_SMTP_FROM`, or a recipient's address does not exist on that server. A provider that has suspended the account or reached its quota may answer this way too. |
+| Nothing to send | The dashboard has no widget, or none of its widgets could be read, for example because none of its indicators is published yet. This is not an SMTP problem. |
+| Unexpected error | Something else failed; the `api` log has the details. |
+
+`api` logs each failed send with the SMTP host and port, the step that failed (connecting, signing in or sending), the outcome and the SMTP status code when the server gave one, never the password or the server's reply:
+
+```sh
+docker compose logs api | grep "SMTP server"
+```
+
+To read the server's reply itself, look at your provider's logs, or try the same settings from another mail program. Tamiza does not process bounces: when a recipient's server refuses an email after your SMTP server accepted it, the dialog still shows it as sent. Your provider's logs list such bounces.
+
+### Choosing an SMTP provider
+
+Any SMTP server that accepts a user name and password, or a relay that trusts `api`'s address, works. Two kinds suit Tamiza:
+
+- **A transactional email service**, such as Brevo, Mailjet, SMTP2GO or Amazon SES. You verify your sender's domain with them (see [SPF, DKIM and DMARC](#spf-dkim-and-dmarc)), and they give you an SMTP host, a user name and a password or key. Their logs show what was delivered, bounced or refused. Amazon SES starts every new account in a sandbox that sends only to verified addresses: ask for production access before you rely on it.
+- **A relay of your organization**, such as a Postfix server on your network or your mail provider's relay. On your own network, `none` without credentials suits a relay that accepts mail only from known addresses. The email then crosses that network unencrypted as far as the relay.
+
+**Free tiers count every recipient.** Tamiza sends one message per email with all its recipients in Bcc, but providers count each recipient as one email: a dashboard emailed every weekday to 20 people uses 100 a week, and five dashboards emailed daily to 20 people use 100 a day, which uses up an allowance of 1,000 a month in ten days. When this was written (October 2026), Brevo's free plan allowed 300 emails a day and added Brevo's branding to them, Mailjet's allowed 200 a day, and SMTP2GO's allowed 200 a day and 1,000 a month. Read the provider's current pricing and limits before you choose.
+
+The provider receives every email it relays, attachment included, so choosing one is also a data-protection decision (see [What leaves the deployment by email](#what-leaves-the-deployment-by-email)).
+
+### SPF, DKIM and DMARC
+
+Receiving mail servers (Gmail, Outlook.com, Yahoo and most organizations' servers) check that the sender's domain allowed the server that sent an email. Mail that fails goes to the spam folder or is refused, and the dialog cannot tell: it shows the email as sent once your SMTP server has accepted it. Before the first real email, set up these records on the domain of `TAMIZA_SMTP_FROM`, with the values your provider gives:
+
+- **SPF:** a TXT record that lists the servers allowed to send for the domain, usually through an `include:` that your provider names. A domain has **one** SPF record, so add the provider to the existing record instead of adding a second one.
+- **DKIM:** the provider signs each email with a key whose public half you publish in DNS, as the TXT or CNAME records it gives you (under `<selector>._domainkey.<your domain>`).
+- **DMARC:** a TXT record at `_dmarc.<your domain>` that tells receivers what to do with mail that fails SPF and DKIM, and where to send reports. A domain without one can start with `v=DMARC1; p=none; rua=mailto:dmarc-reports@example.org`, then move to `p=quarantine` or `p=reject` once the reports show only expected senders. If the domain already has a policy, mail from a provider that is not set up for it is refused or sent to spam.
+
+Use a sender at a domain you control. An address at `gmail.com`, `outlook.com` or another public mail service cannot pass these checks when another provider's servers send for it, and receivers refuse it.
+
+To check, *Send now* to a Gmail address and open the email's *Show original*: SPF, DKIM and DMARC should all read `PASS`.
+
+### Microsoft 365
+
+Exchange Online accepts mail from applications through SMTP AUTH (`smtp.office365.com`, port 587, `starttls`, a mailbox's address and password). Microsoft has announced, in its message center post MC786329, that basic authentication for SMTP AUTH is **turned off by default at the end of December 2026**. After that date, Tamiza's sends fail as *authentication failed* unless an admin of the tenant turns it back on for the mailbox that Tamiza uses. Tamiza signs in with a user name and password only: OAuth (XOAUTH2), which Microsoft recommends instead, is not supported yet (see [Not yet available](#not-yet-available)). Read Microsoft's current announcement before you rely on SMTP AUTH: its dates have moved before.
+
+With SMTP AUTH, Exchange Online accepts as the sender only the mailbox that signs in, or an address it may send as, so there the sender is a mailbox. Two ways avoid SMTP AUTH altogether: a transactional provider for the sender's domain (its SPF and DKIM records go next to Microsoft's), or a Microsoft 365 connector that relays mail from your server's fixed public IP address without a password (your domain's MX host, port 25, `starttls`, no user name). Microsoft's page "How to set up a multifunction device or application to send email using Microsoft 365 or Office 365" describes the connector.
+
+### The sender address
+
+Tamiza puts every recipient in Bcc and writes `undisclosed-recipients:;` as the To header, so the sender address is never a recipient. It **needs no mailbox**, and a no-reply address such as `no-reply@example.org` works. The SMTP server must still accept it as a sender (providers accept any address of a verified domain), and its domain needs SPF and DKIM as above. Replies go to the member who last saved the settings, not to the sender. With your own relay, bounces go to the sender address, so they are lost if it has no mailbox; transactional providers collect bounces themselves and list them in their logs.
+
+The exception is a server that lets an account send only as itself, or as an address it may send as, such as Microsoft 365 with SMTP AUTH (see [above](#microsoft-365)). There the sender is that account's mailbox.
+
+### Checking delivery with Mailpit
+
+[Mailpit](https://mailpit.axllent.org/) is an SMTP server for tests: it keeps every email it receives, delivers none, and shows them in a web page. Use it on a test installation to see an email as recipients would, with its headers and attachment, without sending anything out. Every email stays in Mailpit whatever its recipients, so a real schedule can be tried safely.
+
+Start it on the stack's Compose network, so that `api` reaches it by its name. Compose names that network after the project: `tamiza_default` for the project `tamiza` set in `compose.yaml`. A stack deployed under another project name (Portainer uses the stack's name) has `<name>_default` instead; `docker network ls` lists it.
+
+```sh
+docker run -d --name mailpit --network tamiza_default -p 127.0.0.1:8025:8025 axllent/mailpit
+```
+
+The web page is bound to the loopback address because it shows every email, project data included, to anyone who reaches it. Then set these in `.env` and run `docker compose up -d api`:
+
+```dotenv
+TAMIZA_SMTP_HOST=mailpit
+TAMIZA_SMTP_PORT=1025
+TAMIZA_SMTP_SECURITY=none
+TAMIZA_SMTP_USERNAME=
+TAMIZA_SMTP_PASSWORD=
+TAMIZA_SMTP_FROM=no-reply@example.org
+```
+
+Leave the user name and password empty: Mailpit, started this way, offers no sign-in, so credentials fail as *authentication failed*. Choose *Send now* as described under *Turn it on* above, and open `http://localhost:8025` on the test host. From another machine, reach it through an SSH tunnel: `ssh -L 8025:localhost:8025 user@test-host`. Check that the email's To reads `undisclosed-recipients:;`, that the body reads well, and that the workbook is attached.
+
+On Docker Desktop you can instead publish Mailpit's SMTP port on the host (`docker run -d --name mailpit -p 127.0.0.1:8025:8025 -p 1025:1025 axllent/mailpit`, without `--network`) and set `TAMIZA_SMTP_HOST=host.docker.internal`. The published port 1025 then accepts mail from the host's network too. `compose.yaml` maps `host.docker.internal` for `api` on Docker Engine as well, but there a host firewall may block it, so prefer the Compose network.
+
+When you are done, remove Mailpit and the emails it kept, then set your real server's values in `.env` and run `docker compose up -d api` again:
+
+```sh
+docker rm -f mailpit
+```
+
+### What leaves the deployment by email
+
+Each email carries out of Tamiza what its dashboard shows, in the body and in the workbook: the names of the project, the dashboard, its widgets and its filters; the filter values in force; the aggregated figures; the **group values**, such as municipalities, or enumerators when a widget groups by them; and the **map tooltip text** (see [Tooltip and tooltip columns](indicators-dashboard.md#tooltip-and-tooltip-columns)). The workbook holds every widget's whole table, not only the first rows shown in the body. Group values and tooltip columns can hold **personal data**. The email goes to:
+
+- **your SMTP provider**, which stores and logs what it relays, with the recipients' addresses, under its own terms;
+- **the recipients' mail servers and mailboxes**, outside Tamiza's access control. **A sent email cannot be recalled**: removing the schedule, the dashboard or the project removes nothing that was sent.
+
+Analysts and admins can send a dashboard to **any address of any domain**. The dialog warns them that the recipients get the data outside Tamiza, and each email names the project and tells recipients to reply to stop it. Tamiza does not check who the recipients are, so give the analyst and admin roles only to people you trust to share the project's figures.
+
+This is a data-protection decision of your organization, like [the assistant's](#choosing-a-provider). In Colombia, for example, Ley 1581 de 2012 regulates the processing of personal data, including sharing it with third parties such as partners and funders, and the authorization you hold from the people concerned may not cover it; donors and partners often set rules of their own. The operator of the deployment, not Tamiza, answers for what its members send. This is not legal advice: ask whoever answers for data protection in your organization.
+
+### Turning it off and rolling back
+
+- **Stop all sending:** blank `TAMIZA_SMTP_HOST` or `TAMIZA_SMTP_FROM` and run `docker compose up -d api`. The menu action disappears once members reload Tamiza, saving and *Send now* answer 503 with `reports.unavailable`, and saved schedules are kept but not sent. When you set the variables again, each schedule resumes as after `api` was down: a time that passed earlier that same day is sent once, and earlier days are not caught up.
+- **Stop one dashboard's email:** *Remove* it in the dialog, or pause it there.
+- **Go back to the previous images** with `docker compose up -d` and the earlier `TAMIZA_VERSION`. An `api` older than this change does not know the table `tamiza.dashboard_reports`, sends nothing and is not affected by it; removing a dashboard still removes its schedule. Upgrading again later brings the schedules back as they were.
+
+To also remove the schedules after going back to the previous images, drop the table and remove the record of its script from DbUp's journal, in one transaction:
+
+```sh
+docker compose exec db psql -U tamiza -d tamiza -c "
+BEGIN;
+DROP TABLE tamiza.dashboard_reports;
+DELETE FROM tamiza.schema_versions WHERE scriptname = '0015_add_dashboard_reports.sql';
+COMMIT;"
+```
+
+Replace `tamiza` after `-U` with your `POSTGRES_USER` if you changed it. Every schedule, with its recipients, is lost. DbUp runs a script only when `tamiza.schema_versions` does not list it, so with the record removed a later upgrade creates the table again, empty. Without the `DELETE`, a newer `api` would take the script as applied and fail on the missing table. Run this only under the previous images, never while a newer `api` runs.
+
 ## Data
 
 Two named volumes hold everything that must survive container re-creation:
@@ -492,3 +642,4 @@ These arrive in later changes (see `docs/tamiza-brief.md`, section 8):
 
 - **Backup and restore scripts** (`add-backup-restore`). Until then, protect both volumes above together. A database dump without the key ring cannot decrypt the stored Kobo tokens and webhook secrets; after such a loss, project admins must replace each token and regenerate each webhook secret.
 - **Per-service database roles and network isolation for `analytics`** (`harden-deployment`). Today `api` and `analytics` share the database role from `.env`, and `analytics` can reach the Internet. Analysts' scripts run inside `analytics` without the database credentials in their environment, but they are not sandboxed, so give the analyst and admin roles only to people you trust with the server.
+- **OAuth sign-in to the SMTP server** (XOAUTH2), not planned in a change yet. Tamiza signs in to the [email](#email-optional) server with a user name and password only, so a Microsoft 365 mailbox needs basic SMTP AUTH turned on for it (see [Microsoft 365](#microsoft-365)), or another way of sending.
