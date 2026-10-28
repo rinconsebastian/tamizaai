@@ -62,7 +62,10 @@ public sealed class SyncRunner(
         }
     }
 
-    /// <summary>A synchronization that changed submissions starts the pipeline, when the project wants that.</summary>
+    /// <summary>
+    /// A synchronization that changed submissions, or that follows webhook deliveries no run has read yet, starts the
+    /// pipeline, when the project wants that.
+    /// </summary>
     private async Task QueueRunAsync(ClaimedSync claimed)
     {
         try

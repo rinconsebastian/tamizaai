@@ -550,11 +550,11 @@ A step that fails publishes nothing: the dashboards keep showing the last succes
 
 ## When scripts run
 
-- **After a synchronization** that brought new, changed or deleted submissions (on by default).
+- **After a synchronization** that brought new, changed or deleted submissions, or that follows webhook deliveries no run has read yet (on by default).
 - **On a schedule**, every 1 to 168 hours, counted from the start of the last run.
 - **Run now**, for analysts and admins.
 
-Analysts and admins read these settings as a line on **Settings > Submissions** (the Scripts section only links to the latest run) ("Scripts run after each synchronization with changes · also run every 24 hours · Next scheduled run …"). Admins change the first two with **Edit schedules** on that page, under **When scripts run**. A webhook delivery never starts a run by itself. A project has at most one run waiting: if one is already queued, another trigger does not add a second; if one is running, one more is queued to follow it.
+Analysts and admins read these settings as a line on **Settings > Submissions** (the Scripts section only links to the latest run) ("Scripts run after each synchronization with changes · also run every 24 hours · Next scheduled run …"). Admins change the first two with **Edit schedules** on that page, under **When scripts run**. A webhook delivery never starts a run by itself: the next synchronization starts one for the submissions webhooks stored since the last run began, so with a webhook the scripts run at most a synchronization interval after the data arrives. A project has at most one run waiting: if one is already queued, another trigger does not add a second; if one is running, one more is queued to follow it.
 
 Saving a script does not start a run; the next run uses the latest version of each script. A run records which version of script 1, script 2 and each indicator it used. An indicator you create while a run is running is computed from the next run.
 

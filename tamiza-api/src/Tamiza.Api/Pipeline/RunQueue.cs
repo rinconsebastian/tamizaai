@@ -61,16 +61,24 @@ public sealed class RunQueue(TamizaDbContext db)
         }
     }
 
-    /// <summary>After a successful synchronization that changed submissions, queues a run if the project wants one.</summary>
+    /// <summary>
+    /// After a successful synchronization, queues a run if the project wants one and its submissions changed: in the
+    /// synchronization, or through a webhook delivery since its last run started. A webhook never queues a run itself,
+    /// and the synchronization finds what the webhook stored unchanged, so it queues the run for those submissions.
+    /// </summary>
     public async Task EnqueueAfterSyncAsync(Guid projectId, int changes, DateTimeOffset now, CancellationToken cancellationToken)
     {
-        if (changes == 0)
-        {
-            return;
-        }
-
-        var runAfterSync = await db.Projects.Where(p => p.Id == projectId).Select(p => p.RunAfterSync).SingleAsync(cancellationToken);
-        if (runAfterSync)
+        var project = await db.Projects.AsNoTracking()
+            .Where(p => p.Id == projectId)
+            .Select(p => new
+            {
+                p.RunAfterSync,
+                p.LastWebhookAt,
+                LastRunStart = db.Runs.Where(r => r.ProjectId == p.Id).Max(r => r.StartedAt),
+            })
+            .SingleAsync(cancellationToken);
+        var webhookSinceRun = project.LastWebhookAt is { } webhook && (project.LastRunStart is not { } start || webhook > start);
+        if (project.RunAfterSync && (changes > 0 || webhookSinceRun))
         {
             await EnqueueAutomaticAsync(projectId, RunTrigger.Sync, now, cancellationToken);
         }

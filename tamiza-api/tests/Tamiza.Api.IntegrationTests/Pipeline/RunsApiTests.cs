@@ -275,6 +275,30 @@ public sealed class RunsApiTests(PostgresFixture postgres) : IDisposable
     }
 
     [Fact]
+    public async Task A_webhook_queues_no_run_and_the_next_synchronization_queues_one_for_what_it_stored()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo, scheduler: true);
+        await h.WaitForIdleAsync();
+
+        Assert.Equal(HttpStatusCode.OK, (await h.DeliverAsync(KoboStub.Submission(1).ToJsonString())).StatusCode);
+        await Task.Delay(300);
+        Assert.Equal(0L, await RunCountAsync(h));
+
+        // Kobo lists what the webhook stored: the synchronization changes nothing, but no run has read the delivery.
+        _kobo.WithSubmissions([KoboStub.Submission(1)]);
+        var sync = await h.SyncAsync("full");
+        Assert.Equal(0, sync.GetProperty("createdCount").GetInt32() + sync.GetProperty("updatedCount").GetInt32());
+        await WaitUntilAsync(h, "SELECT count(*) = 1 FROM tamiza.runs WHERE trigger = 'sync'");
+
+        // The worker would have run it after the delivery; a synchronization without changes queues nothing more.
+        await TestData.ExecuteAsync(h.Db, "UPDATE tamiza.runs SET status = 'succeeded', started_at = now(), finished_at = now()");
+        await h.SyncAsync("full");
+        await Task.Delay(300);
+
+        Assert.Equal(1L, await RunCountAsync(h));
+    }
+
+    [Fact]
     public async Task A_due_schedule_queues_a_scheduled_run()
     {
         await using var h = await IngestionHarness.CreateAsync(postgres, _kobo, scheduler: true);

@@ -183,7 +183,7 @@ Each run SHALL record its trigger, the user who started it when manual, its stat
 - **THEN** the API responds 403 and returns no step, log or traceback
 
 ### Requirement: Run triggers
-A run SHALL start manually when an `analyst` or `admin` requests it, after a synchronization that created, updated or deleted submissions when the project's run-after-synchronization setting is on, and on the project's schedule when one is set. A webhook delivery SHALL NEVER start a run. A project SHALL have at most one queued run: a trigger while a run is queued SHALL NOT add another, and a trigger while a run is running SHALL queue one run to follow it.
+A run SHALL start manually when an `analyst` or `admin` requests it, after a synchronization that created, updated or deleted submissions, or that follows a webhook delivery accepted after the project's last run started, when the project's run-after-synchronization setting is on, and on the project's schedule when one is set. A webhook delivery SHALL NEVER start a run. A project SHALL have at most one queued run: a trigger while a run is queued SHALL NOT add another, and a trigger while a run is running SHALL queue one run to follow it.
 
 #### Scenario: Manual run
 - **WHEN** an analyst clicks "Run now"
@@ -194,12 +194,16 @@ A run SHALL start manually when an `analyst` or `admin` requests it, after a syn
 - **THEN** a run with trigger `sync` is queued
 
 #### Scenario: Synchronization without changes
-- **WHEN** a synchronization finds nothing new, changed or deleted
+- **WHEN** a synchronization finds nothing new, changed or deleted and no webhook delivery was accepted since the project's last run started
 - **THEN** no run is queued
 
 #### Scenario: Webhook
 - **WHEN** a webhook delivery stores a submission
 - **THEN** no run is queued
+
+#### Scenario: Synchronization after a webhook delivery
+- **WHEN** a webhook delivery stored a submission after the project's last run started, and the next synchronization finds that submission already stored and nothing else changed
+- **THEN** a run with trigger `sync` is queued
 
 #### Scenario: Trigger during a run
 - **WHEN** a synchronization with changes finishes while a run of the project is running and none is queued
