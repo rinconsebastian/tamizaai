@@ -1,5 +1,5 @@
 <ng-container *transloco="let t">
-  <nav class="sticky top-0 z-20 bg-neutral-primary border-b border-default">
+  <nav class="sticky top-0 z-20 bg-neutral-primary border-b border-default print:hidden" data-testid="top-bar">
     <div class="mx-auto flex max-w-screen-xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
       <a routerLink="/projects" class="text-lg font-semibold text-heading" data-testid="brand">{{ t('app.name') }}</a>
       @if (user(); as user) {
@@ -32,11 +32,11 @@
     </div>
   </nav>
 
-  <main class="mx-auto max-w-screen-xl px-4 py-6 sm:px-6">
+  <main class="mx-auto max-w-screen-xl px-4 py-6 sm:px-6 print:max-w-none print:p-0" data-testid="main">
     <router-outlet />
   </main>
 
-  <tmz-toast-region [dismissLabel]="t('common.dismiss')" />
+  <tmz-toast-region class="print:hidden" [dismissLabel]="t('common.dismiss')" />
 
   <ng-template #drawer>
     <div class="flex h-full flex-col gap-6 overflow-y-auto border-s border-default bg-neutral-primary-soft p-4" data-testid="drawer">

@@ -1,6 +1,6 @@
 import { byTestId, settle } from '../../../../testing/project-harness';
 import { ChartType, IndicatorEntry, QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
-import { Context, all, clearOverlay, config, indicator, isQuery, open, result, row, text, widget } from './indicators-testing';
+import { Context, all, clearOverlay, config, indicator, isQuery, open, printOf, result, row, text, wait, widget } from './indicators-testing';
 
 interface Query {
   config: WidgetConfig;
@@ -368,6 +368,14 @@ describe('chart widgets', () => {
       ]);
     });
 
+    it('prints the whole legend, never the part a scroll would show (Charts on paper)', async () => {
+      const context = await show('pie', settings, visits, [households]);
+
+      const legend = byTestId(context.root, 'chart-legend')!;
+      expect(legend.classList).toContain('paper:max-h-none');
+      expect(legend.classList).toContain('paper:overflow-visible');
+    });
+
     it('draws the slices from the largest, each in its own color', async () => {
       const context = await show('pie', {}, [row('Small', 10), row('Large', 90)]);
 
@@ -450,5 +458,64 @@ describe('chart widgets', () => {
       await toggle(context);
       expect(tableRows(context).map((r) => r[0])).toEqual(['1', '2', '10']);
     });
+  });
+});
+
+describe('widget states on paper (dashboard printing)', () => {
+  const view = document.defaultView!;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearOverlay();
+    document.documentElement.classList.remove('tmz-printing');
+    document.getElementById('tmz-print-page')?.remove();
+  });
+
+  /** The browser's dialog, as Chrome's: it blocks, then says it closed. */
+  const stubDialog = () => vi.spyOn(view, 'print').mockImplementation(() => view.dispatchEvent(new Event('afterprint')));
+
+  it('holds the print back while a widget\'s rows are on their way, and prints once they come (Widgets still loading)', async () => {
+    const context = await open('viewer', [widget('w1')], null);
+    const dialog = stubDialog();
+
+    const done = printOf(context).print();
+    await wait(150);
+    expect(dialog).not.toHaveBeenCalled();
+
+    context.http.expectOne(isQuery).flush(result([row('Cali', 75)]));
+    await settle(context.harness);
+    await done;
+
+    expect(dialog).toHaveBeenCalledTimes(1);
+  });
+
+  it('prints once a widget\'s query has failed: an error is an answer', async () => {
+    const context = await open('viewer', [widget('w1')], null);
+    const dialog = stubDialog();
+
+    const done = printOf(context).print();
+    context.http.expectOne(isQuery).flush({}, { status: 500, statusText: 'Server Error' });
+    await settle(context.harness);
+    await done;
+
+    expect(dialog).toHaveBeenCalledTimes(1);
+  });
+
+  it('says on paper that a widget had not finished loading, in place of its skeleton (Widget that takes too long)', async () => {
+    const context = await open('viewer', [widget('w1')], null);
+
+    expect(byTestId(context.root, 'view-loading')!.classList).toContain('paper:hidden');
+    const note = byTestId(context.root, 'view-not-loaded')!;
+    expect(note.classList).toContain('hidden');
+    expect(note.classList).toContain('paper:block');
+    expect(text(note)).toBe('This widget had not finished loading when it was printed.');
+    context.http.match(isQuery);
+  });
+
+  it('leaves the link to the scripts off the paper (Widget whose indicator has not published)', async () => {
+    const context = await open('analyst', [widget('w1')], result([], { published: false, missing: { indicator: true, columns: [] } }));
+
+    expect(byTestId(context.root, 'view-scripts-link')!.classList).toContain('paper:hidden');
+    expect(byTestId(context.root, 'view-not-published')!.closest('.paper\:hidden')).toBeNull();
   });
 });

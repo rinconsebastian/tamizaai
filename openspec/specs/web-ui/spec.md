@@ -159,7 +159,7 @@ Every date and time the UI shows SHALL be written to the minute, without seconds
 - **THEN** it reads `1 sept 2026, 21:30`
 
 ### Requirement: Feedback while an action runs
-While an action the user started takes longer than a moment (preparing an export, a download, a test), the control that started it SHALL show that it is busy and SHALL NOT be usable again until the action ends; other controls of the same kind SHALL stay usable. When the action ends, the UI SHALL show exactly one message, a success or a failure. A notice the UI inserts into the page after an action, such as a dropped filter or republished tables, SHALL be announced to screen readers.
+While an action the user started takes longer than a moment (preparing an export, a download, a test), the control that started it SHALL show that it is busy and SHALL NOT be usable again until the action ends; other controls of the same kind SHALL stay usable. When the action ends, the UI SHALL show exactly one message, a success or a failure, except for an action that ends by opening the browser's own dialog, such as printing: that dialog SHALL stand in for the message, and the UI SHALL show none. A notice the UI inserts into the page after an action, such as a dropped filter or republished tables, SHALL be announced to screen readers.
 
 #### Scenario: Export of one indicator
 - **WHEN** a member exports the table of the indicator `coverage` from a list of three indicators
@@ -168,6 +168,10 @@ While an action the user started takes longer than a moment (preparing an export
 #### Scenario: Filter dropped after a run
 - **WHEN** a run removes the column a member filtered by and the next page loads
 - **THEN** the notice that the filter was removed is announced to screen readers without stealing focus
+
+#### Scenario: Printing ends in the browser's dialog
+- **WHEN** a member prints a dashboard and then prints or cancels in the browser's print dialog
+- **THEN** the Print action shows the busy state until the dialog opens, and no success or failure message appears afterwards
 
 ### Requirement: Project tab row that does not fit
 From 768 pixels wide, tabs that do not fit in one row SHALL scroll sideways inside the row, never scrolling the page. Settings, when shown, SHALL stay visible at its end, the open tab SHALL be brought into view, and each side that hides tabs SHALL show it with a control that scrolls the row. A dashboard name too long for its tab SHALL be cut with an ellipsis, and its full name SHALL stay available on hover, on keyboard focus and to assistive technology.
@@ -210,3 +214,10 @@ A `viewer` who opens the address of a configuration section (General, Submission
 #### Scenario: No failed request for a viewer
 - **WHEN** a `viewer` opens Performance, Clean data and each of the project's own dashboards
 - **THEN** no request the page makes is refused with 403, and no error message is shown
+
+### Requirement: Navigation left out of printouts
+Printing any screen SHALL leave out the top bar, the project's back link, role badge and tabs, the secondary navigation of the configuration sections, toasts and open menus, so the sheets start with the screen's content. The sheets SHALL have a white background.
+
+#### Scenario: Performance dashboard printed from the browser's menu
+- **WHEN** a member prints the Performance dashboard with Ctrl+P
+- **THEN** the sheets show the project's name and the dashboard's content, without the top bar, the tabs or the user's name

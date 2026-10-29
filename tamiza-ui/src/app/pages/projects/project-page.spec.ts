@@ -233,6 +233,18 @@ describe('ProjectPage tabs', () => {
   });
 });
 
+describe('ProjectPage on paper', () => {
+  it('leaves the back link, the role badge and the tabs out of printouts, and keeps the project name and form (Navigation left out of printouts)', async () => {
+    const { root } = await openProjectSection('performance', 'viewer', twoDashboards);
+
+    expect(byTestId(root, 'back-link')?.classList).toContain('print:hidden');
+    expect(byTestId(root, 'role-badge')?.classList).toContain('print:hidden');
+    expect(byTestId(root, 'role-badge')?.textContent?.trim()).toBe('Viewer');
+    expect(byTestId(root, 'project-tabs')?.classList).toContain('print:hidden');
+    expect(byTestId(root, 'project-name')?.closest('.print\\:hidden')).toBeNull();
+  });
+});
+
 describe('ProjectPage unreadable token banner', () => {
   it('warns an admin on any page, with links to the token and the webhook secret', async () => {
     const { root } = await openProjectSection('clean-data', 'admin', { tokenUnreadable: true });

@@ -1738,6 +1738,16 @@
         "daysRequired": "Choose at least one day.",
         "timeRequired": "Enter a time."
       }
+    },
+    "print": {
+      "rowsLeftOut": "{{ count }} rows not printed.",
+      "rowsLeftOutOne": "1 row not printed.",
+      "notLoaded": "This widget had not finished loading when it was printed.",
+      "action": "Print",
+      "preparing": "Preparing the print…",
+      "printedAt": "Printed {{ time }} ({{ zone }})",
+      "publishedAt": "Data published {{ time }}",
+      "notPublished": "The data has not been published yet."
     }
   },
   "dashboardFilters": {

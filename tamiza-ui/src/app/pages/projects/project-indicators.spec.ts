@@ -35,6 +35,7 @@ import {
   open,
   overlay,
   overview,
+  paperOn,
   result,
   row,
   text,
@@ -45,7 +46,7 @@ import {
 } from './indicators/indicators-testing';
 import { decodeFilters, encodeFilters } from './data-view';
 import { ProjectContext } from './project-context';
-import { layoutSaveDelayMs } from './project-indicators';
+import { ProjectIndicators, layoutSaveDelayMs } from './project-indicators';
 
 const answer = result([row('Cali', 75), row('Bogotá', 60)]);
 /** A project whose dashboards are "Indicators" (`d1`, the one `open()` opens) and "Field". */
@@ -1593,11 +1594,11 @@ describe('ProjectIndicators', () => {
       expect(url()).toBe(`/projects/${projectId}/dashboards/d1`);
     });
 
-    it.each<ProjectRole>(['viewer'])('shows a %s the heading and none of the actions (No actions for a viewer)', async (role) => {
+    it.each<ProjectRole>(['viewer'])('shows a %s the heading followed by Print and no other action (Viewer\'s dashboard header)', async (role) => {
       const { root } = await open(role, two, answer, {}, { dashboards: [housing, health] });
 
       expect(text(heading(root))).toBe('Housing');
-      expect(byTestId(root, 'dashboard-actions')).toBeNull();
+      expect(Array.from(byTestId(root, 'dashboard-actions')!.querySelectorAll('button')).map(text)).toEqual(['Print']);
       expect(byTestId(root, 'dashboard-add')).toBeNull();
       expect(byTestId(root, 'dashboard-menu')).toBeNull();
     });
@@ -2519,10 +2520,10 @@ describe('ProjectIndicators scheduled email (dashboard reports, design D14)', ()
     expect(item('dashboard-report')).toBeNull();
   });
 
-  it('offers a viewer no dashboard actions, the scheduled email among them, and asks nothing about email (No actions for a viewer)', async () => {
+  it('offers a viewer no dashboard actions but Print, so no scheduled email, and asks nothing about email (No actions for a viewer)', async () => {
     const context = await open('viewer', two, answer);
 
-    expect(byTestId(context.root, 'dashboard-actions')).toBeNull();
+    expect(Array.from(byTestId(context.root, 'dashboard-actions')!.querySelectorAll('button')).map(text)).toEqual(['Print']);
     expect(byTestId(context.root, 'dashboard-menu')).toBeNull();
     expect(item('dashboard-report')).toBeNull();
     context.http.expectNone(SYSTEM_CONFIG_URL);
@@ -2539,5 +2540,235 @@ describe('ProjectIndicators scheduled email (dashboard reports, design D14)', ()
     await openMenu(context);
 
     expect(item('dashboard-report')).not.toBeNull();
+  });
+});
+
+describe('ProjectIndicators printing (dashboard printing)', () => {
+  const view = document.defaultView!;
+  const municipality: DashboardFilter = { column: 'municipality', label: 'Municipality', kind: 'text', default: null };
+  const indicatorsAndField: DashboardEntry[] = [{ id: 'd1', name: 'Indicators' }, { id: 'd2', name: 'Field' }];
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    clearOverlay();
+    TestBed.inject(ToastService).toasts.set([]);
+    document.documentElement.classList.remove('tmz-printing');
+    document.getElementById('tmz-print-page')?.remove();
+  });
+
+  /** The browser's dialog, as Chrome's: it blocks, then says it closed. */
+  const stubDialog = () => vi.spyOn(view, 'print').mockImplementation(() => view.dispatchEvent(new Event('afterprint')));
+  const printButton = (root: HTMLElement) => byTestId<HTMLButtonElement>(root, 'dashboard-print')!;
+  const status = (root: HTMLElement) => text(byTestId(root, 'dashboard-status')).replace(/​/g, '');
+  const url = () => TestBed.inject(Router).url;
+  const pageContext = (context: Context) => context.harness.fixture.debugElement.query(By.directive(ProjectIndicators)).injector.get(ProjectContext);
+
+  async function until(context: Context, done: () => boolean) {
+    for (let i = 0; i < 40 && !done(); i++) {
+      await wait(20);
+      await settle(context.harness);
+    }
+  }
+
+  describe('the Print action', () => {
+    it('gives an analyst Print, then New dashboard and the dashboard\'s actions (Dashboard header)', async () => {
+      const { root } = await open('analyst', two, answer);
+
+      const actions = byTestId(root, 'dashboard-actions')!;
+      expect(Array.from(actions.querySelectorAll('[data-testid]')).map((e) => e.getAttribute('data-testid'))).toEqual(['dashboard-print', 'dashboard-add', 'dashboard-menu']);
+      expect(text(printButton(root))).toBe('Print');
+      expect(actions.classList).toContain('print:hidden');
+    });
+
+    it('names the action in Spanish', async () => {
+      const { root } = await open('viewer', two, answer, {}, { lang: 'es' });
+
+      expect(text(printButton(root))).toBe('Imprimir');
+    });
+
+    it('offers no Print on a dashboard that has no widgets (Dashboard without widgets)', async () => {
+      const { root } = await open('viewer', [], null);
+
+      expect(byTestId(root, 'dashboard-print')).toBeNull();
+      expect(byTestId(root, 'dashboard-actions')).toBeNull();
+    });
+
+    it('waits for a widget still loading, busy and announced, then opens the dialog and gives focus back with no message (Widgets still loading)', async () => {
+      const context = await open('viewer', two, null);
+      const dialog = stubDialog();
+
+      printButton(context.root).click();
+      await settle(context.harness);
+      expect(printButton(context.root).getAttribute('aria-busy')).toBe('true');
+      expect(printButton(context.root).getAttribute('aria-disabled')).toBe('true');
+      expect(status(context.root)).toBe('Preparing the print…');
+      await wait(150);
+      expect(dialog).not.toHaveBeenCalled();
+
+      await answerQueries(context, answer);
+      await until(context, () => dialog.mock.calls.length > 0);
+
+      expect(dialog).toHaveBeenCalledTimes(1);
+      await settle(context.harness);
+      expect(printButton(context.root).getAttribute('aria-busy')).toBeNull();
+      expect(document.activeElement).toBe(printButton(context.root));
+      expect(document.documentElement.classList).not.toContain('tmz-printing');
+      expect(TestBed.inject(ToastService).toasts()).toEqual([]);
+    });
+
+    it('opens one dialog however often it is pressed while preparing', async () => {
+      const context = await open('viewer', two, null);
+      const dialog = stubDialog();
+
+      printButton(context.root).click();
+      printButton(context.root).click();
+      await settle(context.harness);
+      printButton(context.root).click();
+      await answerQueries(context, answer);
+      await until(context, () => dialog.mock.calls.length > 0);
+      await wait(100);
+
+      expect(dialog).toHaveBeenCalledTimes(1);
+    });
+
+    it('changes nothing: the filter values, the address and the widgets stay, and nothing is saved (Nothing saved)', async () => {
+      const cali = `f=${encodeFilters([{ column: 'municipality', op: 'in', values: ['Cali'] }])}`;
+      const context = await open('viewer', two, answer, {}, { filters: [municipality], query: cali });
+      const before = url();
+      const dialog = stubDialog();
+
+      printButton(context.root).click();
+      await until(context, () => dialog.mock.calls.length > 0);
+      await settle(context.harness);
+
+      expect(url()).toBe(before);
+      expect(context.http.match(isPatch)).toHaveLength(0);
+      expect(context.http.match(isQuery)).toHaveLength(0); // nothing is read again for the paper
+      expect(all(context.root, 'widget')).toHaveLength(2);
+    });
+
+    it('lays the content out on the paper canvas, left whole for the browser to scale down to a narrower sheet', async () => {
+      const { root } = await open('viewer', two, answer);
+
+      const canvas = byTestId(root, 'dashboard-canvas')!;
+      expect(canvas.classList).toContain('paper:w-[980px]');
+      expect(canvas.className).not.toMatch(/max-w/);
+    });
+
+    it('prints nothing when another dashboard opens while it waits, and moves focus nowhere', async () => {
+      const context = await open('viewer', two, null, {}, { dashboards: indicatorsAndField });
+      const dialog = stubDialog();
+      printButton(context.root).click();
+      await settle(context.harness);
+
+      await TestBed.inject(Router).navigateByUrl(`/projects/${projectId}/dashboards/d2`);
+      await settle(context.harness);
+      await answerLoad(context, [widget('w9')], {}, 'd2');
+      await answerQueries(context, answer);
+      await wait(150);
+
+      expect(dialog).not.toHaveBeenCalled();
+      expect(document.documentElement.classList).not.toContain('tmz-printing');
+      expect(printButton(context.root).getAttribute('aria-busy')).toBeNull();
+      expect(document.activeElement).not.toBe(printButton(context.root));
+    });
+
+    it('prints nothing when the member leaves the dashboards while it waits (Leaving the page)', async () => {
+      const context = await open('viewer', two, null);
+      const dialog = stubDialog();
+      printButton(context.root).click();
+      await settle(context.harness);
+
+      await TestBed.inject(Router).navigateByUrl(`/projects/${projectId}/performance`);
+      await settle(context.harness);
+      context.http.match(() => true).forEach((request) => request.cancelled || request.flush({}));
+      await wait(150);
+
+      expect(dialog).not.toHaveBeenCalled();
+      expect(document.documentElement.classList).not.toContain('tmz-printing');
+      expect(document.getElementById('tmz-print-page')).toBeNull();
+    });
+  });
+
+  describe('the print header', () => {
+    const published = (overrides: Record<string, string>) =>
+      defaultIndicators.map((i) => indicator(i.name, { publishedAt: overrides[i.name] ?? '2026-10-01T12:00:00Z' }));
+
+    it('gives the print time in the project\'s time zone, and the latest time the widgets\' indicators were published (Header)', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-28T15:30:00Z'));
+      // The widgets name `coverage` and `response_rate`; `target` was published later, but no widget shows it.
+      const indicators = published({ coverage: '2026-10-28T09:00:00Z', response_rate: '2026-10-28T10:12:00Z', target: '2026-10-28T14:00:00Z' });
+      const context = await open('viewer', two, answer, { indicators }, { project: { timeZone: 'America/Bogota' } });
+      expect(byTestId(context.root, 'print-header')).toBeNull(); // only while printing
+
+      await paperOn(context);
+
+      expect(byTestId(context.root, 'print-header')!.classList).toContain('paper:block');
+      expect(byTestId(context.root, 'print-header')!.classList).toContain('hidden');
+      expect(text(byTestId(context.root, 'print-time'))).toMatch(/^Printed Oct 28, 2026, 10:30\sAM \(America\/Bogota\)$/);
+      expect(text(byTestId(context.root, 'print-published'))).toMatch(/^Data published Oct 28, 2026, 5:12\sAM$/);
+    });
+
+    it('says it in Spanish', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-28T15:30:00Z'));
+      const indicators = published({ coverage: '2026-10-28T10:12:00Z' });
+      const context = await open('viewer', two, answer, { indicators }, { project: { timeZone: 'America/Bogota' }, lang: 'es' });
+
+      await paperOn(context);
+
+      expect(text(byTestId(context.root, 'print-time'))).toMatch(/^Impreso el 28 de oct\.? de 2026, 10:30\sa\.\sm\. \(America\/Bogota\)$/);
+      expect(text(byTestId(context.root, 'print-published'))).toMatch(/^Datos publicados el 28 de oct\.? de 2026, 5:12\sa\.\sm\.$/);
+    });
+
+    it('says the data has not been published yet when no widget\'s indicator has (Nothing published)', async () => {
+      const context = await open('viewer', two, answer, unpublished);
+
+      await paperOn(context);
+
+      expect(text(byTestId(context.root, 'print-published'))).toBe('The data has not been published yet.');
+    });
+
+    it('names the project, the dashboard and the day as the page\'s title while printing, and puts it back after (PDF file name)', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-29T03:00:00Z'));
+      document.title = 'Tamiza';
+      const context = await open('viewer', two, answer, {}, { project: { timeZone: 'America/Bogota' } });
+
+      const print = await paperOn(context);
+      expect(document.title).toBe('Household survey 2026 – Indicators – 2026-10-28');
+
+      print.restore();
+      expect(document.title).toBe('Tamiza');
+    });
+  });
+
+  describe('what paper leaves out (Content of a printed dashboard)', () => {
+    it('leaves the toolbar and the list of indicators off the paper, and keeps the heading and the grid', async () => {
+      const { root } = await open('analyst', two, answer);
+
+      expect(byTestId(root, 'indicators-toolbar')!.classList).toContain('paper:hidden');
+      expect(byTestId(root, 'indicator-table-card')!.classList).toContain('paper:hidden');
+      expect(byTestId(root, 'dashboard-heading')!.closest('.paper\\:hidden, .print\\:hidden')).toBeNull();
+      expect(byTestId(root, 'widget-grid')!.closest('.paper\\:hidden, .print\\:hidden')).toBeNull();
+    });
+
+    it('leaves the card that explains how indicators publish off the paper', async () => {
+      const { root } = await open('analyst', two, answer, unpublished);
+
+      expect(byTestId(root, 'indicators-empty')!.classList).toContain('paper:hidden');
+    });
+
+    it('leaves the notices off the paper: a dashboard notice and filters dropped from the address', async () => {
+      const round = `f=${encodeFilters([{ column: 'round', op: 'range', min: '1' }])}`;
+      const context = await open('viewer', two, answer, {}, { filters: [municipality], query: round });
+      pageContext(context).notice.set({ dashboardId: 'd1', text: 'Something changed.' });
+      await settle(context.harness);
+
+      expect(byTestId(context.root, 'dashboard-notice')!.classList).toContain('paper:hidden');
+      expect(byTestId(context.root, 'dashboard-filters-dropped')!.classList).toContain('paper:hidden');
+    });
   });
 });

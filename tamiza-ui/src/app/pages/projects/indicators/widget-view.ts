@@ -1,5 +1,5 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, LOCALE_ID, computed, effect, inject, input, model, output, signal } from '@angular/core';
+import { Component, DestroyRef, LOCALE_ID, computed, effect, inject, input, model, output, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import { TranslocoDirective } from '@jsverse/transloco';
@@ -10,6 +10,7 @@ import { Alert, ApiLang, Button, Skeleton } from '../../../shared/ui';
 import { AxisChart } from './axis-chart';
 import { plainIndicator, valueFormatter } from './format';
 import { ActiveDashboardFilter, appliedOf } from './dashboard-filters';
+import { DashboardPrint } from './dashboard-print';
 import { MapWidget } from './map-widget';
 import { PieWidget } from './pie-widget';
 import { StatWidget } from './stat-widget';
@@ -78,7 +79,9 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
           }
         }
         @case ('loading') {
-          <div class="flex flex-col gap-3" data-testid="view-loading"><tmz-skeleton class="w-1/3" /><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div>
+          <div class="flex flex-col gap-3 paper:hidden" data-testid="view-loading"><tmz-skeleton class="w-1/3" /><tmz-skeleton class="w-full" /><tmz-skeleton class="w-2/3" /></div>
+          <!-- A widget printed before its rows came says so, rather than print grey bars (dashboard printing, design D6). -->
+          <p class="hidden text-sm text-body paper:block" data-testid="view-not-loaded">{{ t('dashboards.print.notLoaded') }}</p>
         }
         @case ('error') {
           <tmz-alert tone="danger" data-testid="view-error"><span [tmzApiLang]="error()">{{ error() }}</span></tmz-alert>
@@ -137,7 +140,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
       <div class="flex flex-col items-start gap-2 text-sm text-body" data-testid="view-not-published" *transloco="let t">
         <p>{{ t('indicators.widget.notPublished', { label: label() }) }}</p>
         @if (scriptsLink()) {
-          <a [routerLink]="['/projects', projectId(), 'scripts']" class="text-fg-brand hover:underline" data-testid="view-scripts-link">{{ t('indicators.widget.scriptsLink') }}</a>
+          <a [routerLink]="['/projects', projectId(), 'scripts']" class="text-fg-brand hover:underline paper:hidden" data-testid="view-scripts-link">{{ t('indicators.widget.scriptsLink') }}</a>
         }
       </div>
     </ng-template>
@@ -214,6 +217,11 @@ export class WidgetView {
   });
 
   constructor() {
+    // On the dashboard page, the Print action waits while the rows are on their way (dashboard printing, design D6).
+    const print = inject(DashboardPrint, { optional: true });
+    if (print) {
+      inject(DestroyRef).onDestroy(print.registerPending(() => this.state().kind === 'loading'));
+    }
     effect(() => this.tableAvailable.emit(this.drawable()));
     toObservable(this.key)
       .pipe(

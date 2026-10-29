@@ -25,7 +25,16 @@ export interface FilterChange {
     @if (filters().length) {
       <section class="flex flex-wrap items-center gap-2" aria-labelledby="dashboard-filters-title" data-testid="dashboard-filter-bar" *transloco="let t">
         <h3 id="dashboard-filters-title" class="sr-only">{{ t('dashboardFilters.bar.title') }}</h3>
-        <ul class="flex min-w-0 max-w-full flex-wrap gap-2">
+        <!-- On paper the values in force read as plain text, without the buttons (dashboard printing, design D7). -->
+        <p class="hidden text-sm text-body paper:block" data-testid="dashboard-filters-paper">
+          @for (filter of filters(); track filter.column) {
+            @if (!$first) {
+              <span aria-hidden="true"> · </span>
+            }
+            <span data-testid="dashboard-filter-paper"><span class="font-medium text-heading">{{ filter.label }}:</span> {{ value(filter, t) }}</span>
+          }
+        </p>
+        <ul class="flex min-w-0 max-w-full flex-wrap gap-2 paper:hidden">
           @for (filter of filters(); track filter.column) {
             <li class="min-w-0 max-w-full">
               <button
@@ -43,10 +52,10 @@ export interface FilterChange {
           }
         </ul>
         @if (anySet()) {
-          <button tmzButton variant="ghost" size="sm" type="button" (click)="cleared.emit()" data-testid="dashboard-filters-clear">{{ t('dashboardFilters.clearAll') }}</button>
+          <button tmzButton variant="ghost" size="sm" type="button" class="paper:hidden" (click)="cleared.emit()" data-testid="dashboard-filters-clear">{{ t('dashboardFilters.clearAll') }}</button>
         }
         @if (offersDefaults()) {
-          <button tmzButton variant="ghost" size="sm" type="button" (click)="reset.emit()" data-testid="dashboard-filters-reset">{{ t('dashboardFilters.reset') }}</button>
+          <button tmzButton variant="ghost" size="sm" type="button" class="paper:hidden" (click)="reset.emit()" data-testid="dashboard-filters-reset">{{ t('dashboardFilters.reset') }}</button>
         }
       </section>
     }

@@ -75,6 +75,25 @@ describe('DashboardFilterBar', () => {
     expect(bar.root.querySelector('[data-testid="dashboard-filter-bar"]')).toBeNull();
   });
 
+  it('reads on paper as plain text, in order, with the pills and the buttons left off (Filters in force)', async () => {
+    const bar = await render([municipality, { ...round, default: null }], { municipality: { values: ['Cali'] } });
+
+    const paper = bar.root.querySelector('[data-testid="dashboard-filters-paper"]')!;
+    expect(paper.classList).toContain('hidden');
+    expect(paper.classList).toContain('paper:block');
+    expect(Array.from(paper.querySelectorAll('[data-testid="dashboard-filter-paper"]')).map(text)).toEqual(['Municipality: Cali', 'Round: All']);
+    expect(text(paper)).toBe('Municipality: Cali · Round: All');
+    expect(paper.querySelector('button')).toBeNull();
+    expect(bar.root.querySelector('[data-testid="dashboard-filter-bar"] ul')!.classList).toContain('paper:hidden');
+    expect(bar.root.querySelector('[data-testid="dashboard-filters-clear"]')!.classList).toContain('paper:hidden');
+  });
+
+  it('keeps the reset button off the paper too', async () => {
+    const bar = await render([round], { round: { min: '1', max: '1' } });
+
+    expect(bar.root.querySelector('[data-testid="dashboard-filters-reset"]')!.classList).toContain('paper:hidden');
+  });
+
   it('describes the values chosen and the ranges set', async () => {
     const bar = await render([municipality, round, consent, { column: 'visit', label: 'Visit', kind: 'date', default: null }], {
       municipality: { values: ['Cali', 'Palmira'] },

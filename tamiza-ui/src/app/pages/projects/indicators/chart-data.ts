@@ -1,6 +1,7 @@
-import { ElementRef, Signal, effect, signal } from '@angular/core';
+import { DestroyRef, ElementRef, Signal, effect, inject, signal } from '@angular/core';
 import { QueryRow } from '../../../core/projects/indicators.service';
 import { naturalCompare } from './chart-scales';
+import { DashboardPrint } from './dashboard-print';
 
 export interface Pivot {
   categories: string[];
@@ -56,10 +57,21 @@ export interface Size {
 
 /**
  * The pixel size of an element, kept up to date as the widget is resized, so a chart draws at exactly its box and its text keeps
- * one size. Browsers only: where there is no ResizeObserver (jsdom) the fallback stays.
+ * one size. Browsers only: where there is no ResizeObserver (jsdom) the fallback stays. On the dashboard page it is also read
+ * when the page prepares the print, where no ResizeObserver fires in time (dashboard printing, design D5).
  */
 export function observeSize(target: () => ElementRef<HTMLElement> | undefined, fallback: Size = { width: 480, height: 280 }): Signal<Size> {
   const size = signal(fallback);
+  const print = inject(DashboardPrint, { optional: true });
+  if (print) {
+    const unregister = print.registerMeasure(() => {
+      const box = target()?.nativeElement.getBoundingClientRect();
+      if (box && box.width > 0 && box.height > 0) {
+        size.set({ width: Math.round(box.width), height: Math.round(box.height) });
+      }
+    });
+    inject(DestroyRef).onDestroy(unregister);
+  }
   effect((onCleanup) => {
     const element = target()?.nativeElement;
     if (!element || typeof ResizeObserver === 'undefined') {

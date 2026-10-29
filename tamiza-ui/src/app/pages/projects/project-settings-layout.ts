@@ -20,7 +20,7 @@ import { projectSections } from './project-sections';
   template: `
     <ng-container *transloco="let t">
       @if (allowed()) {
-        <nav class="mb-6 hidden md:block" [attr.aria-label]="t('project.tabs.settings')" data-testid="settings-nav">
+        <nav class="mb-6 hidden md:block print:hidden" [attr.aria-label]="t('project.tabs.settings')" data-testid="settings-nav">
           <ul class="flex flex-wrap gap-2">
             @for (section of sections(); track section.link) {
               <li>

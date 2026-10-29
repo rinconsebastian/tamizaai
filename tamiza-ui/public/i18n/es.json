@@ -1738,6 +1738,16 @@
         "daysRequired": "Elige al menos un día.",
         "timeRequired": "Indica una hora."
       }
+    },
+    "print": {
+      "rowsLeftOut": "{{ count }} filas no se imprimieron.",
+      "rowsLeftOutOne": "1 fila no se imprimió.",
+      "notLoaded": "Este widget no había terminado de cargar cuando se imprimió.",
+      "action": "Imprimir",
+      "preparing": "Preparando la impresión…",
+      "printedAt": "Impreso el {{ time }} ({{ zone }})",
+      "publishedAt": "Datos publicados el {{ time }}",
+      "notPublished": "Los datos aún no se han publicado."
     }
   },
   "dashboardFilters": {

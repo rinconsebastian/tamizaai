@@ -310,7 +310,7 @@ Each dashboard has its own grid of 12 columns. A new widget goes below the exist
 - **Drag** a widget by the handle at the left of its title to move it, and drag the corner at the bottom right to resize it. A dashed outline shows where it will land. A widget dropped on others pushes them down; widgets that do not overlap stay where they are.
 - **Keyboard.** Focus the move handle and press the arrow keys to move the widget one cell; hold **Shift** with the arrow keys to resize it. On the resize handle, the arrow keys resize. The new place is announced to screen readers. The handles are hidden on narrow screens.
 - **Saving.** A move or resize is saved when the dragging has been still for a moment (about 0.4 seconds), not on every step. If it cannot be saved, the page tells you and shows what the server has.
-- **Reading order** is top to bottom, then left to right, whatever the order the widgets were created in. Keyboard and screen readers follow it, and so does the page below 768 px wide, where the grid becomes one column and each widget keeps its height.
+- **Reading order** is top to bottom, then left to right, whatever the order the widgets were created in. Keyboard and screen readers follow it, and so does the screen below 768 px wide, where the grid becomes one column and each widget keeps its height. A printed dashboard keeps the 12 columns (see [Printing a dashboard](#printing-a-dashboard)).
 
 ## Show as table
 
@@ -319,6 +319,19 @@ Every widget except the stat tile has a table button in its header (shown once t
 ## Export
 
 **Export**, the download button at the end of a published indicator's entry in the list, downloads the **whole published table of that indicator**, exactly as published and without the widgets' or the dashboard's filters, as CSV or XLSX. Viewers can export. It is the same file, the same single-use download link and the same limits as the [clean data exports](clean-data-dashboard.md#exports): the CSV has a byte order mark, a geometry column is exported as its WKT text, and an XLSX is refused above 1,048,575 rows. While one indicator's file is being prepared only its button shows that it is busy, and the page ends with one message. Exporting one indicator never delays another indicator's publishing, and a widget does not export on its own; a chart cannot be saved as an image, so use **Show as table** to see its numbers.
+
+## Printing a dashboard
+
+**Print**, after the dashboard's name, prints the open dashboard or saves it as PDF through the browser's own dialog. Every member has it, viewers included, once the dashboard has widgets. The Performance and Clean data dashboards have no Print action.
+
+- **Getting ready.** Print lays the dashboard out as it will print, waits for the widgets still loading and for the maps' basemap tiles (at most 20 seconds), then opens the dialog. While it waits, the button is busy and screen readers hear "Preparing the print…". When the dialog closes, whether you printed or cancelled, the dashboard is back as it was, with the focus on **Print**. Printing saves nothing and changes neither the filter values nor the page address.
+- **What the sheets show.** The project's name and form, the dashboard's name, when it was printed (in the project's time zone), the latest time one of its widgets' indicators was published, the dashboard filters with the values in force ("Municipality: Cali · Round: All"), and the widgets as you see them, charts or tables. They leave out the top bar, the tabs, every button and menu, the widgets' handles, the map controls, notices, tooltips and the list of indicators.
+- **Layout.** Pages have 10 mm margins, and the widgets keep the 12 columns, positions and heights they have on a wide screen, even when you print from a phone. A widget that fits on a sheet is never split: it moves whole to the next sheet. Only a widget taller than a sheet continues on the next one. A map shows all its shapes, or the area you zoomed into, with its legend and the basemap's credit.
+- **Tables.** A widget shown as a table prints the rows that fit in its box and says how many were not printed ("28 rows not printed."). **Export** gives every row.
+- **Printing with Ctrl+P** (or the browser's menu) gives the same sheets, but it cannot wait: a widget still loading says on paper that it had not finished loading, and a map prints the tiles it already has. Prefer **Print**.
+- **Orientation.** Choose it in the browser's dialog. In landscape, A4 and Letter print the dashboard at full size. In portrait, the whole dashboard is scaled down to the sheet's width, upright and with its 12 columns, so it reads smaller but more rows fit on each sheet. On a sheet smaller than A4 or Letter, such as A5 in portrait, Chrome and Edge cannot scale it down enough and cut off the right-hand columns: choose landscape or a smaller scale.
+- **The browser's options.** Paper size, orientation and scale stay yours to choose; a smaller scale fits more rows on a sheet. Colors print without turning on **Background graphics**. The browser offers the project, the dashboard and the date as the PDF's file name, and prints the same in its own header when **Headers and footers** is on.
+- **Browsers.** Printing is made for Chrome, Edge and Firefox on a computer. Other browsers print the same content but may not scale the dashboard to a portrait sheet or keep every widget whole.
 
 ## When a table changes
 
@@ -362,4 +375,5 @@ An operator can change the first two; the others are fixed. See [operations.md](
 - It does not copy a dashboard or a widget to another project, and a removed dashboard cannot be brought back.
 - Tabs cannot be dragged: a dashboard moves with **Move left** and **Move right**, which also work from the keyboard and on a phone.
 - It does not save a chart or a map as an image.
+- It does not make a PDF on the server, and a scheduled email attaches no PDF: printing goes through the browser's dialog, which can save as PDF.
 - It does not refresh by itself: reload the page after a run, or to see the dashboards other members have added, renamed, moved or removed.

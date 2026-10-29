@@ -69,6 +69,12 @@ describe('ProjectSettingsLayout', () => {
     harness.fixture.destroy();
   });
 
+  it('leaves the settings navigation out of printouts (Navigation left out of printouts)', async () => {
+    const { root } = await openProjectSection('members', 'admin');
+
+    expect(root.querySelector('nav[aria-label="Settings"]')?.classList).toContain('print:hidden');
+  });
+
   describe('for a viewer', () => {
     it.each(sections)('takes the address of %s to the performance dashboard in its place, asking for none of its data (Viewer opens a configuration bookmark)', async (section, element) => {
       const { http, harness, router, failures, root } = await openAddress(section, 'viewer');
