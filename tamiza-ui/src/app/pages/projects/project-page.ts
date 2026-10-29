@@ -19,10 +19,10 @@ import { projectSections } from './project-sections';
     <section *transloco="let t">
       @if (project(); as project) {
         <header class="mb-6 flex flex-col gap-2">
-          <a routerLink="/projects" class="text-sm text-fg-brand hover:underline">← {{ t('projects.title') }}</a>
+          <a routerLink="/projects" class="text-sm text-fg-brand hover:underline print:hidden" data-testid="back-link">← {{ t('projects.title') }}</a>
           <div class="flex flex-wrap items-center gap-3">
             <h1 class="text-2xl font-semibold text-heading break-words" data-testid="project-name">{{ project.name }}</h1>
-            <tmz-badge [tone]="project.myRole === 'admin' ? 'brand' : 'neutral'">{{ t('roles.' + project.myRole) }}</tmz-badge>
+            <tmz-badge class="print:hidden" [tone]="project.myRole === 'admin' ? 'brand' : 'neutral'" data-testid="role-badge">{{ t('roles.' + project.myRole) }}</tmz-badge>
           </div>
           <p class="text-sm text-body break-words">{{ project.formName }}</p>
         </header>
@@ -35,7 +35,8 @@ import { projectSections } from './project-sections';
           </tmz-alert>
         }
         <tmz-tabs-nav
-          class="mb-6 block"
+          class="mb-6 block print:hidden"
+          data-testid="project-tabs"
           [items]="tabs()"
           [label]="t('project.sections')"
           [scrollStartLabel]="t('dashboards.scrollStart')"

@@ -6,6 +6,7 @@ import { DataColumnType } from '../../../core/projects/data.service';
 import { BasemapKind, QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartTooltip, ChartTooltips } from '../../../shared/ui';
 import { sequentialColor, sequentialStep, sequentialSteps } from './chart-scales';
+import { DashboardPrint } from './dashboard-print';
 import { ValueFormatter, plotted } from './format';
 import { BasemapChoice, MapControls } from './map-controls';
 import { EngineView, MapEngine, MapEvents, MapPoint, ShapeInput, TileHooks } from './map-engine';
@@ -82,8 +83,12 @@ let helpIds = 0;
               data-testid="map-container"
             ></div>
             <p [id]="helpId" class="sr-only">{{ t('indicators.map.keyHelp') }}</p>
+            @if (!engine() && !loadFailed()) {
+              <!-- A map below the screen is only made when the print is prepared; one not made in time says so on paper. -->
+              <p class="absolute inset-x-2 top-1/2 hidden -translate-y-1/2 text-center text-sm text-body paper:block" data-testid="map-not-loaded">{{ t('dashboards.print.notLoaded') }}</p>
+            }
             <app-map-controls
-              class="absolute end-2 top-2 z-10"
+              class="absolute end-2 top-2 z-10 paper:hidden"
               [compact]="compact()"
               [choices]="choices(t)"
               [chosen]="chosen()"
@@ -95,7 +100,7 @@ let helpIds = 0;
               (basemap)="chooseBasemap($event, t)"
             />
             @if (hint(); as hint) {
-              <p class="pointer-events-none absolute inset-x-2 top-1/2 z-10 -translate-y-1/2 text-center" aria-hidden="true" data-testid="map-hint">
+              <p class="pointer-events-none absolute inset-x-2 top-1/2 z-10 -translate-y-1/2 text-center paper:hidden" aria-hidden="true" data-testid="map-hint">
                 <span class="rounded-base bg-neutral-primary-soft px-2 py-1 text-xs text-heading shadow-sm">{{ hint === 'wheel' ? t(mac ? 'indicators.map.hintWheelMac' : 'indicators.map.hintWheel') : t('indicators.map.hintTouch') }}</span>
               </p>
             }
@@ -150,6 +155,8 @@ export class MapWidget {
   private readonly locale = inject(LOCALE_ID);
   private readonly basemaps = inject(Basemaps);
   private readonly tooltip: ChartTooltip = inject(ChartTooltips).create();
+  /** The dashboard page's paper mode; none in the widget form's preview. */
+  private readonly print = inject(DashboardPrint, { optional: true });
 
   readonly rows = input.required<QueryRow[]>();
   readonly config = input.required<WidgetConfig>();
@@ -293,6 +300,15 @@ export class MapWidget {
 
   constructor() {
     this.basemaps.load();
+
+    // Paper mode (dashboard printing, design D5, D6): the map is made even below the screen, takes the box it has on paper and
+    // shows all its shapes again unless the member moved it; the Print action waits for it to be made and for its tiles.
+    const print = this.print;
+    if (print) {
+      const destroyRef = inject(DestroyRef);
+      destroyRef.onDestroy(print.registerMeasure(() => this.fitPaper()));
+      destroyRef.onDestroy(print.registerPending(() => this.printPending()));
+    }
 
     // The box: its size, kept up to date, and the gestures that need to see an event before Leaflet's own handlers do.
     effect((onCleanup) => {
@@ -583,6 +599,31 @@ export class MapWidget {
     if (box && box.clientWidth > 0 && box.clientHeight > 0) {
       this.size.set({ width: box.clientWidth, height: box.clientHeight });
     }
+  }
+
+  /** The print is being prepared: the map is made if it was not, and fits the box it has on paper, as on any resize. */
+  private fitPaper(): void {
+    this.visible.set(true);
+    this.measure();
+    const engine = this.engine();
+    if (engine) {
+      engine.resize();
+      if (!this.touched()) {
+        engine.refit();
+      }
+    }
+  }
+
+  /** While a print is prepared: the map is still being made, its basemap set up, or its tiles loading. */
+  private printPending(): boolean {
+    if (!this.print?.printing() || this.asTable() || !this.drawn().length || this.loadFailed()) {
+      return false;
+    }
+    const engine = this.engine();
+    if (!engine) {
+      return true;
+    }
+    return (!!this.layerKey() && !this.tilesShown()) || engine.tilesLoading();
   }
 
   // --- Keyboard (design D5, D6) -----------------------------------------------------------------------------------------

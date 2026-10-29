@@ -1,4 +1,5 @@
 import { TestRequest } from '@angular/common/http/testing';
+import { By } from '@angular/platform-browser';
 import { vi } from 'vitest';
 import { Downloader } from '../../../core/download.service';
 import {
@@ -14,8 +15,11 @@ import {
   WidgetConfig,
   emptyConfig,
 } from '../../../core/projects/indicators.service';
-import { DashboardEntry, ProjectRole } from '../../../core/projects/projects.service';
+import { DashboardEntry, ProjectDetails, ProjectRole } from '../../../core/projects/projects.service';
+import { InterfaceLanguage } from '../../../core/i18n/interface-language';
 import { openProjectSection, projectId, settle } from '../../../../testing/project-harness';
+import { ProjectIndicators } from '../project-indicators';
+import { DashboardPrint } from './dashboard-print';
 
 // Shared by the specs of the indicators dashboard: factories for the API's answers and a way to open the page.
 
@@ -129,20 +133,23 @@ export type Answer = QueryResult | ((body: { config: WidgetConfig; chartType?: s
 
 /**
  * Which dashboard `open()` opens, and the project's dashboards when they are not just "Indicators" (`d1`); the dashboard's filters,
- * and a query string for the address (`f=…`, without the `?`).
+ * and a query string for the address (`f=…`, without the `?`); other project details (its time zone), and the interface language.
  */
 export interface OpenAt {
   dashboardId?: string;
   dashboards?: DashboardEntry[];
   filters?: DashboardFilter[];
   query?: string;
+  project?: Partial<ProjectDetails>;
+  lang?: InterfaceLanguage;
 }
 
 /** Opens a dashboard by its address, as a bookmark or a tab would, and answers what it reads; `d1` unless `at` says otherwise. */
 export async function open(role: ProjectRole, widgets: Widget[], answer: Answer | null, extra: Partial<IndicatorsOverview> = {}, at: OpenAt = {}) {
   const id = at.dashboardId ?? dashboardId;
   const address = `dashboards/${id}${at.query ? `?${at.query}` : ''}`;
-  const context = await openProjectSection(address, role, at.dashboards ? { dashboards: at.dashboards } : {}, [{ provide: Downloader, useValue: downloader }]);
+  const project = { ...(at.dashboards ? { dashboards: at.dashboards } : {}), ...at.project };
+  const context = await openProjectSection(address, role, project, [{ provide: Downloader, useValue: downloader }], at.lang);
   await answerLoad(context, widgets, extra, id, at.filters);
   if (answer) {
     await answerQueries(context, answer);
@@ -178,3 +185,16 @@ export async function answerQueries(context: Pick<Context, 'http' | 'harness'>, 
 export const overlay = () => document.querySelector('.cdk-overlay-container') as HTMLElement;
 export const clearOverlay = () => document.querySelectorAll('.cdk-overlay-container').forEach((c) => c.replaceChildren());
 export const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The open dashboard's paper mode (dashboard printing, design D1). */
+export function printOf(context: Pick<Context, 'harness'>): DashboardPrint {
+  return context.harness.fixture.debugElement.query(By.directive(ProjectIndicators)).injector.get(DashboardPrint);
+}
+
+/** Lays the open dashboard out as it prints, as the Print action and `beforeprint` do, and lets the page draw. */
+export async function paperOn(context: Pick<Context, 'harness'>): Promise<DashboardPrint> {
+  const print = printOf(context);
+  print.prepare();
+  await settle(context.harness);
+  return print;
+}

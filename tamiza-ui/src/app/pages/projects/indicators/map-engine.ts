@@ -340,6 +340,11 @@ export class MapEngine {
     return this.template;
   }
 
+  /** The tile layer is still fetching the tiles of the view shown; false without a layer. */
+  tilesLoading(): boolean {
+    return this.tiles?.isLoading() ?? false;
+  }
+
   /**
    * Makes a shape the one the keyboard is on. The order matters: `bringToFront` re-inserts the node, and a node that moved loses
    * the focus, so the class and the focus come after it, and the pan after those.

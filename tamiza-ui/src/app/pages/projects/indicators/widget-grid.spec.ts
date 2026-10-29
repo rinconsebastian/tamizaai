@@ -1,12 +1,13 @@
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { vi } from 'vitest';
-import { projectId, settle } from '../../../../testing/project-harness';
+import { configureApp, projectId, settle } from '../../../../testing/project-harness';
 import { DashboardFilter, Layout } from '../../../core/projects/indicators.service';
 import { ChartTooltips } from '../../../shared/ui';
 import { encodeFilters } from '../data-view';
-import { Context, all, answerLoad, answerQueries, clearOverlay, config, isPatch, isQuery, open, result, row, text, wait, widget, widgetUrl } from './indicators-testing';
+import { Context, all, answerLoad, answerQueries, clearOverlay, config, isPatch, isQuery, open, paperOn, result, row, text, wait, widget, widgetUrl } from './indicators-testing';
 import { layoutSaveDelayMs } from '../project-indicators';
+import { WidgetGrid } from './widget-grid';
 
 const rows = result([row('Cali', 75)]);
 const left = widget('w1', { title: 'Left', layout: { x: 0, y: 0, w: 6, h: 4 } });
@@ -349,5 +350,65 @@ describe('the widget grid with dashboard filters', () => {
 
     expect(note(context, 'w1')).toBe('');
     expect(note(context, 'w2')).toBe('');
+  });
+});
+
+describe('the widget grid on paper (dashboard printing)', () => {
+  afterEach(() => {
+    clearOverlay();
+    document.documentElement.classList.remove('tmz-printing');
+    document.getElementById('tmz-print-page')?.remove();
+  });
+
+  const grid = (context: Context) => context.root.querySelector<HTMLElement>('[data-testid="widget-grid"]')!;
+
+  it('keeps the 12 columns while the page prepares the print, and goes back after (Twelve columns on paper)', async () => {
+    const context = await open('analyst', [left, right], rows);
+    expect(grid(context).classList).not.toContain('tmz-paper');
+
+    const print = await paperOn(context);
+    expect(grid(context).classList).toContain('tmz-paper');
+    expect(place(context, 'w2')).toEqual({ column: '7 / span 6', row: '1 / span 4' });
+
+    print.restore();
+    await settle(context.harness);
+    expect(grid(context).classList).not.toContain('tmz-paper');
+  });
+
+  it('starts each tile 2px into its grid area on paper, clear of what a scaled-down sheet paints of the next one (design D2)', async () => {
+    const context = await open('analyst', [left, right], rows);
+    expect(getComputedStyle(item(context, 'w1')).paddingTop).not.toBe('2px');
+
+    const print = await paperOn(context);
+    expect(getComputedStyle(item(context, 'w1')).paddingTop).toBe('2px');
+    expect(getComputedStyle(item(context, 'w2')).paddingTop).toBe('2px');
+
+    print.restore();
+    await settle(context.harness);
+    expect(getComputedStyle(item(context, 'w1')).paddingTop).not.toBe('2px');
+  });
+
+  it('leaves every widget control off the paper, and the tiles white without a shadow (Content of a printed dashboard)', async () => {
+    const context = await open('analyst', [left], rows);
+    const tile = item(context, 'w1');
+
+    expect(handle(context, 'w1', 'move').classList).toContain('paper:hidden');
+    expect(handle(context, 'w1', 'resize').classList).toContain('paper:hidden');
+    expect(tile.querySelector('[data-testid="widget-table-toggle"]')!.classList).toContain('paper:hidden');
+    expect(tile.querySelector('tmz-dropdown-menu')!.classList).toContain('paper:hidden');
+    expect(tile.querySelector('[data-testid="widget-title"]')!.closest('.paper\:hidden')).toBeNull();
+    const article = tile.querySelector('article')!;
+    expect(article.classList).toContain('paper:bg-white');
+    expect(article.classList).toContain('paper:shadow-none');
+  });
+
+  it('lays out as before where no dashboard page provides paper mode', async () => {
+    configureApp();
+    const fixture = TestBed.createComponent(WidgetGrid);
+    fixture.componentRef.setInput('widgets', []);
+    fixture.componentRef.setInput('projectId', projectId);
+    await fixture.whenStable();
+
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="widget-grid"]')!.classList).not.toContain('tmz-paper');
   });
 });

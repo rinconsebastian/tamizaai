@@ -63,6 +63,18 @@ describe('App shell', () => {
     expect(oidc.logoff).toHaveBeenCalledTimes(1);
   });
 
+  it('leaves the top bar and the toasts out of printouts, and gives the content the whole sheet (Navigation left out of printouts)', async () => {
+    const fixture = await renderWithUser(ada);
+    const element = fixture.nativeElement as HTMLElement;
+
+    expect(element.querySelector('[data-testid="top-bar"]')?.classList).toContain('print:hidden');
+    expect(element.querySelector('tmz-toast-region')?.classList).toContain('print:hidden');
+    const main = element.querySelector('[data-testid="main"]')!;
+    expect(main.classList).toContain('print:max-w-none');
+    expect(main.classList).toContain('print:p-0');
+    expect(main.classList).not.toContain('print:hidden');
+  });
+
   describe('narrow-screen menu', () => {
     afterEach(() => document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = '')));
 

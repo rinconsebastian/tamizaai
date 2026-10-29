@@ -65,7 +65,7 @@ const minSlot = 14;
         <app-widget-table class="flex-1 overflow-auto" [model]="table(t)" />
       } @else {
         <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
-          <svg role="img" class="absolute inset-0 block" [attr.width]="layout().width" [attr.height]="layout().height" [attr.viewBox]="'0 0 ' + layout().width + ' ' + layout().height" [attr.aria-label]="summary(t)" data-testid="chart-svg">
+          <svg role="img" class="tmz-chart-svg absolute inset-0 block" [attr.width]="layout().width" [attr.height]="layout().height" [attr.viewBox]="'0 0 ' + layout().width + ' ' + layout().height" [attr.aria-label]="summary(t)" data-testid="chart-svg">
             @for (line of layout().grid; track $index) {
               <line [attr.x1]="line.x1" [attr.y1]="line.y1" [attr.x2]="line.x2" [attr.y2]="line.y2" [class]="line.zero ? 'stroke-default-medium' : 'stroke-default'" stroke-width="1" />
             }

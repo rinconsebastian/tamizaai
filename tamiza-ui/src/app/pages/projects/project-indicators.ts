@@ -12,11 +12,12 @@ import { ExportFormat } from '../../core/projects/data.service';
 import { DashboardFilter, IndicatorEntry, IndicatorsOverview, IndicatorsService, Layout, Widget, maxDashboards } from '../../core/projects/indicators.service';
 import { DashboardEntry } from '../../core/projects/projects.service';
 import { SystemConfigService } from '../../core/system-config';
-import { Alert, ApiLang, Badge, Button, Card, ConfirmDialog, Disclosure, DropdownMenu, MenuItem, Skeleton, ToastService, DateTimePipe, NumberPipe, numberText } from '../../shared/ui';
+import { Alert, ApiLang, Badge, Button, Card, ConfirmDialog, Disclosure, DropdownMenu, MenuItem, Skeleton, ToastService, DateTimePipe, NumberPipe, dateText, numberText } from '../../shared/ui';
 import { DashboardFilterBar, FilterChange } from './indicators/dashboard-filter-bar';
 import { FilterValues, activeFilters, defaultsOf, readAddress, writeAddress } from './indicators/dashboard-filters';
 import { DashboardFiltersData, DashboardFiltersDialog, DashboardFiltersResult } from './indicators/dashboard-filters-dialog';
 import { DashboardNameAction, DashboardNameData, DashboardNameDialog, DashboardNameResult } from './indicators/dashboard-name-dialog';
+import { DashboardPrint, printTitle } from './indicators/dashboard-print';
 import { DashboardReportData, DashboardReportDialog, DashboardReportResult } from './indicators/dashboard-report-dialog';
 import { Placed } from './indicators/grid-layout';
 import { WidgetDialog, WidgetDialogData, WidgetDialogResult } from './indicators/widget-dialog';
@@ -33,10 +34,12 @@ export const layoutSaveDelayMs = 400;
  * admins add, edit, arrange and remove widgets (design D5, D6 of add-indicators-dashboard). While no indicator has published, it
  * says so, shows the indicators as part of that message and still lists the widgets already configured. The router reuses the
  * page from one dashboard to the next, so it shows one dashboard at a time; from its header, analysts and admins add, rename,
- * duplicate, move and remove the project's dashboards (design D10, D12 of add-multiple-dashboards).
+ * duplicate, move and remove the project's dashboards (design D10, D12 of add-multiple-dashboards). Every member prints it from
+ * its header, laid out as on a wide screen (add-dashboard-printing).
  */
 @Component({
   selector: 'app-project-indicators',
+  providers: [DashboardPrint],
   imports: [
     DateTimePipe,
     NumberPipe,
@@ -58,31 +61,66 @@ export const layoutSaveDelayMs = 400;
     WidgetGrid,
   ],
   template: `
-    <div class="flex flex-col gap-6" *transloco="let t">
+    <!-- The paper canvas (dashboard printing, design D2): as wide as a landscape Letter sheet while the print is prepared and on paper.
+         Nothing caps it on paper: on a narrower sheet the browser scales the whole page down to the sheet's width. -->
+    <div class="flex flex-col gap-6 paper:w-[980px]" *transloco="let t" data-testid="dashboard-canvas">
       <!-- Outside the loading and overview branches, so the heading and the live region exist from the first render. -->
       <div class="flex flex-wrap items-center gap-2" data-testid="dashboard-header">
         <h2 #heading tabindex="-1" class="min-w-0 flex-1 break-words text-lg font-semibold text-heading [overflow-wrap:anywhere] focus:outline-none" data-testid="dashboard-heading">{{ name() }}</h2>
-        @if (context.can('analyst')) {
+        @if (canPrint() || context.can('analyst')) {
           <!-- Under the name on a phone. At the limit "New dashboard" stays focusable, so the hint saying why it is unavailable can be read. -->
-          <div class="ms-auto flex w-full items-center justify-end gap-2 sm:w-auto" data-testid="dashboard-actions">
-            <button
-              tmzButton
-              variant="secondary"
-              size="sm"
-              type="button"
-              class="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-              [attr.aria-disabled]="atLimit() ? 'true' : null"
-              [attr.aria-describedby]="atLimit() ? 'dashboard-limit-hint' : null"
-              (click)="addDashboard()"
-              data-testid="dashboard-add"
-            >
-              {{ t('dashboards.add') }}
-            </button>
-            <tmz-dropdown-menu [label]="t('dashboards.actions')" [items]="actions()" triggerTestId="dashboard-menu" (selected)="act($event)" />
+          <div class="ms-auto flex w-full items-center justify-end gap-2 sm:w-auto print:hidden" data-testid="dashboard-actions">
+            @if (canPrint()) {
+              <!-- Every member's: it stays focusable while the print is prepared, so its busy state can be read (design D11). -->
+              <button
+                #printButton
+                tmzButton
+                variant="secondary"
+                size="sm"
+                type="button"
+                class="aria-disabled:cursor-not-allowed"
+                [attr.aria-disabled]="preparing() ? 'true' : null"
+                [attr.aria-busy]="preparing() ? 'true' : null"
+                (click)="print()"
+                data-testid="dashboard-print"
+              >
+                <svg aria-hidden="true" class="size-4" [class.animate-pulse]="preparing()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M7 8V3h10v5M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M7 14h10v7H7z" />
+                </svg>
+                {{ t('dashboards.print.action') }}
+              </button>
+            }
+            @if (context.can('analyst')) {
+              <button
+                tmzButton
+                variant="secondary"
+                size="sm"
+                type="button"
+                class="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                [attr.aria-disabled]="atLimit() ? 'true' : null"
+                [attr.aria-describedby]="atLimit() ? 'dashboard-limit-hint' : null"
+                (click)="addDashboard()"
+                data-testid="dashboard-add"
+              >
+                {{ t('dashboards.add') }}
+              </button>
+              <tmz-dropdown-menu [label]="t('dashboards.actions')" [items]="actions()" triggerTestId="dashboard-menu" (selected)="act($event)" />
+            }
           </div>
-          @if (atLimit()) {
-            <p id="dashboard-limit-hint" class="w-full text-sm text-body" data-testid="dashboard-limit-hint">{{ t('dashboards.limitHint', { max: dashboardLimit() }) }}</p>
+          @if (context.can('analyst') && atLimit()) {
+            <p id="dashboard-limit-hint" class="w-full text-sm text-body print:hidden" data-testid="dashboard-limit-hint">{{ t('dashboards.limitHint', { max: dashboardLimit() }) }}</p>
           }
+        }
+        <!-- The print header (design D7): when the sheet was printed, and when its data was published. -->
+        @if (printedAt(); as printedAt) {
+          <div class="hidden w-full text-sm text-body paper:block" data-testid="print-header">
+            <p data-testid="print-time">{{ t('dashboards.print.printedAt', { time: when(printedAt), zone: timeZone() }) }}</p>
+            @if (publishedAt(); as publishedAt) {
+              <p data-testid="print-published">{{ t('dashboards.print.publishedAt', { time: when(publishedAt) }) }}</p>
+            } @else {
+              <p data-testid="print-published">{{ t('dashboards.print.notPublished') }}</p>
+            }
+          </div>
         }
         <!-- Rendered empty: a live region added with its text already in it would not be read. -->
         <p class="sr-only" role="status" data-testid="dashboard-status">{{ announcement() }}</p>
@@ -90,7 +128,7 @@ export const layoutSaveDelayMs = 400;
 
       @if (notice(); as notice) {
         <!-- Not itself a live region: the header's announces the same text once. -->
-        <tmz-alert tone="warning" data-testid="dashboard-notice">
+        <tmz-alert tone="warning" class="paper:hidden" data-testid="dashboard-notice">
           <div class="flex items-start justify-between gap-3">
             <p class="min-w-0 break-words" [tmzApiLang]="notice.text" data-testid="dashboard-notice-text">{{ notice.text }}</p>
             <button tmzButton variant="ghost" size="sm" type="button" class="shrink-0" (click)="dismissNotice()" data-testid="dashboard-notice-dismiss">{{ t('dashboards.notice.dismiss') }}</button>
@@ -100,7 +138,7 @@ export const layoutSaveDelayMs = 400;
 
       @if (dropped().length) {
         <!-- Not itself a live region: the header's announces the same text once. -->
-        <tmz-alert tone="warning" [heading]="t('dashboardFilters.dropped.title')" data-testid="dashboard-filters-dropped">
+        <tmz-alert tone="warning" class="paper:hidden" [heading]="t('dashboardFilters.dropped.title')" data-testid="dashboard-filters-dropped">
           <ul class="list-inside list-disc">
             @for (name of dropped(); track $index) {
               <li class="break-words">{{ t('dashboardFilters.dropped.item', { name }) }}</li>
@@ -177,7 +215,7 @@ export const layoutSaveDelayMs = 400;
         </ng-template>
 
         @if (!anyPublished()) {
-          <tmz-card [heading]="t('indicators.empty.title')" data-testid="indicators-empty">
+          <tmz-card class="paper:hidden" [heading]="t('indicators.empty.title')" data-testid="indicators-empty">
             <p class="text-sm text-body">{{ t('indicators.empty.body') }}</p>
             @if (context.can('analyst')) {
               <p class="mt-2 text-sm text-body">{{ t('indicators.empty.editor') }}</p>
@@ -213,7 +251,7 @@ export const layoutSaveDelayMs = 400;
 
         @if (widgets().length) {
           <!-- Editors see how many widgets there are (and the limit); everyone gets the switch to tables. -->
-          <div class="flex flex-wrap items-center justify-between gap-3" data-testid="indicators-toolbar">
+          <div class="flex flex-wrap items-center justify-between gap-3 paper:hidden" data-testid="indicators-toolbar">
             @if (context.can('analyst')) {
               @if (limitReached()) {
                 <p class="text-sm text-fg-warning" data-testid="widget-limit">{{ t('indicators.limit', { count: overview.limits.maxWidgets }) }}</p>
@@ -257,6 +295,7 @@ export const layoutSaveDelayMs = 400;
 
         @if (anyPublished() && overview.indicators.length) {
           <tmz-disclosure
+            class="paper:hidden"
             [heading]="t('indicators.list.title', { count: overview.indicators.length })"
             [status]="t('indicators.list.summary', { count: publishedCount() })"
             data-testid="indicator-table-card"
@@ -282,6 +321,8 @@ export class ProjectIndicators {
   private readonly injector = inject(Injector);
   private readonly destroyRef = inject(DestroyRef);
   protected readonly context = inject(ProjectContext);
+  /** The dashboard's paper mode (dashboard printing, design D1). */
+  private readonly printer = inject(DashboardPrint);
 
   /** Bound from the `:dashboardId` route parameter; it changes when another dashboard opens. */
   readonly dashboardId = input.required<string>();
@@ -390,6 +431,25 @@ export class ProjectIndicators {
   /** Some widget has a chart or map whose table can be shown. */
   protected readonly hasTables = computed(() => this.anyPublished() && this.widgets().some((w) => w.chartType !== 'stat'));
 
+  // Printing (dashboard printing, design D7, D11).
+
+  /** Every member may print a dashboard once its widgets are read, when it has any. */
+  protected readonly canPrint = computed(() => !this.loading() && !this.error() && this.widgets().length > 0);
+  /** The Print action is getting the dashboard ready: it is busy until the browser's dialog opens. */
+  protected readonly preparing = signal(false);
+  protected readonly printedAt = this.printer.printedAt;
+  protected readonly timeZone = computed(() => this.context.project()?.timeZone ?? 'UTC');
+  /** The latest time one of the widgets' indicators was published, or null when none has. */
+  protected readonly publishedAt = computed(() => {
+    const named = new Set(this.widgets().map((w) => w.config.indicator));
+    const times = (this.overview()?.indicators ?? [])
+      .filter((i) => i.published && i.publishedAt && named.has(i.name))
+      .map((i) => new Date(i.publishedAt!).getTime())
+      .filter((time) => !Number.isNaN(time));
+    return times.length ? new Date(Math.max(...times)) : null;
+  });
+  private readonly printButton = viewChild<ElementRef<HTMLElement>>('printButton');
+
   /** Layouts waiting for the pause after the last drag before they are saved, by widget, with the dashboard they were made on. */
   private readonly pending = new Map<string, { dashboardId: string; layout: Layout; timer: ReturnType<typeof setTimeout> }>();
   /** Layout saves sent and not answered yet, by widget. */
@@ -410,6 +470,19 @@ export class ProjectIndicators {
       void this.flushSaves();
       // Leaving the dashboards opens another page: the notice has done its job.
       this.context.notice.set(null);
+    });
+
+    // While printing, the page's title names the project, the dashboard and the day (design D10).
+    this.printer.titleSource = () =>
+      printTitle(this.context.project()?.name ?? '', this.name(), this.printer.printedAt() ?? new Date(), this.timeZone());
+    // Back from the browser's dialog, focus returns to the Print action; a wait the page cut short (it opened another dashboard,
+    // or left) moves focus nowhere.
+    this.printer.restored.pipe(takeUntilDestroyed()).subscribe(({ fromAction }) => {
+      const cutShort = this.preparing();
+      this.preparing.set(false);
+      if (fromAction && !cutShort) {
+        this.printButton()?.nativeElement.focus();
+      }
     });
 
     // The project's indicators and the dashboard's widgets are read together, so the page draws once with both.
@@ -478,6 +551,8 @@ export class ProjectIndicators {
 
   /** Shows another dashboard, or the first one in place of an id the project does not have, which is never requested (design D10, D12). */
   private open(id: string): void {
+    // A print being prepared was for the dashboard left: nothing is printed.
+    this.printer.restore();
     // The previous dashboard's layouts go out now, each to its own dashboard; the new one does not wait for them.
     void this.flushSaves();
     this.widgets.set([]);
@@ -508,6 +583,24 @@ export class ProjectIndicators {
     }
     this.context.notice.set({ dashboardId: first.id, text: this.transloco.translate('dashboards.notice.missing', { name: first.name }) });
     void this.router.navigate(['/projects', this.projectId, 'dashboards', first.id], { replaceUrl: true });
+  }
+
+  /**
+   * The Print action (design D11): the dashboard is laid out as it prints, the widgets and tiles still on their way are waited
+   * for, then the browser's dialog opens. The dialog is the outcome: no message follows it (web-ui, "Feedback while an action runs").
+   */
+  protected async print(): Promise<void> {
+    if (this.preparing() || this.printer.printing()) {
+      return;
+    }
+    this.preparing.set(true);
+    this.announce(this.transloco.translate('dashboards.print.preparing'));
+    await this.printer.print(() => this.preparing.set(false));
+  }
+
+  /** A time on the print header: the shared format, in the project's time zone. */
+  protected when(value: Date): string {
+    return dateText(value, this.locale, 'dateTime', this.timeZone()) ?? '';
   }
 
   /** The key of a count message: its singular form when `count` is 1. */

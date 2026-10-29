@@ -12,8 +12,8 @@ import { DataColumnType } from '../../../core/projects/data.service';
 import { IndicatorEntry, QueryResult, QueryRow, WidgetConfig, WidgetTooltipItem } from '../../../core/projects/indicators.service';
 import { ChartTooltips } from '../../../shared/ui';
 import { plainIndicator, valueFormatter } from './format';
-import { Context, all, catalog, clearOverlay, config, indicator, isColumns, isQuery, open, overlay, result, row, text, wait, widget } from './indicators-testing';
-import { loadLeaflet } from './map-engine';
+import { Context, all, catalog, clearOverlay, config, indicator, isColumns, isQuery, open, overlay, paperOn, printOf, result, row, text, wait, widget } from './indicators-testing';
+import { MapEngine, loadLeaflet } from './map-engine';
 import { MapWidget } from './map-widget';
 import { previewDelayMs } from './widget-dialog';
 
@@ -1761,6 +1761,100 @@ describe('map widget', () => {
         context.http.expectNone(isBasemaps);
       });
     });
+  });
+});
+
+describe('map widget on paper (dashboard printing)', () => {
+  const blocks = [row('0001', 10, square(-76.6, 3.4, 0.01)), row('0002', 40, square(-76.58, 3.4, 0.01))];
+  const tiles = (context: Pick<Context, 'root'>) => all(context.root, 'map-tile') as HTMLImageElement[];
+
+  beforeAll(async () => {
+    const preload = stubMap();
+    await loadLeaflet();
+    preload.restore();
+  });
+
+  beforeEach(() => {
+    stub = stubMap({ width: 600, height: 400 });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearOverlay();
+    stub.restore();
+    document.documentElement.classList.remove('tmz-printing');
+    document.getElementById('tmz-print-page')?.remove();
+  });
+
+  it('fits an untouched map to the box it has on paper (Map with a basemap)', async () => {
+    const context = await show(blocks);
+    const resize = vi.spyOn(MapEngine.prototype, 'resize');
+    const refit = vi.spyOn(MapEngine.prototype, 'refit');
+
+    await paperOn(context);
+
+    expect(resize).toHaveBeenCalled();
+    expect(refit).toHaveBeenCalled();
+  });
+
+  it('keeps the area a member zoomed into: the map only takes its new box (Zoomed map)', async () => {
+    const context = await show(blocks);
+    await click(context, byTestId(context.root, 'map-zoom-in'));
+    const zoomed = zoomOf(context);
+    const resize = vi.spyOn(MapEngine.prototype, 'resize');
+    const refit = vi.spyOn(MapEngine.prototype, 'refit');
+
+    await paperOn(context);
+
+    expect(resize).toHaveBeenCalled();
+    expect(refit).not.toHaveBeenCalled();
+    expect(zoomOf(context)).toBe(zoomed);
+  });
+
+  it('leaves the controls and the hints off the paper, and keeps the legend', async () => {
+    const context = await show(blocks);
+
+    expect(context.root.querySelector('app-map-controls')!.classList).toContain('paper:hidden');
+    expect(byTestId(context.root, 'map-legend')!.closest('.paper\\:hidden')).toBeNull();
+    wheel(container(context));
+    await settle(context.harness);
+    expect(byTestId(context.root, 'map-hint')!.classList).toContain('paper:hidden');
+  });
+
+  it('makes a map that never came near the screen when the print is prepared, and says so on paper until it is made', async () => {
+    stub.restore();
+    stub = stubMap({ width: 600, height: 400, intersection: true });
+    const context = await show(blocks, { drawn: false });
+    await wait(30);
+    await settle(context.harness);
+    const note = byTestId(context.root, 'map-not-loaded')!;
+    expect(note.classList).toContain('hidden');
+    expect(note.classList).toContain('paper:block');
+    expect(text(note)).toBe('This widget had not finished loading when it was printed.');
+
+    await paperOn(context);
+    await ready(context);
+
+    expect(regions(context)).toHaveLength(2);
+    expect(byTestId(context.root, 'map-not-loaded')).toBeNull();
+  });
+
+  it('holds the print dialog back until the basemap tiles have loaded', async () => {
+    const context = await show(blocks, { settings: { basemap: 'streets' }, list: osmList });
+    await ready(context, () => tiles(context).length > 0);
+    const dialog = vi.spyOn(document.defaultView!, 'print').mockImplementation(() => document.defaultView!.dispatchEvent(new Event('afterprint')));
+
+    const done = printOf(context).print();
+    await wait(150);
+    await settle(context.harness);
+    expect(dialog).not.toHaveBeenCalled();
+
+    for (const tile of tiles(context)) {
+      tile.dispatchEvent(new Event('load'));
+    }
+    await done;
+
+    expect(dialog).toHaveBeenCalledTimes(1);
   });
 });
 

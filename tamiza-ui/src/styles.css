@@ -8,6 +8,20 @@
 @import '@angular/cdk/overlay-prebuilt.css';
 @import '@angular/cdk/a11y-prebuilt.css';
 
+/*
+ * `paper:` styles a dashboard as it prints (dashboard printing, design D3): on paper, and on screen while the page prepares the print
+ * (`tmz-printing` on <html>), so every box measured then has its size on paper. Tailwind emits custom variants after its own,
+ * responsive ones included, so `paper:hidden` wins over `md:inline-flex` on the same element without the important modifier.
+ */
+@custom-variant paper {
+  @media print {
+    @slot;
+  }
+  &:where(.tmz-printing, .tmz-printing *) {
+    @slot;
+  }
+}
+
 /* Tamiza overrides: teal brand and the system font stack (the CSP blocks web fonts). */
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
@@ -100,3 +114,22 @@
 .tmz-map.leaflet-container,
 .tmz-map.leaflet-container.leaflet-touch-drag,
 .tmz-map.leaflet-container.leaflet-touch-drag.leaflet-touch-zoom { touch-action: pan-x pan-y; }
+
+/*
+ * Every printout (web-ui, "Navigation left out of printouts"): white sheets, and nothing from the CDK overlay (menus, dialogs, chart
+ * and map tooltips), which is attached to the body outside any page. Unlayered, so the base layer's page background never wins.
+ * A chart is drawn for the box its widget has on paper when the page prepares the print; should the sheet's box still differ (a
+ * scale chosen in the dialog, a browser that lays the sheet out differently), its viewBox scales it into the box rather than cutting
+ * it off (dashboard printing, design D2).
+ */
+@media print {
+  html { background: #fff; }
+  .cdk-overlay-container { display: none; }
+  .tmz-chart-svg { width: 100%; height: 100%; }
+}
+
+/* While a dashboard prepares its print, its paper canvas may be wider than a phone's screen: clipped, not scrolled. Screen only: on
+   a sheet narrower than the canvas, the browser scales the whole page down to the sheet's width, which a clip would stop (design D2). */
+@media screen {
+  .tmz-printing main { overflow-x: clip; }
+}

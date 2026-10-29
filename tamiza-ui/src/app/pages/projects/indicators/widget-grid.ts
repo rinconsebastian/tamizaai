@@ -4,6 +4,7 @@ import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { IndicatorEntry, Layout, Widget } from '../../../core/projects/indicators.service';
 import { ChartTooltips, DropdownMenu, MenuItem } from '../../../shared/ui';
 import { ActiveDashboardFilter } from './dashboard-filters';
+import { DashboardPrint } from './dashboard-print';
 import { Placed, changed, movedBy, readingOrder, reflow, resizedBy, unitsFor } from './grid-layout';
 import { WidgetView } from './widget-view';
 
@@ -14,16 +15,17 @@ const arrows: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRigh
 const fallbackWidth = 1200;
 
 /**
- * The widget canvas (design D7): a 12-column grid with a fixed row height, from `md` up; one column below it. Whoever may edit
- * (analyst, admin) moves a widget by its handle with the pointer or the arrow keys, and resizes it by the corner handle or with
- * shift and the arrow keys. A drop moves the widgets it lands on downward and reports every layout that changed; saving them is
- * the page's job. The widgets are in reading order (top to bottom, left to right) in the page, whatever their place.
+ * The widget canvas (design D7): a 12-column grid with a fixed row height, from `md` up and on paper; one column below it on
+ * screens. Whoever may edit (analyst, admin) moves a widget by its handle with the pointer or the arrow keys, and resizes it by
+ * the corner handle or with shift and the arrow keys. A drop moves the widgets it lands on downward and reports every layout that
+ * changed; saving them is the page's job. The widgets are in reading order (top to bottom, left to right) in the page, whatever
+ * their place.
  */
 @Component({
   selector: 'app-widget-grid',
   imports: [CdkDrag, CdkDragHandle, TranslocoDirective, DropdownMenu, WidgetView],
   template: `
-    <ul #grid class="tmz-grid" *transloco="let t" data-testid="widget-grid">
+    <ul #grid class="tmz-grid" [class.tmz-paper]="paper()" *transloco="let t" data-testid="widget-grid">
       @for (widget of ordered(); track widget.id) {
         <li
           class="tmz-item"
@@ -39,7 +41,7 @@ const fallbackWidth = 1200;
             (cdkDragStarted)="tileMoving()"
             (cdkDragMoved)="dragMoved(widget, $event)"
             (cdkDragEnded)="dragEnded(widget, $event)"
-            class="flex h-full min-h-0 flex-col rounded-base border border-default bg-neutral-primary-soft shadow-xs"
+            class="flex h-full min-h-0 flex-col rounded-base border border-default bg-neutral-primary-soft shadow-xs paper:bg-white paper:shadow-none"
             [class.relative]="dragging() === widget.id"
             [class.z-30]="dragging() === widget.id"
             [class.shadow-lg]="dragging() === widget.id"
@@ -50,7 +52,7 @@ const fallbackWidth = 1200;
                 <button
                   cdkDragHandle
                   type="button"
-                  class="hidden size-9 shrink-0 cursor-grab items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary md:inline-flex"
+                  class="hidden size-9 shrink-0 cursor-grab items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary md:inline-flex paper:hidden"
                   [attr.aria-label]="t('indicators.grid.move', { title: widget.title })"
                   [attr.aria-describedby]="'grid-help'"
                   (keydown)="key(widget, $event, 'move')"
@@ -63,7 +65,7 @@ const fallbackWidth = 1200;
               @if (drawable()[widget.id]) {
                 <button
                   type="button"
-                  class="inline-flex size-9 shrink-0 items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary"
+                  class="inline-flex size-9 shrink-0 items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary paper:hidden"
                   [class.bg-neutral-tertiary-medium]="shownAsTable(widget)"
                   [attr.aria-pressed]="shownAsTable(widget)"
                   [attr.aria-label]="t('indicators.grid.showTable', { title: widget.title })"
@@ -74,7 +76,7 @@ const fallbackWidth = 1200;
                 </button>
               }
               @if (editable()) {
-                <tmz-dropdown-menu [label]="t('indicators.grid.actionsFor', { title: widget.title })" [items]="actions()" (selected)="act(widget, $event)" />
+                <tmz-dropdown-menu class="paper:hidden" [label]="t('indicators.grid.actionsFor', { title: widget.title })" [items]="actions()" (selected)="act(widget, $event)" />
               }
             </header>
             <div class="min-h-0 flex-1 overflow-hidden p-3">
@@ -95,7 +97,7 @@ const fallbackWidth = 1200;
             <button
               cdkDrag
               type="button"
-              class="absolute bottom-0 end-0 z-20 hidden size-8 cursor-nwse-resize items-end justify-end rounded-ee-base p-1 text-body hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary md:inline-flex"
+              class="absolute bottom-0 end-0 z-20 hidden size-8 cursor-nwse-resize items-end justify-end rounded-ee-base p-1 text-body hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary md:inline-flex paper:hidden"
               [attr.aria-label]="t('indicators.grid.resize', { title: widget.title })"
               [attr.aria-describedby]="'grid-help'"
               (cdkDragStarted)="tileMoving()"
@@ -143,19 +145,40 @@ const fallbackWidth = 1200;
         pointer-events: none;
         opacity: 0.5;
       }
-      /* Phones: one column in reading order; each widget keeps its height in rows. */
-      @media (max-width: 47.99rem) {
-        .tmz-grid {
+      /*
+       * Phone screens: one column in reading order; each widget keeps its height in rows. Never on paper, nor while the page prepares
+       * the print (tmz-paper): a sheet is narrower than this breakpoint, and it keeps the 12 columns (dashboard printing, design D4).
+       */
+      @media screen and (max-width: 47.99rem) {
+        .tmz-grid:not(.tmz-paper) {
           grid-template-columns: minmax(0, 1fr);
           grid-auto-rows: auto;
         }
-        .tmz-item {
+        .tmz-grid:not(.tmz-paper) > .tmz-item {
           height: calc(var(--h) * 72px + (var(--h) - 1) * 16px);
           grid-column: auto !important;
           grid-row: auto !important;
         }
         .tmz-ghost {
           display: none;
+        }
+      }
+      /*
+       * On paper each tile starts 2px below its grid area. A browser that scales the page down to the sheet (a portrait sheet, or a
+       * scale picked in the dialog) can paint the first pixel of the next sheet at the foot of this one, where the top border of a
+       * tile moved to the next sheet would show as a stray line (dashboard printing, design D2).
+       */
+      .tmz-grid.tmz-paper > .tmz-item {
+        padding-top: 2px;
+      }
+      /* A widget that fits on a sheet starts on the next one rather than being split; colors print without "Background graphics". */
+      @media print {
+        .tmz-grid {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        .tmz-item {
+          break-inside: avoid;
         }
       }
     `,
@@ -165,6 +188,8 @@ const fallbackWidth = 1200;
 export class WidgetGrid {
   private readonly transloco = inject(TranslocoService);
   private readonly tooltips = inject(ChartTooltips);
+  /** The dashboard page's paper mode; none where the grid is used without it. */
+  private readonly print = inject(DashboardPrint, { optional: true });
   private readonly grid = viewChild.required<ElementRef<HTMLElement>>('grid');
 
   readonly widgets = input.required<Widget[]>();
@@ -183,6 +208,8 @@ export class WidgetGrid {
   readonly remove = output<Widget>();
 
   protected readonly ordered = computed(() => readingOrder(this.widgets()));
+  /** Laid out as it prints: the 12 columns at every width, the phone layout off. */
+  protected readonly paper = computed(() => this.print?.printing() ?? false);
   protected readonly none: ActiveDashboardFilter[] = [];
   /** Each widget's dashboard filters, marked where it ignores them; one list per widget, so a widget only re-queries when its own changes. */
   protected readonly filtersOf = computed(() => {

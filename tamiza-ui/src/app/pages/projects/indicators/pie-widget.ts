@@ -36,7 +36,7 @@ interface Slice {
         <!-- A wide tile puts the legend beside the pie, so the pie keeps the tile's height. -->
         <div class="@container flex min-h-0 flex-1 flex-col gap-2 @md:flex-row">
         <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
-          <svg role="img" class="absolute inset-0 block" [attr.width]="geometry().width" [attr.height]="geometry().height" [attr.viewBox]="'0 0 ' + geometry().width + ' ' + geometry().height" [attr.aria-label]="summary(t)" data-testid="chart-svg">
+          <svg role="img" class="tmz-chart-svg absolute inset-0 block" [attr.width]="geometry().width" [attr.height]="geometry().height" [attr.viewBox]="'0 0 ' + geometry().width + ' ' + geometry().height" [attr.aria-label]="summary(t)" data-testid="chart-svg">
             @for (slice of slices(); track slice.name) {
               @if (slice.d) {
                 <path class="stroke-neutral-primary-soft hover:opacity-80" stroke-width="2" [attr.d]="slice.d" [style.fill]="slice.color" data-testid="pie-slice">
@@ -50,7 +50,8 @@ interface Slice {
             }
           </svg>
         </div>
-        <ul class="max-h-28 shrink-0 overflow-y-auto text-xs text-body @md:max-h-full @md:w-48" data-testid="chart-legend">
+        <!-- On paper the whole legend shows, never a part of it to scroll; the pie is drawn in the room left (dashboard printing). -->
+        <ul class="max-h-28 shrink-0 overflow-y-auto text-xs text-body @md:max-h-full @md:w-48 paper:max-h-none paper:overflow-visible" data-testid="chart-legend">
           @for (slice of slices(); track slice.name) {
             <li class="flex items-center gap-1.5 py-0.5" data-testid="legend-item">
               <span aria-hidden="true" class="inline-block size-2.5 shrink-0 rounded-sm" [style.background]="slice.color"></span>
