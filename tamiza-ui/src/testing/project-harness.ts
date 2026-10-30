@@ -24,6 +24,8 @@ const settingsOnlyForViewer: Partial<ProjectDetails> = {
   fieldCheck: null,
   tokenUnreadable: null,
   unavailableFormVersions: null,
+  mcpAccess: null,
+  mcpMaxAccess: null,
 };
 
 export function details(role: ProjectRole, overrides: Partial<ProjectDetails> = {}): ProjectDetails {
@@ -47,6 +49,8 @@ export function details(role: ProjectRole, overrides: Partial<ProjectDetails> = 
     unavailableFormVersions: 0,
     timeZone: 'UTC',
     dashboards: [{ id: 'd1', name: 'Indicators' }],
+    mcpAccess: 'off',
+    mcpMaxAccess: 'aggregates',
     ...(role === 'viewer' ? settingsOnlyForViewer : {}),
     ...overrides,
   };
@@ -89,7 +93,7 @@ export function configureApp(extraProviders: Provider[] = [], lang: InterfaceLan
 }
 
 /** The requests only the Settings sections make; a viewer's pages never send them, because the API answers a viewer 403. */
-const settingsRequest = /\/api\/v1\/projects\/[^/]+\/(members|sampling-frame|ingestion|syncs|form-versions|runs|pipeline|reference-tables|scripts|script-inputs|form-fields|form-choices)(\/|\?|$)/;
+const settingsRequest = /\/api\/v1\/projects\/[^/]+\/(members|sampling-frame|ingestion|syncs|form-versions|runs|pipeline|reference-tables|scripts|script-inputs|form-fields|form-choices|mcp-calls)(\/|\?|$)/;
 
 /** Takes the pending requests to Settings data out of the controller, to assert that a viewer's page sent none. */
 export function settingsRequests(http: HttpTestingController) {

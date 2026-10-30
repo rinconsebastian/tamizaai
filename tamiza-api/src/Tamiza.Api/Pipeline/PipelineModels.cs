@@ -8,7 +8,7 @@ public sealed record Person(Guid Id, string Name);
 
 /// <summary>A script version without its code, for history lists. <c>Name</c> and <c>Label</c> are set for indicators.</summary>
 public sealed record ScriptVersionSummary(
-    Guid VersionId, ScriptKind Kind, string? Name, string? Label, int Number, bool Removed, Person Author, DateTimeOffset CreatedAt);
+    Guid VersionId, ScriptKind Kind, string? Name, string? Label, int Number, bool Removed, Person Author, DateTimeOffset CreatedAt, ScriptOrigin Origin);
 
 /// <summary>A version with its code and, for an indicator, its metadata (null when the script was removed).</summary>
 public sealed record ScriptVersionDetails(
@@ -23,7 +23,8 @@ public sealed record ScriptVersionDetails(
     string? Unit,
     string? Format,
     Person Author,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    ScriptOrigin Origin);
 
 /// <summary>Script 1 or script 2 with its current version, or null when it was never saved.</summary>
 public sealed record ProjectScript(ScriptKind Kind, ScriptVersionDetails? Current);

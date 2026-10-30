@@ -46,6 +46,10 @@ context: |
   - `api` calls the model provider the operator configures (any OpenAI-compatible
     chat-completions server) when the AI assistant is enabled; only `api` talks to it,
     and never `analytics`.
+  - AI clients (Claude) → `api`: Model Context Protocol over Streamable HTTP at `/mcp`,
+    through `ui`, when the operator enables the MCP server. Tokens come from the same
+    Keycloak realm with their own audience, so a token for the REST API does not open
+    `/mcp` and the reverse. Tamiza calls no model for it.
 
   ### 2.3 Result storage
 

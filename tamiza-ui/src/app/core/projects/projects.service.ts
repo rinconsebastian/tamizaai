@@ -1,6 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
+import type { McpDataAccess, McpProjectAccess } from './mcp.service';
 
 export type ProjectRole = 'admin' | 'analyst' | 'viewer';
 
@@ -50,6 +51,10 @@ export interface ProjectDetails {
   timeZone: string;
   /** The project's own dashboards, in the order of their tabs: at least one. */
   dashboards: DashboardEntry[];
+  /** What AI clients may read of the project (`off` until an admin allows it); `null` for a viewer, like the other values only Settings shows. */
+  mcpAccess: McpProjectAccess | null;
+  /** The most the deployment lets any project share; `null` for a viewer. */
+  mcpMaxAccess: McpDataAccess | null;
 }
 
 export type FormVersionStatus = 'available' | 'pending' | 'failed' | 'not_found';
@@ -206,7 +211,10 @@ export class ProjectsService {
     return this.http.get<ProjectDetails>(`${base}/${id}`);
   }
 
-  update(id: string, changes: { name?: string; enumeratorField?: string; timeZone?: string }): Observable<ProjectDetails> {
+  update(
+    id: string,
+    changes: { name?: string; enumeratorField?: string; timeZone?: string; mcpAccess?: McpProjectAccess },
+  ): Observable<ProjectDetails> {
     return this.http.patch<ProjectDetails>(`${base}/${id}`, changes);
   }
 

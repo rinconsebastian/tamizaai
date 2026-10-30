@@ -697,6 +697,68 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
         Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.dashboard_reports"));
     }
 
+    [Fact]
+    public async Task Mcp_server_script_turns_every_project_off_marks_versions_as_app_and_adds_records_that_go_with_their_project()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(
+            connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql", "0004_add_pipeline_authoring.sql",
+            "0005_add_choice_labels.sql", "0006_add_performance_dashboard.sql", "0007_add_indicators_dashboard.sql", "0008_split_indicator_scripts.sql",
+            "0009_add_script_workbench.sql", "0010_add_local_dev_kit.sql", "0011_add_script_assistant.sql", "0012_add_multiple_dashboards.sql",
+            "0013_add_account_emails.sql", "0014_add_dashboard_filters.sql", "0015_add_dashboard_reports.sql");
+        const string ada = "00000000-0000-0000-0000-000000000001";
+        const string first = "00000000-0000-0000-0000-0000000000a1";
+        const string second = "00000000-0000-0000-0000-0000000000a2";
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('{{ada}}', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('{{first}}', 'First', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(), '{{ada}}', now(), now()),
+                   ('{{second}}', 'Second', 'https://kf.kobotoolbox.org', 'bAsset', 'x', 'x', 'Form', '[]', now(), '{{ada}}', now(), now());
+            INSERT INTO tamiza.script_versions (id, project_id, kind, number, code, author_id, created_at)
+            VALUES (gen_random_uuid(), '{{first}}', 'clean', 1, 'def clean(raw, ctx): return raw', '{{ada}}', now()),
+                   (gen_random_uuid(), '{{second}}', 'clean', 1, 'def clean(raw, ctx): return raw', '{{ada}}', now());
+            """);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        Assert.Contains("0016_add_mcp_server.sql", Scripts);
+
+        // Existing Project upgraded: every project is off and every version was saved in the app.
+        Assert.Equal(2L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.projects WHERE mcp_access = 'off'"));
+        Assert.Equal(2L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.script_versions WHERE origin = 'app'"));
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.mcp_calls"));
+
+        // The access level and the origin accept their values and refuse any other.
+        await ExecuteAsync(connectionString, $"UPDATE tamiza.projects SET mcp_access = 'aggregates' WHERE id = '{first}'");
+        await ExecuteAsync(connectionString, $"UPDATE tamiza.projects SET mcp_access = 'rows' WHERE id = '{first}'");
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString,
+            $"UPDATE tamiza.projects SET mcp_access = 'everything' WHERE id = '{first}'"));
+        await ExecuteAsync(connectionString, "UPDATE tamiza.script_versions SET origin = 'mcp' WHERE project_id = '" + first + "'");
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString,
+            "UPDATE tamiza.script_versions SET origin = 'bot' WHERE project_id = '" + first + "'"));
+
+        // A call record; the checks on its access and status; a call that names no project.
+        const string insert = """
+            INSERT INTO tamiza.mcp_calls (id, user_id, project_id, tool, access, status, duration_ms, started_at)
+            VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', PROJECT, 'get_form', ACCESS, 'STATUS', 12, now())
+            """;
+        string Call(string project, string access, string status) =>
+            insert.Replace("PROJECT", project).Replace("ACCESS", access).Replace("STATUS", status);
+        await ExecuteAsync(connectionString, Call($"'{first}'", "'aggregates'", "succeeded"));
+        await ExecuteAsync(connectionString, Call($"'{first}'", "'rows'", "failed"));
+        await ExecuteAsync(connectionString, Call("NULL", "NULL", "refused"));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, Call($"'{first}'", "'off'", "succeeded")));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, Call($"'{first}'", "'rows'", "queued")));
+        Assert.Equal(3L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.mcp_calls"));
+
+        // Removing a project removes its records, and a person with records cannot be removed.
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, $"DELETE FROM tamiza.users WHERE id = '{ada}'"));
+        await ExecuteAsync(connectionString, $"DELETE FROM tamiza.projects WHERE id = '{first}'");
+        Assert.Equal(1L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.mcp_calls"));
+    }
+
     /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>
     private static void ApplyScripts(string connectionString, params string[] names)
     {

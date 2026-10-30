@@ -17,7 +17,9 @@ public sealed class SystemConfigTests(PostgresFixture postgres)
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal(["accountEmails", "assistant", "email", "oidc", "version"], Keys(body.RootElement));
+        Assert.Equal(["accountEmails", "assistant", "email", "mcp", "oidc", "version"], Keys(body.RootElement));
+        Assert.Equal(["enabled"], Keys(body.RootElement.GetProperty("mcp")));
+        Assert.False(body.RootElement.GetProperty("mcp").GetProperty("enabled").GetBoolean());
         Assert.Equal(["enabled"], Keys(body.RootElement.GetProperty("accountEmails")));
         Assert.Equal(["enabled"], Keys(body.RootElement.GetProperty("email")));
         Assert.Equal(["enabled"], Keys(body.RootElement.GetProperty("assistant")));

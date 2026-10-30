@@ -386,6 +386,8 @@ It never carries rows of the sample or of a published table, the rows or text of
 
 Your administrator chooses the provider, and with it who processes this text. Ask them which one it is: the tab names the model and the host.
 
+**From Claude.** When your administrator has turned on the MCP server and an admin of the project has allowed it (see [mcp.md](mcp.md)), you can ask Claude (claude.ai, Claude Desktop or Claude Code) to write, test and save the scripts of this project, run the chain and build the dashboard for you. It follows the same contract and the same checks as this editor, tests every script on a sample before saving it and never saves over a version it has not read. Each version it saves appears in the **Versions** tab marked "via MCP" next to the person it acted for, and you can restore any earlier one. Unlike the editor, it refuses code that imports `os`, `sys`, `subprocess`, `socket`, `shutil`, `ctypes`, `importlib`, `http` or `urllib`, calls `eval`, `exec`, `compile`, `open` or `__import__`, or holds a web address.
+
 ## Writing scripts on your computer
 
 A test runs your script from the start every time. To explore the data the way you do in Jupyter, with variables that stay in memory from one cell to the next, work on your own computer and upload the script when it is ready. Tamiza gives you a sample of the project's data and a small package, `tamiza_sdk`, that builds the same `ctx` a script receives and checks a script the way the server runs it. Nothing in it contacts Tamiza.

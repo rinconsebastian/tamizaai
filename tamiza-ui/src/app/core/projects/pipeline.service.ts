@@ -25,6 +25,9 @@ export interface Person {
   name: string;
 }
 
+/** Where a version was written: in the editor (`app`, which includes restoring a version there) or by an AI client through MCP. */
+export type ScriptVersionOrigin = 'app' | 'mcp';
+
 export interface ScriptVersionSummary {
   versionId: string;
   kind: ScriptKind;
@@ -35,6 +38,7 @@ export interface ScriptVersionSummary {
   removed: boolean;
   author: Person;
   createdAt: string;
+  origin: ScriptVersionOrigin;
 }
 
 /** An indicator's metadata, saved with each version of its script. */

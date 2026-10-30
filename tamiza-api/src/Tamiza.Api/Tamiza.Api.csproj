@@ -8,6 +8,8 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.12" />
     <PackageReference Include="MiniExcel" Version="1.46.0" />
+    <!-- 2.2.0 (2026-08-13): the newest release at least two weeks old when the MCP server was added (2.3.0 is from 2026-10-20). -->
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <!-- MimeKit only asks for 10.0.0, which has CVE-2026-84008 and CVE-2026-70162 (both fixed in 10.0.13). -->
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
@@ -15,7 +17,7 @@
 
   <ItemGroup>
     <!-- The assistant's prompt kit: the rules, the templates of each script kind and the masking vocabulary (AssistantPrompts). -->
-    <EmbeddedResource Include="Assistant/Prompts/**;Assistant/Examples/**" />
+    <EmbeddedResource Include="Assistant/Prompts/**;Assistant/Examples/**;Mcp/Instructions.md;Mcp/python-modules.json" />
   </ItemGroup>
 
   <ItemGroup>

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Tamiza.Api.Mcp;
 
 namespace Tamiza.Api.IntegrationTests.Infrastructure;
 
@@ -46,6 +47,7 @@ public sealed class TamizaApiFactory(
         builder.ConfigureTestServices(services =>
         {
             services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, TestTokens.TrustTestKey);
+            services.PostConfigure<JwtBearerOptions>(McpAuthentication.Scheme, TestTokens.TrustTestKey);
             configureServices?.Invoke(services);
         });
     }

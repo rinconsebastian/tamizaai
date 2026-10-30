@@ -60,6 +60,7 @@ function version(number: number, code: string | null = `def clean(raw, ctx):\n  
     format: null,
     author: ada,
     createdAt: '2026-10-02T10:00:00Z',
+    origin: 'app',
   };
 }
 
@@ -1129,6 +1130,46 @@ describe('ProjectScripts', () => {
     expect(summaryLine).toContain('cases');
     expect(byTestId(root, 'edit-details')).not.toBeNull();
     expect(editor().text()).toContain('# coverage v1');
+  });
+
+  it('marks the versions Claude wrote with "via MCP", and not the restore the analyst makes in the editor (Version written by Claude, Restored in the editor)', async () => {
+    const current = indicatorVersion('coverage', 4, { origin: 'mcp' });
+    const written = indicatorVersion('coverage', 3, { origin: 'mcp' });
+    const opened = await open('analyst', { scripts: withIndicators(current) });
+    const { root, http, harness } = opened;
+    await selectIndicator(opened, current, [summary(current), summary(written), summary(indicatorVersion('coverage', 2)), summary(indicatorVersion('coverage', 1))]);
+    await openVersions(opened);
+    const marked = () =>
+      [...root.querySelectorAll('[data-testid^="version-"]:not([data-testid="version-via-mcp"])')]
+        .filter((e) => e.textContent!.includes('via MCP'))
+        .map((e) => e.getAttribute('data-testid'));
+
+    expect(marked()).toEqual(['version-4', 'version-3']);
+    expect(textOf(byTestId(root, 'version-3'))).toMatch(/^Version 3\s*Ada · .+ · via MCP$/);
+    expect(textOf(byTestId(root, 'version-2'))).not.toContain('MCP');
+
+    byTestId<HTMLButtonElement>(root, 'version-3')!.click();
+    await settle(harness);
+    http.expectOne(`${scriptsUrl}/indicators/coverage/versions/3`).flush(written);
+    await settle(harness);
+    byTestId<HTMLButtonElement>(root, 'restore')!.click();
+    http
+      .expectOne((r) => r.url === `${scriptsUrl}/indicators/coverage/versions/3/restore` && r.method === 'POST')
+      .flush(indicatorVersion('coverage', 5, { code: written.code, origin: 'app' }));
+    await settle(harness);
+    http
+      .expectOne(`${scriptsUrl}/indicators/coverage/versions`)
+      .flush([
+        summary(indicatorVersion('coverage', 5, { origin: 'app' })),
+        summary(current),
+        summary(written),
+        summary(indicatorVersion('coverage', 2)),
+        summary(indicatorVersion('coverage', 1)),
+      ]);
+    await settle(harness);
+
+    expect(textOf(byTestId(root, 'version-5'))).not.toContain('MCP');
+    expect(marked()).toEqual(['version-4', 'version-3']);
   });
 
   it('removes an indicator only after confirmation and goes back to script 1', async () => {

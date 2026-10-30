@@ -5,8 +5,10 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { ProjectDetails, ProjectsService } from '../../core/projects/projects.service';
+import { SystemConfigService } from '../../core/system-config';
 import { Alert, Badge, Button, Card, FormField, Input, ToastService, DateTimePipe } from '../../shared/ui';
 import { ProjectContext } from './project-context';
+import { ProjectMcpAccess } from './project-mcp-access';
 import { isSingular } from '../../core/i18n/plural';
 
 /** The names the browser knows, plus UTC (the default, which it does not list). The API judges the final choice. */
@@ -32,7 +34,7 @@ const metadataTypes = new Set(['start', 'end', 'today', 'deviceid', 'username', 
 
 @Component({
   selector: 'app-project-overview',
-  imports: [DateTimePipe, RouterLink, TranslocoDirective, Alert, Badge, Button, Card, FormField, Input],
+  imports: [DateTimePipe, RouterLink, TranslocoDirective, Alert, Badge, Button, Card, FormField, Input, ProjectMcpAccess],
   template: `
     @if (project(); as project) {
       <div class="grid gap-6 lg:grid-cols-2" *transloco="let t">
@@ -192,6 +194,10 @@ const metadataTypes = new Set(['start', 'end', 'today', 'deviceid', 'username', 
             </form>
           </tmz-card>
         }
+
+        @if (mcpEnabled() && context.can('analyst')) {
+          <app-project-mcp-access class="min-w-0 lg:col-span-2" />
+        }
       </div>
     }
   `,
@@ -204,6 +210,8 @@ export class ProjectOverview {
   private readonly document = inject(DOCUMENT);
   private readonly route = inject(ActivatedRoute);
   protected readonly context = inject(ProjectContext);
+  /** Whether the deployment turned the MCP server on; without it the AI clients card is not drawn at all. */
+  protected readonly mcpEnabled = inject(SystemConfigService).mcpEnabled;
 
   protected readonly project = this.context.project;
   protected readonly busy = signal(false);

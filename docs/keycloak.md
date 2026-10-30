@@ -235,6 +235,103 @@ Each user can cause 20 account emails per hour (`TAMIZA_ACCOUNT_EMAILS_PER_HOUR`
 - **Password reset and federated accounts.** A member who signs in with an identity provider linked to Keycloak (for example Google) would get a local password if they use the reset link. Their linked sign-in keeps working.
 - **Account found by `sub`.** Tamiza looks up the member's account with the token's `sub`, which in Keycloak is the user ID. A custom *subject* mapper that changes it makes the password reset answer that the member has no active account.
 
+## Client for AI clients (MCP) (optional)
+
+Without this section the MCP server (`TAMIZA_MCP_ENABLED`) has no client to sign people in with, so nobody can connect an AI client such as Claude. See [docs/mcp.md](mcp.md) for what the server does. The `tamiza-ui` client is not touched: UI tokens never carry the MCP audience, and MCP tokens never carry the API's, so a token for one is refused by the other.
+
+### What you need
+
+| Item | Why |
+|---|---|
+| A **client scope** `tamiza-mcp` with an **audience mapper** that adds `TAMIZA_MCP_AUDIENCE` (`tamiza-mcp` by default) to access tokens only | `/mcp` accepts only tokens issued for that audience. It must differ from `OIDC_AUDIENCE`; the `api` refuses to start otherwise. |
+| A **public client** `tamiza-mcp` with the standard flow, PKCE (S256) and *Consent required* | claude.ai, Claude Desktop and Claude Code sign in with the authorization code flow and no secret. The consent screen tells the person which application is asking. |
+| The redirect URIs `https://claude.ai/api/mcp/auth_callback` and `http://localhost:<TAMIZA_MCP_CALLBACK_PORT>/callback` (port 33418 by default) | The first is for claude.ai and Claude Desktop, the second for Claude Code, which listens on that port on the analyst's computer. |
+| The client scope `tamiza-mcp` as **Default** next to `basic`, `profile` and `email`, and `offline_access` as **Optional** | The audience reaches every token. `offline_access` lets a connection renew its token (see below). |
+
+The client ID is what people enter in the connector (`TAMIZA_MCP_CLIENT_ID`, `tamiza-mcp` by default). Tamiza only shows it; it never talks to Keycloak with it.
+
+### Option A: admin console
+
+1. **Client scope.** *Client scopes → Create client scope*: *Name* `tamiza-mcp`, *Type* **None**, *Protocol* OpenID Connect, *Include in token scope* **On**. Open it, then *Mappers → Configure a new mapper → Audience*:
+   - *Name*: `tamiza-mcp audience`.
+   - *Included Custom Audience*: the value of `TAMIZA_MCP_AUDIENCE`, for example `tamiza-mcp`.
+   - *Add to access token*: **On**. *Add to ID token*: **Off**.
+2. **Client.** *Clients → Create client*:
+   - *Client type*: OpenID Connect. *Client ID*: `tamiza-mcp`.
+   - *Client authentication*: **Off**. *Standard flow*: **On**. *Direct access grants*: **Off**.
+   - *Valid redirect URIs*: `https://claude.ai/api/mcp/auth_callback` and `http://localhost:33418/callback`.
+   - *Web origins*: leave empty. The clients call the token endpoint from servers or native apps, not from a page.
+   - In the *Advanced* tab, set *Proof Key for Code Exchange Code Challenge Method* to **S256**.
+   - In the *Login settings* section, turn *Consent required* **On**.
+3. **Scopes of the client.** In *Clients → tamiza-mcp → Client scopes → Add client scope*, add `tamiza-mcp` as **Default** and `offline_access` as **Optional**. Check that `basic`, `profile` and `email` are Default.
+
+### Option B: `kcadm.sh`
+
+With the variables of Option B above set (`KEYCLOAK_URL`, `REALM`) and `kcadm.sh config credentials` done:
+
+```sh
+MCP_CLIENT_ID=tamiza-mcp           # TAMIZA_MCP_CLIENT_ID
+MCP_AUDIENCE=tamiza-mcp            # TAMIZA_MCP_AUDIENCE
+MCP_CALLBACK_PORT=33418            # TAMIZA_MCP_CALLBACK_PORT
+
+# 1. The client scope with the audience mapper.
+kcadm.sh create client-scopes -r "$REALM" \
+  -s name=tamiza-mcp -s protocol=openid-connect \
+  -s 'attributes."include.in.token.scope"=true' \
+  -s 'attributes."display.on.consent.screen"=false'
+
+# The scope and the client are found by name with grep: kcadm's -q filter does not apply to client scopes.
+SCOPE_UUID=$(kcadm.sh get client-scopes -r "$REALM" --fields id,name --format csv --noquotes | grep ',tamiza-mcp$' | cut -d, -f1)
+
+kcadm.sh create "client-scopes/$SCOPE_UUID/protocol-mappers/models" -r "$REALM" \
+  -s name="$MCP_AUDIENCE audience" \
+  -s protocol=openid-connect \
+  -s protocolMapper=oidc-audience-mapper \
+  -s "config.\"included.custom.audience\"=$MCP_AUDIENCE" \
+  -s 'config."access.token.claim"=true' \
+  -s 'config."id.token.claim"=false'
+
+# 2. The public client.
+kcadm.sh create clients -r "$REALM" \
+  -s clientId="$MCP_CLIENT_ID" \
+  -s protocol=openid-connect \
+  -s publicClient=true \
+  -s standardFlowEnabled=true \
+  -s directAccessGrantsEnabled=false \
+  -s consentRequired=true \
+  -s "redirectUris=[\"https://claude.ai/api/mcp/auth_callback\",\"http://localhost:$MCP_CALLBACK_PORT/callback\"]" \
+  -s 'webOrigins=[]' \
+  -s 'attributes."pkce.code.challenge.method"=S256'
+
+MCP_UUID=$(kcadm.sh get clients -r "$REALM" -q clientId="$MCP_CLIENT_ID" --fields id --format csv --noquotes)
+
+# 3. Its scopes: the audience by default, offline_access on request.
+kcadm.sh update "clients/$MCP_UUID/default-client-scopes/$SCOPE_UUID" -r "$REALM" -n
+OFFLINE_UUID=$(kcadm.sh get client-scopes -r "$REALM" --fields id,name --format csv --noquotes | grep ',offline_access$' | cut -d, -f1)
+kcadm.sh update "clients/$MCP_UUID/optional-client-scopes/$OFFLINE_UUID" -r "$REALM" -n
+```
+
+New clients get the realm's default client scopes (`basic`, `profile`, `email` and others) on their own, and `offline_access` as an optional scope. The last command therefore changes nothing on a default realm and answers nothing; it is there for a realm where `offline_access` is not attached to new clients. Both `update` commands are safe to repeat.
+
+### What `offline_access` means
+
+Claude asks for `offline_access`, so a connection keeps working after the person's Keycloak session ends: it renews its token until the person revokes the application (their account console, *Applications*) or an admin removes it. That avoids asking people to sign in again every few hours. For the stricter setup, remove `offline_access` from the client's optional scopes: a connection then ends with the Keycloak session and the person signs in again.
+
+To end a person's connection as an admin, delete their consent for the client (*Users → (user) → Consents*, or `kcadm.sh delete users/<user id>/consents/tamiza-mcp -r "$REALM"`). That removes the offline session too, so the refresh token stops working, and the next sign-in shows the consent screen again. Deleting only the offline session (*Users → (user) → Sessions*, or `kcadm.sh delete sessions/<session id> -r "$REALM" -q isOffline=true`) also stops the refresh token but keeps the consent, so signing in again does not ask. Either way, an access token that was already issued works until it expires (five minutes by default in Keycloak) plus 30 seconds that `api` allows for clock differences.
+
+### Check it
+
+1. The redirect URIs are the ones above:
+
+   ```sh
+   kcadm.sh get clients -r "$REALM" -q clientId="$MCP_CLIENT_ID" --fields clientId,publicClient,redirectUris,consentRequired
+   ```
+
+2. A token for the client has `aud` equal to `TAMIZA_MCP_AUDIENCE` and not the API's. Sign in once from Claude Code (`/mcp`), or from the admin console use *Clients → tamiza-mcp → Client scopes → Evaluate*, pick a user, and open *Generated access token*: `aud` must read `tamiza-mcp` and `scope` must include `tamiza-mcp`.
+3. The `api` agrees: `curl -i <TAMIZA_PUBLIC_URL>/mcp` answers `401` with a `WWW-Authenticate` header that holds `resource_metadata="<TAMIZA_PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"` and `scope="tamiza-mcp"`, and that document names your realm under `authorization_servers`.
+
+Keycloak ignores the `resource` parameter that Claude sends with the authorization request, which is why the audience comes from the client scope and not from it. If a future Keycloak or client version requires resource indicators, enable them in the realm and set `TAMIZA_MCP_AUDIENCE` to the address of `/mcp`.
+
 ## Other OpenID Connect providers
 
 Sign-in uses standard OpenID Connect only, so a provider other than Keycloak can sign users in. Set the `OIDC_*` variables to the provider's values and leave the `TAMIZA_KEYCLOAK_*` ones empty. Account emails then do not exist: the members section offers no email actions, and an invited person must be told by the admin, as in Tamiza without the section above.

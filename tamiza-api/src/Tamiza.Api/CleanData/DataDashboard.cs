@@ -125,7 +125,17 @@ public sealed partial class DataDashboard : IDisposable
             return null;
         }
 
-        var schema = DataSources.SchemaName(projectId, source);
+        return await QuerySchemaAsync(projectId, DataSources.SchemaName(projectId, source), source, table, request, ct);
+    }
+
+    /// <summary>
+    /// <see cref="QueryAsync"/> for any published schema, for the callers that are allowed to read the ones the dashboard does not offer
+    /// (the MCP server). <paramref name="schema"/> is built by the caller from the project id and a fixed word, never from request text;
+    /// <paramref name="stepName"/> is the run step whose publication the page reports.
+    /// </summary>
+    internal async Task<DataQueryResult?> QuerySchemaAsync(
+        Guid projectId, string schema, string stepName, string table, DataQueryRequest request, CancellationToken ct)
+    {
         return await WithSlotAsync(() => InTransactionAsync(projectId, _options.StatementTimeout, async (connection, transaction, project) =>
         {
             var columns = await LockAndDescribeAsync(connection, transaction, schema, table, ct);
@@ -145,7 +155,7 @@ public sealed partial class DataDashboard : IDisposable
             var from = $"{DataSources.Quote(schema)}.{DataSources.Quote(table)}";
             var total = await CountAsync(connection, transaction, from, query, ct);
             var (rows, cutCells) = await ReadPageAsync(connection, transaction, from, columns, query, ct);
-            var step = await LatestStepAsync(connection, transaction, projectId, source, ct);
+            var step = await LatestStepAsync(connection, transaction, projectId, stepName, ct);
             return new DataQueryResult(new DataPage(columns, rows, cutCells, total, query.Page, query.PageSize, step?.FinishedAt, step?.RunId, project.TimeZone), null);
         }, ct), ct);
     }

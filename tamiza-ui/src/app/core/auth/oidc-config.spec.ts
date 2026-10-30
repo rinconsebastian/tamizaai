@@ -11,6 +11,7 @@ const systemConfig: SystemConfig = {
   assistant: { enabled: false },
   accountEmails: { enabled: false },
   email: { enabled: false },
+  mcp: { enabled: false },
 };
 
 describe('OIDC configuration', () => {

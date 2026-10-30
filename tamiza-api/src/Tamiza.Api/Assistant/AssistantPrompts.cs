@@ -43,6 +43,63 @@ public static class AssistantPrompts
     /// <summary>The rules block: what the model must know about scripts, the data and the answer's format.</summary>
     public static string System => SystemText.Value;
 
+    /// <summary>The sections of <c>system.md</c> that describe scripts (language, contracts, data, <c>ctx</c>, libraries, cells) and not the assistant's answer.</summary>
+    private static readonly string[] ContractSections =
+        ["Language", "The contracts", "The indicator contract", "The data", "Choice labels", "`ctx`", "Libraries", "Cells"];
+
+    private static readonly Lazy<string> ContractText = new(() => Sections(SystemText.Value, ContractSections));
+
+    /// <summary>
+    /// What an AI client needs to write a script: the contracts, the conventions of the data, <c>ctx</c>, the libraries and the cells,
+    /// taken from the same rules the assistant follows, so the two cannot disagree. Without the assistant's answer format.
+    /// </summary>
+    public static string Contract => ContractText.Value;
+
+    /// <summary>The headings of the sections of <c>system.md</c> (the text after <c>## </c>), in order. For tests.</summary>
+    public static IReadOnlyList<string> SectionHeadings() => SplitSections(SystemText.Value).Select(s => s.Heading).ToList();
+
+    private static string Sections(string text, IEnumerable<string> headings)
+    {
+        var all = SplitSections(text);
+        var wanted = headings.ToList();
+        var missing = wanted.Where(h => all.All(s => s.Heading != h)).ToList();
+        if (missing.Count > 0)
+        {
+            throw new InvalidOperationException($"system.md has no section {string.Join(", ", missing)}.");
+        }
+
+        return string.Join("\n", all.Where(s => wanted.Contains(s.Heading)).Select(s => s.Text.TrimEnd('\n'))) + "\n";
+    }
+
+    private static List<(string Heading, string Text)> SplitSections(string text)
+    {
+        var sections = new List<(string, string)>();
+        string? heading = null;
+        var current = new StringBuilder();
+        foreach (var line in text.Split('\n'))
+        {
+            if (line.StartsWith("## ", StringComparison.Ordinal))
+            {
+                if (heading is not null)
+                {
+                    sections.Add((heading, current.ToString()));
+                }
+
+                heading = line[3..].Trim();
+                current.Clear();
+            }
+
+            current.Append(line).Append('\n');
+        }
+
+        if (heading is not null)
+        {
+            sections.Add((heading, current.ToString()));
+        }
+
+        return sections;
+    }
+
     /// <summary>The templates of a script kind (<c>clean</c>, <c>output</c> or <c>indicator</c>), first choice first.</summary>
     public static IReadOnlyList<ScriptExample> Examples(string kind) =>
         ExampleSets.Value.TryGetValue(kind, out var examples)

@@ -17,7 +17,7 @@ public static class PerformanceEndpoints
 
     /// <param name="first">First day of the range, <c>YYYY-MM-DD</c> (query parameter <c>from</c>).</param>
     /// <param name="last">Last day of the range, <c>YYYY-MM-DD</c> (query parameter <c>to</c>).</param>
-    private static async Task<Results<Ok<PerformanceDashboardResult>, ValidationProblem, ProblemHttpResult>> GetAsync(
+    internal static async Task<Results<Ok<PerformanceDashboardResult>, ValidationProblem, ProblemHttpResult>> GetAsync(
         Guid projectId, [FromQuery(Name = "from")] string? first, [FromQuery(Name = "to")] string? last,
         TamizaDbContext db, PerformanceDashboard dashboard, CancellationToken ct)
     {

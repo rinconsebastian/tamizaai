@@ -3,6 +3,7 @@ import { Router } from '@angular/router';
 import { vi } from 'vitest';
 import { Downloader } from '../../core/download.service';
 import { FormChoice, FormField, MetricAvailability, SamplingFrame } from '../../core/projects/projects.service';
+import { SYSTEM_CONFIG_URL } from '../../core/system-config';
 import { ToastService } from '../../shared/ui';
 import { tick } from '../../../testing/cdk';
 import { byTestId, details, formFields, openProjectSection, projectId, settle, typeInto } from '../../../testing/project-harness';
@@ -889,6 +890,8 @@ describe('ProjectSamplingFrame', () => {
       const metric = byTestId(root, 'metric-coverage')!;
       expect(metric.textContent).toContain('Available');
       expect(byTestId(root, 'hint-coverage')).toBeNull();
+      // General asks whether the MCP server is on; in the app the shell has read that once already, here nothing has.
+      http.match(SYSTEM_CONFIG_URL);
       http.verify();
     });
 

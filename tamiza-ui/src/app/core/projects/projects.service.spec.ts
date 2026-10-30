@@ -61,3 +61,36 @@ describe('ProjectsService: people and account emails', () => {
     expect(done).toBe(true);
   });
 });
+
+describe('ProjectsService: access for AI clients', () => {
+  function setup() {
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    return { http: TestBed.inject(HttpTestingController), service: TestBed.inject(ProjectsService) };
+  }
+
+  it('patches only the level when an admin chooses one', () => {
+    const { http, service } = setup();
+    let level: string | null | undefined;
+
+    service.update('p1', { mcpAccess: 'aggregates' }).subscribe((project) => (level = project.mcpAccess));
+    const request = http.expectOne('/api/v1/projects/p1');
+    request.flush({ id: 'p1', mcpAccess: 'aggregates', mcpMaxAccess: 'rows' });
+
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.body).toEqual({ mcpAccess: 'aggregates' });
+    expect(level).toBe('aggregates');
+  });
+
+  it('surfaces the refusal of rows above the deployment maximum as a field error on mcpAccess', () => {
+    const { http, service } = setup();
+    let failure: { status: number; error: { errors: Record<string, string[]> } } | undefined;
+
+    service.update('p1', { mcpAccess: 'rows' }).subscribe({ error: (error) => (failure = error) });
+    http
+      .expectOne('/api/v1/projects/p1')
+      .flush({ errors: { mcpAccess: ['The operator of this installation allows summaries only.'] } }, { status: 400, statusText: 'Bad Request' });
+
+    expect(failure?.status).toBe(400);
+    expect(failure?.error.errors['mcpAccess']).toEqual(['The operator of this installation allows summaries only.']);
+  });
+});
