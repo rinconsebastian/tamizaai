@@ -26,7 +26,7 @@ public static class RunEndpoints
         return api;
     }
 
-    private static async Task<Results<Accepted<RunSummary>, ProblemHttpResult>> StartAsync(
+    internal static async Task<Results<Accepted<RunSummary>, ProblemHttpResult>> StartAsync(
         Guid projectId, TamizaDbContext db, RunQueue queue, ICurrentUser user, TimeProvider time, CancellationToken ct)
     {
         var run = await queue.EnqueueManualAsync(projectId, user.Id, time.GetUtcNow(), ct);
@@ -39,7 +39,7 @@ public static class RunEndpoints
         return TypedResults.Accepted($"/api/v1/projects/{projectId}/runs/{run.Id}", summary);
     }
 
-    private static async Task<Ok<RunPage>> ListAsync(Guid projectId, TamizaDbContext db, int? page, int? pageSize, CancellationToken ct)
+    internal static async Task<Ok<RunPage>> ListAsync(Guid projectId, TamizaDbContext db, int? page, int? pageSize, CancellationToken ct)
     {
         var size = Math.Clamp(pageSize ?? DefaultPageSize, 1, MaxPageSize);
         var number = Math.Max(page ?? 1, 1);
@@ -48,7 +48,7 @@ public static class RunEndpoints
         return TypedResults.Ok(new RunPage(await SummariesAsync(db, pageQuery, ct), await runs.CountAsync(ct)));
     }
 
-    private static async Task<Results<Ok<RunDetails>, NotFound>> GetAsync(Guid projectId, Guid runId, TamizaDbContext db, CancellationToken ct)
+    internal static async Task<Results<Ok<RunDetails>, NotFound>> GetAsync(Guid projectId, Guid runId, TamizaDbContext db, CancellationToken ct)
     {
         var summary = (await SummariesAsync(db, db.Runs.Where(r => r.ProjectId == projectId && r.Id == runId), ct)).SingleOrDefault();
         if (summary is null)

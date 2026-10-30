@@ -29,7 +29,7 @@ public static partial class ScriptTestEndpoints
         return api;
     }
 
-    private static async Task<Results<Accepted<ScriptTestDetails>, ValidationProblem>> StartAsync(
+    internal static async Task<Results<Accepted<ScriptTestDetails>, ValidationProblem>> StartAsync(
         Guid projectId, ScriptTestRequest request, TamizaDbContext db, ICurrentUser user, TimeProvider time, CancellationToken ct)
     {
         var errors = new FieldErrors();
@@ -144,7 +144,7 @@ public static partial class ScriptTestEndpoints
         }
     }
 
-    private static async Task<ScriptTestDetails> DetailsAsync(TamizaDbContext db, ScriptTest test, CancellationToken ct)
+    internal static async Task<ScriptTestDetails> DetailsAsync(TamizaDbContext db, ScriptTest test, CancellationToken ct)
     {
         var cleanVersion = test.CleanVersionId is { } versionId
             ? await db.ScriptVersions.Where(v => v.Id == versionId).Select(v => (int?)v.Number).SingleOrDefaultAsync(ct)

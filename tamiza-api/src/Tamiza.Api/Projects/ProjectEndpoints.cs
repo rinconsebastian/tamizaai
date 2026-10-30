@@ -10,6 +10,7 @@ using Tamiza.Api.Http;
 using Tamiza.Api.Indicators;
 using Tamiza.Api.Ingestion;
 using Tamiza.Api.Kobo;
+using Tamiza.Api.Mcp;
 
 namespace Tamiza.Api.Projects;
 
@@ -41,7 +42,7 @@ public static partial class ProjectEndpoints
         return api;
     }
 
-    private static async Task<Ok<List<ProjectSummary>>> ListAsync(TamizaDbContext db, ICurrentUser user, CancellationToken ct)
+    internal static async Task<Ok<List<ProjectSummary>>> ListAsync(TamizaDbContext db, ICurrentUser user, CancellationToken ct)
     {
         var memberships = db.ProjectMembers.Where(m => m.UserId == user.Id);
         var rows = user.IsSuperAdmin
@@ -61,7 +62,7 @@ public static partial class ProjectEndpoints
 
     private static async Task<Results<Created<CreatedProject>, ValidationProblem, ProblemHttpResult>> CreateAsync(
         CreateProjectRequest request, TamizaDbContext db, ICurrentUser user, KoboClient kobo, FormSnapshot snapshot, SecretProtector secrets,
-        IOptions<TamizaOptions> options, TimeProvider time, IngestionSignal ingestion, ProjectAccess access, CancellationToken ct)
+        IOptions<TamizaOptions> options, TimeProvider time, IngestionSignal ingestion, ProjectAccess access, IOptions<McpOptions> mcp, CancellationToken ct)
     {
         // First, before the fields, the address policy and any request to Kobo.
         if (!await access.CanCreateProjectsAsync(ct))
@@ -141,7 +142,7 @@ public static partial class ProjectEndpoints
 
         var details = ToDetails(
             project, ProjectRole.Admin, tokenUnreadable: false, unavailableFormVersions: 0, frameDimensions: null,
-            [new DashboardEntry(dashboard.Id, dashboard.Name)]);
+            [new DashboardEntry(dashboard.Id, dashboard.Name)], mcp.Value.MaxAccess);
         var webhook = new WebhookSettings(WebhookUrl(options.Value, project.Id), WebhookSecret.Username, webhookSecret, false);
         return TypedResults.Created($"/api/v1/projects/{project.Id}", new CreatedProject(details, webhook));
     }
@@ -178,6 +179,23 @@ public static partial class ProjectEndpoints
             else
             {
                 errors.Add("enumeratorField", $"The form has no field '{field}'.");
+            }
+        }
+
+        if (request.McpAccess is not null)
+        {
+            var level = request.McpAccess.Trim().ToLowerInvariant();
+            if (level is not ("off" or "aggregates" or "rows"))
+            {
+                errors.Add("mcpAccess", "Choose off, aggregates or rows.");
+            }
+            else if (level == "rows" && http.RequestServices.GetRequiredService<IOptions<McpOptions>>().Value.MaxAccess < McpAccess.Rows)
+            {
+                errors.Add("mcpAccess", "The operator of this installation allows summaries only, so rows cannot be allowed. Choose aggregates, or ask the operator to allow rows.");
+            }
+            else
+            {
+                project.McpAccess = Enum.Parse<McpAccess>(level, ignoreCase: true);
             }
         }
 
@@ -335,13 +353,14 @@ public static partial class ProjectEndpoints
             await versions.CountUnavailableAsync(project.Id, ct),
             // Only the dimensions: the check needs the fields they map to, not the frame's thousands of targets.
             await db.SamplingFrames.AsNoTracking().Where(f => f.ProjectId == project.Id).Select(f => f.Dimensions).SingleOrDefaultAsync(ct),
-            dashboards);
+            dashboards,
+            http.RequestServices.GetRequiredService<IOptions<McpOptions>>().Value.MaxAccess);
     }
 
     /// <summary>The values only Settings &gt; General shows (see <see cref="ProjectDetails"/>) are filled for <c>analyst</c> and above.</summary>
     private static ProjectDetails ToDetails(
         Project project, ProjectRole role, bool tokenUnreadable, int unavailableFormVersions, IReadOnlyList<SamplingDimension>? frameDimensions,
-        IReadOnlyList<DashboardEntry> dashboards)
+        IReadOnlyList<DashboardEntry> dashboards, McpAccess mcpMaxAccess = McpAccess.Aggregates)
     {
         var configured = role >= ProjectRole.Analyst;
         return new ProjectDetails(
@@ -358,6 +377,8 @@ public static partial class ProjectEndpoints
             project.CreatedAt,
             configured ? unavailableFormVersions : null,
             project.TimeZone,
-            dashboards);
+            dashboards,
+            configured ? project.McpAccess : null,
+            configured ? mcpMaxAccess : null);
     }
 }

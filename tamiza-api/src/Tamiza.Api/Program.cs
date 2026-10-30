@@ -9,6 +9,7 @@ using Tamiza.Api.Health;
 using Tamiza.Api.Indicators;
 using Tamiza.Api.Ingestion;
 using Tamiza.Api.Maps;
+using Tamiza.Api.Mcp;
 using Tamiza.Api.Performance;
 using Tamiza.Api.Pipeline;
 using Tamiza.Api.Projects;
@@ -36,11 +37,13 @@ builder.Services.AddTamizaPipeline();
 builder.Services.AddTamizaAssistant();
 builder.Services.AddTamizaMaps();
 builder.Services.AddTamizaReports();
+builder.Services.AddTamizaMcp();
 
 var app = builder.Build();
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();
+app.UseMcpOriginCheck();
 app.UseAuthentication();
 app.UseUserProvisioning();
 app.UseAuthorization();
@@ -70,6 +73,8 @@ api.MapScriptInputEndpoints();
 api.MapAssistantEndpoints();
 api.MapMapEndpoints();
 api.MapReportEndpoints();
+api.MapMcpEndpoints();
+app.MapTamizaMcp();
 
 if (!await app.MigrateDatabaseAsync())
 {

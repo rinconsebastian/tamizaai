@@ -43,9 +43,9 @@ public static class ScriptEndpoints
         return api;
     }
 
-    private static readonly Expression<Func<ScriptVersion, ScriptVersionDetails>> ToDetails = v => new ScriptVersionDetails(
+    internal static readonly Expression<Func<ScriptVersion, ScriptVersionDetails>> ToDetails = v => new ScriptVersionDetails(
         v.Id, v.Kind, v.Name, v.Number, v.Code == null, v.Code, v.Label, v.Description, v.Unit, v.Format,
-        new Person(v.Author!.Id, v.Author.Name), v.CreatedAt);
+        new Person(v.Author!.Id, v.Author.Name), v.CreatedAt, v.Origin);
 
     /// <summary>The current version of every indicator the project has: the latest of each name, unless it marks the indicator removed.</summary>
     internal static async Task<List<ScriptVersionDetails>> CurrentIndicatorsAsync(TamizaDbContext db, Guid projectId, CancellationToken ct) =>
@@ -86,15 +86,25 @@ public static class ScriptEndpoints
             return TypedResults.NotFound();
         }
 
-        var errors = new FieldErrors();
-        AddCodeError(request.Code, errors);
-        if (errors.Any)
+        var outcome = await SaveFixedCoreAsync(db, projectId, scriptKind, request.Code, user.Id, time.GetUtcNow(), ScriptWrite.App, ct);
+        if (outcome.Errors is { } errors)
         {
-            return Problems.Validation(errors.ToDictionary());
+            return Problems.Validation(errors);
         }
 
-        var version = await AddVersionAsync(db, projectId, scriptKind, null, new Metadata(request.Code), user.Id, time.GetUtcNow(), ct);
+        var version = outcome.Version!;
         return TypedResults.Created($"/api/v1/projects/{projectId}/scripts/{Lower(scriptKind)}/versions/{version.Number}", version);
+    }
+
+    /// <summary>Saves script 1 or script 2: the same checks and the same version numbering for the editor and for an AI client.</summary>
+    internal static async Task<ScriptOutcome> SaveFixedCoreAsync(
+        TamizaDbContext db, Guid projectId, ScriptKind kind, string? code, Guid authorId, DateTimeOffset now, ScriptWrite write, CancellationToken ct)
+    {
+        var errors = new FieldErrors();
+        AddCodeError(code, errors);
+        return errors.Any
+            ? ScriptOutcome.Invalid(errors.ToDictionary())
+            : ScriptOutcome.Saved(await AddVersionAsync(db, projectId, kind, null, new Metadata(code), authorId, now, write, ct));
     }
 
     private static async Task<Results<Ok<ScriptVersionDetails>, ProblemHttpResult, NotFound>> RemoveAsync(
@@ -105,8 +115,11 @@ public static class ScriptEndpoints
             return TypedResults.NotFound();
         }
 
-        return await RemoveCoreAsync(db, projectId, scriptKind, null, user.Id, time.GetUtcNow(), ct);
+        return RemoveResult(await RemoveCoreAsync(db, projectId, scriptKind, null, user.Id, time.GetUtcNow(), ScriptWrite.App, ct));
     }
+
+    private static Results<Ok<ScriptVersionDetails>, ProblemHttpResult, NotFound> RemoveResult(ScriptOutcome outcome) =>
+        outcome.Conflict is { } conflict ? Problems.Conflict(conflict.Code, conflict.Detail) : TypedResults.Ok(outcome.Version!);
 
     private static async Task<Results<Ok<List<ScriptVersionSummary>>, NotFound>> VersionsAsync(
         Guid projectId, string kind, TamizaDbContext db, CancellationToken ct) =>
@@ -134,13 +147,44 @@ public static class ScriptEndpoints
             return TypedResults.NotFound();
         }
 
-        return await RestoreCoreAsync(db, projectId, scriptKind, null, number, user.Id, time.GetUtcNow(), ct);
+        return RestoreResult(projectId, await RestoreCoreAsync(db, projectId, scriptKind, null, number, user.Id, time.GetUtcNow(), ScriptWrite.App, ct));
+    }
+
+    private static Results<Created<ScriptVersionDetails>, ValidationProblem, NotFound> RestoreResult(Guid projectId, ScriptOutcome outcome)
+    {
+        if (outcome.NotFound)
+        {
+            return TypedResults.NotFound();
+        }
+
+        if (outcome.Errors is { } errors)
+        {
+            return Problems.Validation(errors);
+        }
+
+        var version = outcome.Version!;
+        var path = version.Kind == ScriptKind.Indicator ? $"indicators/{version.Name}" : Lower(version.Kind);
+        return TypedResults.Created($"/api/v1/projects/{projectId}/scripts/{path}/versions/{version.Number}", version);
     }
 
     // Indicator scripts
 
     private static async Task<Results<Created<ScriptVersionDetails>, ValidationProblem>> SaveIndicatorAsync(
         Guid projectId, string name, SaveIndicatorRequest request, TamizaDbContext db, ICurrentUser user, TimeProvider time, CancellationToken ct)
+    {
+        var outcome = await SaveIndicatorCoreAsync(db, projectId, name, request, user.Id, time.GetUtcNow(), ScriptWrite.App, ct);
+        if (outcome.Errors is { } errors)
+        {
+            return Problems.Validation(errors);
+        }
+
+        var version = outcome.Version!;
+        return TypedResults.Created($"/api/v1/projects/{projectId}/scripts/indicators/{name}/versions/{version.Number}", version);
+    }
+
+    /// <summary>Saves an indicator script with its details: the same checks, limit and numbering for the editor and for an AI client.</summary>
+    internal static async Task<ScriptOutcome> SaveIndicatorCoreAsync(
+        TamizaDbContext db, Guid projectId, string name, SaveIndicatorRequest request, Guid authorId, DateTimeOffset now, ScriptWrite write, CancellationToken ct)
     {
         var errors = new FieldErrors();
         if (!ColumnNames.IsValidTableName(name))
@@ -152,22 +196,21 @@ public static class ScriptEndpoints
         var metadata = ValidateMetadata(request, errors);
         if (errors.Any)
         {
-            return Problems.Validation(errors.ToDictionary());
+            return ScriptOutcome.Invalid(errors.ToDictionary());
         }
 
         if (await IsNewIndicatorOverLimitAsync(db, projectId, name, ct))
         {
-            return Problems.Validation("name", LimitMessage);
+            return ScriptOutcome.Invalid(new Dictionary<string, string[]> { ["name"] = [LimitMessage] });
         }
 
-        var version = await AddVersionAsync(db, projectId, ScriptKind.Indicator, name, metadata, user.Id, time.GetUtcNow(), ct);
-        return TypedResults.Created($"/api/v1/projects/{projectId}/scripts/indicators/{name}/versions/{version.Number}", version);
+        return ScriptOutcome.Saved(await AddVersionAsync(db, projectId, ScriptKind.Indicator, name, metadata, authorId, now, write, ct));
     }
 
     private static async Task<Results<Ok<ScriptVersionDetails>, ProblemHttpResult, NotFound>> RemoveIndicatorAsync(
         Guid projectId, string name, TamizaDbContext db, ICurrentUser user, TimeProvider time, CancellationToken ct) =>
         ColumnNames.IsValidTableName(name)
-            ? await RemoveCoreAsync(db, projectId, ScriptKind.Indicator, name, user.Id, time.GetUtcNow(), ct)
+            ? RemoveResult(await RemoveCoreAsync(db, projectId, ScriptKind.Indicator, name, user.Id, time.GetUtcNow(), ScriptWrite.App, ct))
             : TypedResults.NotFound();
 
     private static async Task<Results<Ok<List<ScriptVersionSummary>>, NotFound>> IndicatorVersionsAsync(
@@ -184,13 +227,19 @@ public static class ScriptEndpoints
     private static async Task<Results<Created<ScriptVersionDetails>, ValidationProblem, NotFound>> RestoreIndicatorAsync(
         Guid projectId, string name, int number, TamizaDbContext db, ICurrentUser user, TimeProvider time, CancellationToken ct)
     {
-        // Restoring a removed indicator creates it again, so the limit applies.
+        return RestoreResult(projectId, await RestoreIndicatorCoreAsync(db, projectId, name, number, user.Id, time.GetUtcNow(), ScriptWrite.App, ct));
+    }
+
+    /// <summary>Restores a version of an indicator. Restoring a removed indicator creates it again, so the limit applies.</summary>
+    internal static async Task<ScriptOutcome> RestoreIndicatorCoreAsync(
+        TamizaDbContext db, Guid projectId, string name, int number, Guid authorId, DateTimeOffset now, ScriptWrite write, CancellationToken ct)
+    {
         if (await IsNewIndicatorOverLimitAsync(db, projectId, name, ct))
         {
-            return Problems.Validation("name", LimitMessage);
+            return ScriptOutcome.Invalid(new Dictionary<string, string[]> { ["name"] = [LimitMessage] });
         }
 
-        return await RestoreCoreAsync(db, projectId, ScriptKind.Indicator, name, number, user.Id, time.GetUtcNow(), ct);
+        return await RestoreCoreAsync(db, projectId, ScriptKind.Indicator, name, number, authorId, now, write, ct);
     }
 
     // Shared
@@ -253,44 +302,44 @@ public static class ScriptEndpoints
         return count >= MaxIndicators && !await current.AnyAsync(v => v.Name == name, ct);
     }
 
-    private static async Task<Results<Ok<ScriptVersionDetails>, ProblemHttpResult, NotFound>> RemoveCoreAsync(
-        TamizaDbContext db, Guid projectId, ScriptKind kind, string? name, Guid authorId, DateTimeOffset now, CancellationToken ct)
+    /// <summary>Marks a script as removed with a new version; its earlier versions stay and can be restored.</summary>
+    internal static async Task<ScriptOutcome> RemoveCoreAsync(
+        TamizaDbContext db, Guid projectId, ScriptKind kind, string? name, Guid authorId, DateTimeOffset now, ScriptWrite write, CancellationToken ct)
     {
         var current = await Versions(db, projectId, kind, name).OrderByDescending(v => v.Number).FirstOrDefaultAsync(ct);
         if (current is null || current.Code is null)
         {
-            return Problems.Conflict(NotSetCode, "There is no script to remove.");
+            return ScriptOutcome.NotSet(NotSetCode, "There is no script to remove.");
         }
 
-        return TypedResults.Ok(await AddVersionAsync(db, projectId, kind, name, new Metadata(null), authorId, now, ct));
+        return ScriptOutcome.Saved(await AddVersionAsync(db, projectId, kind, name, new Metadata(null), authorId, now, write, ct));
     }
 
-    private static async Task<Results<Created<ScriptVersionDetails>, ValidationProblem, NotFound>> RestoreCoreAsync(
-        TamizaDbContext db, Guid projectId, ScriptKind kind, string? name, int number, Guid authorId, DateTimeOffset now, CancellationToken ct)
+    /// <summary>Saves the code and details of an earlier version as a new version.</summary>
+    internal static async Task<ScriptOutcome> RestoreCoreAsync(
+        TamizaDbContext db, Guid projectId, ScriptKind kind, string? name, int number, Guid authorId, DateTimeOffset now, ScriptWrite write, CancellationToken ct)
     {
         var source = await Versions(db, projectId, kind, name).Where(v => v.Number == number)
             .Select(v => new { v.Code, v.Label, v.Description, v.Unit, v.Format }).SingleOrDefaultAsync(ct);
         if (source is null)
         {
-            return TypedResults.NotFound();
+            return ScriptOutcome.Missing();
         }
 
         if (source.Code is null)
         {
-            return Problems.Validation("number", "That version marks the script as removed; choose a version with code.");
+            return ScriptOutcome.Invalid(new Dictionary<string, string[]> { ["number"] = ["That version marks the script as removed; choose a version with code."] });
         }
 
-        var version = await AddVersionAsync(
-            db, projectId, kind, name, new Metadata(source.Code, source.Label, source.Description, source.Unit, source.Format), authorId, now, ct);
-        var path = kind == ScriptKind.Indicator ? $"indicators/{name}" : Lower(kind);
-        return TypedResults.Created($"/api/v1/projects/{projectId}/scripts/{path}/versions/{version.Number}", version);
+        return ScriptOutcome.Saved(await AddVersionAsync(
+            db, projectId, kind, name, new Metadata(source.Code, source.Label, source.Description, source.Unit, source.Format), authorId, now, write, ct));
     }
 
-    private static async Task<List<ScriptVersionSummary>> SummariesAsync(
+    internal static async Task<List<ScriptVersionSummary>> SummariesAsync(
         TamizaDbContext db, Guid projectId, ScriptKind kind, string? name, CancellationToken ct) =>
         await Versions(db, projectId, kind, name)
             .OrderByDescending(v => v.Number)
-            .Select(v => new ScriptVersionSummary(v.Id, v.Kind, v.Name, v.Label, v.Number, v.Code == null, new Person(v.Author!.Id, v.Author.Name), v.CreatedAt))
+            .Select(v => new ScriptVersionSummary(v.Id, v.Kind, v.Name, v.Label, v.Number, v.Code == null, new Person(v.Author!.Id, v.Author.Name), v.CreatedAt, v.Origin))
             .ToListAsync(ct);
 
     /// <summary>The code of a version and, for an indicator, the metadata saved with it; all null for a removal.</summary>
@@ -298,11 +347,19 @@ public static class ScriptEndpoints
 
     /// <summary>Adds the next version number for the script; retries when two saves race for the same number.</summary>
     private static async Task<ScriptVersionDetails> AddVersionAsync(
-        TamizaDbContext db, Guid projectId, ScriptKind kind, string? name, Metadata metadata, Guid authorId, DateTimeOffset now, CancellationToken ct)
+        TamizaDbContext db, Guid projectId, ScriptKind kind, string? name, Metadata metadata, Guid authorId, DateTimeOffset now, ScriptWrite write,
+        CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
         {
-            var number = (await Versions(db, projectId, kind, name).MaxAsync(v => (int?)v.Number, ct) ?? 0) + 1;
+            var latest = await Versions(db, projectId, kind, name).MaxAsync(v => (int?)v.Number, ct) ?? 0;
+            if (write.GuardsBase && latest != (write.BaseVersion ?? 0))
+            {
+                // Checked on every attempt, so a save that races another one is refused instead of numbered after it.
+                throw await ScriptChangedException.ForAsync(db, projectId, kind, name, latest, ct);
+            }
+
+            var number = latest + 1;
             var version = new ScriptVersion
             {
                 Id = Guid.CreateVersion7(now),
@@ -316,6 +373,7 @@ public static class ScriptEndpoints
                 Unit = metadata.Unit,
                 Format = metadata.Format,
                 AuthorId = authorId,
+                Origin = write.Origin,
                 CreatedAt = now,
             };
             db.ScriptVersions.Add(version);
@@ -332,7 +390,7 @@ public static class ScriptEndpoints
         }
     }
 
-    private static IQueryable<ScriptVersion> Versions(TamizaDbContext db, Guid projectId, ScriptKind kind, string? name) =>
+    internal static IQueryable<ScriptVersion> Versions(TamizaDbContext db, Guid projectId, ScriptKind kind, string? name) =>
         db.ScriptVersions.AsNoTracking().Where(v => v.ProjectId == projectId && v.Kind == kind && v.Name == name);
 
     /// <summary>Script 1 or script 2; indicators have their own routes.</summary>
@@ -340,4 +398,52 @@ public static class ScriptEndpoints
         Enum.TryParse(value, ignoreCase: true, out kind) && kind is ScriptKind.Clean or ScriptKind.Output && !int.TryParse(value, out _);
 
     private static string Lower(ScriptKind kind) => kind.ToString().ToLowerInvariant();
+}
+
+/// <summary>Where a version is written from and, for an AI client, which version it read as the current one (design D9).</summary>
+/// <param name="BaseVersion">The number of the version the writer read as current; null means it saw no version, so the script never existed.</param>
+/// <param name="GuardsBase">Whether <paramref name="BaseVersion"/> must still be the current version for the write to go ahead.</param>
+internal sealed record ScriptWrite(ScriptOrigin Origin, int? BaseVersion, bool GuardsBase)
+{
+    /// <summary>The editor and the REST API: no guard, as before.</summary>
+    public static readonly ScriptWrite App = new(ScriptOrigin.App, null, false);
+
+    public static ScriptWrite Mcp(int? baseVersion) => new(ScriptOrigin.Mcp, baseVersion, true);
+}
+
+/// <summary>The result of saving, removing or restoring a script, before it becomes an HTTP result or a tool result.</summary>
+internal sealed record ScriptOutcome(
+    ScriptVersionDetails? Version, IDictionary<string, string[]>? Errors = null, bool NotFound = false, (string Code, string Detail)? Conflict = null)
+{
+    public static ScriptOutcome Saved(ScriptVersionDetails version) => new(version);
+
+    public static ScriptOutcome Invalid(IDictionary<string, string[]> errors) => new(null, errors);
+
+    public static ScriptOutcome Missing() => new(null, NotFound: true);
+
+    public static ScriptOutcome NotSet(string code, string detail) => new(null, Conflict: (code, detail));
+}
+
+/// <summary>A guarded write found that the script's current version is not the one the writer read.</summary>
+internal sealed class ScriptChangedException(int current, string author, DateTimeOffset at, bool removed)
+    : Exception("The script was changed since it was read.")
+{
+    public int Current { get; } = current;
+
+    public string Author { get; } = author;
+
+    public DateTimeOffset At { get; } = at;
+
+    /// <summary>Whether the current version marks the script as removed.</summary>
+    public bool Removed { get; } = removed;
+
+    public static async Task<ScriptChangedException> ForAsync(
+        TamizaDbContext db, Guid projectId, ScriptKind kind, string? name, int latest, CancellationToken ct)
+    {
+        var current = await db.ScriptVersions.AsNoTracking()
+            .Where(v => v.ProjectId == projectId && v.Kind == kind && v.Name == name && v.Number == latest)
+            .Select(v => new { Author = v.Author!.Name, v.CreatedAt, Removed = v.Code == null })
+            .SingleOrDefaultAsync(ct);
+        return new ScriptChangedException(latest, current?.Author ?? "", current?.CreatedAt ?? DateTimeOffset.MinValue, current?.Removed ?? false);
+    }
 }

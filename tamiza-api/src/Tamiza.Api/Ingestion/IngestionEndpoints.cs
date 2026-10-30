@@ -104,7 +104,7 @@ public static class IngestionEndpoints
     /// The form versions the project's non-deleted submissions use, plus the current one even if no submission uses it yet.
     /// A version without a record reads as pending, because the next recording pass will create one.
     /// </summary>
-    private static async Task<Ok<FormVersionList>> ListFormVersionsAsync(Guid projectId, TamizaDbContext db, CancellationToken ct)
+    internal static async Task<Ok<FormVersionList>> ListFormVersionsAsync(Guid projectId, TamizaDbContext db, CancellationToken ct)
     {
         var current = await db.Projects.AsNoTracking().Where(p => p.Id == projectId).Select(p => p.FormVersion).SingleAsync(ct);
         var live = db.RawSubmissions.AsNoTracking().Where(s => s.ProjectId == projectId && !s.Deleted);
@@ -150,7 +150,7 @@ public static class IngestionEndpoints
         return TypedResults.Ok(new FormVersionList(versions, withoutVersion));
     }
 
-    private static async Task<IngestionStatus> StatusAsync(TamizaDbContext db, Guid projectId, CancellationToken ct)
+    internal static async Task<IngestionStatus> StatusAsync(TamizaDbContext db, Guid projectId, CancellationToken ct)
     {
         var project = await db.Projects.AsNoTracking().SingleAsync(p => p.Id == projectId, ct);
         var submissions = db.RawSubmissions.Where(s => s.ProjectId == projectId);

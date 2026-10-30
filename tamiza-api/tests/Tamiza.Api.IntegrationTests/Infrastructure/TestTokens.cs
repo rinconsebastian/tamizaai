@@ -14,6 +14,9 @@ public static class TestTokens
     public const string Issuer = "https://idp.test/realms/tamiza";
     public const string Audience = "tamiza-api";
 
+    /// <summary>The audience of the tokens AI clients get for the MCP server.</summary>
+    public const string McpAudience = "tamiza-mcp";
+
     public static readonly RsaSecurityKey SigningKey = new(RSA.Create(2048)) { KeyId = "test-key" };
 
     /// <summary>Replaces discovery with a static configuration that trusts <see cref="SigningKey"/>.</summary>

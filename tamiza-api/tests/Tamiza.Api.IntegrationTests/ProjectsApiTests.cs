@@ -385,6 +385,94 @@ public sealed class ProjectsApiTests(PostgresFixture postgres) : IDisposable
     }
 
     [Fact]
+    public async Task A_new_project_is_off_for_AI_clients_and_only_analysts_see_the_level()
+    {
+        var (factory, db) = await FactoryAsync(extra: new() { ["TAMIZA_MCP_MAX_DATA_ACCESS"] = "rows" });
+        await using var owner = factory;
+        using var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
+        var created = await CreateProjectAsync(admin);
+        var id = created.GetProperty("project").GetProperty("id").GetGuid();
+        foreach (var (subject, role) in new[] { ("grace", "analyst"), ("vera", "viewer") })
+        {
+            await TestData.AddMemberAsync(db, id, await TestData.SignInAsync(factory, subject, $"{subject}@example.org"), role);
+        }
+
+        using var analyst = TestData.ClientFor(factory, "grace", "grace@example.org");
+        using var viewer = TestData.ClientFor(factory, "vera", "vera@example.org");
+
+        var asAdmin = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{id}");
+        var asAnalyst = await analyst.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{id}");
+        var asViewer = await viewer.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{id}");
+
+        Assert.Equal("off", asAdmin.GetProperty("mcpAccess").GetString());
+        Assert.Equal("rows", asAdmin.GetProperty("mcpMaxAccess").GetString());
+        Assert.Equal("off", asAnalyst.GetProperty("mcpAccess").GetString());
+        Assert.Equal(JsonValueKind.Null, asViewer.GetProperty("mcpAccess").ValueKind);
+        Assert.Equal(JsonValueKind.Null, asViewer.GetProperty("mcpMaxAccess").ValueKind);
+        Assert.Equal("off", await TestData.ScalarAsync<string>(db, "SELECT mcp_access FROM tamiza.projects WHERE id = @id", ("id", id)));
+    }
+
+    [Theory]
+    [InlineData("aggregates")]
+    [InlineData("rows")]
+    [InlineData("Aggregates")]
+    [InlineData("off")]
+    public async Task An_admin_chooses_what_AI_clients_may_read(string level)
+    {
+        var (factory, db) = await FactoryAsync(extra: new() { ["TAMIZA_MCP_MAX_DATA_ACCESS"] = "rows" });
+        await using var owner = factory;
+        using var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
+        var id = (await CreateProjectAsync(admin)).GetProperty("project").GetProperty("id").GetGuid();
+
+        var response = await admin.PatchAsJsonAsync($"/api/v1/projects/{id}", new { mcpAccess = level });
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(level.ToLowerInvariant(), body.GetProperty("mcpAccess").GetString());
+        Assert.Equal(level.ToLowerInvariant(), await TestData.ScalarAsync<string>(db, "SELECT mcp_access FROM tamiza.projects WHERE id = @id", ("id", id)));
+        Assert.Equal("Household survey 2026", body.GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public async Task Rows_above_the_deployments_maximum_and_unknown_levels_are_refused_and_change_nothing()
+    {
+        var (factory, _) = await FactoryAsync();
+        await using var owner = factory;
+        using var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
+        var id = (await CreateProjectAsync(admin)).GetProperty("project").GetProperty("id").GetGuid();
+        (await admin.PatchAsJsonAsync($"/api/v1/projects/{id}", new { mcpAccess = "aggregates" })).EnsureSuccessStatusCode();
+
+        var rows = await admin.PatchAsJsonAsync($"/api/v1/projects/{id}", new { mcpAccess = "rows", name = "Not renamed" });
+        var unknown = await admin.PatchAsJsonAsync($"/api/v1/projects/{id}", new { mcpAccess = "everything" });
+        var details = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{id}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, rows.StatusCode);
+        var rowsError = (await rows.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors").GetProperty("mcpAccess").EnumerateArray().Single().GetString();
+        Assert.Contains("summaries only", rowsError);
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+        Assert.True((await unknown.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors").TryGetProperty("mcpAccess", out _));
+        Assert.Equal("aggregates", details.GetProperty("mcpAccess").GetString());
+        Assert.Equal("aggregates", details.GetProperty("mcpMaxAccess").GetString());
+        Assert.Equal("Household survey 2026", details.GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public async Task An_analyst_cannot_change_what_AI_clients_may_read()
+    {
+        var (factory, db) = await FactoryAsync(extra: new() { ["TAMIZA_MCP_MAX_DATA_ACCESS"] = "rows" });
+        await using var owner = factory;
+        using var admin = TestData.ClientFor(factory, "ada", "ada@example.org");
+        var id = (await CreateProjectAsync(admin)).GetProperty("project").GetProperty("id").GetGuid();
+        await TestData.AddMemberAsync(db, id, await TestData.SignInAsync(factory, "grace", "grace@example.org"), "analyst");
+        using var analyst = TestData.ClientFor(factory, "grace", "grace@example.org");
+
+        var response = await analyst.PatchAsJsonAsync($"/api/v1/projects/{id}", new { mcpAccess = "rows" });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal("off", await TestData.ScalarAsync<string>(db, "SELECT mcp_access FROM tamiza.projects WHERE id = @id", ("id", id)));
+    }
+
+    [Fact]
     public async Task An_admin_sets_the_time_zone_and_every_member_sees_it()
     {
         var (factory, db) = await FactoryAsync();

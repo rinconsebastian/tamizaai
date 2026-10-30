@@ -29,7 +29,7 @@ public static class IndicatorEndpoints
     }
 
     /// <summary>The project's indicators with whether each has published a table, and the limits of its dashboards.</summary>
-    private static async Task<Results<Ok<IndicatorOverview>, ProblemHttpResult>> GetOverviewAsync(
+    internal static async Task<Results<Ok<IndicatorOverview>, ProblemHttpResult>> GetOverviewAsync(
         Guid projectId, IndicatorDashboard dashboard, TamizaDbContext db, IOptions<IndicatorDashboardOptions> options, CancellationToken ct)
     {
         try
@@ -56,7 +56,7 @@ public static class IndicatorEndpoints
     }
 
     /// <summary>Every column of one indicator's published table, those a widget can plot, and the defaults for a new widget.</summary>
-    private static async Task<Results<Ok<IndicatorColumns>, ProblemHttpResult>> GetColumnsAsync(
+    internal static async Task<Results<Ok<IndicatorColumns>, ProblemHttpResult>> GetColumnsAsync(
         Guid projectId, string name, IndicatorDashboard dashboard, CancellationToken ct)
     {
         try
@@ -70,7 +70,7 @@ public static class IndicatorEndpoints
     }
 
     /// <summary>One widget's rows: the measure summed, or the ratio of sums, per group. Used to draw a saved widget and to preview a draft.</summary>
-    private static async Task<Results<Ok<IndicatorQueryResponse>, ValidationProblem, ProblemHttpResult>> QueryAsync(
+    internal static async Task<Results<Ok<IndicatorQueryResponse>, ValidationProblem, ProblemHttpResult>> QueryAsync(
         Guid projectId, IndicatorQueryRequest? request, IndicatorDashboard dashboard, CancellationToken ct)
     {
         try

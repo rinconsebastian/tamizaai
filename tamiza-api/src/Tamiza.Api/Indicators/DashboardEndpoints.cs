@@ -58,7 +58,7 @@ public static class DashboardEndpoints
     }
 
     /// <summary>The dashboard's name, its filters and its widgets in reading order, listed whether or not their indicator is published.</summary>
-    private static async Task<Results<Ok<DashboardView>, ProblemHttpResult>> GetDashboardAsync(
+    internal static async Task<Results<Ok<DashboardView>, ProblemHttpResult>> GetDashboardAsync(
         Guid projectId, Guid dashboardId, TamizaDbContext db, CancellationToken ct)
     {
         var dashboard = await db.Dashboards.AsNoTracking()
@@ -121,7 +121,7 @@ public static class DashboardEndpoints
     /// Replaces the dashboard's filters with the list sent, in its order (design D4). No lock: the last save wins. A dashboard removed
     /// since the check updates no row.
     /// </summary>
-    private static async Task<Results<Ok<DashboardFilterList>, ValidationProblem, ProblemHttpResult>> SaveFiltersAsync(
+    internal static async Task<Results<Ok<DashboardFilterList>, ValidationProblem, ProblemHttpResult>> SaveFiltersAsync(
         Guid projectId, Guid dashboardId, DashboardFiltersRequest? request, TamizaDbContext db, ICurrentUser user, TimeProvider time,
         CancellationToken ct)
     {
@@ -149,7 +149,7 @@ public static class DashboardEndpoints
     }
 
     /// <summary>Adds a dashboard with no widgets after the project's others.</summary>
-    private static async Task<Results<Created<DashboardEntry>, ValidationProblem, ProblemHttpResult>> AddAsync(
+    internal static async Task<Results<Created<DashboardEntry>, ValidationProblem, ProblemHttpResult>> AddAsync(
         Guid projectId, DashboardNameRequest? request, TamizaDbContext db, ICurrentUser user, TimeProvider time, CancellationToken ct)
     {
         var (name, error) = DashboardValidation.Name(request?.Name);
@@ -185,7 +185,7 @@ public static class DashboardEndpoints
     }
 
     /// <summary>Renames the dashboard. Its widgets, its place and its address stay the same.</summary>
-    private static async Task<Results<Ok<DashboardEntry>, ValidationProblem, ProblemHttpResult>> RenameAsync(
+    internal static async Task<Results<Ok<DashboardEntry>, ValidationProblem, ProblemHttpResult>> RenameAsync(
         Guid projectId, Guid dashboardId, DashboardNameRequest? request, TamizaDbContext db, ICurrentUser user, TimeProvider time,
         CancellationToken ct)
     {
@@ -229,7 +229,7 @@ public static class DashboardEndpoints
     }
 
     /// <summary>Removes the dashboard with its widgets. The project's only dashboard stays.</summary>
-    private static async Task<Results<NoContent, ProblemHttpResult>> RemoveAsync(
+    internal static async Task<Results<NoContent, ProblemHttpResult>> RemoveAsync(
         Guid projectId, Guid dashboardId, TamizaDbContext db, CancellationToken ct)
     {
         // Under the lock two removals at 2 dashboards leave one, and no widget can be added to the dashboard as it goes (design D3).
@@ -265,7 +265,7 @@ public static class DashboardEndpoints
     /// Puts the project's dashboards in the order asked for and answers them in it. The order the member's page showed must be the
     /// current one, so a page that missed another member's add, removal or move changes nothing (design D6).
     /// </summary>
-    private static async Task<Results<Ok<List<DashboardEntry>>, ProblemHttpResult>> ReorderAsync(
+    internal static async Task<Results<Ok<List<DashboardEntry>>, ProblemHttpResult>> ReorderAsync(
         Guid projectId, ReorderDashboardsRequest? request, TamizaDbContext db, CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -292,7 +292,7 @@ public static class DashboardEndpoints
     /// Adds a copy of the dashboard right after it, holding its filters and a copy of each of its widgets: same title, chart type,
     /// query and layout, a new id, and the caller as their author. Later changes to one leave the other as it is.
     /// </summary>
-    private static async Task<Results<Created<DashboardEntry>, ValidationProblem, ProblemHttpResult>> DuplicateAsync(
+    internal static async Task<Results<Created<DashboardEntry>, ValidationProblem, ProblemHttpResult>> DuplicateAsync(
         Guid projectId, Guid dashboardId, DashboardNameRequest? request, TamizaDbContext db, ICurrentUser user,
         IOptions<IndicatorDashboardOptions> options, TimeProvider time, CancellationToken ct)
     {
@@ -368,7 +368,7 @@ public static class DashboardEndpoints
     }
 
     /// <summary>Adds a widget to the dashboard. Without a layout it is placed under that dashboard's widgets.</summary>
-    private static async Task<Results<Created<Widget>, ValidationProblem, ProblemHttpResult>> CreateWidgetAsync(
+    internal static async Task<Results<Created<Widget>, ValidationProblem, ProblemHttpResult>> CreateWidgetAsync(
         Guid projectId, Guid dashboardId, CreateWidgetRequest? request, IndicatorDashboard indicators, TamizaDbContext db, ICurrentUser user,
         IOptions<IndicatorDashboardOptions> options, TimeProvider time, CancellationToken ct)
     {
@@ -441,7 +441,7 @@ public static class DashboardEndpoints
     /// Changes any of a widget's title, chart type, query and layout, or moves it to another dashboard of the project. A move or a
     /// rename leaves the query as it is, even if the table no longer has what it names.
     /// </summary>
-    private static async Task<Results<Ok<Widget>, ValidationProblem, ProblemHttpResult>> UpdateWidgetAsync(
+    internal static async Task<Results<Ok<Widget>, ValidationProblem, ProblemHttpResult>> UpdateWidgetAsync(
         Guid projectId, Guid dashboardId, Guid widgetId, UpdateWidgetRequest? request, IndicatorDashboard indicators, TamizaDbContext db,
         ICurrentUser user, IOptions<IndicatorDashboardOptions> options, TimeProvider time, CancellationToken ct)
     {
@@ -562,7 +562,7 @@ public static class DashboardEndpoints
         return TypedResults.Ok(ToWidget(widget));
     }
 
-    private static async Task<Results<NoContent, ProblemHttpResult>> DeleteWidgetAsync(
+    internal static async Task<Results<NoContent, ProblemHttpResult>> DeleteWidgetAsync(
         Guid projectId, Guid dashboardId, Guid widgetId, TamizaDbContext db, CancellationToken ct)
     {
         var deleted = await db.DashboardWidgets

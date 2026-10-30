@@ -401,6 +401,65 @@ FROM tamiza.assistant_calls ORDER BY started_at DESC LIMIT 20"
 
 A request that costs several times the tokens of the others, or a `tokens_estimated` of true on every row, usually means a reasoning model thinking at full effort or a provider that reports no usage: lower the effort in the extra fields. Run the seven again whenever you change the model, its settings or the provider, and after a Tamiza upgrade that changes the assistant's rules.
 
+## MCP server (optional)
+
+An AI client such as Claude (claude.ai, Claude Desktop, Claude Code) can work with a project through the Model Context Protocol: read the Kobo form and summaries of the data, write, test and run scripts, and build dashboards and widgets, signed in as the person with their role (see [docs/mcp.md](mcp.md)). It is **off by default**, and when it is on every project still stays off until an admin of the project allows it in **Settings > General**. Tamiza calls no model and ships no account: the person's own Claude plan pays for it, and the server makes no outbound request.
+
+### Turn it on
+
+Register the client in Keycloak first ([Client for AI clients (MCP)](keycloak.md#client-for-ai-clients-mcp-optional)), then set these in `.env` and run `docker compose up -d api ui` (`ui` carries the proxy locations for `/mcp` and `/.well-known/oauth-protected-resource`). Only `api` reads them.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TAMIZA_MCP_ENABLED` | `false` | Turns the server on, at `<TAMIZA_PUBLIC_URL>/mcp`. |
+| `TAMIZA_MCP_AUDIENCE` | `tamiza-mcp` | The `aud` that tokens for `/mcp` must carry. It must differ from `OIDC_AUDIENCE`; `api` refuses to start when the server is on and they are equal. |
+| `TAMIZA_MCP_CLIENT_ID` | `tamiza-mcp` | The public client registered in Keycloak. Only shown on the connect page. |
+| `TAMIZA_MCP_CALLBACK_PORT` | `33418` | The loopback port registered for Claude Code, 1024 to 65535. Only shown in its command. |
+| `TAMIZA_MCP_MAX_DATA_ACCESS` | `aggregates` | The most any project may allow: `aggregates` (summaries only) or `rows`. Each project's admin chooses a level up to it. |
+
+A blank value means the default. A value `api` cannot read (a maximum that is neither `aggregates` nor `rows`, an equal audience, a port out of range) stops `api` at startup and names the variable. To turn the server off, set `TAMIZA_MCP_ENABLED=false` and restart `api`: `/mcp` and the protected resource metadata answer 404 to anyone, the connect page and the project cards disappear, and the records and each project's chosen level stay.
+
+The limits have defaults you rarely need to change. They are read from the `Mcp` configuration section, so set them as environment variables of `api` in a compose override rather than in `.env`:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `Mcp__MaxResultCharacters` | `60000` | The most characters one tool result holds, 10,000 to 140,000. A longer result is cut from the end of its longest list and says so. |
+| `Mcp__MaxConcurrentCallsPerUser` | `4` | Calls one person runs at once across all their clients, 1 to 16. |
+| `Mcp__CallsPerMinutePerUser` | `120` | Calls one person makes per minute, 10 to 1,000. |
+| `Mcp__ProfileStatementTimeout` | `00:01:00` | How long one column profile may run in PostgreSQL, from `00:00:05` to `00:05:00`. |
+| `Mcp__CallRetentionDays` | `180` | How long call records are kept, 7 to 3,650. |
+
+The counters of the limits are in memory, so restarting `api` resets them, and they assume a single `api` instance, as the assistant's budget and the ingestion queue do.
+
+### Who can reach it
+
+The hosted Claude apps (claude.ai, Claude Desktop and the mobile apps) connect from Anthropic's servers, so `TAMIZA_PUBLIC_URL` and Keycloak must be reachable from the Internet over HTTPS; Anthropic publishes the address range (`160.79.104.0/21` at the time of writing) if you filter by source. Claude Code connects from the analyst's computer and works on a private network when that computer reaches both. When the server is on and `TAMIZA_PUBLIC_URL` is not an `https` address, `api` logs a warning at startup. If your installation is private and people use claude.ai, Anthropic documents MCP tunnels for that case.
+
+Requests to `/mcp` that carry an `Origin` header for another origin than `TAMIZA_PUBLIC_URL` are refused with 403, so a page in a browser cannot call the server with the person's credentials. AI clients send no `Origin`.
+
+### Timeouts and proxies
+
+A call can wait for a run's step or a script's test, up to two minutes, and results stream as server-sent events. The `ui` service has `location = /mcp` with a 300-second read timeout, no buffering and a 1 MB body limit (a long script goes in the request), and `location ^~ /.well-known/oauth-protected-resource` with the default timeout. A reverse proxy of your own in front of `ui` needs the same for `/mcp`: a read timeout of at least 300 seconds, response buffering off, and a body limit of at least 1 MB. It must pass `/.well-known/oauth-protected-resource` too, or clients cannot find the realm. Do not add CORS headers: the clients call from servers or native apps.
+
+### Records
+
+Every tool call leaves one row in `tamiza.mcp_calls`: who, the project, the tool, the level that applied, the outcome (`succeeded`, `failed` or `refused`), the error code, how long it took and how many characters the result had. The rows hold no arguments and no result. They are kept 180 days by default and deleted with their project. Project analysts see the latest 50 in **Settings > General**.
+
+```sh
+docker compose exec db psql -U tamiza -d tamiza -c "
+SELECT date_trunc('day', c.started_at) AS day, u.email, c.tool, count(*) AS calls,
+       count(*) FILTER (WHERE c.status <> 'succeeded') AS not_succeeded,
+       round(avg(c.duration_ms)) AS avg_ms
+FROM tamiza.mcp_calls c JOIN tamiza.users u ON u.id = c.user_id
+GROUP BY 1, 2, 3 ORDER BY 1 DESC, 4 DESC LIMIT 30"
+```
+
+Replace `tamiza` after `-U` with your `POSTGRES_USER` if you changed it. A `refused` call is an answer the person was meant to get (the project is off, a role is missing, the version changed, the rate limit): the `error_code` says which.
+
+### Rolling back
+
+Turning the server off hides it; nothing else needs undoing. The migration adds `projects.mcp_access` (every project `off`), `script_versions.origin` (`app` for every existing version, `mcp` for the ones an AI client saved) and `tamiza.mcp_calls`. Going back to an earlier Tamiza version ignores them. Scripts and dashboards an AI client changed stay as they are: the scripts keep every earlier version, which can be restored from the Versions tab, while a dashboard or a widget changed wrongly is not versioned and must be fixed by hand.
+
 ## Map basemaps (optional)
 
 The dashboard's maps can have a background map under their shapes, streets or satellite imagery (see [Maps](indicators-dashboard.md#maps)). It is **off by default**: with no provider, no browser and no server makes a request to any tile provider, and maps still zoom and pan on their plain background. Tamiza ships with no provider account and no key: you choose one, and the choice is yours to make.
