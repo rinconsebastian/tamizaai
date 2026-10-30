@@ -29,6 +29,9 @@ public sealed class ScriptVersion
 
     public Guid AuthorId { get; set; }
 
+    /// <summary>Where the version was saved: the editor (<c>app</c>) or an AI client (<c>mcp</c>).</summary>
+    public ScriptOrigin Origin { get; set; } = ScriptOrigin.App;
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public User? Author { get; set; }

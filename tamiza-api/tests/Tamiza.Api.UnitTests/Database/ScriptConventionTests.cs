@@ -220,4 +220,31 @@ public sealed class ScriptConventionTests
         // No key, check, foreign key or index, so nothing can be left unnamed.
         Assert.Empty(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|CHECK|INDEX)\b"));
     }
+
+    [Fact]
+    public void The_mcp_server_script_names_every_constraint_and_index()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0016_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0016_add_mcp_server.sql", resource);
+        foreach (var constraint in new[]
+                 {
+                     "ck_projects_mcp_access CHECK", "ck_script_versions_origin CHECK", "pk_mcp_calls PRIMARY KEY",
+                     "fk_mcp_calls_users_user_id FOREIGN KEY", "fk_mcp_calls_projects_project_id FOREIGN KEY",
+                     "ck_mcp_calls_access CHECK", "ck_mcp_calls_status CHECK",
+                 })
+        {
+            Assert.Contains($"CONSTRAINT {constraint}", sql);
+        }
+
+        // Every key, check and foreign key is introduced by a CONSTRAINT name; every index has an ix_ name.
+        Assert.Equal(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count,
+            System.Text.RegularExpressions.Regex.Matches(sql, @"CONSTRAINT (?:pk|fk|ck)_\w+ (?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count);
+        Assert.All(System.Text.RegularExpressions.Regex.Matches(sql, @"CREATE (?:UNIQUE )?INDEX (\w+)").Select(m => m.Groups[1].Value),
+            name => Assert.StartsWith("ix_mcp_calls_", name));
+        Assert.Contains("CREATE INDEX ix_mcp_calls_project_id_started_at ON tamiza.mcp_calls (project_id, started_at DESC)", sql);
+        Assert.Contains("REFERENCES tamiza.projects (id) ON DELETE CASCADE", sql);
+    }
 }

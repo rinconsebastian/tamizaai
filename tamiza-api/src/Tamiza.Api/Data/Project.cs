@@ -64,6 +64,9 @@ public sealed class Project
     /// <summary>The uid of the deployed form version the snapshot describes; null when the form has no deployment.</summary>
     public string? FormVersion { get; set; }
 
+    /// <summary>How much of the project's data AI clients may read through the MCP server. <c>off</c> until an admin allows it.</summary>
+    public McpAccess McpAccess { get; set; } = McpAccess.Off;
+
     public Guid CreatedBy { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }

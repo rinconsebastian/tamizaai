@@ -6,10 +6,10 @@
 
 ## 1. Schema (api)
 
-- [ ] 1.1 Add `tamiza-api/src/dbUp/Scripts/0016_add_mcp_server.sql` exactly as design D13: `projects.mcp_access` with `ck_projects_mcp_access`, `script_versions.origin` with `ck_script_versions_origin`, and `tamiza.mcp_calls` with `pk_mcp_calls`, `fk_mcp_calls_users_user_id` (restrict), `fk_mcp_calls_projects_project_id` (cascade), `ck_mcp_calls_access`, `ck_mcp_calls_status` and the three indexes. Keep upper-case `CHECK`, `FOREIGN KEY` and `PRIMARY KEY` out of the comments. Verify the analytics integration tests still build their template database.
-- [ ] 1.2 Mirror it in EF: `Project.McpAccess`, `ScriptVersion.Origin`, an `McpCall` entity with `DbSet<McpCall> McpCalls`, the checks, FKs and indexes. Verify `SchemaDriftTests` passes.
-- [ ] 1.3 Add `The_mcp_server_script_names_every_constraint_and_index` to `ScriptConventionTests`, in the style of the 0011 and 0012 tests. Verify it passes, and fails when a constraint name is removed from a copy of the script.
-- [ ] 1.4 Add a `SchemaMigratorTests` upgrade test from `0015`: two projects with script versions, then `MigrateAsync`. Verify every project is `off`, every version is `app`, `rows` and `app` are accepted and `everything` and `bot` are refused by the checks, and removing a project removes its `mcp_calls` (projects `Existing project upgraded`).
+- [x] 1.1 Add `tamiza-api/src/dbUp/Scripts/0016_add_mcp_server.sql` exactly as design D13: `projects.mcp_access` with `ck_projects_mcp_access`, `script_versions.origin` with `ck_script_versions_origin`, and `tamiza.mcp_calls` with `pk_mcp_calls`, `fk_mcp_calls_users_user_id` (restrict), `fk_mcp_calls_projects_project_id` (cascade), `ck_mcp_calls_access`, `ck_mcp_calls_status` and the three indexes. Keep upper-case `CHECK`, `FOREIGN KEY` and `PRIMARY KEY` out of the comments. Verify the analytics integration tests still build their template database.
+- [x] 1.2 Mirror it in EF: `Project.McpAccess`, `ScriptVersion.Origin`, an `McpCall` entity with `DbSet<McpCall> McpCalls`, the checks, FKs and indexes. Verify `SchemaDriftTests` passes.
+- [x] 1.3 Add `The_mcp_server_script_names_every_constraint_and_index` to `ScriptConventionTests`, in the style of the 0011 and 0012 tests. Verify it passes, and fails when a constraint name is removed from a copy of the script.
+- [x] 1.4 Add a `SchemaMigratorTests` upgrade test from `0015`: two projects with script versions, then `MigrateAsync`. Verify every project is `off`, every version is `app`, `rows` and `app` are accepted and `everything` and `bot` are refused by the checks, and removing a project removes its `mcp_calls` (projects `Existing project upgraded`).
 
 ## 2. Options and the server's existence (api)
 

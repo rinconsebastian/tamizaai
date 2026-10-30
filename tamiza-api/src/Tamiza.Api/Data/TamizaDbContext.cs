@@ -53,6 +53,8 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
 
     public DbSet<DashboardReport> DashboardReports => Set<DashboardReport>();
 
+    public DbSet<McpCall> McpCalls => Set<McpCall>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(Schema);
@@ -90,8 +92,10 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             project.Property(p => p.RunAfterSync).HasDefaultValue(true);
             project.Property(p => p.FormChoices).HasJsonColumn().HasDefaultValueSql("'[]'::jsonb");
             project.Property(p => p.FormVersion).HasMaxLength(128);
+            project.Property(p => p.McpAccess).HasConversion(LowercaseEnum<McpAccess>()).HasMaxLength(16).HasDefaultValue(McpAccess.Off);
             project.ToTable(table =>
             {
+                table.HasCheckConstraint("ck_projects_mcp_access", "mcp_access IN ('off', 'aggregates', 'rows')");
                 table.HasCheckConstraint("ck_projects_sync_interval_hours", "sync_interval_hours BETWEEN 1 AND 168");
                 table.HasCheckConstraint("ck_projects_reconcile_interval_hours", "reconcile_interval_hours BETWEEN 1 AND 168");
                 table.HasCheckConstraint("ck_projects_run_interval_hours", "run_interval_hours BETWEEN 1 AND 168");
@@ -199,6 +203,7 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
                 table.HasCheckConstraint("ck_script_versions_kind", "kind IN ('clean', 'output', 'indicator')");
                 table.HasCheckConstraint("ck_script_versions_name", "(kind = 'indicator') = (name IS NOT NULL)");
                 table.HasCheckConstraint("ck_script_versions_format", "format IS NULL OR format IN ('count', 'decimal', 'percent', 'currency')");
+                table.HasCheckConstraint("ck_script_versions_origin", "origin IN ('app', 'mcp')");
             });
             version.HasKey(v => v.Id);
             version.Property(v => v.Id).ValueGeneratedNever();
@@ -208,6 +213,7 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             version.Property(v => v.Description).HasColumnType("text");
             version.Property(v => v.Unit).HasMaxLength(32);
             version.Property(v => v.Format).HasMaxLength(16);
+            version.Property(v => v.Origin).HasConversion(LowercaseEnum<ScriptOrigin>()).HasMaxLength(8).HasDefaultValue(ScriptOrigin.App);
             // Versions are numbered per indicator; the clean and output scripts have no name and still collide.
             version.HasIndex(v => new { v.ProjectId, v.Kind, v.Name, v.Number }).IsUnique().AreNullsDistinct(false);
             version.HasOne<Project>().WithMany().HasForeignKey(v => v.ProjectId).OnDelete(DeleteBehavior.Cascade);
@@ -341,6 +347,27 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             // The daily budget sums a user's rows since the start of the UTC day.
             call.HasIndex(c => new { c.UserId, c.StartedAt });
             call.HasIndex(c => c.ProjectId);
+            call.HasOne<Project>().WithMany().HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            call.HasOne<User>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<McpCall>(call =>
+        {
+            call.ToTable("mcp_calls", table =>
+            {
+                table.HasCheckConstraint("ck_mcp_calls_access", "access IS NULL OR access IN ('aggregates', 'rows')");
+                table.HasCheckConstraint("ck_mcp_calls_status", "status IN ('succeeded', 'failed', 'refused')");
+            });
+            call.HasKey(c => c.Id);
+            call.Property(c => c.Id).ValueGeneratedNever();
+            call.Property(c => c.Tool).HasMaxLength(64);
+            call.Property(c => c.Access).HasConversion(LowercaseEnum<McpAccess>()).HasMaxLength(16);
+            call.Property(c => c.Status).HasConversion(LowercaseEnum<McpCallStatus>()).HasMaxLength(16);
+            call.Property(c => c.ErrorCode).HasMaxLength(64);
+            // The activity list of a project reads its newest calls; the daily sweep and a person's calls read by time.
+            call.HasIndex(c => new { c.ProjectId, c.StartedAt }).IsDescending(false, true).HasDatabaseName("ix_mcp_calls_project_id_started_at");
+            call.HasIndex(c => new { c.UserId, c.StartedAt }).HasDatabaseName("ix_mcp_calls_user_id_started_at");
+            call.HasIndex(c => c.StartedAt).HasDatabaseName("ix_mcp_calls_started_at");
             call.HasOne<Project>().WithMany().HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.Cascade);
             call.HasOne<User>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Restrict);
         });
