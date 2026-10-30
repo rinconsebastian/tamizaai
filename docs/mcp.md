@@ -9,7 +9,7 @@ Tamiza has an MCP server (Model Context Protocol) so an AI client such as Claude
 ## Turn it on (operator)
 
 1. Register the client in Keycloak: [Client for AI clients (MCP)](keycloak.md#client-for-ai-clients-mcp-optional). Without it nobody can sign in.
-2. In `.env`, set `TAMIZA_MCP_ENABLED=true` and, only if projects may allow rows, `TAMIZA_MCP_MAX_DATA_ACCESS=rows`. The other variables have defaults; see [`.env.example`](../.env.example) and [docs/operations.md](operations.md#mcp-server).
+2. In `.env`, set `TAMIZA_MCP_ENABLED=true` and, only if projects may allow rows, `TAMIZA_MCP_MAX_DATA_ACCESS=rows`. The other variables have defaults; see [`.env.example`](../.env.example) and [docs/operations.md](operations.md#mcp-server-optional).
 3. `docker compose up -d api ui` (the `ui` image carries the proxy locations for `/mcp` and `/.well-known/oauth-protected-resource`).
 4. Check `https://<your address>/.well-known/oauth-protected-resource/mcp`: it must answer a short JSON document that names `https://<your address>/mcp` and your Keycloak realm.
 
@@ -97,7 +97,7 @@ The calls appear in Settings > General. Everything Claude saved is a new version
 - **Removals name what they remove.** `remove_dashboard` needs the dashboard's name and `remove_widget` the widget's title, compared ignoring case. A wrong identifier cannot remove the wrong thing: `mcp.nameMismatch`.
 - **Code that reaches outside the script is refused.** `save_script`, `restore_script_version` and `test_script` refuse code that imports `os`, `sys`, `subprocess`, `socket`, `shutil`, `ctypes`, `importlib`, `http` or `urllib`, calls `__import__`, `eval`, `exec`, `compile` or `open`, or holds a web address (`mcp.unsafeCode`, with the lines). The script editor still accepts such code from a person, with warnings. This is a line scan, not isolation: scripts run without a strong sandbox, and the text of a form or of the data could mislead a client, so allow rows only for projects whose scripts you can review.
 - **Limits.** A person runs at most 4 calls at once and 120 a minute across all their clients (`mcp.rateLimited`, with the seconds to wait). A result longer than 60,000 characters is cut from the end of its longest list and says which list and which argument asks for less. A test started from Claude replaces your own queued test in the project, as a new test in the editor does.
-- **Records.** Each call is recorded with who, which project, which tool, the level, the outcome and the size of the result, never its arguments or its result, and kept 180 days.
+- **Records.** Each call is recorded with who, which project, which tool, the level, the outcome and the size of the result, never its arguments or its result, and kept 180 days. A call refused for a limit is recorded once a minute for a person, so a client that keeps calling past its limit cannot fill the table.
 
 ## Troubleshooting
 
@@ -105,6 +105,7 @@ The calls appear in Settings > General. Everything Claude saved is a new version
 |---|---|
 | Claude says it cannot reach the server | The address is not public HTTPS (claude.ai needs it), or `/.well-known/oauth-protected-resource/mcp` does not answer, or Keycloak is not reachable from the Internet |
 | Sign-in loops or fails at Keycloak | The client's redirect URIs lack `https://claude.ai/api/mcp/auth_callback` or `http://localhost:<port>/callback`, or the audience mapper is missing: [the Keycloak section](keycloak.md#client-for-ai-clients-mcp-optional) has a check |
-| Every tool says `mcp.projectOff` | An admin of the project has not allowed AI clients in Settings > General |
+| Tools that name the project say `mcp.projectOff` | An admin of the project has not allowed AI clients in Settings > General. `get_authoring_guide` names no project and says `mcp.forbidden` until the person is an analyst or admin of one the admin allowed |
+| A tool says `mcp.validation` about `arguments`, or `mcp.notFound` about a tool | The client sent a missing or malformed argument, or the name of a tool that does not exist: it should read the tool list again |
 | `query_rows` says `mcp.rowsNotAllowed` | The project is at *Summaries only*, or the operator's maximum is `aggregates` |
 | A call says `mcp.timeout` | A table is being replaced by a run, or a profile took too long: name fewer columns, or try again |

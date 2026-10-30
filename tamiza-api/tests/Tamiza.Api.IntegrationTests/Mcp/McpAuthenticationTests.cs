@@ -111,6 +111,20 @@ public sealed class McpAuthenticationTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_token_that_expired_a_minute_ago_is_refused_and_one_that_expired_seconds_ago_is_still_accepted()
+    {
+        await using var harness = await McpHarness.StartAsync(postgres);
+        using var justExpired = harness.Http(TestTokens.Create("sub-1", audience: TestTokens.McpAudience, expires: DateTime.UtcNow.AddSeconds(-5)));
+        using var longExpired = harness.Http(TestTokens.Create("sub-1", audience: TestTokens.McpAudience, expires: DateTime.UtcNow.AddMinutes(-1)));
+
+        var accepted = await McpHarness.InitializeAsync(justExpired);
+        var refused = await McpHarness.InitializeAsync(longExpired);
+
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+    }
+
+    [Fact]
     public async Task Expired_token_gets_the_same_challenge_so_the_client_can_refresh()
     {
         await using var harness = await McpHarness.StartAsync(postgres);

@@ -52,9 +52,31 @@ public sealed class McpLimiter(IOptions<McpOptions> options, TimeProvider time)
         return new Slot(state);
     }
 
+    /// <summary>
+    /// Whether the refusal of a call for a limit should be written to the records: once a minute for a person, so a client that keeps calling
+    /// past its limit cannot grow the table by a row for every attempt. The refusal itself is always answered.
+    /// </summary>
+    public bool ShouldRecordRefusal(Guid userId)
+    {
+        var state = _people.GetOrAdd(userId, _ => new PersonState());
+        var now = time.GetUtcNow();
+        lock (state)
+        {
+            if (state.LastRefusalRecorded is { } last && now - last < Window)
+            {
+                return false;
+            }
+
+            state.LastRefusalRecorded = now;
+            return true;
+        }
+    }
+
     private sealed class PersonState
     {
         public Queue<DateTimeOffset> Starts { get; } = new();
+
+        public DateTimeOffset? LastRefusalRecorded { get; set; }
 
         public int Running { get; set; }
     }

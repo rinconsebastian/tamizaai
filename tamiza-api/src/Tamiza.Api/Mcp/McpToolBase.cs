@@ -22,6 +22,7 @@ public abstract class McpToolBase(McpAccessGate gate, McpCallScope call, IOption
     /// </summary>
     protected async Task<CallToolResult> RunAsync(Func<Task<object?>> body, string? hint = null)
     {
+        Call.BodyStarted = true;
         try
         {
             return McpOutput.Ok(await body(), Settings.MaxResultCharacters, hint, Call);

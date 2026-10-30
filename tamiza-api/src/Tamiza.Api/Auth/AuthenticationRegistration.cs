@@ -25,6 +25,7 @@ public static class AuthenticationRegistration
             .Configure<IOptions<OidcOptions>, IOptions<McpOptions>>((jwt, oidcOptions, mcpOptions) =>
             {
                 McpAuthentication.Configure(jwt, oidcOptions.Value, mcpOptions.Value.Audience);
+                jwt.TokenValidationParameters.ClockSkew = McpAuthentication.ClockSkew;
             });
 
         // Every endpoint requires a signed-in user unless it opts out with AllowAnonymous.

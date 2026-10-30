@@ -280,7 +280,8 @@ kcadm.sh create client-scopes -r "$REALM" \
   -s 'attributes."include.in.token.scope"=true' \
   -s 'attributes."display.on.consent.screen"=false'
 
-SCOPE_UUID=$(kcadm.sh get client-scopes -r "$REALM" -q name=tamiza-mcp --fields id --format csv --noquotes)
+# The scope and the client are found by name with grep: kcadm's -q filter does not apply to client scopes.
+SCOPE_UUID=$(kcadm.sh get client-scopes -r "$REALM" --fields id,name --format csv --noquotes | grep ',tamiza-mcp$' | cut -d, -f1)
 
 kcadm.sh create "client-scopes/$SCOPE_UUID/protocol-mappers/models" -r "$REALM" \
   -s name="$MCP_AUDIENCE audience" \
@@ -306,15 +307,17 @@ MCP_UUID=$(kcadm.sh get clients -r "$REALM" -q clientId="$MCP_CLIENT_ID" --field
 
 # 3. Its scopes: the audience by default, offline_access on request.
 kcadm.sh update "clients/$MCP_UUID/default-client-scopes/$SCOPE_UUID" -r "$REALM" -n
-OFFLINE_UUID=$(kcadm.sh get client-scopes -r "$REALM" -q name=offline_access --fields id --format csv --noquotes)
+OFFLINE_UUID=$(kcadm.sh get client-scopes -r "$REALM" --fields id,name --format csv --noquotes | grep ',offline_access$' | cut -d, -f1)
 kcadm.sh update "clients/$MCP_UUID/optional-client-scopes/$OFFLINE_UUID" -r "$REALM" -n
 ```
 
-New clients get the realm's default client scopes (`basic`, `profile`, `email` and others) on their own. The last two commands add `offline_access` to the client's optional scopes if the realm does not already attach it to new clients; if one of them answers that the scope is already assigned, the client already had it.
+New clients get the realm's default client scopes (`basic`, `profile`, `email` and others) on their own, and `offline_access` as an optional scope. The last command therefore changes nothing on a default realm and answers nothing; it is there for a realm where `offline_access` is not attached to new clients. Both `update` commands are safe to repeat.
 
 ### What `offline_access` means
 
-Claude asks for `offline_access`, so a connection keeps working after the person's Keycloak session ends: it renews its token until the person revokes the application (their account console, *Applications*) or an admin removes it (*Users → (user) → Consents*, or *Sessions → Offline sessions*). That avoids asking people to sign in again every few hours. For the stricter setup, remove `offline_access` from the client's optional scopes: a connection then ends with the Keycloak session and the person signs in again.
+Claude asks for `offline_access`, so a connection keeps working after the person's Keycloak session ends: it renews its token until the person revokes the application (their account console, *Applications*) or an admin removes it. That avoids asking people to sign in again every few hours. For the stricter setup, remove `offline_access` from the client's optional scopes: a connection then ends with the Keycloak session and the person signs in again.
+
+To end a person's connection as an admin, delete their consent for the client (*Users → (user) → Consents*, or `kcadm.sh delete users/<user id>/consents/tamiza-mcp -r "$REALM"`). That removes the offline session too, so the refresh token stops working, and the next sign-in shows the consent screen again. Deleting only the offline session (*Users → (user) → Sessions*, or `kcadm.sh delete sessions/<session id> -r "$REALM" -q isOffline=true`) also stops the refresh token but keeps the consent, so signing in again does not ask. Either way, an access token that was already issued works until it expires (five minutes by default in Keycloak) plus 30 seconds that `api` allows for clock differences.
 
 ### Check it
 
@@ -325,7 +328,7 @@ Claude asks for `offline_access`, so a connection keeps working after the person
    ```
 
 2. A token for the client has `aud` equal to `TAMIZA_MCP_AUDIENCE` and not the API's. Sign in once from Claude Code (`/mcp`), or from the admin console use *Clients → tamiza-mcp → Client scopes → Evaluate*, pick a user, and open *Generated access token*: `aud` must read `tamiza-mcp` and `scope` must include `tamiza-mcp`.
-3. The `api` agrees: `curl -i <TAMIZA_PUBLIC_URL>/mcp` answers `401` with a `WWW-Authenticate` header that holds `resource_metadata="<TAMIZA_PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"`, and that document names your realm as the authorization server.
+3. The `api` agrees: `curl -i <TAMIZA_PUBLIC_URL>/mcp` answers `401` with a `WWW-Authenticate` header that holds `resource_metadata="<TAMIZA_PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"` and `scope="tamiza-mcp"`, and that document names your realm under `authorization_servers`.
 
 Keycloak ignores the `resource` parameter that Claude sends with the authorization request, which is why the audience comes from the client scope and not from it. If a future Keycloak or client version requires resource indicators, enable them in the realm and set `TAMIZA_MCP_AUDIENCE` to the address of `/mcp`.
 

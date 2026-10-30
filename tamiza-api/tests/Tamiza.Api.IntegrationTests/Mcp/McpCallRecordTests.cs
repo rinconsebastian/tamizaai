@@ -91,6 +91,29 @@ public sealed class McpCallRecordTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_request_the_server_cannot_read_is_refused_with_what_is_wrong_and_not_reported_as_a_failure()
+    {
+        await using var harness = await McpHarness.StartAsync(postgres);
+        await using var client = await harness.ConnectAsync(McpHarness.TokenFor("ada", "ada", "ada@example.org"));
+        var longName = new string('t', 200);
+
+        var missing = await client.CallToolAsync("probe_slow", new Dictionary<string, object?>());
+        var wrongType = await client.CallToolAsync("probe_slow", new Dictionary<string, object?> { ["milliseconds"] = "soon" });
+        var unknown = await client.CallToolAsync(longName, new Dictionary<string, object?>());
+
+        Assert.Equal("mcp.validation", missing.Code());
+        Assert.Contains("milliseconds", missing.Text());
+        Assert.Equal("mcp.validation", wrongType.Code());
+        Assert.Equal("mcp.notFound", unknown.Code());
+        Assert.Contains("tools/list", unknown.Text());
+        var rows = await ReadAsync(harness.ConnectionString);
+        Assert.Equal(3, rows.Count);
+        Assert.All(rows, r => Assert.Equal("refused", r.Status));
+        Assert.Contains(rows, r => r.Tool == new string('t', 64));
+        Assert.DoesNotContain(harness.Factory.Logs.Lines, line => line.StartsWith("Error", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Calls_over_the_minute_limit_are_refused_with_the_seconds_to_wait_and_do_not_run()
     {
         await using var harness = await McpHarness.StartAsync(postgres);
@@ -112,10 +135,10 @@ public sealed class McpCallRecordTests(PostgresFixture postgres)
         });
         Assert.Equal(120, McpProbeTools.Started - startedBefore);
 
-        // Refused calls are recorded too, as refused.
+        // The first refusal of the minute is recorded, as refused; the others are answered and add no row, so a client that keeps calling cannot grow the table.
         var rows = await ReadAsync(harness.ConnectionString);
-        Assert.Equal(130, rows.Count);
-        Assert.Equal(10, rows.Count(r => r.Status == "refused" && r.ErrorCode == "mcp.rateLimited"));
+        Assert.Equal(121, rows.Count);
+        Assert.Equal(1, rows.Count(r => r.Status == "refused" && r.ErrorCode == "mcp.rateLimited"));
     }
 
     [Fact]

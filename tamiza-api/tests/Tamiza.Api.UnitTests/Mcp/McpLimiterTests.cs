@@ -105,4 +105,20 @@ public sealed class McpLimiterTests
 
         public override DateTimeOffset GetUtcNow() => _now;
     }
+
+    [Fact]
+    public void A_refusal_for_a_limit_is_recorded_once_a_minute_for_each_person()
+    {
+        var (limiter, time) = Create();
+        var ada = Guid.NewGuid();
+        var grace = Guid.NewGuid();
+
+        Assert.True(limiter.ShouldRecordRefusal(ada));
+        Assert.False(limiter.ShouldRecordRefusal(ada));
+        Assert.True(limiter.ShouldRecordRefusal(grace));
+        time.Advance(TimeSpan.FromSeconds(59));
+        Assert.False(limiter.ShouldRecordRefusal(ada));
+        time.Advance(TimeSpan.FromSeconds(2));
+        Assert.True(limiter.ShouldRecordRefusal(ada));
+    }
 }

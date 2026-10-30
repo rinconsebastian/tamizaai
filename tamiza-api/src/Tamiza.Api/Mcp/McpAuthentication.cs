@@ -17,6 +17,12 @@ public static class McpAuthentication
     /// <summary>The default scheme: forwards each request to the scheme of its path.</summary>
     public const string SelectorScheme = "TamizaBearer";
 
+    /// <summary>
+    /// How far past its expiry a token for <c>/mcp</c> is still accepted. The default of five minutes would double the life of a Keycloak access token
+    /// (also five minutes) for a connection the person has just revoked.
+    /// </summary>
+    public static readonly TimeSpan ClockSkew = TimeSpan.FromSeconds(30);
+
     /// <summary>The scheme that validates <paramref name="context"/>: <see cref="Scheme"/> under <c>/mcp</c>, the API's otherwise.</summary>
     public static string SelectScheme(HttpContext context) =>
         context.Request.Path.StartsWithSegments(McpOptions.Path) ? Scheme : JwtBearerDefaults.AuthenticationScheme;

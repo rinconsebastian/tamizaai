@@ -454,7 +454,7 @@ FROM tamiza.mcp_calls c JOIN tamiza.users u ON u.id = c.user_id
 GROUP BY 1, 2, 3 ORDER BY 1 DESC, 4 DESC LIMIT 30"
 ```
 
-Replace `tamiza` after `-U` with your `POSTGRES_USER` if you changed it. A `refused` call is an answer the person was meant to get (the project is off, a role is missing, the version changed, the rate limit): the `error_code` says which.
+Replace `tamiza` after `-U` with your `POSTGRES_USER` if you changed it. A `refused` call is an answer the person was meant to get (the project is off, a role is missing, the version changed, the rate limit, an argument the client got wrong): the `error_code` says which. Refusals for a limit are recorded once a minute for a person; the others are all recorded.
 
 ### Rolling back
 

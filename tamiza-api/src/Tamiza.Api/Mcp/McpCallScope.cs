@@ -8,7 +8,11 @@ namespace Tamiza.Api.Mcp;
 /// </summary>
 public sealed class McpCallScope
 {
+    /// <summary>The tool's name as the client sent it, cut to what the record keeps: a client chooses it, and it goes into logs.</summary>
     public string Tool { get; set; } = "";
+
+    /// <summary>Whether the tool's own code began to run. An exception before that is the client's request being wrong (a missing or malformed argument).</summary>
+    public bool BodyStarted { get; set; }
 
     /// <summary>Set once the person is known to be a member, so a call that names a project of others never points a record at it.</summary>
     public Guid? ProjectId { get; set; }
@@ -22,6 +26,9 @@ public sealed class McpCallScope
 
     /// <summary>The characters of the result sent back; set by the tool's output, or measured by the filter.</summary>
     public int? ResultChars { get; set; }
+
+    /// <summary>Set by the filter for a refusal for a limit that was already recorded this minute: the call is answered but adds no row.</summary>
+    public bool SkipRecord { get; set; }
 
     public void Refused(McpRefusal refusal)
     {

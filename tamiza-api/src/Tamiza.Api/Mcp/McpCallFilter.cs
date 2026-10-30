@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using Tamiza.Api.Auth;
@@ -20,17 +21,19 @@ public static class McpCallFilter
             var call = services.GetRequiredService<McpCallScope>();
             var time = services.GetRequiredService<TimeProvider>();
             var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(McpCallFilter));
-            call.Tool = context.Params?.Name ?? "";
+            call.Tool = Cut(context.Params?.Name ?? "");
             var startedAt = time.GetUtcNow();
             var timer = Stopwatch.StartNew();
 
             try
             {
-                using var slot = services.GetRequiredService<McpLimiter>().TryEnter(user.Id, out var retryAfter);
+                var limiter = services.GetRequiredService<McpLimiter>();
+                using var slot = limiter.TryEnter(user.Id, out var retryAfter);
                 if (slot is null)
                 {
                     var refusal = McpRefusal.RateLimited(retryAfter);
                     call.Refused(refusal);
+                    call.SkipRecord = !limiter.ShouldRecordRefusal(user.Id);
                     return McpOutput.Error(refusal, call);
                 }
 
@@ -43,6 +46,12 @@ public static class McpCallFilter
                 {
                     call.Failed("mcp.cancelled");
                     throw;
+                }
+                catch (Exception exception) when (!call.BodyStarted && ArgumentsRefusal(exception) is { } refusal)
+                {
+                    // The request was wrong before any tool code ran: an unknown tool, a missing or malformed argument. Say which, so the client can correct it.
+                    call.Refused(refusal);
+                    return McpOutput.Error(refusal, call);
                 }
                 catch (Exception exception)
                 {
@@ -64,7 +73,28 @@ public static class McpCallFilter
             finally
             {
                 timer.Stop();
-                await services.GetRequiredService<McpLedger>().RecordAsync(user.Id, call, timer.Elapsed, startedAt);
+                if (!call.SkipRecord)
+                {
+                    await services.GetRequiredService<McpLedger>().RecordAsync(user.Id, call, timer.Elapsed, startedAt);
+                }
             }
         };
+
+    /// <summary>The longest tool name the record keeps (the column's length).</summary>
+    private const int MaxToolNameLength = 64;
+
+    private static string Cut(string name) => name.Length <= MaxToolNameLength ? name : name[..MaxToolNameLength];
+
+    /// <summary>
+    /// What to tell a client whose request the SDK could not bind to a tool: the SDK's messages for these cases name the tool or the argument,
+    /// and a value in them is the client's own. Null for any other exception, which is a failure.
+    /// </summary>
+    private static McpRefusal? ArgumentsRefusal(Exception exception) => exception switch
+    {
+        McpProtocolException { Message: var message } when message.StartsWith("Unknown tool", StringComparison.Ordinal) =>
+            McpRefusal.NotFound("The tool", "Call tools/list for the tools that exist."),
+        ArgumentException or System.Text.Json.JsonException or FormatException =>
+            McpRefusal.Validation(new Dictionary<string, string[]> { ["arguments"] = [exception.Message] }),
+        _ => null,
+    };
 }
