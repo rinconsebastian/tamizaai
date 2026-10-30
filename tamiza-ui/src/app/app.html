@@ -11,11 +11,17 @@
             >{{ t('shell.projects') }}</a
           >
           <span class="text-sm text-heading" data-testid="user-name">{{ user.name }}</span>
+          @if (mcpEnabled()) {
+            <button tmzButton variant="ghost" size="sm" type="button" (click)="openConnect()" data-testid="connect-ai-client">
+              {{ t('shell.connectAiClient') }}
+            </button>
+          }
           <button tmzButton variant="secondary" size="sm" type="button" (click)="signOut()" data-testid="sign-out">
             {{ t('shell.signOut') }}
           </button>
         </div>
         <button
+          #menuButton
           type="button"
           class="inline-flex min-h-10 min-w-10 items-center justify-center rounded-base text-body hover:bg-neutral-secondary-medium focus:outline-none focus:ring-4 focus:ring-neutral-tertiary md:hidden"
           [attr.aria-label]="t('shell.openMenu')"
@@ -59,6 +65,11 @@
       @if (user(); as user) {
         <div class="mt-auto flex flex-col gap-3 border-t border-default pt-4">
           <span class="text-sm text-heading">{{ user.name }}</span>
+          @if (mcpEnabled()) {
+            <button tmzButton variant="secondary" type="button" (click)="openConnect(true)" data-testid="drawer-connect-ai-client">
+              {{ t('shell.connectAiClient') }}
+            </button>
+          }
           <button tmzButton variant="secondary" type="button" (click)="signOut()" data-testid="drawer-sign-out">
             {{ t('shell.signOut') }}
           </button>

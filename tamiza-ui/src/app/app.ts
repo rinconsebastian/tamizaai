@@ -1,12 +1,14 @@
 import { Dialog, DialogRef } from '@angular/cdk/dialog';
 import { Overlay } from '@angular/cdk/overlay';
-import { Component, DestroyRef, TemplateRef, effect, inject, signal, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, TemplateRef, effect, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationStart, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { TranslocoDirective } from '@jsverse/transloco';
 import { filter } from 'rxjs';
 import { AuthService } from './core/auth/auth.service';
 import { CurrentUserService } from './core/current-user.service';
+import { SystemConfigService } from './core/system-config';
+import { ConnectAiClientDialog } from './pages/connect-ai-client-dialog';
 import { Button, ToastRegion } from './shared/ui';
 
 @Component({
@@ -20,10 +22,13 @@ export class App {
   private readonly dialog = inject(Dialog);
   private readonly overlay = inject(Overlay);
   private readonly drawerTemplate = viewChild.required<TemplateRef<unknown>>('drawer');
+  private readonly menuButton = viewChild<ElementRef<HTMLButtonElement>>('menuButton');
   private drawerRef: DialogRef | null = null;
 
   protected readonly user = this.currentUser.user;
   protected readonly menuOpen = signal(false);
+  /** Whether the deployment turned the MCP server on, which is what makes "Connect an AI client" appear. */
+  protected readonly mcpEnabled = inject(SystemConfigService).mcpEnabled;
 
   constructor() {
     effect(() => {
@@ -59,6 +64,24 @@ export class App {
 
   protected closeMenu(): void {
     this.drawerRef?.close();
+  }
+
+  /**
+   * Opens the dialog that explains how to add Tamiza to an AI client. From the drawer, the drawer closes first and focus goes
+   * back to the menu button when the dialog closes, since the button that opened the dialog is gone by then.
+   */
+  protected openConnect(fromDrawer = false): void {
+    const restoreFocus = (fromDrawer && this.menuButton()?.nativeElement) || true;
+    if (fromDrawer) {
+      this.closeMenu();
+    }
+    this.dialog.open(ConnectAiClientDialog, {
+      ariaLabelledBy: 'connect-ai-client-title',
+      autoFocus: 'first-tabbable',
+      restoreFocus,
+      maxWidth: '100vw',
+      backdropClass: ['cdk-overlay-dark-backdrop'],
+    });
   }
 
   protected signOut(): void {

@@ -5,12 +5,29 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { fakeAssistantSession } from '../../../../testing/assistant-session';
 import { provideVisibleElements, tick } from '../../../../testing/cdk';
 import { translocoTesting } from '../../../../testing/transloco-testing';
+import type { ScriptVersionSummary } from '../../../core/projects/pipeline.service';
 import { SystemConfigService } from '../../../core/system-config';
 import { ASSISTANT_SESSION } from './assistant-state';
 import { ScriptSidePanel } from './script-side-panel';
 
 const textOf = (element: Element | null) => element?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 const byTestId = <T extends HTMLElement = HTMLElement>(root: ParentNode, id: string) => root.querySelector<T>(`[data-testid="${id}"]`);
+
+function versionSummary(number: number, origin: 'app' | 'mcp' | undefined, overrides: Partial<ScriptVersionSummary> = {}): ScriptVersionSummary {
+  const summary = {
+    versionId: `coverage-v${number}`,
+    kind: 'indicator',
+    name: 'coverage',
+    label: 'Coverage',
+    number,
+    removed: false,
+    author: { id: 'u1', name: 'Ada' },
+    createdAt: '2026-10-02T10:00:00Z',
+    origin,
+    ...overrides,
+  };
+  return summary as ScriptVersionSummary;
+}
 
 describe('ScriptSidePanel tabs', () => {
   let fixture: ComponentFixture<ScriptSidePanel>;
@@ -82,6 +99,39 @@ describe('ScriptSidePanel tabs', () => {
     expect(selected()).toBe('side-tab-versions');
     expect(textOf(root.querySelector('#side-panel-versions'))).toBe('No versions saved yet.');
     expect(byTestId(root, 'assistant-panel')).toBeNull();
+  });
+
+  describe('versions written through MCP', () => {
+    it('marks a version an AI client wrote with "via MCP" after its author and time, and no other (Version written by Claude)', async () => {
+      await create(true);
+      fixture.componentRef.setInput('versions', [versionSummary(3, 'mcp'), versionSummary(2, 'app'), versionSummary(1, 'app')]);
+      await choose('versions');
+
+      const row = (number: number) => textOf(byTestId(root, `version-${number}`));
+      expect(row(3)).toMatch(/^Version 3\s*Ada · .+ · via MCP$/);
+      expect(row(2)).toMatch(/^Version 2\s*Ada · [^·]+$/);
+      expect(row(1)).toMatch(/^Version 1\s*Ada · [^·]+$/);
+      expect(root.querySelectorAll('[data-testid="version-via-mcp"]')).toHaveLength(1);
+      expect(byTestId(root, 'version-3')!.contains(byTestId(root, 'version-via-mcp'))).toBe(true);
+    });
+
+    it('marks a version removed by an AI client too, next to its removed badge', async () => {
+      await create(true);
+      fixture.componentRef.setInput('versions', [versionSummary(4, 'mcp', { removed: true })]);
+      await choose('versions');
+
+      expect(textOf(byTestId(root, 'version-4'))).toMatch(/^Version 4\s*removed\s*Ada · .+ · via MCP$/);
+    });
+
+    it('marks nothing on a version the editor wrote, restores included, nor on one without an origin (Restored in the editor)', async () => {
+      await create(true);
+      fixture.componentRef.setInput('versions', [versionSummary(4, 'app'), versionSummary(3, 'mcp'), versionSummary(1, undefined)]);
+      await choose('versions');
+
+      expect(textOf(byTestId(root, 'version-4'))).not.toContain('MCP');
+      expect(textOf(byTestId(root, 'version-1'))).not.toContain('MCP');
+      expect(textOf(byTestId(root, 'version-3'))).toContain('via MCP');
+    });
   });
 
   describe('open', () => {

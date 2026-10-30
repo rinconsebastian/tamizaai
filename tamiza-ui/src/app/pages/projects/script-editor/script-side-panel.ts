@@ -70,7 +70,7 @@ export type SideTab = 'inputs' | 'reference' | 'versions' | 'assistant';
                       @if (version.removed) {
                         <tmz-badge tone="warning" class="ms-1">{{ t('scripts.removedBadge') }}</tmz-badge>
                       }
-                      <span class="block text-body">{{ version.author.name }} · {{ version.createdAt | dateTime }}</span>
+                      <span class="block text-body">{{ version.author.name }} · {{ version.createdAt | dateTime }}@if (version.origin === 'mcp') { · <span data-testid="version-via-mcp">{{ t('scripts.versions.viaMcp') }}</span>}</span>
                     </button>
                   </li>
                 }

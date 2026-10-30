@@ -42,6 +42,19 @@ describe('App shell in Spanish', () => {
     expect(element.querySelector('[data-testid="sign-out"]')?.textContent?.trim()).toBe(es.shell.signOut);
     expect(element.querySelector('[data-testid="brand"]')?.textContent).toBe(es.app.name);
 
+    // The MCP entry reads its text from es.json too, once the deployment says the server is on.
+    backend.expectOne('/api/v1/system/config').flush({
+      oidc: { authority: 'https://kc.example.org/realms/tamiza', clientId: 'tamiza-ui', scope: 'openid' },
+      version: '0.1.0',
+      assistant: { enabled: false },
+      accountEmails: { enabled: false },
+      email: { enabled: false },
+      mcp: { enabled: true },
+    });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(element.querySelector('[data-testid="connect-ai-client"]')?.textContent?.trim()).toBe(es.shell.connectAiClient);
+
     // The toast region has no translations of its own: the shell gives it the label of its dismiss button.
     TestBed.inject(ToastService).info('Hola');
     fixture.detectChanges();

@@ -21,6 +21,10 @@ export interface SystemConfig {
   email: {
     enabled: boolean;
   };
+  /** Whether the deployment turned on the MCP server for AI clients; its address and client are read after sign-in from `GET /api/v1/mcp`. */
+  mcp: {
+    enabled: boolean;
+  };
 }
 
 export const SYSTEM_CONFIG_URL = '/api/v1/system/config';
@@ -42,6 +46,9 @@ export class SystemConfigService {
 
   /** Whether Tamiza sends email itself. False while the configuration loads, when it cannot be read, and for an older API. */
   readonly emailEnabled = computed(() => this.config()?.email?.enabled === true);
+
+  /** Whether the MCP server for AI clients is on. False while the configuration loads, when it cannot be read, and for an older API. */
+  readonly mcpEnabled = computed(() => this.config()?.mcp?.enabled === true);
 
   constructor() {
     this.http.get<SystemConfig>(SYSTEM_CONFIG_URL).subscribe({

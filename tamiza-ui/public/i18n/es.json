@@ -8,7 +8,42 @@
     "projects": "Proyectos",
     "menu": "Menú",
     "openMenu": "Abrir menú",
-    "closeMenu": "Cerrar menú"
+    "closeMenu": "Cerrar menú",
+    "connectAiClient": "Conectar un cliente de IA"
+  },
+  "connect": {
+    "title": "Conectar un cliente de IA",
+    "intro": "Agrega Tamiza a un cliente de IA como Claude. Inicias sesión con tu cuenta de Tamiza y el cliente actúa con tu rol en cada proyecto.",
+    "address": "Dirección MCP",
+    "clientId": "ID de cliente",
+    "copyAddress": "Copiar la dirección MCP",
+    "copyClientId": "Copiar el ID de cliente",
+    "copyCommand": "Copiar el comando",
+    "copied": "Copiado al portapapeles.",
+    "copyFailed": "No se pudo copiar. Selecciona el texto y cópialo manualmente.",
+    "loadFailed": "No se pudieron cargar los datos de conexión. Cierra esta ventana e intenta de nuevo.",
+    "unavailable": "Los clientes de IA no están habilitados en esta instalación.",
+    "claudeAi": {
+      "title": "claude.ai y Claude Desktop",
+      "steps": {
+        "open": "Abre Customize → Connectors y elige Add custom connector.",
+        "address": "Ponle un nombre, por ejemplo Tamiza, y pega la dirección MCP.",
+        "client": "Abre los ajustes del cliente OAuth y usa tu propio cliente OAuth: escribe el ID de cliente de arriba y deja vacío el secreto del cliente.",
+        "signIn": "Agrega el conector e inicia sesión con tu cuenta de Tamiza cuando Claude te lo pida."
+      }
+    },
+    "claudeCode": {
+      "title": "Claude Code",
+      "intro": "Ejecuta este comando en tu terminal:",
+      "then": "Luego abre Claude Code, ejecuta /mcp y elige tamiza para iniciar sesión."
+    },
+    "revoke": {
+      "title": "Revocar una conexión",
+      "body": "Para que un cliente deje de acceder a Tamiza, elimina el conector en Claude. También puedes terminar su acceso desde tu cuenta:",
+      "link": "Abrir mi cuenta"
+    },
+    "projects": "Solo se puede acceder a los proyectos cuyo administrador permitió los clientes de IA, y solo al nivel que el proyecto muestra en Configuración > General. Tu rol en cada proyecto sigue aplicando.",
+    "close": "Cerrar"
   },
   "authUnavailable": {
     "title": "El inicio de sesión no está disponible",
@@ -253,6 +288,48 @@
     "enumeratorUsername": "nombre de usuario (metadatos del formulario)",
     "enumeratorGone": "{{ xpath }} — no está en el formulario actual; se usa el nombre de usuario cuando el formulario lo tiene",
     "tokenUnreadableWebhook": "Abrir la configuración del webhook"
+  },
+  "settings": {
+    "mcp": {
+      "title": "Clientes de IA (MCP)",
+      "intro": "Permite que los miembros de este proyecto trabajen con él desde un cliente de IA como Claude. Cada persona actúa con su propio rol, y Tamiza registra cada llamada sin sus datos.",
+      "access": "Acceso de los clientes de IA",
+      "setByAdmin": "Solo quien tenga el rol de Administrador del proyecto puede cambiarlo.",
+      "levels": {
+        "off": {
+          "title": "Desactivado",
+          "description": "Los clientes de IA no ven nada de este proyecto."
+        },
+        "aggregates": {
+          "title": "Solo resúmenes",
+          "description": "Un cliente ve el formulario, las tablas y sus columnas, perfiles de columnas como conteos y rangos, los scripts y lo que muestran los indicadores y los widgets. Nunca ve las filas de las tablas."
+        },
+        "rows": {
+          "title": "Resúmenes y filas",
+          "description": "Además, las filas de las tablas, las vistas previas de las pruebas de scripts y los valores que los scripts muestran con ctx.show."
+        }
+      },
+      "rowsBlocked": "El operador de esta instalación solo permite resúmenes.",
+      "limited": "Este proyecto está en Resúmenes y filas, pero el operador de esta instalación solo permite resúmenes, así que los clientes de IA quedan limitados a Solo resúmenes.",
+      "saved": "Acceso de los clientes de IA guardado.",
+      "activityTitle": "Actividad reciente",
+      "activityIntro": "Las 50 llamadas más recientes de clientes de IA en este proyecto, la más nueva primero. Las horas están en la zona horaria del proyecto ({{ zone }}). Tamiza registra quién llamó, qué herramienta y cómo terminó, nunca los datos.",
+      "activityLabel": "Llamadas recientes de clientes de IA",
+      "activityEmpty": "Ningún cliente de IA ha usado este proyecto todavía.",
+      "activityFailed": "No se pudo cargar la actividad reciente.",
+      "retry": "Intentar de nuevo",
+      "columns": {
+        "when": "Cuándo",
+        "person": "Persona",
+        "tool": "Herramienta",
+        "outcome": "Resultado"
+      },
+      "status": {
+        "succeeded": "Exitosa",
+        "failed": "Fallida",
+        "refused": "Rechazada"
+      }
+    }
   },
   "metrics": {
     "dailyEvolution": "Envíos por día",
@@ -813,6 +890,9 @@
         "cutOff": "La respuesta se cortó, así que el código solo se puede insertar en el cursor. Pide un cambio más pequeño.",
         "cellChanged": "La celda cambió desde la solicitud, así que el código solo se puede insertar en el cursor."
       }
+    },
+    "versions": {
+      "viaMcp": "vía MCP"
     }
   },
   "runs": {

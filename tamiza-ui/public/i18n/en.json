@@ -8,7 +8,42 @@
     "projects": "Projects",
     "menu": "Menu",
     "openMenu": "Open menu",
-    "closeMenu": "Close menu"
+    "closeMenu": "Close menu",
+    "connectAiClient": "Connect an AI client"
+  },
+  "connect": {
+    "title": "Connect an AI client",
+    "intro": "Add Tamiza to an AI client such as Claude. You sign in with your Tamiza account, and the client acts with your role in each project.",
+    "address": "MCP address",
+    "clientId": "Client ID",
+    "copyAddress": "Copy the MCP address",
+    "copyClientId": "Copy the client ID",
+    "copyCommand": "Copy the command",
+    "copied": "Copied to the clipboard.",
+    "copyFailed": "Could not copy. Select the text and copy it manually.",
+    "loadFailed": "The connection details could not be loaded. Close this window and try again.",
+    "unavailable": "AI clients are not enabled in this installation.",
+    "claudeAi": {
+      "title": "claude.ai and Claude Desktop",
+      "steps": {
+        "open": "Open Customize, then Connectors, and choose Add custom connector.",
+        "address": "Give it a name, for example Tamiza, and paste the MCP address.",
+        "client": "Open the OAuth client settings and use your own OAuth client: enter the client ID above and leave the client secret empty.",
+        "signIn": "Add the connector and sign in with your Tamiza account when Claude asks."
+      }
+    },
+    "claudeCode": {
+      "title": "Claude Code",
+      "intro": "Run this command in your terminal:",
+      "then": "Then start Claude Code, run /mcp and choose tamiza to sign in."
+    },
+    "revoke": {
+      "title": "Revoke a connection",
+      "body": "To stop a client from reaching Tamiza, remove the connector in Claude. You can also end its access from your account:",
+      "link": "Open my account"
+    },
+    "projects": "Only projects whose admin allowed AI clients can be reached, and only at the level the project shows in Settings > General. Your role in each project still applies.",
+    "close": "Close"
   },
   "authUnavailable": {
     "title": "Sign-in is unavailable",
@@ -253,6 +288,48 @@
     "enumeratorUsername": "username (form metadata)",
     "enumeratorGone": "{{ xpath }} — not in the current form; username is used when the form has it",
     "tokenUnreadableWebhook": "Open the webhook settings"
+  },
+  "settings": {
+    "mcp": {
+      "title": "AI clients (MCP)",
+      "intro": "Let the members of this project work with it from an AI client such as Claude. Each person acts with their own role, and Tamiza records every call without its data.",
+      "access": "Access for AI clients",
+      "setByAdmin": "Only a project admin can change this.",
+      "levels": {
+        "off": {
+          "title": "Off",
+          "description": "AI clients see nothing of this project."
+        },
+        "aggregates": {
+          "title": "Summaries only",
+          "description": "A client sees the form, the tables and their columns, column profiles such as counts and ranges, the scripts, and what the indicators and widgets show. It never sees the rows of the tables."
+        },
+        "rows": {
+          "title": "Summaries and rows",
+          "description": "Also the rows of the tables, the previews of script tests, and the values that scripts show with ctx.show."
+        }
+      },
+      "rowsBlocked": "The operator of this installation allows summaries only.",
+      "limited": "This project is set to Summaries and rows, but the operator of this installation allows summaries only, so AI clients are limited to Summaries only.",
+      "saved": "Access for AI clients saved.",
+      "activityTitle": "Recent activity",
+      "activityIntro": "The 50 most recent calls from AI clients on this project, newest first. Times are in the project's time zone ({{ zone }}). Tamiza records who called, which tool and how it ended, never the data.",
+      "activityLabel": "Recent calls from AI clients",
+      "activityEmpty": "No AI client has used this project yet.",
+      "activityFailed": "The recent activity could not be loaded.",
+      "retry": "Try again",
+      "columns": {
+        "when": "When",
+        "person": "Person",
+        "tool": "Tool",
+        "outcome": "Outcome"
+      },
+      "status": {
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "refused": "Refused"
+      }
+    }
   },
   "metrics": {
     "dailyEvolution": "Submissions per day",
@@ -813,6 +890,9 @@
         "cutOff": "The answer was cut off, so the code can only be inserted at the cursor. Ask for a smaller change.",
         "cellChanged": "The cell changed since the request, so the code can only be inserted at the cursor."
       }
+    },
+    "versions": {
+      "viaMcp": "via MCP"
     }
   },
   "runs": {

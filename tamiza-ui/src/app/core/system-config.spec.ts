@@ -3,13 +3,14 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { SYSTEM_CONFIG_URL, SystemConfig, SystemConfigService } from './system-config';
 
-function config(enabled: boolean, accountEmails = false, email = false): SystemConfig {
+function config(enabled: boolean, accountEmails = false, email = false, mcp = false): SystemConfig {
   return {
     oidc: { authority: 'https://kc.example.org/realms/tamiza', clientId: 'tamiza-ui', scope: 'openid' },
     version: '0.1.0',
     assistant: { enabled },
     accountEmails: { enabled: accountEmails },
     email: { enabled: email },
+    mcp: { enabled: mcp },
   };
 }
 
@@ -127,6 +128,47 @@ describe('SystemConfigService', () => {
     http.expectOne(SYSTEM_CONFIG_URL).flush({ oidc: config(true).oidc, version: '0.0.9', assistant: { enabled: true }, accountEmails: { enabled: true } });
 
     expect(service.emailEnabled()).toBe(false);
+  });
+
+  it('reports the MCP server as off until the configuration arrives, and when it cannot be read', () => {
+    const { http, service } = setup();
+    expect(service.mcpEnabled()).toBe(false);
+
+    http.expectOne(SYSTEM_CONFIG_URL).flush(null, { status: 503, statusText: 'Service Unavailable' });
+
+    expect(service.mcpEnabled()).toBe(false);
+  });
+
+  it('reports the MCP server as enabled only when the deployment turned it on, apart from the other features (Disabled)', () => {
+    const on = setup();
+    on.http.expectOne(SYSTEM_CONFIG_URL).flush(config(false, false, false, true));
+    expect(on.service.mcpEnabled()).toBe(true);
+    expect(on.service.assistantEnabled()).toBe(false);
+    expect(on.service.emailEnabled()).toBe(false);
+  });
+
+  it('reports the MCP server as disabled when the deployment did not turn it on', () => {
+    const { http, service } = setup();
+
+    http.expectOne(SYSTEM_CONFIG_URL).flush(config(true, true, true, false));
+
+    expect(service.mcpEnabled()).toBe(false);
+    expect(service.assistantEnabled()).toBe(true);
+    expect(service.emailEnabled()).toBe(true);
+  });
+
+  it('treats a configuration without the mcp key (an older API) as disabled', () => {
+    const { http, service } = setup();
+
+    http.expectOne(SYSTEM_CONFIG_URL).flush({
+      oidc: config(true).oidc,
+      version: '0.0.9',
+      assistant: { enabled: true },
+      accountEmails: { enabled: true },
+      email: { enabled: true },
+    });
+
+    expect(service.mcpEnabled()).toBe(false);
   });
 
   it('reads the configuration once, however often the service is used', () => {
