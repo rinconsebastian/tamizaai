@@ -102,7 +102,9 @@ public sealed class ColumnProfiler(DataDashboard dashboard, IMemoryCache cache)
                 return cached;
             }
 
-            var profile = await ComputeAsync(connection, transaction, schema, table, chosen, others, selectOf, published?.FinishedAt, ct);
+            // PostgreSQL stops a slow statement at the timeout; the driver must wait longer than that, or its own 30-second limit fires first.
+            var commandSeconds = (int)Math.Ceiling(timeout.TotalSeconds) + 30;
+            var profile = await ComputeAsync(connection, transaction, schema, table, chosen, others, selectOf, published?.FinishedAt, commandSeconds, ct);
             cache.Set(key, profile, CacheTime);
             return profile;
         }, ct);
@@ -129,12 +131,12 @@ public sealed class ColumnProfiler(DataDashboard dashboard, IMemoryCache cache)
 
     private static async Task<TableProfile> ComputeAsync(
         NpgsqlConnection connection, NpgsqlTransaction transaction, string schema, string table, IReadOnlyList<TableColumn> columns,
-        IReadOnlyList<string> others, Func<string, ProfileSelect?> selectOf, DateTimeOffset? publishedAt, CancellationToken ct)
+        IReadOnlyList<string> others, Func<string, ProfileSelect?> selectOf, DateTimeOffset? publishedAt, int commandSeconds, CancellationToken ct)
     {
         var from = $"{DataSources.Quote(schema)}.{DataSources.Quote(table)}";
         if (columns.Count == 0)
         {
-            var rowsOnly = await ScalarAsync<long>(connection, transaction, $"SELECT count(*) FROM {from}", ct);
+            var rowsOnly = await ScalarAsync<long>(connection, transaction, $"SELECT count(*) FROM {from}", commandSeconds, ct);
             return new TableProfile(table, rowsOnly, publishedAt, [], others);
         }
 
@@ -146,7 +148,9 @@ public sealed class ColumnProfiler(DataDashboard dashboard, IMemoryCache cache)
             select.Add(column.Type == DataColumnType.Text
                 ? $"count(*) FILTER (WHERE {q} IS NULL OR btrim({q}) = '')"
                 : $"count(*) FILTER (WHERE {q} IS NULL)");
-            select.Add($"count(DISTINCT {q})");
+            // Distinct text is counted on a 64-bit hash of the value: sorting 500,000 long strings took 8 seconds a column, sorting their hashes half a second.
+            // Two different values share a hash with a probability around 1e-8 at that size, and the count is a description, not a key.
+            select.Add(column.Type == DataColumnType.Text ? $"count(DISTINCT hashtextextended({q}, 0))" : $"count(DISTINCT {q})");
             switch (column.Type)
             {
                 case DataColumnType.Integer or DataColumnType.Decimal:
@@ -168,7 +172,7 @@ public sealed class ColumnProfiler(DataDashboard dashboard, IMemoryCache cache)
 
         long rows;
         var profiles = new List<ColumnProfile>();
-        await using (var command = new NpgsqlCommand($"SELECT {string.Join(", ", select)} FROM {from}", connection, transaction))
+        await using (var command = new NpgsqlCommand($"SELECT {string.Join(", ", select)} FROM {from}", connection, transaction) { CommandTimeout = commandSeconds })
         await using (var reader = await command.ExecuteReaderAsync(ct))
         {
             await reader.ReadAsync(ct);
@@ -224,13 +228,13 @@ public sealed class ColumnProfiler(DataDashboard dashboard, IMemoryCache cache)
             var q = DataSources.Quote(profile.Name);
             if (selectOf(profile.Name) is { } select1)
             {
-                var counts = await GroupAsync(connection, transaction, from, q, select1 == ProfileSelect.Multiple, MaxChoices + 1, ct);
+                var counts = await GroupAsync(connection, transaction, from, q, select1 == ProfileSelect.Multiple, MaxChoices + 1, commandSeconds, ct);
                 var shown = counts.Take(MaxChoices).Select(c => new ProfileCount(c.Value, c.Count < MinGroupRows ? FewerThanFive : c.Count)).ToList();
                 profiles[i] = profile with { Choices = shown, MoreChoices = counts.Count > MaxChoices ? counts.Count - MaxChoices : null };
             }
             else if (profile.Distinct is > 0 and <= MaxListValues)
             {
-                var counts = await GroupAsync(connection, transaction, from, q, split: false, MaxListValues + 1, ct);
+                var counts = await GroupAsync(connection, transaction, from, q, split: false, MaxListValues + 1, commandSeconds, ct);
                 var listed = counts.Where(c => c.Count >= MinGroupRows).Select(c => new ProfileCount(c.Value, c.Count)).ToList();
                 var folded = counts.Where(c => c.Count < MinGroupRows).ToList();
                 profiles[i] = profile with
@@ -250,12 +254,12 @@ public sealed class ColumnProfiler(DataDashboard dashboard, IMemoryCache cache)
     }
 
     private static async Task<List<(string Value, long Count)>> GroupAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, string from, string quoted, bool split, int limit, CancellationToken ct)
+        NpgsqlConnection connection, NpgsqlTransaction transaction, string from, string quoted, bool split, int limit, int commandSeconds, CancellationToken ct)
     {
         var sql = split
             ? $"SELECT v, count(*) FROM {from}, LATERAL unnest(string_to_array({quoted}, '; ')) AS v WHERE {quoted} IS NOT NULL AND btrim(v) <> '' GROUP BY v ORDER BY 2 DESC, 1 LIMIT @limit"
             : $"SELECT {quoted}, count(*) FROM {from} WHERE {quoted} IS NOT NULL AND btrim({quoted}) <> '' GROUP BY {quoted} ORDER BY 2 DESC, 1 LIMIT @limit";
-        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        await using var command = new NpgsqlCommand(sql, connection, transaction) { CommandTimeout = commandSeconds };
         command.Parameters.Add(new NpgsqlParameter("limit", NpgsqlDbType.Integer) { Value = limit });
         var result = new List<(string, long)>();
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -267,9 +271,9 @@ public sealed class ColumnProfiler(DataDashboard dashboard, IMemoryCache cache)
         return result;
     }
 
-    private static async Task<T> ScalarAsync<T>(NpgsqlConnection connection, NpgsqlTransaction transaction, string sql, CancellationToken ct)
+    private static async Task<T> ScalarAsync<T>(NpgsqlConnection connection, NpgsqlTransaction transaction, string sql, int commandSeconds, CancellationToken ct)
     {
-        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        await using var command = new NpgsqlCommand(sql, connection, transaction) { CommandTimeout = commandSeconds };
         return (T)(await command.ExecuteScalarAsync(ct))!;
     }
 
