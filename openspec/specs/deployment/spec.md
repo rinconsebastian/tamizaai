@@ -67,7 +67,7 @@ On startup, `api` SHALL apply pending metadata schema migrations before reportin
 - **THEN** `api` changes nothing, does not report healthy, and the log states that the database must be recreated
 
 ### Requirement: Network exposure
-Only the `ui` service SHALL publish a port on the host. The API SHALL be reachable from outside only through `ui`, under the `/api/` path. The `analytics` and `db` services SHALL be reachable only from the internal Compose network.
+Only the `ui` service SHALL publish a port on the host. The API SHALL be reachable from outside only through `ui`, under the `/api/` path and, for the MCP server, at `/mcp` and under `/.well-known/oauth-protected-resource`. The `analytics` and `db` services SHALL be reachable only from the internal Compose network.
 
 #### Scenario: Published ports
 - **WHEN** the deployment runs from `compose.yaml`
@@ -76,6 +76,10 @@ Only the `ui` service SHALL publish a port on the host. The API SHALL be reachab
 #### Scenario: Reaching the API through the UI
 - **WHEN** an external client calls `<public URL>/api/v1/system/config`
 - **THEN** it receives the response from `api`
+
+#### Scenario: Reaching the MCP server through the UI
+- **WHEN** the MCP server is enabled and an AI client calls `<public URL>/mcp` or `<public URL>/.well-known/oauth-protected-resource/mcp`
+- **THEN** it receives the response from `api`, and a call that waits up to 120 seconds for a test is not cut by the proxy
 
 ### Requirement: Configurable memory limits
 Every service SHALL have a memory limit configurable through an environment variable. The default limits SHALL add up to an amount that fits on a 4 GB RAM VPS while leaving at least 512 MB for the operating system.
