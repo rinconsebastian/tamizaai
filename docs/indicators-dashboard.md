@@ -194,7 +194,7 @@ The series column has to be another column than the group column. Everything els
 
 - **Rows that share a group and a series value are summed**, or combined as a ratio of sums, as rows that share a group are.
 - **Totals come from the rows, never from adding the cells.** For a rate, a group's total is the sum of its numerators over the sum of its denominators, not the sum or the mean of its cells' rates.
-- **Order.** Series are listed in natural order (2 before 10). Rows with no value in the series column come next as **(none)**, and the folded series last as **Other**.
+- **Order.** Series are listed in natural order (2 before 10). So are the groups of a line chart, a heat map, a pyramid, Likert bars and a cross table, which have no order setting; bars and columns keep the [order](#bar-and-column-order) of their group column or the one you choose. Rows with no value in the series column come next as **(none)**, and the folded series last as **Other**.
 - **At most 8 series** in a bar, column or line chart, and **30** in a heat map or a cross table. When the widget's rows hold more, the ones with the largest totals are kept, one fewer than the limit, and the rest are combined in one **Other** series. **(none)** is never folded into **Other**.
 - **Colors and legend stay put.** The series, their order and their colors come from the rows that match the widget's *own* filters, not the dashboard's. A member who changes a dashboard filter keeps every series in its color and in the legend, even one that no longer has rows. Editing the widget's own filters can change them.
 - **Row limit.** The limit counts cells (a group and a series value). A group that would cross it is left out whole, with the groups after it, and the widget says the limit was reached. The totals of series and of all rows still cover every row the widget matches.
@@ -204,7 +204,7 @@ The series column has to be another column than the group column. Everything els
 
 A bar or column chart with a series has a **layout**:
 
-- **Grouped** (the default): one bar or column per series value, side by side.
+- **Grouped** (the default): one bar or column per series value, side by side. With many groups and series the bars get thin: twelve municipalities by five sources are sixty bars, so give the widget the full width of the grid, or use a stacked layout.
 - **Stacked**: the series end to end from the axis, so the bar's length is the group's total. Negative values stack on the other side of the axis.
 - **Stacked to 100%**: each bar shows the shares of its total, so you compare compositions. The tooltip gives the share and the value. A value below zero has no share: it is left out and the widget says how many.
 
@@ -214,7 +214,7 @@ A **line chart** with a series draws one line per series value, through the grou
 
 ### Heat map
 
-Groups are rows (in the group column's own order), series values are columns, and each cell is shaded on the same blue scale as the maps, from the smallest to the largest value shown, with a legend of that range. A cell with no value is drawn empty with a hatch, which is not the same as a cell whose value is 0.
+Groups are rows (in natural order, so `5-9` comes before `10-14`), series values are columns, and each cell is shaded on the same blue scale as the maps, from the smallest to the largest value shown, with a legend of that range. A cell with no value is drawn empty with a hatch, which is not the same as a cell whose value is 0.
 
 ### Population pyramid
 
@@ -231,7 +231,7 @@ Values outside the scale (`Don't know`) are left out and counted in a note. Like
 
 ### Cross table
 
-A table of groups by series values, with the indicator's format in every cell, a **Total** column, a **Total** row and the grand total. A pair without rows reads "—". A table wider than its widget scrolls inside it and keeps the group column in view. It is also what **Show as table** gives for every widget with a series; for stacked-to-100% bars and Likert bars it lists each cell's share.
+A table of groups by series values (the groups in natural order), with the indicator's format in every cell, a **Total** column, a **Total** row and the grand total. A pair without rows reads "—". A table wider than its widget scrolls inside it and keeps the group column in view. It is also what **Show as table** gives for every widget with a series; for stacked-to-100% bars and Likert bars it lists each cell's share.
 
 ### Preparing an indicator with two dimensions
 

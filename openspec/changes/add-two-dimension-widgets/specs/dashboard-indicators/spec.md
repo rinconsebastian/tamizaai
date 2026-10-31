@@ -261,11 +261,15 @@ A bar or column widget with a series SHALL have a layout: grouped (one bar per s
 - **THEN** the API responds 400 with an error on the layout
 
 ### Requirement: Heat map
-A heat map SHALL draw its group values as rows, in the group column's own order as bars use, and its series values as columns, each cell shaded by its value on a sequential scale from the smallest to the largest value shown, with a legend of that range. A cell with no value SHALL be drawn empty and marked as having no value, unlike a cell whose value is 0.
+A heat map SHALL draw its group values as rows, in natural order (2 before 10, a missing group last), and its series values as columns, each cell shaded by its value on a sequential scale from the smallest to the largest value shown, with a legend of that range. A cell with no value SHALL be drawn empty and marked as having no value, unlike a cell whose value is 0.
 
 #### Scenario: Cells shaded
 - **WHEN** a heat map of `households_by_source` is grouped by `municipality` with the series `water_source`
 - **THEN** each municipality is a row, each water source a column, and the cell with the largest value is the darkest
+
+#### Scenario: Age bands in natural order
+- **WHEN** a heat map is grouped by the text column `age_band`, whose values are `0-4`, `5-9`, `10-14` and `80+`
+- **THEN** its rows read `0-4`, `5-9`, `10-14`, `80+` from top to bottom, not in alphabetical order
 
 #### Scenario: Empty cell
 - **WHEN** `Buga` has no row for `River`
@@ -313,11 +317,15 @@ Each group of a Likert widget SHALL be one bar of its composition in percent ove
 - **THEN** the bars leave them out and the widget says that 7 rows were left out
 
 ### Requirement: Cross table widget
-A cross table widget SHALL show its group values as rows, in the order bars use, and its series values as columns, each cell holding the value of its pair in the indicator's format, with a "Total" column, a "Total" row and the grand total (see "Totals of a widget with a series"). A pair with no rows SHALL read "—". A table wider than its widget SHALL scroll inside it, keeping the group column in view.
+A cross table widget SHALL show its group values as rows, in natural order (2 before 10, a missing group last), and its series values as columns, each cell holding the value of its pair in the indicator's format, with a "Total" column, a "Total" row and the grand total (see "Totals of a widget with a series"). A pair with no rows SHALL read "—". A table wider than its widget SHALL scroll inside it, keeping the group column in view.
 
 #### Scenario: Contingency table
 - **WHEN** a cross table of `households_by_source` is grouped by `municipality` with the series `water_source`
 - **THEN** each municipality is a row, each water source a column, and the last row and column hold the totals
+
+#### Scenario: Groups in natural order
+- **WHEN** a cross table is grouped by the text column `round`, whose values are `1`, `2` and `10`
+- **THEN** its rows read `1`, `2`, `10`
 
 #### Scenario: Pair with no rows
 - **WHEN** `Buga` has no row for `River`

@@ -9,7 +9,7 @@ import { ValueFormatter, plotted } from './format';
 import { MarkPoint, markTooltips } from './mark-tooltips';
 import { LegendEntry, SeriesLegend, SeriesNotes, seriesName } from './series-legend';
 import { Hit, Label, Line, Rect } from './series-plot';
-import { SeriesTable, buildSeriesTable } from './series-table';
+import { SeriesTable, buildSeriesTable, orderedSeriesTable } from './series-table';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
@@ -66,13 +66,18 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
   const largest = Math.max(0, ...cells);
   const axis = largest === 0 ? niceAxis(0, 1) : niceAxis(0, largest);
   const center = (left + (w - right)) / 2;
-  // The longest bar keeps room for its value.
-  const labelRoom = Math.min(((w - right - left) / 2) * 0.3, input.value(axis.max).length * charWidth * 0.9 + 8);
-  const half = (w - right - left) / 2 - labelRoom;
-  const scale = linearScale([0, axis.max], [0, Math.max(1, half)]);
   const bands = bandScale(rows.length, [top, h - bottom], 0.25);
   const thickness = Math.min(maxThickness, Math.max(1, bands.bandwidth));
-  const labelled = bands.step >= minLabelBand;
+  // A value is written at the tip of its bar, in one way for every bar: as the indicator writes it when the longest of them fits the
+  // room kept beside the longest bar, else as the compact figure of the axis, else not at all. Written bar by bar, the bars that
+  // are labelled would be the shortest ones, and the longest would have none.
+  const spare = ((w - right - left) / 2) * 0.3;
+  const widest = (write: (value: number) => string) => Math.max(0, write(axis.max).length, ...cells.map((cell) => write(cell).length)) * charWidth * 0.9 + 8;
+  const writing: ((value: number) => string) | null =
+    bands.step < minLabelBand ? null : widest(input.value) <= spare ? input.value : widest(input.value.tick) <= spare ? input.value.tick : null;
+  const labelRoom = Math.min(spare, widest(writing ?? input.value));
+  const half = (w - right - left) / 2 - labelRoom;
+  const scale = linearScale([0, axis.max], [0, Math.max(1, half)]);
 
   const grid: Line[] = [];
   const ticks: Label[] = [];
@@ -110,8 +115,8 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
       rectsOut.push({ ...bar, color: input.colors[side], title: '', at: { g: visual, s: side } });
       // The hit area is the whole row's half, the gap above and below the bar included.
       hits.push({ x: side === 0 ? left : center, y: bands.start(visual) - (bands.step - bands.bandwidth) / 2, width: (w - right - left) / 2, height: bands.step, at: { g: visual, s: side } });
-      if (labelled) {
-        const text = input.value(cell);
+      if (writing) {
+        const text = writing(cell);
         const room = side === 0 ? x - left : w - right - (x + bar.width);
         if (room >= text.length * charWidth * 0.9 + 4) {
           values.push({ x: side === 0 ? x - 4 : x + bar.width + 4, y: y + thickness / 2 + 4, text, anchor: side === 0 ? 'end' : 'start' });
@@ -229,7 +234,7 @@ export class PyramidChart {
   protected readonly size = observeSize(() => this.box());
 
   protected readonly what = computed(() => plotted(this.config(), this.label()));
-  protected readonly table = computed(() => buildSeriesTable(this.answer(), 'pyramid', null));
+  protected readonly table = computed(() => orderedSeriesTable(this.answer(), 'pyramid', null));
   private readonly tr = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
 
   /**

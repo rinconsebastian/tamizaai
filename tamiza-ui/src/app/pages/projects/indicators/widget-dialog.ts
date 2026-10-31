@@ -1,5 +1,5 @@
 import { DIALOG_DATA, Dialog, DialogRef } from '@angular/cdk/dialog';
-import { Component, Signal, computed, inject, signal } from '@angular/core';
+import { Component, ElementRef, Injector, Signal, afterNextRender, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { Observable, catchError, map, of, switchMap, tap, timer } from 'rxjs';
@@ -564,6 +564,8 @@ export class WidgetDialog {
   private readonly errors = inject(ApiErrors);
   private readonly dialog = inject(Dialog);
   private readonly transloco = inject(TranslocoService);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly injector = inject(Injector);
   private readonly basemaps = inject(Basemaps);
 
   protected readonly chartTypes = chartTypes;
@@ -1093,8 +1095,8 @@ export class WidgetDialog {
 
   protected moveScale(index: number, by: -1 | 1): void {
     this.edited = true;
+    const to = index + by;
     this.scaleItems.update((items) => {
-      const to = index + by;
       if (to < 0 || to >= items.length) {
         return items;
       }
@@ -1103,12 +1105,39 @@ export class WidgetDialog {
       return moved;
     });
     this.clearScaleProblems();
+    // The rows are redrawn in place, so the keyboard would stay on the row and act on whatever value moved into it: it follows the
+    // value instead, on the same button, or on the other one when the value reached an end and that button is off.
+    if (to >= 0 && to < this.scaleItems().length) {
+      this.focusScale(to, by > 0 ? ['scale-down', 'scale-up'] : ['scale-up', 'scale-down']);
+    }
   }
 
   protected removeScale(index: number): void {
     this.edited = true;
     this.scaleItems.update((items) => items.filter((_, i) => i !== index));
     this.clearScaleProblems();
+    // The button that was pressed is gone with its row: the keyboard goes to the remove button of the value that took its place, or of
+    // the one before it, and with no value left to the field that adds one.
+    const last = this.scaleItems().length - 1;
+    this.focusScale(Math.min(index, last), ['scale-remove']);
+  }
+
+  /** Once the editor is drawn again, puts the keyboard on the first enabled control of `testIds` in row `index`, or on the field that adds a value. */
+  private focusScale(index: number, testIds: readonly string[]): void {
+    afterNextRender(
+      () => {
+        const row = index >= 0 ? this.host.nativeElement.querySelectorAll('[data-testid="scale-item"]')[index] : undefined;
+        for (const id of testIds) {
+          const control = row?.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`);
+          if (control && !control.disabled) {
+            control.focus();
+            return;
+          }
+        }
+        this.host.nativeElement.querySelector<HTMLElement>('#widgetScaleNew')?.focus();
+      },
+      { injector: this.injector },
+    );
   }
 
   /** A value typed by hand, for one the data does not show (a dashboard filter can hide it, a script can change it later). Left out until marked. */

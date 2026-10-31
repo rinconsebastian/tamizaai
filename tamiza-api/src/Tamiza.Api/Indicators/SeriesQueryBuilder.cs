@@ -10,7 +10,7 @@ namespace Tamiza.Api.Indicators;
 /// <param name="Domain">Selects <c>series, total</c> for the non-missing series values, largest total first, plus one row of null series when some rows have no value. Null when the domain is fixed.</param>
 /// <param name="FixedDomain">A population pyramid's two sides or a Likert widget's scale, in order; null when the domain comes from the rows.</param>
 /// <param name="MaxSeries">The most series the widget shows before the smallest are folded into "Other".</param>
-/// <param name="NaturalGroups">Whether the groups are listed in natural order (a line chart, a pyramid) and not in the group column's own order or the widget's.</param>
+/// <param name="NaturalGroups">Whether the groups are listed in natural order (the kinds that cannot be ordered: a line chart, a heat map, a pyramid, Likert bars, a cross table) and not in the group column's own order or the widget's.</param>
 /// <param name="Cells">The cells statement for the series values to keep.</param>
 public sealed record SeriesQueryPlan(
     IndicatorSql? Domain,
@@ -54,7 +54,8 @@ public static class SeriesQueryBuilder
 
         var fixedDomain = FixedDomain(config, chartType);
         var maxSeries = chartType is ChartTypes.Heatmap or ChartTypes.Crosstab ? WidgetConfig.MaxMatrixSeries : WidgetConfig.MaxSeries;
-        var natural = chartType is ChartTypes.Line or ChartTypes.Pyramid;
+        // The kinds an analyst cannot order list their groups in natural order, so age bands read 0-4, 5-9, 10-14; bars and columns keep the column's own order.
+        var natural = chartType is ChartTypes.Line or ChartTypes.Pyramid or ChartTypes.Heatmap or ChartTypes.Likert or ChartTypes.Crosstab;
 
         // Both sets bind the project's zone as tz when they have a timestamp range: it is bound once.
         var parameters = new List<SqlParam>(own.Parameters);

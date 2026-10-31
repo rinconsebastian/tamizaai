@@ -88,14 +88,21 @@ export function buildSeriesTable(answer: SeriesAnswer, type: ChartType, layout: 
 }
 
 /**
- * The groups in the order the chart draws them: the table's own, except for a line chart, which plots its groups in natural order
- * (2 before 10) with a missing group last. A stable sort, so equal groups keep the table's order.
+ * The groups in the order the chart draws them: the table's own for a bar or a column (an analyst can order those), and natural order
+ * (2 before 10, a missing group last) for the kinds that cannot be ordered: a line chart, a heat map, a population pyramid, Likert
+ * bars and a cross table. A stable sort, so equal groups keep the table's order. Twin of `NaturalGroups` in the API's SeriesQueryBuilder.
  */
 export function chartOrder(table: SeriesTable, type: ChartType): SeriesRow[] {
-  if (type !== 'line') {
+  if (type === 'bar' || type === 'column') {
     return table.rows;
   }
   return [...table.rows].sort((a, b) => (a.group === null ? (b.group === null ? 0 : 1) : b.group === null ? -1 : naturalCompare(a.group, b.group)));
+}
+
+/** The table of an answer with its groups in the order the chart draws them (see {@link chartOrder}). */
+export function orderedSeriesTable(answer: SeriesAnswer, type: ChartType, layout: SeriesLayout | null | undefined): SeriesTable {
+  const table = buildSeriesTable(answer, type, layout);
+  return { ...table, rows: chartOrder(table, type) };
 }
 
 /** True when an answer is that of a widget with a series: the server sent the series domain and the totals. */

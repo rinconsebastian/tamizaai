@@ -21,6 +21,8 @@ export interface Label {
   text: string;
   anchor: 'start' | 'middle' | 'end';
   title?: string;
+  /** Written down the column, ending at (x, y), for a label that does not fit across it. */
+  rotate?: boolean;
 }
 export interface Rect {
   x: number;

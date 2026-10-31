@@ -236,3 +236,81 @@ grandTotal, grandRows, negativeLeftOut, leftOut, rowLimitReached
 ## Open Questions
 
 - Whether ordering series by their total, or Likert bars by their net agreement, is worth a setting; the order rules of this change do not depend on it.
+
+## Deviations from the plan
+
+- **Two statements, not one (D3).** The series domain (the non-missing values with the largest totals, plus whether some rows have none) is read by its own statement, and the cells statement then takes the values to keep as a `text[]` parameter. The fold into "Other" is a plain function (`SeriesDomain.Fold`), tested without a database, and the cells statement has no condition on the domain. Both run in the same read-only transaction, under the share lock that describing the table takes. A pyramid and a Likert widget have a fixed domain and run only the cells statement.
+- **The row limit leaves a group out whole (D3).** Cells come in the order of their group's rank, up to the limit plus one. When the limit falls inside a group, that group and the groups after it are dropped from the cells and from `totals.groups`, so a group is never drawn partly. The totals of the series and of all rows are not cut: they cover every row the widget matches, and the response says the limit was reached.
+- **Every kind an analyst cannot order lists its groups in natural order (D3).** The line chart, the heat map, the population pyramid, Likert bars and the cross table have no order setting, and the real-browser check showed that age bands in the column's own order read `0-4, 10-14, 15-19, …, 5-9`. Only bars and columns, which an analyst can order, keep the column's own order. PostgreSQL has no natural-order collation here, so the SQL ranks groups in the column's own order and the API re-sorts the groups it got; the UI's `chartOrder` is the twin. Only a table with more than 5,000 cells could notice, and then the response says the limit was reached.
+- **A cell's `series` is absent for "(none)" and "Other" (D12).** A first version marked cells with a derived record so that `series: null` was written; it made OpenAPI describe `IndicatorRow` as a union and broke the document's tooltip test. `IndicatorRow` has two more members, `series` and `seriesKind`, written only for a widget with a series, and a reader matches a cell with no `series` by its `seriesKind`.
+- **The folded series lose their value inside the SQL (D3).** The source rows carry `NULL` as series text when their value is not kept, so their rows add up to one "Other" cell and one "Other" total, with a ratio's total computed over them.
+- **`leftOut` counts rows, not values (D3).** The pyramid and Likert examples of the spec count rows ("12 rows have the sex Other and 3 have no age band: 15 rows").
+- **Shares tables have no "Total" row (D8, D5).** The UI's "Show as table" for a 100% layout and Likert bars has the group's total as its own column and no row, and the emails must list the same rows as that view, so the "Total" row of the first plan, with each series' share of the whole, was dropped from the emails.
+- **A series needs a group (D2).** A series on a query with no group column is refused (`config.seriesBy`): the plan had no rule for it and the query would have ignored the series silently.
+- **An unknown chart type is refused everywhere (D6).** `DefaultSize` throws for it and the query endpoint answers 400 with an error on `chartType`; the first design only listed the four places that fell back to a default.
+- **The pyramid and Likert editors read their values from a second query (D7).** The preview of a pyramid or a Likert widget without its sides or scale is refused, so it has no series to offer. The form sends one silent query for a heat map over the same indicator, columns and widget filters and offers its `series`, which is the domain the finished widget will have.
+- **`NaturalGroupOrder` became `NaturalOrder`** (`ByGroup` for rows, `ByText` for series values) in `Indicators/`, used by emails and series alike.
+
+## Verification Results
+
+Checked in the development sandbox (4 cores; PostgreSQL 17 with PostGIS in a container; Keycloak 26.4; .NET 10; Node 22.22.3; headless Chromium through Playwright). The stack of the browser check was a published API, nginx serving the `ng build` output and the containers, started by hand rather than as a Compose project.
+
+**Tests**
+
+| Suite | Result |
+|---|---|
+| API integration, whole suite, after the API and the emails were done | 1,619 passed, 0 failed, 38 minutes |
+| API integration, `Indicators`, `Reports`, `Mcp`, `SchemaMigrator` and `SchemaDrift`, after the last API changes (natural order of every kind that cannot be ordered, the nullable fix) | 677 passed, 0 failed, 14 minutes |
+| API unit | 1,560 passed, 3 failed: `ReportFormatTests.Dates_and_timestamps_of_tooltip_columns`, `ReportHtmlTests.Header` and `Text_reader`. The sandbox's ICU writes a narrow no-break space before `AM`; they fail the same way on the commit before this change |
+| UI (`ng test`, Node 22.22.3) | 98 files, 2,190 tests passed (baseline 93 files, 1,985). The one unhandled error `Cannot read properties of undefined (reading 'total')` in `ProjectPerformance`, present before this change, still makes the exit code 1 |
+| UI `ng build` | clean; initial bundle 649.56 kB, under the 650 kB budget. `scripts/check-ui-safety.sh` clean |
+
+**Query time over an indicator table of 100,000 rows** (500 groups, 30 water sources, 2 sexes, 12 rounds; one request through the API with PostgreSQL in a container, in milliseconds as the HTTP client saw them):
+
+| Widget | Cells | Time |
+|---|---|---|
+| Plain bar chart (warm-up) | 500 | 129 |
+| Stacked column, 8 series (the other 22 folded into Other) | 850 | 332 |
+| Heat map, 30 series | 1,500 | 277 |
+| Heat map as a ratio, 30 series | 1,500 | 359 |
+| Column, 2 series | 500 | 193 |
+| Line, 12 rounds × 2 series | 12 | 167 |
+| Stacked bar ordered by its total | 850 | 236 |
+
+The statement limit of 25 seconds leaves two orders of magnitude of room on a table of this size.
+
+**The Likert palette (task 13.1).** The widget surface is `#ffffff` in light and `#101828` in dark (Flowbite `neutral-primary-soft` and gray-900). Each arm passes as an ordinal ramp with the validator of the dataviz method (`validate_palette.js --ordinal`):
+
+- `"#ea9a93,#dd716a,#c74845,#9e3432,#762221" --mode light --surface "#ffffff"`: monotone, light end 2.20:1, hue spread 0°.
+- `"#86b6ef,#5598e7,#2a78d6,#1c5cab,#104281" --mode light --surface "#ffffff"`: light end 2.11:1, spread 3°.
+- `"#892b2a,#b13f3c,#d75853,#e4857e,#f1aea8" --mode dark --surface "#101828"`: light end 2.06:1, spread 0°.
+- `"#184f95,#256abf,#3987e5,#6da7ec,#9ec5f4" --mode dark --surface "#101828"`: light end 2.19:1, spread 3°.
+
+The neutral step (`#f0efec` light, `#383835` dark) is as light as the surface by design, so its segment and its legend swatch get a hairline. `chart-tokens.spec.ts` pins the hexes and re-checks the ordinal properties.
+
+**In a real browser** (a published API behind Keycloak 26.4 sign-in, 30 widgets over 7 indicator tables with 12 municipalities, 17 age bands, long place names, a 10-source table, rows with no series value and a ratio indicator; 4 dashboards with 3 dashboard filters):
+
+- Every kind and layout was looked at at 1,280 and 390 pixels, in the light and the dark theme (the dark tokens sit under `.dark` on `<html>` and the app has no toggle, so the class was set by script): 16 of 16 full pages without horizontal scroll, legends in the right colors, "Other" and "(none)" last, bars from the axis, a mirrored pyramid with the first band at the bottom, Likert bars centered with numbers that match the database. A scan of 3,820 texts for contrast found one real failure (below).
+- Tooltips and keyboard on 12 charts: one Tab stop, arrows, Home, End and Escape, the `aria-live` region reading the focused mark ("Cali. Agree: 18.2%. … 96 answers. Positive") and a visible focus ring.
+- "Show as table" and "Show all as tables": totals and dashes right; a 100% layout and Likert bars have the group total as a column and no "Total" row.
+- The form: the side and scale editors offer the values of the series column, Stacked and 100% are disabled with their reason while the widget plots a ratio, changing the indicator resets the series, and a server error shows on the right field (a second neutral value on the scale, an empty value on the third).
+- A dashboard filter that empties a series keeps it in the legend, with the other series in their colors; a pyramid side that a filter hides is drawn empty.
+- Printing through `page.pdf` on A4 in both orientations: every chart whole in its box, legends and swatch colors printed without background graphics, "3 columns not printed." under a cross table that does not fit.
+- The scheduled email to Mailpit: a body with six series columns, "Total" and "4 more columns", and a workbook with a sheet per widget holding the whole table, shares stored as numbers.
+
+Six defects of the UI were found, fixed and looked at again:
+
+1. The heat map's cell values were white on the blue of step 4 (3.64:1 at 11 px); they use near-black ink on the middle steps (5.41:1), and `chart-tokens.spec.ts` asks for 4.5:1.
+2. The sticky group-column cells of a cross table painted over its sticky header while it scrolled (`z-20` on the header).
+3. In the scale editor the focus stayed on the row after Move up or Move down, so Enter then Space undid the move, and Remove lost the focus; the focus now follows the value.
+4. A heat map of 10 series dropped half its column labels at 1,280 px; every column is now labelled, vertically when it does not fit across, and values are written in every cell or in none. The rotation uses `writing-mode`: the SVG `transform` attribute makes Tailwind emit its `.transform` utility, which took the initial bundle to 650.05 kB.
+5. A pyramid at 390 px labelled only its short bars; the label format is now the same for every bar of the widget.
+6. The tooltip of 100% and Likert bars broke its figures across lines ("18.\n2%"); its label column wraps and numbers do not.
+
+Left as they are, by judgment: grouped bars of twelve groups by five series are 1 px wide at the default 6×4 size (the documentation says to give them the grid's width or to stack them); a cross table repeats the unit in every cell, as the indicator's format says; the Likert neutral swatch is 1.15:1 against white, by design, with its hairline; the 288 px tooltip overflows the left edge of a 390 px screen by up to 11 px; the map tooltip editor has the same focus gap as defect 3 (not part of this change).
+
+The check also found two things on the API side. Groups of text read alphabetically in the heat map, the cross table and Likert bars (`0-4, 10-14, …, 5-9`), so every kind an analyst cannot order now lists its groups in natural order (see Deviations from the plan). And a build warning (a possibly null `plan.Sql`) was fixed. The workbook of a dashboard writes `Piped (6)` for a series column whose number format differs from that of another widget's column of the same name: the format is kept per header in the workbook, a rule of the earlier email change; with series it shows more often, and it stays.
+
+**The MCP tools.** Task 17.5 is covered by `McpDashboardToolsTests` through an MCP client: a pyramid is created and read back with `get_dashboard`, a Likert widget's shares and the rows it left out come from `get_widget_data`, a stacked chart is previewed with `query_indicator` (series, cells and totals, no rows, nothing saved), an invalid scale and a stacked ratio are refused with `mcp.validation` and the key, and a result too long is cut from its cells with a hint. It was not run from Claude.
+
+**Not verified.** Touch taps on a phone (the 390 px runs are a desktop browser with a phone viewport), Firefox and Safari, the browser's own print dialog (`page.pdf` and a hand-fired `beforeprint` stand in for it) and a real screen reader (the `aria-live` text was read from the DOM). Negative values in stacked and 100% charts were checked only in jsdom: the seed data had none. A Compose project with the real images, and the 4 GB VPS the design targets, were not used.

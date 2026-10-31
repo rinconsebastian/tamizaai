@@ -24,7 +24,7 @@ const noteRoom = 24;
   template: `
     <tmz-table-container class="max-h-full overflow-y-auto">
       <table tmzTable data-testid="widget-table">
-        <thead [class]="tableHead + ' sticky top-0'">
+        <thead [class]="tableHead + ' sticky top-0 z-20'">
           <tr>
             @for (header of model().headers; track $index) {
               <!-- The first column stays in view when a wide table scrolls inside its widget; on paper only the columns that fit print. -->

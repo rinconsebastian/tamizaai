@@ -71,15 +71,23 @@ public sealed class SeriesQueryBuilderTests
         Assert.Equal(series, Build(Config(), chartType).MaxSeries);
 
     [Fact]
-    public void Only_a_line_chart_and_a_pyramid_list_their_groups_in_natural_order()
+    public void Only_a_bar_and_a_column_keep_the_group_columns_own_order_and_every_other_kind_lists_its_groups_in_natural_order()
     {
-        foreach (var chartType in new[] { ChartTypes.Bar, ChartTypes.Column, ChartTypes.Heatmap, ChartTypes.Crosstab, ChartTypes.Likert })
+        var scale = Config(scale: [new("A", LikertSides.Negative), new("B", LikertSides.Positive)]);
+        var pyramid = Config(pyramid: new("Female", "Male"));
+
+        foreach (var chartType in new[] { ChartTypes.Bar, ChartTypes.Column })
         {
-            Assert.False(Build(Config(scale: [new("A", LikertSides.Negative), new("B", LikertSides.Positive)]), chartType).NaturalGroups, chartType);
+            Assert.False(Build(Config(), chartType).NaturalGroups, chartType);
         }
 
-        Assert.True(Build(Config(), ChartTypes.Line).NaturalGroups);
-        Assert.True(Build(Config(pyramid: new("Female", "Male")), ChartTypes.Pyramid).NaturalGroups);
+        foreach (var chartType in new[] { ChartTypes.Line, ChartTypes.Heatmap, ChartTypes.Crosstab })
+        {
+            Assert.True(Build(Config(), chartType).NaturalGroups, chartType);
+        }
+
+        Assert.True(Build(pyramid, ChartTypes.Pyramid).NaturalGroups);
+        Assert.True(Build(scale, ChartTypes.Likert).NaturalGroups);
     }
 
     [Fact]

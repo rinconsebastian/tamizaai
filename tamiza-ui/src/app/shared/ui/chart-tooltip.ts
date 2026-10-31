@@ -1,6 +1,6 @@
 import { FlexibleConnectedPositionStrategy, Overlay, OverlayRef } from '@angular/cdk/overlay';
 import { ComponentPortal } from '@angular/cdk/portal';
-import { Component, ComponentRef, Injectable, inject, input } from '@angular/core';
+import { Component, ComponentRef, Injectable, computed, inject, input } from '@angular/core';
 import type { ConnectedPosition } from '@angular/cdk/overlay';
 
 /**
@@ -42,7 +42,7 @@ export const tooltipPositions: ConnectedPosition[] = [
   template: `
     <p class="font-medium text-heading" data-testid="tooltip-heading">{{ content().heading }}</p>
     @if (content().lines.length) {
-      <dl class="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
+      <dl [class]="'mt-1 grid gap-x-3 gap-y-0.5 ' + (numbers() ? 'grid-cols-[minmax(0,1fr)_auto]' : 'grid-cols-[auto_minmax(0,1fr)]')">
         @for (line of content().lines; track $index) {
           <div class="contents" data-testid="tooltip-line">
             <dt>
@@ -51,7 +51,7 @@ export const tooltipPositions: ConnectedPosition[] = [
               }
               {{ line.label }}:
             </dt>
-            {{ ' ' }}<dd [class]="line.align === 'end' ? 'text-end tabular-nums' : 'text-start'">{{ line.value }}</dd>
+            {{ ' ' }}<dd [class]="line.align === 'end' ? 'text-end tabular-nums whitespace-nowrap' : 'text-start'">{{ line.value }}</dd>
           </div>
         }
       </dl>
@@ -68,6 +68,12 @@ export const tooltipPositions: ConnectedPosition[] = [
 })
 export class ChartTooltipBody {
   readonly content = input.required<ChartTooltipContent>();
+  /**
+   * Whether every value is a number set against the end: then the label is the column that gives way, so a long one wraps ("Agreement
+   * with the water service:") and a figure is never broken across lines. A text value (an address) keeps the other layout, where it
+   * is the value that wraps.
+   */
+  protected readonly numbers = computed(() => this.content().lines.every((line) => line.align === 'end'));
 }
 
 /**

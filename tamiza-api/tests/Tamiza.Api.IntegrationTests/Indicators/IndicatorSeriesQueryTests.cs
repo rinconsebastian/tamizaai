@@ -237,15 +237,19 @@ public sealed class IndicatorSeriesQueryTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task A_line_chart_lists_its_groups_in_natural_order()
+    public async Task The_kinds_nobody_can_order_list_their_groups_in_natural_order_and_bars_and_columns_keep_the_columns_own_order()
     {
         await using var h = await WithSourcesAsync("('r10', 'a', 1, 0, 0, '1'), ('r2', 'a', 1, 0, 0, '1'), ('r1', 'a', 1, 0, 0, '1'), (NULL, 'a', 1, 0, 0, '1')");
 
-        var line = await h.QueryAsync(Config(), "line");
-        var column = await h.QueryAsync(Config(), "column");
+        foreach (var chartType in new[] { "line", "heatmap", "crosstab" })
+        {
+            Assert.Equal(["r1", "r2", "r10", "-"], Groups(await h.QueryAsync(Config(), chartType)).Select(g => g.Split('|')[0]).ToArray());
+        }
 
-        Assert.Equal(["r1", "r2", "r10", "-"], Groups(line).Select(g => g.Split('|')[0]).ToArray());
-        Assert.Equal(["r1", "r10", "r2", "-"], Groups(column).Select(g => g.Split('|')[0]).ToArray());
+        foreach (var chartType in new[] { "column", "bar" })
+        {
+            Assert.Equal(["r1", "r10", "r2", "-"], Groups(await h.QueryAsync(Config(), chartType)).Select(g => g.Split('|')[0]).ToArray());
+        }
     }
 
     [Fact]

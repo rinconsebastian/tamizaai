@@ -1992,6 +1992,29 @@ describe('the widget dialog with a series (design D7)', () => {
       ]);
     });
 
+    it('keeps the keyboard on the value it moves with the up and down buttons, and on a neighbor when it removes one', async () => {
+      const context = await likert(['Agree', 'Disagree', "Don't know"]);
+      fields('scale-down')[0].focus();
+
+      await click(context, fields('scale-down')[0]);
+      expect(valuesOf()).toEqual(['Disagree', 'Agree', "Don't know"]);
+      expect(document.activeElement).toBe(fields('scale-down')[1]); // still on the Down button of Agree, now the second
+      await click(context, fields('scale-down')[1]);
+      expect(valuesOf()).toEqual(['Disagree', "Don't know", 'Agree']);
+      expect(document.activeElement).toBe(fields('scale-up')[2]); // Agree is last: its Down button is off, so the Up button
+      await click(context, fields('scale-up')[2]);
+      expect(document.activeElement).toBe(fields('scale-up')[1]);
+
+      await click(context, fields('scale-remove')[2]);
+      expect(valuesOf()).toEqual(['Disagree', 'Agree']);
+      expect(document.activeElement).toBe(fields('scale-remove')[1]); // the last one went: the one before it
+      await click(context, fields('scale-remove')[0]);
+      expect(document.activeElement).toBe(fields('scale-remove')[0]); // the next one took its place
+      await click(context, fields('scale-remove')[0]);
+      expect(items()).toHaveLength(0);
+      expect(document.activeElement).toBe(field('scale-new')); // nothing left to remove: the field that adds a value
+    });
+
     it('accepts a value typed by hand, left out until it is marked', async () => {
       const context = await likert(['Agree', 'Disagree']);
 

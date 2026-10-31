@@ -157,10 +157,10 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
             }
 
             var group = columns.FirstOrDefault(c => c.Name == config.GroupBy);
-            var (rows, limitReached) = await ReadRowsAsync(connection, transaction, plan.Sql, group?.Type, maxRows, ct);
+            var (rows, limitReached) = await ReadRowsAsync(connection, transaction, plan.Sql!, group?.Type, maxRows, ct);
             return new IndicatorQueryOutcome(
                 new IndicatorQueryResponse(
-                    true, rows, limitReached, MissingReferences.None, plan.Sql.TooltipTypes, dashboardFilters is { Count: > 0 } ? plan.NotFiltered : null),
+                    true, rows, limitReached, MissingReferences.None, plan.Sql!.TooltipTypes, dashboardFilters is { Count: > 0 } ? plan.NotFiltered : null),
                 null);
         }, ct), ct);
     }

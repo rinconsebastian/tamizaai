@@ -51,7 +51,7 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 7. Roles and OpenAPI (api)
 
-- [ ] 7.1 Extend `IndicatorRoleMatrixTests` with a widget of each new kind (a viewer reads it and cannot create, change or remove it) and the OpenAPI test with the new config and response fields. Verify the full `dotnet test` run is green.
+- [x] 7.1 Extend `IndicatorRoleMatrixTests` with a widget of each new kind (a viewer reads it and cannot create, change or remove it) and the OpenAPI test with the new config and response fields. Verify the full `dotnet test` run is green.
 
 ## 8. Types and kinds (ui)
 
@@ -96,9 +96,9 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 17. Verification
 
-- [ ] 17.1 Real stack in a separate Compose project: indicators `households_by_source` (municipality × water source), `population` (age band × sex, count and percent versions) and an agreement scale by municipality. Build a dashboard with one widget of each new kind and layout (grouped, stacked and 100% columns, lines by series, heat map, pyramid, Likert, cross table) and a dashboard filter. Check them at 390 and 1,280 pixels, light and dark, with a keyboard pass and with a dashboard filter that empties one series.
-- [ ] 17.2 Print the dashboard on A4, portrait and landscape: every mark and legend inside its box, the cross table's columns note.
-- [ ] 17.3 Measure the query of a stacked column chart with 8 series and of a heat map with 30 over an indicator table of 100,000 rows, and record the times in the design.
-- [ ] 17.4 Send the dashboard's scheduled email to Mailpit: the body, the plain text and the workbook, with one sheet per widget and shares as numbers.
-- [ ] 17.5 From an MCP client, create a pyramid and a Likert widget and read `get_widget_data`; refuse an invalid scale.
-- [ ] 17.6 Write "Deviations from the plan" and "Verification Results" in the design, and run `openspec validate add-two-dimension-widgets`.
+- [x] 17.1 Real stack in a separate Compose project: indicators `households_by_source` (municipality × water source), `population` (age band × sex, count and percent versions) and an agreement scale by municipality. Build a dashboard with one widget of each new kind and layout (grouped, stacked and 100% columns, lines by series, heat map, pyramid, Likert, cross table) and a dashboard filter. Check them at 390 and 1,280 pixels, light and dark, with a keyboard pass and with a dashboard filter that empties one series. Done in a real browser with a published API, Keycloak 26.4 and nginx, started by hand and not as a Compose project; see Verification Results.
+- [x] 17.2 Print the dashboard on A4, portrait and landscape: every mark and legend inside its box, the cross table's columns note.
+- [x] 17.3 Measure the query of a stacked column chart with 8 series and of a heat map with 30 over an indicator table of 100,000 rows, and record the times in the design.
+- [x] 17.4 Send the dashboard's scheduled email to Mailpit: the body, the plain text and the workbook, with one sheet per widget and shares as numbers.
+- [x] 17.5 From an MCP client, create a pyramid and a Likert widget and read `get_widget_data`; refuse an invalid scale. Done through an MCP client in `McpDashboardToolsTests`, not from Claude; see Verification Results.
+- [x] 17.6 Write "Deviations from the plan" and "Verification Results" in the design, and run `openspec validate add-two-dimension-widgets`.

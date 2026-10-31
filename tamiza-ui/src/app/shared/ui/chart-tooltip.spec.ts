@@ -52,6 +52,25 @@ describe('chart tooltip', () => {
     expect(panel()!.querySelectorAll('dd')[1].className).toContain('text-start');
   });
 
+  it('lets a long label wrap before it lets a figure break: numbers keep their line, a text value wraps', () => {
+    tooltip.open({ x: 0, y: 0 }, {
+      heading: 'Cali',
+      lines: [
+        { label: 'Agree', value: '18.2%', align: 'end' },
+        { label: 'Agreement with the water service', value: '96 answers', align: 'end' },
+      ],
+      footer: null,
+    });
+    expect(panel()!.querySelector('dl')!.className).toContain('grid-cols-[minmax(0,1fr)_auto]');
+    for (const value of Array.from(panel()!.querySelectorAll('dd'))) {
+      expect(value.className).toContain('whitespace-nowrap');
+    }
+
+    tooltip.open({ x: 0, y: 0 }, content); // a text value among the numbers: the value is the one that gives way
+    expect(panel()!.querySelector('dl')!.className).toContain('grid-cols-[auto_minmax(0,1fr)]');
+    expect(panel()!.querySelectorAll('dd')[1].className).not.toContain('whitespace-nowrap');
+  });
+
   it('shows only the lines it has: no footer, no lines', () => {
     tooltip.open({ x: 0, y: 0 }, { heading: 'Cali', lines: [], footer: null });
 

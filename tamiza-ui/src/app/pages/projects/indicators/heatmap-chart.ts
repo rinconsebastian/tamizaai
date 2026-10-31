@@ -9,7 +9,7 @@ import { ValueFormatter, plotted } from './format';
 import { MarkPoint, markTooltips } from './mark-tooltips';
 import { seriesName } from './series-legend';
 import { Hit, Label } from './series-plot';
-import { SeriesTable, buildSeriesTable } from './series-table';
+import { SeriesTable, buildSeriesTable, orderedSeriesTable } from './series-table';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
@@ -49,10 +49,18 @@ export interface HeatmapPlotInput {
 
 const gap = 2;
 const right = 6;
+/** The room above the cells for column labels written across them: one line of small text. */
 const headerRoom = 22;
 const minCellText = 14;
+/** A column label longer than this is cut, whole in its tooltip. */
+const maxColumnChars = 14;
 
-/** The grid of a heat map (design D5): groups as rows, series as columns, a 2-pixel surface gap between cells, labels only where they fit. */
+/**
+ * The grid of a heat map (design D5): groups as rows, series as columns, a 2-pixel surface gap between cells, labels only where they fit.
+ * A column is a category, not a point on a scale, so every column keeps its label: written across it when the longest fits, otherwise
+ * every one of them down its column, in a taller header. Cell values are written in every cell or in none, so the cells that are labelled are
+ * not the ones with the shortest numbers.
+ */
 export function heatmapPlot(input: HeatmapPlotInput): HeatmapPlot {
   const { table, width, height } = input;
   const rows = table.rows;
@@ -65,34 +73,42 @@ export function heatmapPlot(input: HeatmapPlotInput): HeatmapPlot {
   const labelChars = Math.max(3, Math.min(Math.floor((width * 0.3) / charWidth), longest));
   const left = labelChars * charWidth + 10;
   const cellWidth = Math.max(1, (width - left - right) / Math.max(1, columns.length));
-  const cellHeight = Math.max(1, (height - headerRoom - 4) / Math.max(1, rows.length));
+  const longestColumn = Math.max(0, ...columnTexts.map((text) => Math.min(text.length, maxColumnChars)));
+  const rotate = longestColumn * charWidth + 6 > cellWidth;
+  // Upward labels need a taller header, but never more than the cells can spare; what does not fit it is cut, whole in its tooltip.
+  const header = rotate ? Math.min(longestColumn * charWidth + 12, Math.max(headerRoom, height * 0.45)) : headerRoom;
+  const columnChars = rotate ? Math.max(3, Math.min(maxColumnChars, Math.floor((header - 12) / charWidth))) : maxColumnChars;
+  const cellHeight = Math.max(1, (height - header - 4) / Math.max(1, rows.length));
   const rowStride = Math.max(1, Math.ceil(12 / cellHeight));
-  const longestColumn = Math.max(0, ...columnTexts.map((text) => Math.min(text.length, 12)));
-  const columnStride = Math.max(1, Math.ceil((longestColumn * charWidth + 6) / cellWidth));
-  const columnChars = Math.max(2, Math.floor((columnStride * cellWidth) / charWidth) - 1);
 
   const rowLabels: Label[] = [];
   rowTexts.forEach((text, g) => {
     if (g % rowStride === 0) {
-      rowLabels.push({ x: left - 6, y: headerRoom + g * cellHeight + cellHeight / 2 + 4, text: truncate(text, labelChars), anchor: 'end', title: truncate(text, labelChars) === text ? undefined : text });
+      rowLabels.push({ x: left - 6, y: header + g * cellHeight + cellHeight / 2 + 4, text: truncate(text, labelChars), anchor: 'end', title: truncate(text, labelChars) === text ? undefined : text });
     }
   });
-  const columnLabels: Label[] = [];
-  columnTexts.forEach((text, s) => {
-    if (s % columnStride === 0) {
-      columnLabels.push({ x: left + s * cellWidth + cellWidth / 2, y: headerRoom - 8, text: truncate(text, columnChars), anchor: 'middle', title: truncate(text, columnChars) === text ? undefined : text });
-    }
+  const columnLabels: Label[] = columnTexts.map((text, s) => {
+    const shown = truncate(text, columnChars);
+    const x = left + s * cellWidth + cellWidth / 2;
+    return rotate
+      ? { x, y: header - 4, text: shown, anchor: 'end', title: shown === text ? undefined : text, rotate: true }
+      : { x, y: header - 8, text: shown, anchor: 'middle', title: shown === text ? undefined : text };
   });
+
+  // A value is written in a cell when the longest of them fits it, so the cells that are labelled are all of them or none.
+  const texts = rows.map((row) => row.cells.map((value) => (value === null ? null : input.short(value))));
+  const longestText = Math.max(0, ...texts.flatMap((row) => row.map((text) => text?.length ?? 0)));
+  const labelled = cellHeight - gap >= minCellText && cellWidth - gap >= longestText * charWidth * 0.9 + 8;
 
   const cells: HeatCell[] = [];
   const hits: Hit[] = [];
   rows.forEach((row, g) => {
     row.cells.forEach((value, s) => {
       const x = left + s * cellWidth + gap / 2;
-      const y = headerRoom + g * cellHeight + gap / 2;
+      const y = header + g * cellHeight + gap / 2;
       const w = Math.max(1, cellWidth - gap);
       const h = Math.max(1, cellHeight - gap);
-      const text = value === null ? null : input.short(value);
+      const text = texts[g][s];
       cells.push({
         x,
         y,
@@ -102,7 +118,7 @@ export function heatmapPlot(input: HeatmapPlotInput): HeatmapPlot {
         s,
         value,
         step: value === null || !range ? 0 : sequentialStep(value, range.min, range.max),
-        label: text !== null && h >= minCellText && w >= text.length * charWidth * 0.9 + 8 ? text : null,
+        label: labelled ? text : null,
       });
       hits.push({ x: x - gap / 2, y: y - gap / 2, width: w + gap, height: h + gap, at: { g, s } });
     });
@@ -151,7 +167,7 @@ let hatchIds = 0;
               </pattern>
             </defs>
             @for (label of plot().columnLabels; track $index) {
-              <text class="fill-body" font-size="11" [attr.x]="label.x" [attr.y]="label.y" [attr.text-anchor]="label.anchor" data-testid="heat-column-label">
+              <text class="fill-body" font-size="11" [attr.x]="label.x" [attr.y]="label.y" [attr.text-anchor]="label.anchor" [attr.writing-mode]="label.rotate ? 'vertical-rl' : null" data-testid="heat-column-label">
                 @if (label.title) {
                   <title>{{ label.title }}</title>
                 }
@@ -247,7 +263,7 @@ export class HeatmapChart {
   protected readonly hatchId = `heat-hatch-${++hatchIds}`;
   protected readonly hatchSwatch = 'repeating-linear-gradient(45deg, transparent 0 3px, var(--color-default-strong) 3px 4px)';
   protected readonly what = computed(() => plotted(this.config(), this.label()));
-  private readonly table = computed(() => buildSeriesTable(this.answer(), 'heatmap', null));
+  private readonly table = computed(() => orderedSeriesTable(this.answer(), 'heatmap', null));
   protected readonly hasEmpty = computed(() => this.table().rows.some((row) => row.cells.some((cell) => cell === null)));
 
   private readonly tr = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);

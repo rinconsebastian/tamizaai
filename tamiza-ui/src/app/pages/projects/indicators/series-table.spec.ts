@@ -119,12 +119,14 @@ describe('chartOrder', () => {
     null,
   );
 
-  it('puts the groups of a line chart in natural order, 2 before 10, and a missing group last', () => {
-    expect(chartOrder(table, 'line').map((row) => row.group)).toEqual(['1', '2', '10', null]);
+  it('puts the groups of the charts nobody can order in natural order, 2 before 10, and a missing group last', () => {
+    for (const type of ['line', 'heatmap', 'pyramid', 'likert', 'crosstab'] as const) {
+      expect(chartOrder(table, type).map((row) => row.group)).toEqual(['1', '2', '10', null]);
+    }
   });
 
-  it('keeps the order of the table for every other kind', () => {
-    for (const type of ['bar', 'column', 'heatmap', 'pyramid', 'likert', 'crosstab'] as const) {
+  it('keeps the order of the table for a bar and a column, which an analyst can order', () => {
+    for (const type of ['bar', 'column'] as const) {
       expect(chartOrder(table, type).map((row) => row.group)).toEqual(['10', null, '2', '1']);
     }
   });

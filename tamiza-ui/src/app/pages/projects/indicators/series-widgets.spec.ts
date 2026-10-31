@@ -4,7 +4,10 @@ import { pressKey } from '../../../../testing/cdk';
 import { byTestId, settle } from '../../../../testing/project-harness';
 import { ChartType, IndicatorEntry, LikertStep, QueryResult, WidgetConfig, chartTypes } from '../../../core/projects/indicators.service';
 import { Context, all, cell, clearOverlay, config, indicator, isQuery, open, overlay, result, seriesResult, text, widget } from './indicators-testing';
+import { valueFormatter } from './format';
 import { armSteps, scaleColors } from './likert-chart';
+import { pyramidPlot } from './pyramid-chart';
+import { buildSeriesTable } from './series-table';
 
 // The new kinds (design D5): heat map, population pyramid, diverging Likert bars and cross table, over the answer of a widget with a
 // series (design D12). Each scenario is a case of dashboard-indicators.
@@ -50,22 +53,22 @@ const sources = { indicator: 'households_visited', groupBy: 'municipality', seri
 describe('heat map', () => {
   afterEach(clearOverlay);
 
-  /** Cali is the largest at 100 Piped and the smallest at 5 River; Buga has no River. */
+  /** Armenia is the largest at 100 Piped and the smallest at 5 River; Buga has no River. */
   const grid = () =>
     seriesResult(
-      [cell('Cali', 'Piped', 100), cell('Cali', 'Well', 20), cell('Cali', 'River', 5), cell('Buga', 'Piped', 40), cell('Buga', 'Well', 60)],
+      [cell('Armenia', 'Piped', 100), cell('Armenia', 'Well', 20), cell('Armenia', 'River', 5), cell('Buga', 'Piped', 40), cell('Buga', 'Well', 60)],
       ['Piped', 'River', 'Well'],
     );
 
   it('shows a row per group, a column per series, and the largest cell darkest (Cells shaded)', async () => {
     const context = await show('heatmap', sources, grid(), [households]);
 
-    expect(all(context.root, 'heat-row-label').map(text)).toEqual(['Cali', 'Buga']);
+    expect(all(context.root, 'heat-row-label').map(text)).toEqual(['Armenia', 'Buga']);
     expect(all(context.root, 'heat-column-label').map(text)).toEqual(['Piped', 'River', 'Well']);
     expect(marks(context)).toHaveLength(6);
     const steps = marks(context).map((m) => m.getAttribute('data-step'));
-    expect(steps[0]).toBe('7'); // Cali, Piped: 100, the largest
-    expect(steps[1]).toBe('1'); // Cali, River: 5, the smallest
+    expect(steps[0]).toBe('7'); // Armenia, Piped: 100, the largest
+    expect(steps[1]).toBe('1'); // Armenia, River: 5, the smallest
     expect(Math.max(...steps.filter((s) => s !== null).map(Number))).toBe(7);
     expect(marks(context)[0].getAttribute('style')).toContain('var(--tmz-seq-7)');
     expect(context.query).toEqual({ config: { ...config(sources), seriesBy: 'water_source' }, chartType: 'heatmap' });
@@ -94,7 +97,7 @@ describe('heat map', () => {
 
   it('writes no value in cells too narrow for it, and leaves them to the tooltip', async () => {
     const names = Array.from({ length: 30 }, (_, i) => `S${String(i).padStart(2, '0')}`);
-    const wide = seriesResult(names.map((name, i) => cell('Cali', name, 1000 + i)), names);
+    const wide = seriesResult(names.map((name, i) => cell('Armenia', name, 1000 + i)), names);
     const context = await show('heatmap', sources, wide, [households]);
 
     expect(marks(context)).toHaveLength(30);
@@ -103,16 +106,58 @@ describe('heat map', () => {
     expect(tooltipLines()).toEqual(['S03: 1,003 households']);
   });
 
-  it('labels only as many columns and rows as fit, however many there are (Heat map within its limit)', async () => {
+  it('writes the column labels across their columns when they fit', async () => {
+    const context = await show('heatmap', sources, grid(), [households]);
+
+    expect(all(context.root, 'heat-column-label').map(text)).toEqual(['Piped', 'River', 'Well']);
+    expect(all(context.root, 'heat-column-label').every((label) => !label.hasAttribute('writing-mode'))).toBe(true);
+  });
+
+  it('labels every column, down its column when the labels do not fit across it, so no cell loses its column', async () => {
+    const names = ['Bottled', 'Lake', 'Neighbor', 'Piped', 'Rain', 'River', 'Spring', 'Tank', 'Truck', 'Well'];
+    const many = seriesResult(['Armenia', 'Buga'].flatMap((group) => names.map((name, i) => cell(group, name, 100 + i))), names);
+    const context = await show('heatmap', sources, many, [households]);
+
+    const labels = all(context.root, 'heat-column-label');
+    expect(labels.map(text)).toEqual(names);
+    expect(labels.every((label) => label.getAttribute('writing-mode') === 'vertical-rl')).toBe(true);
+    expect(labels.every((label) => label.getAttribute('text-anchor') === 'end')).toBe(true);
+    // The header grew to hold them: the labels end at the cells, which start below the labels' ends.
+    for (const label of labels) {
+      expect(Number(label.getAttribute('y'))).toBeGreaterThan(20);
+    }
+    expect(Number(marks(context)[0].getAttribute('y'))).toBeGreaterThan(Number(labels[0].getAttribute('y')));
+  });
+
+  it('cuts a column label that cannot fit its header and keeps its full name in a tooltip title', async () => {
+    const names = Array.from({ length: 12 }, (_, i) => `Water from source number ${i}`);
+    const context = await show('heatmap', sources, seriesResult(names.map((name, i) => cell('Armenia', name, 10 + i)), names), [households]);
+
+    const labels = all(context.root, 'heat-column-label');
+    expect(labels).toHaveLength(12);
+    const written = (label: Element) => Array.from(label.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join('').trim();
+    expect(written(labels[0])).toBe('Water from so…');
+    expect(labels[0].querySelector('title')!.textContent).toBe('Water from source number 0');
+  });
+
+  it('writes values in every cell or in none, not in the cells that happen to have the shortest numbers', async () => {
+    const names = Array.from({ length: 14 }, (_, i) => `S${String(i).padStart(2, '0')}`);
+    const mixed = seriesResult(names.map((name, i) => cell('Armenia', name, i === 3 ? 1234 : 5)), names);
+    const context = await show('heatmap', sources, mixed, [households]);
+
+    // 1.2K does not fit a column this narrow, so neither does the 5 beside it.
+    expect(all(context.root, 'heat-value')).toHaveLength(0);
+  });
+
+  it('labels only as many rows as fit, however many there are, and every one of the 30 columns (Heat map within its limit)', async () => {
     const names = Array.from({ length: 30 }, (_, i) => `Source ${String(i).padStart(2, '0')}`);
     const places = Array.from({ length: 24 }, (_, i) => `Place ${String(i).padStart(2, '0')}`);
     const big = seriesResult(places.flatMap((p, g) => names.map((n, i) => cell(p, n, g + i + 1))), names);
     const context = await show('heatmap', sources, big, [households]);
 
     expect(marks(context)).toHaveLength(720);
-    const columns = all(context.root, 'heat-column-label');
-    expect(columns.length).toBeGreaterThan(0);
-    expect(columns.length).toBeLessThan(30);
+    expect(all(context.root, 'heat-column-label')).toHaveLength(30);
+    expect(all(context.root, 'heat-row-label').length).toBeGreaterThan(0);
     expect(all(context.root, 'heat-row-label').length).toBeLessThan(24);
     expect(all(context.root, 'heat-value')).toHaveLength(0);
     // Every cell still has its tooltip.
@@ -137,7 +182,7 @@ describe('heat map', () => {
   });
 
   it('draws a cell whose value is 0 as a value, not as empty', async () => {
-    const zero = seriesResult([cell('Cali', 'Piped', 0), cell('Cali', 'Well', 10)], ['Piped', 'Well']);
+    const zero = seriesResult([cell('Armenia', 'Piped', 0), cell('Armenia', 'Well', 10)], ['Piped', 'Well']);
     const context = await show('heatmap', sources, zero, [households]);
 
     expect(marks(context).filter((m) => m.hasAttribute('data-empty'))).toHaveLength(0);
@@ -160,12 +205,12 @@ describe('heat map', () => {
     pressKey(chart, 'Enter');
     await settle(context.harness);
     expect({ heading: tooltipHeading(), lines: tooltipLines() }).toEqual(onHover);
-    expect(spoken(context)).toBe('Cali. Piped: 100 households');
+    expect(spoken(context)).toBe('Armenia. Piped: 100 households');
     expect(all(context.root, 'heat-active')).toHaveLength(1);
 
     pressKey(chart, 'ArrowRight'); // the next series of the same group
     await settle(context.harness);
-    expect(spoken(context)).toBe('Cali. River: 5 households');
+    expect(spoken(context)).toBe('Armenia. River: 5 households');
     pressKey(chart, 'ArrowDown'); // the next group
     await settle(context.harness);
     expect(spoken(context)).toBe('Buga. River: No value');
@@ -178,11 +223,11 @@ describe('heat map', () => {
   it('describes itself for assistive technology, and lists the same numbers as a cross table', async () => {
     const context = await show('heatmap', sources, grid(), [households]);
 
-    expect(label(context)).toBe('Heat map of Households visited, municipality by water_source: 2 groups, 3 series, from 5 households to 100 households. Highest: Cali, Piped.');
+    expect(label(context)).toBe('Heat map of Households visited, municipality by water_source: 2 groups, 3 series, from 5 households to 100 households. Highest: Armenia, Piped.');
     await toggle(context);
     expect(tableHeaders(context)).toEqual(['municipality', 'Piped', 'River', 'Well', 'Total']);
     expect(tableRows(context)).toEqual([
-      ['Cali', '100 households', '5 households', '20 households', '125 households'],
+      ['Armenia', '100 households', '5 households', '20 households', '125 households'],
       ['Buga', '40 households', '—', '60 households', '100 households'],
       ['Total', '140 households', '5 households', '80 households', '225 households'],
     ]);
@@ -252,6 +297,41 @@ describe('population pyramid', () => {
     expect(ticks.some((t) => t.startsWith('-'))).toBe(false);
     expect(ticks.filter((t) => t === '20')).toHaveLength(2); // once on each side
     expect(ticks.filter((t) => t === '0')).toHaveLength(1);
+  });
+
+  describe('writing the values of the bars on a narrow chart', () => {
+    const answer = seriesResult(
+      [cell('0-4', 'Female', 7865), cell('0-4', 'Male', 7451), cell('5-9', 'Female', 1313), cell('5-9', 'Male', 1428), cell('10-14', 'Female', 8784), cell('10-14', 'Male', 100)],
+      ['Female', 'Male'],
+    );
+    const plotAt = (width: number, format: Parameters<typeof valueFormatter>[0] = { format: 'count', unit: 'people' }) =>
+      pyramidPlot({
+        table: buildSeriesTable(answer, 'pyramid', null),
+        sides: [0, 1],
+        width,
+        height: 280,
+        names: ['Female', 'Male'],
+        colors: ['blue', 'orange'],
+        groupLabel: (group) => group ?? '',
+        value: valueFormatter(format, 'en'),
+      });
+
+    it('writes every value as the indicator does while the longest fits beside its bar', () => {
+      const plot = plotAt(1000);
+
+      expect(plot.values.map((v) => v.text).sort()).toEqual(['100 people', '1,313 people', '1,428 people', '7,451 people', '7,865 people', '8,784 people'].sort());
+    });
+
+    it('writes every value in the compact figure of the axis when the whole ones do not fit, never only the short bars', () => {
+      const plot = plotAt(340);
+
+      expect(plot.values).toHaveLength(6);
+      expect(plot.values.map((v) => v.text).sort()).toEqual(['100', '1.3K', '1.4K', '7.5K', '7.9K', '8.8K'].sort());
+    });
+
+    it('writes none when not even the compact figures fit', () => {
+      expect(plotAt(150).values).toHaveLength(0);
+    });
   });
 
   it('draws no bar for a third value or a missing band, and says how many rows were left out (Third value and missing values left out)', async () => {
@@ -357,11 +437,11 @@ describe('diverging Likert bars', () => {
   const answer = (extra: Partial<QueryResult> = {}) =>
     seriesResult(
       [
-        cell('Cali', 'Strongly disagree', 10),
-        cell('Cali', 'Disagree', 20),
-        cell('Cali', 'Neither', 20),
-        cell('Cali', 'Agree', 30),
-        cell('Cali', 'Strongly agree', 20),
+        cell('Armenia', 'Strongly disagree', 10),
+        cell('Armenia', 'Disagree', 20),
+        cell('Armenia', 'Neither', 20),
+        cell('Armenia', 'Agree', 30),
+        cell('Armenia', 'Strongly agree', 20),
         cell('Buga', 'Agree', 5),
         cell('Buga', 'Strongly agree', 5),
       ],
@@ -426,7 +506,7 @@ describe('diverging Likert bars', () => {
     const context = await show('likert', likert, answer(), [households]);
 
     await hover(context, hits(context)[3]);
-    expect(tooltipHeading()).toBe('Cali');
+    expect(tooltipHeading()).toBe('Armenia');
     expect(tooltipLines()).toEqual(['Agree: 30%', 'Households visited: 30 households']);
     expect(text(overlay().querySelector('[data-testid="tooltip-footer"]'))).toBe('Positive');
   });
@@ -438,10 +518,10 @@ describe('diverging Likert bars', () => {
     chart.focus();
     pressKey(chart, 'Enter');
     await settle(context.harness);
-    expect(spoken(context)).toBe('Cali. Strongly disagree: 10%. Households visited: 10 households. Negative');
+    expect(spoken(context)).toBe('Armenia. Strongly disagree: 10%. Households visited: 10 households. Negative');
     pressKey(chart, 'ArrowRight');
     await settle(context.harness);
-    expect(spoken(context)).toContain('Cali. Disagree: 20%');
+    expect(spoken(context)).toContain('Armenia. Disagree: 20%');
     pressKey(chart, 'ArrowDown');
     await settle(context.harness);
     expect(spoken(context)).toContain('Buga. Agree: 50%');
@@ -460,7 +540,7 @@ describe('diverging Likert bars', () => {
     await toggle(context);
     expect(tableHeaders(context)).toEqual(['municipality', ...names, 'Total']);
     expect(tableRows(context)).toEqual([
-      ['Cali', '10%', '20%', '20%', '30%', '20%', '100 households'],
+      ['Armenia', '10%', '20%', '20%', '30%', '20%', '100 households'],
       ['Buga', '—', '—', '—', '50%', '50%', '10 households'],
     ]);
   });
@@ -505,14 +585,14 @@ describe('the diverging scale', () => {
 describe('cross table widget', () => {
   afterEach(clearOverlay);
 
-  const grid = () => seriesResult([cell('Cali', 'Piped', 100, 10), cell('Cali', 'Well', 20, 2), cell('Buga', 'Piped', 40, 4), cell('Buga', 'Well', 60, 6)], ['Piped', 'Well']);
+  const grid = () => seriesResult([cell('Armenia', 'Piped', 100, 10), cell('Armenia', 'Well', 20, 2), cell('Buga', 'Piped', 40, 4), cell('Buga', 'Well', 60, 6)], ['Piped', 'Well']);
 
   it('shows the groups as rows, the series as columns, and the totals in a last row and column (Contingency table)', async () => {
     const context = await show('crosstab', sources, grid(), [households]);
 
     expect(tableHeaders(context)).toEqual(['municipality', 'Piped', 'Well', 'Total']);
     expect(tableRows(context)).toEqual([
-      ['Cali', '100 households', '20 households', '120 households'],
+      ['Armenia', '100 households', '20 households', '120 households'],
       ['Buga', '40 households', '60 households', '100 households'],
       ['Total', '140 households', '80 households', '220 households'],
     ]);
@@ -521,20 +601,20 @@ describe('cross table widget', () => {
   });
 
   it('writes a dash for a pair with no rows and counts only the rows there are (Pair with no rows)', async () => {
-    const answer = seriesResult([cell('Cali', 'Piped', 100), cell('Cali', 'River', 5), cell('Buga', 'Piped', 40)], ['Piped', 'River']);
+    const answer = seriesResult([cell('Armenia', 'Piped', 100), cell('Armenia', 'River', 5), cell('Buga', 'Piped', 40)], ['Piped', 'River']);
     const context = await show('crosstab', sources, answer, [households]);
 
     expect(tableRows(context)).toEqual([
-      ['Cali', '100 households', '5 households', '105 households'],
+      ['Armenia', '100 households', '5 households', '105 households'],
       ['Buga', '40 households', '—', '40 households'],
       ['Total', '140 households', '5 households', '145 households'],
     ]);
   });
 
   it('writes the totals of a ratio as the server computed them, not as sums or means of the cells (Ratio totals)', async () => {
-    const answer = seriesResult([cell('Cali', 'Female', 0.5, 2), cell('Cali', 'Male', 0.25, 1)], ['Female', 'Male'], {
+    const answer = seriesResult([cell('Armenia', 'Female', 0.5, 2), cell('Armenia', 'Male', 0.25, 1)], ['Female', 'Male'], {
       totals: {
-        groups: [{ group: 'Cali', value: 0.4, rows: 3 }],
+        groups: [{ group: 'Armenia', value: 0.4, rows: 3 }],
         series: [
           { series: 'Female', kind: 'value', value: 0.5, rows: 2 },
           { series: 'Male', kind: 'value', value: 0.25, rows: 1 },
@@ -546,7 +626,7 @@ describe('cross table widget', () => {
     const context = await show('crosstab', { ...sources, indicator: 'piped_water_rate', measure: null, ratio }, answer, [indicator('piped_water_rate')]);
 
     expect(tableRows(context)).toEqual([
-      ['Cali', '50%', '25%', '40%'],
+      ['Armenia', '50%', '25%', '40%'],
       ['Total', '50%', '25%', '40%'],
     ]);
   });
@@ -557,6 +637,11 @@ describe('cross table widget', () => {
     const first = context.root.querySelector('[data-testid="widget-table"] tbody th')!;
     expect(first.className).toContain('sticky');
     expect(first.className).toContain('start-0');
+    // The header sticks to the top above the group column's cells (z-10): a row scrolled under it must not paint over its first cell.
+    const head = context.root.querySelector('[data-testid="widget-table"] thead')!;
+    expect(head.className).toContain('sticky');
+    expect(head.className).toContain('top-0');
+    expect(head.className).toContain('z-20');
     expect(context.root.querySelector('tmz-table-container')!.className).toContain('overflow-x-auto');
     const total = all(context.root, 'widget-table-row').at(-1)!;
     expect(total.className).toContain('font-semibold');
@@ -580,7 +665,7 @@ describe('cross table widget', () => {
 
   it('writes "(none)" and "Other" columns by their names', async () => {
     const answer = seriesResult(
-      [cell('Cali', 'Piped', 10), cell('Cali', null, 2, 1, 'none'), cell('Cali', null, 3, 1, 'other')],
+      [cell('Armenia', 'Piped', 10), cell('Armenia', null, 2, 1, 'none'), cell('Armenia', null, 3, 1, 'other')],
       ['Piped', { value: null, kind: 'none' }, { value: null, kind: 'other' }],
     );
     const context = await show('crosstab', sources, answer, [households]);
@@ -604,7 +689,7 @@ describe('a widget whose series column a script removed (Series column removed b
 describe('every kind of chart', () => {
   afterEach(clearOverlay);
 
-  const answer = () => seriesResult([cell('Cali', 'Piped', 100), cell('Cali', 'Well', 20), cell('Buga', 'Piped', 40)], ['Piped', 'Well']);
+  const answer = () => seriesResult([cell('Armenia', 'Piped', 100), cell('Armenia', 'Well', 20), cell('Buga', 'Piped', 40)], ['Piped', 'Well']);
   const scale: LikertStep[] = [
     { value: 'Piped', side: 'negative' },
     { value: 'Well', side: 'positive' },
@@ -639,7 +724,7 @@ describe('every kind of chart', () => {
 
   it.each(chartTypes)('draws a %s widget with its own component and no other', async (type) => {
     const plain = type === 'stat' || type === 'histogram' || type === 'pie' || type === 'map';
-    const context = await show(type, settings[type] ?? {}, plain ? result([{ group: type === 'stat' ? null : 'Cali', value: 5, geometry: null }]) : answer(), [households]);
+    const context = await show(type, settings[type] ?? {}, plain ? result([{ group: type === 'stat' ? null : 'Armenia', value: 5, geometry: null }]) : answer(), [households]);
     context.http.match((r) => r.method === 'GET' && r.url === '/api/v1/basemaps').forEach((r) => r.flush({ provider: 'none', basemaps: [] }));
     await settle(context.harness);
 
@@ -663,7 +748,7 @@ describe('the new kinds in both languages', () => {
 
   it('writes a stacked chart\'s legend, summary and cross table in Spanish', async () => {
     const answer = seriesResult(
-      [cell('Cali', 'Piped', 35), cell('Cali', null, 2, 1, 'none'), cell('Cali', null, 3, 1, 'other')],
+      [cell('Armenia', 'Piped', 35), cell('Armenia', null, 2, 1, 'none'), cell('Armenia', null, 3, 1, 'other')],
       ['Piped', { value: null, kind: 'none' }, { value: null, kind: 'other' }],
     );
     const context = await open('viewer', [widget('w1', { chartType: 'column', config: config({ ...sources, layout: 'stacked' }) })], null, { indicators: [households] }, { lang: 'es' });
@@ -671,14 +756,14 @@ describe('the new kinds in both languages', () => {
     await settle(context.harness);
 
     expect(legend(context)).toEqual(['Piped', '(ninguno)', 'Otros']);
-    expect(label(context)).toBe('Gráfico de columnas apiladas de Households visited por municipality y water_source: 1 grupo, 3 series, de 2 households a 35 households. Más alto: Cali, Piped.');
+    expect(label(context)).toBe('Gráfico de columnas apiladas de Households visited por municipality y water_source: 1 grupo, 3 series, de 2 households a 35 households. Más alto: Armenia, Piped.');
     await toggle(context);
     expect(tableHeaders(context)).toEqual(['municipality', 'Piped', '(ninguno)', 'Otros', 'Total']);
   });
 
   it('writes the notes of a pyramid and the labels of a heat map in Spanish', async () => {
     const heat = await open('viewer', [widget('w1', { chartType: 'heatmap', config: config(sources) })], null, { indicators: [households] }, { lang: 'es' });
-    heat.http.match(isQuery)[0].flush(seriesResult([cell('Cali', 'Piped', 5), cell('Cali', 'Well', 7), cell('Buga', 'Piped', 9)], ['Piped', 'Well']));
+    heat.http.match(isQuery)[0].flush(seriesResult([cell('Armenia', 'Piped', 5), cell('Armenia', 'Well', 7), cell('Buga', 'Piped', 9)], ['Piped', 'Well']));
     await settle(heat.harness);
 
     expect(byTestId(heat.root, 'heatmap-legend')!.getAttribute('aria-label')).toBe('Escala de 5 households a 9 households');

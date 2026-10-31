@@ -91,18 +91,21 @@ describe('the sequential tokens and the labels on their steps', () => {
     expect(darkSteps).toEqual([...darkSteps].sort((a, b) => a - b));
   });
 
-  it.each(['light', 'dark'] as const)('gives every step a label color that reads on it in the %s theme', (theme) => {
+  it.each(['light', 'dark'] as const)('gives every step the label color that reads best on it, at 4.5:1 for the small text of a cell, in the %s theme', (theme) => {
     const set = theme === 'light' ? light : dark;
 
     ramp(set, 'seq', 7).forEach((fill, i) => {
       const ink = set[`--tmz-seq-ink-${i + 1}`];
+      const other = ink === '#ffffff' ? '#0b0b0b' : '#ffffff';
       expect(['#ffffff', '#0b0b0b'], `step ${i + 1}`).toContain(ink);
-      expect(contrast(ink, fill), `step ${i + 1}`).toBeGreaterThanOrEqual(3.5);
+      expect(contrast(ink, fill), `step ${i + 1}`).toBeGreaterThanOrEqual(4.5);
+      // White on the middle step #3987e5 is 3.6:1 and near-black 5.4:1: the label that reads better is the one used.
+      expect(contrast(ink, fill), `step ${i + 1} against ${other}`).toBeGreaterThanOrEqual(contrast(other, fill));
     });
   });
 
   it('flips the label colors between the themes, as the steps reverse', () => {
-    expect(ramp(light, 'seq-ink', 7)).toEqual(['#0b0b0b', '#0b0b0b', '#0b0b0b', '#ffffff', '#ffffff', '#ffffff', '#ffffff']);
-    expect(ramp(dark, 'seq-ink', 7)).toEqual(['#ffffff', '#ffffff', '#ffffff', '#0b0b0b', '#0b0b0b', '#0b0b0b', '#0b0b0b']);
+    expect(ramp(light, 'seq-ink', 7)).toEqual(['#0b0b0b', '#0b0b0b', '#0b0b0b', '#0b0b0b', '#ffffff', '#ffffff', '#ffffff']);
+    expect(ramp(dark, 'seq-ink', 7)).toEqual(['#ffffff', '#ffffff', '#0b0b0b', '#0b0b0b', '#0b0b0b', '#0b0b0b', '#0b0b0b']);
   });
 });

@@ -9,7 +9,7 @@ import { ValueFormatter, plotted } from './format';
 import { MarkPoint, markTooltips } from './mark-tooltips';
 import { LegendEntry, SeriesLegend, SeriesNotes, seriesName } from './series-legend';
 import { Hit, Label, Line, Rect } from './series-plot';
-import { SeriesTable, buildSeriesTable } from './series-table';
+import { SeriesTable, buildSeriesTable, orderedSeriesTable } from './series-table';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
@@ -281,7 +281,7 @@ export class LikertChart {
   protected readonly size = observeSize(() => this.box());
 
   protected readonly what = computed(() => plotted(this.config(), this.label()));
-  protected readonly table = computed(() => buildSeriesTable(this.answer(), 'likert', null));
+  protected readonly table = computed(() => orderedSeriesTable(this.answer(), 'likert', null));
   private readonly tr = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
 
   /** The side of each value of the scale, in the answer's order: the scale of the widget says it, by value. */
