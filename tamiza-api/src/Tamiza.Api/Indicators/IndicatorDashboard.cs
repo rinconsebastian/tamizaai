@@ -114,6 +114,11 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
     {
         var config = input.Normalize();
         var errors = new FieldErrors();
+        if (chartType is not null)
+        {
+            IndicatorValidation.CheckChartType(chartType, errors);
+        }
+
         IndicatorValidation.CheckConfig(config, ChartTypes.IsKnown(chartType) ? chartType : null, prefix: "", errors);
         IndicatorValidation.CheckDashboardFilters(dashboardFilters, errors);
         if (errors.Any)
@@ -131,18 +136,26 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
             }
 
             var plan = IndicatorQueryBuilder.Plan(
-                config, columns, project.TimeZone, From(projectId, config.Indicator), maxRows, perRow: chartType == ChartTypes.Histogram, dashboardFilters);
+                config, columns, project.TimeZone, From(projectId, config.Indicator), maxRows, perRow: chartType == ChartTypes.Histogram, dashboardFilters,
+                chartType);
             if (plan.Errors is not null)
             {
                 return new IndicatorQueryOutcome(null, plan.Errors);
             }
 
-            if (plan.Sql is null)
+            if (plan.Sql is null && plan.Series is null)
             {
                 return new IndicatorQueryOutcome(new IndicatorQueryResponse(true, [], false, new MissingReferences(false, plan.MissingColumns)), null);
             }
 
             await data.SleepForTestsAsync(connection, transaction, ct);
+            if (plan.Series is { } seriesPlan)
+            {
+                var seriesGroupType = columns.First(c => c.Name == config.GroupBy).Type;
+                var notFiltered = dashboardFilters is { Count: > 0 } ? plan.NotFiltered : null;
+                return new IndicatorQueryOutcome(await ReadSeriesAsync(connection, transaction, seriesPlan, seriesGroupType, maxRows, notFiltered, ct), null);
+            }
+
             var group = columns.FirstOrDefault(c => c.Name == config.GroupBy);
             var (rows, limitReached) = await ReadRowsAsync(connection, transaction, plan.Sql, group?.Type, maxRows, ct);
             return new IndicatorQueryOutcome(
@@ -264,6 +277,161 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
                 return cut ? shown + "…" : shown;
         }
     }
+
+    /// <summary>
+    /// Runs the statements of a widget with a series (design D3) and puts the answer together: the series in display order, one cell per
+    /// group and series value that has a value, and the totals. A group is shown whole or not at all, so when the row limit falls inside
+    /// a group, that group is left out.
+    /// </summary>
+    private static async Task<IndicatorQueryResponse> ReadSeriesAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, SeriesQueryPlan plan, DataColumnType groupType, int maxRows,
+        IReadOnlyList<string>? notFiltered, CancellationToken ct)
+    {
+        IReadOnlyList<string> kept;
+        List<SeriesInfo> series;
+        if (plan.FixedDomain is { } fixedValues)
+        {
+            kept = fixedValues;
+            series = fixedValues.Select(value => new SeriesInfo(value, SeriesKinds.Value)).ToList();
+        }
+        else
+        {
+            var (values, hasNone) = await ReadDomainAsync(connection, transaction, plan.Domain!, ct);
+            var (keptValues, hasOther) = SeriesDomain.Fold(values, hasNone, plan.MaxSeries);
+            kept = keptValues;
+            series = SeriesDomain.Order(keptValues, hasNone, hasOther);
+        }
+
+        var seriesIndex = new Dictionary<(string Kind, string? Value), int>();
+        for (var i = 0; i < series.Count; i++)
+        {
+            seriesIndex[(series[i].Kind, series[i].Value)] = i;
+        }
+
+        var groups = new List<(long Rank, GroupTotal Total)>();
+        var cells = new List<(long Rank, string? Group, int Series, double Value, long Rows)>();
+        var seriesTotals = new SeriesTotal?[series.Count];
+        GrandTotal grand = new(null, 0);
+        long? leftOut = null;
+
+        var cellsSql = plan.Cells(kept);
+        await using (var command = new NpgsqlCommand(cellsSql.Sql, connection, transaction))
+        {
+            foreach (var parameter in cellsSql.Parameters)
+            {
+                command.Parameters.Add(parameter.ToParameter());
+            }
+
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var part = reader.GetInt32(0);
+                var group = reader.IsDBNull(1) ? null : reader.GetString(1);
+                if (group is not null && groupType == DataColumnType.Timestamp)
+                {
+                    group = DataValues.IsoTimestamp(group);
+                }
+
+                var kind = reader.IsDBNull(2) ? null : reader.GetString(2);
+                var name = reader.IsDBNull(3) ? null : reader.GetString(3);
+                var value = reader.IsDBNull(4) ? (double?)null : FiniteOrNull(reader.GetDouble(4));
+                var rows = reader.GetInt64(5);
+                var rank = reader.IsDBNull(6) ? 0 : reader.GetInt64(6);
+                switch (part)
+                {
+                    case SeriesParts.GroupTotal:
+                        groups.Add((rank, new GroupTotal(group, value, rows)));
+                        break;
+                    case SeriesParts.Cell:
+                        // A value that is not a number has nothing to draw; the group's total still counts it.
+                        if (value is { } plotted && kind is not null && seriesIndex.TryGetValue((kind, kind == SeriesKinds.Value ? name : null), out var index))
+                        {
+                            cells.Add((rank, group, index, plotted, rows));
+                        }
+
+                        break;
+                    case SeriesParts.SeriesTotal:
+                        if (kind is not null && seriesIndex.TryGetValue((kind, kind == SeriesKinds.Value ? name : null), out var at))
+                        {
+                            seriesTotals[at] = new SeriesTotal(series[at].Value, series[at].Kind, value, rows);
+                        }
+
+                        break;
+                    case SeriesParts.Grand:
+                        grand = new GrandTotal(value, rows);
+                        break;
+                    case SeriesParts.LeftOut:
+                        leftOut = rows;
+                        break;
+                }
+            }
+        }
+
+        // The row limit counts cells: a group whose cells cross it is left out whole, with the groups after it.
+        var cut = long.MaxValue;
+        if (cells.Count > maxRows)
+        {
+            cut = cells.OrderBy(c => c.Rank).ThenBy(c => c.Series).ElementAt(maxRows).Rank;
+        }
+
+        if (groups.Count > maxRows)
+        {
+            cut = Math.Min(cut, groups.OrderBy(g => g.Rank).ElementAt(maxRows).Rank);
+        }
+
+        var limitReached = cut != long.MaxValue;
+        var shown = groups.Where(g => g.Rank < cut).OrderBy(g => g.Rank).ToList();
+        if (plan.NaturalGroups)
+        {
+            shown = shown.OrderBy(g => g.Total.Group, NaturalOrder.ByText.Instance).ToList();
+        }
+
+        var rowsOut = new List<IndicatorRow>();
+        foreach (var (rank, total) in shown)
+        {
+            foreach (var cell in cells.Where(c => c.Rank == rank).OrderBy(c => c.Series))
+            {
+                rowsOut.Add(new IndicatorRow(total.Group, cell.Value, null, cell.Rows, null, series[cell.Series].Value, series[cell.Series].Kind));
+            }
+        }
+
+        var totals = new SeriesTotals(
+            shown.Select(g => g.Total).ToList(),
+            series.Select((info, i) => seriesTotals[i] ?? new SeriesTotal(info.Value, info.Kind, null, 0)).ToList(),
+            grand);
+        return new IndicatorQueryResponse(true, rowsOut, limitReached, MissingReferences.None, null, notFiltered, series, totals, leftOut);
+    }
+
+    /// <summary>The series values of a widget by total, largest first, and whether some rows have no series value.</summary>
+    private static async Task<(List<string> Values, bool HasNone)> ReadDomainAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, CancellationToken ct)
+    {
+        await using var command = new NpgsqlCommand(sql.Sql, connection, transaction);
+        foreach (var parameter in sql.Parameters)
+        {
+            command.Parameters.Add(parameter.ToParameter());
+        }
+
+        var values = new List<string>();
+        var hasNone = false;
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            if (reader.IsDBNull(0))
+            {
+                hasNone = true;
+            }
+            else
+            {
+                values.Add(reader.GetString(0));
+            }
+        }
+
+        return (values, hasNone);
+    }
+
+    /// <summary>NaN and infinity have no number in JSON.</summary>
+    private static double? FiniteOrNull(double value) => double.IsFinite(value) ? value : null;
 
     private static async Task<(List<IndicatorRow> Rows, bool LimitReached)> ReadRowsAsync(
         NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, DataColumnType? groupType, int maxRows, CancellationToken ct)

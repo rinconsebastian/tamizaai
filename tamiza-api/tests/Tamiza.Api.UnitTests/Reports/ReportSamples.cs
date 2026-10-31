@@ -31,4 +31,15 @@ internal static class ReportSamples
 
     public static ReportWidget Unreadable(int position, string title, string reason) =>
         new(position, title, ChartTypes.Bar, "Visits: value", WidgetOutcome.NotPublished, [], [], null, reason, []);
+
+    /// <summary>A cross table of <paramref name="series"/> series columns (named S1, S2…) between the group column and "Total", with a "Total" row.</summary>
+    public static ReportWidget CrossTable(int position, string title, int series, int groups = 3, string chartType = ChartTypes.Column) =>
+        new(position, title, chartType, "Households: value", WidgetOutcome.Shown,
+            [new ReportColumn("municipality"), .. Enumerable.Range(1, series).Select(i => new ReportColumn($"S{i}", "#,##0")), new ReportColumn("Total", "#,##0")],
+            [.. Enumerable.Range(1, groups).Select(g => (IReadOnlyList<ReportCell>)
+                [new ReportCell($"Municipality {g}", $"Municipality {g}"),
+                 .. Enumerable.Range(1, series).Select(i => new ReportCell((double)(g * i), $"{g * i}")),
+                 new ReportCell((double)(g * series), $"{g * series}")]),
+             [new ReportCell("Total", "Total"), .. Enumerable.Range(1, series).Select(i => new ReportCell((double)i, $"{i}")), new ReportCell(series, $"{series}")]],
+            null, null, [], series);
 }

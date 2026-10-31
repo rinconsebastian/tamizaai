@@ -99,6 +99,24 @@ public sealed class McpGuideTests
     }
 
     [Fact]
+    public void The_instructions_name_every_kind_of_widget_and_say_when_each_fits()
+    {
+        var text = McpGuide.Instructions;
+
+        foreach (var kind in Tamiza.Api.Indicators.ChartTypes.All)
+        {
+            Assert.Contains($"`{kind}`", text);
+        }
+
+        foreach (var setting in new[] { "seriesBy", "layout", "scale" })
+        {
+            Assert.Contains($"`{setting}`", text);
+        }
+
+        Assert.Contains("rates do not add up", text);
+    }
+
+    [Fact]
     public void The_prompt_names_the_project_and_the_situation_and_asks_for_confirmation_before_scripts()
     {
         var id = Guid.NewGuid();

@@ -428,7 +428,8 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
         modelBuilder.Entity<DashboardWidget>(widget =>
         {
             widget.ToTable("dashboard_widgets", table => table.HasCheckConstraint(
-                "ck_dashboard_widgets_chart_type", "chart_type IN ('stat', 'bar', 'column', 'line', 'histogram', 'pie', 'map')"));
+                "ck_dashboard_widgets_chart_type",
+                "chart_type IN ('stat', 'bar', 'column', 'line', 'histogram', 'pie', 'map', 'heatmap', 'pyramid', 'likert', 'crosstab')"));
             widget.HasKey(w => w.Id);
             widget.Property(w => w.Id).HasDefaultValueSql("gen_random_uuid()");
             widget.Property(w => w.ChartType).HasColumnType("text");

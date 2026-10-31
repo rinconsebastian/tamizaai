@@ -184,7 +184,7 @@ Exports are written to `ExportDirectory` before the browser downloads them, so t
 | Variable | Default | Meaning |
 |---|---|---|
 | `IndicatorDashboard__MaxWidgetsPerDashboard` | `50` | Most widgets one dashboard can hold, from 1 to 500. A project has up to 7 dashboards, so it can hold up to 7 times as many widgets. Widgets already saved are kept if you lower it: a dashboard at or above the limit cannot get more widgets, added or moved to it, until it is under the limit, and one above the limit cannot be duplicated until it holds no more widgets than the limit. |
-| `IndicatorDashboard__MaxWidgetQueryRows` | `5000` | Most rows one widget plots, from 1 to 100,000. A widget with more says that only the first rows are shown. |
+| `IndicatorDashboard__MaxWidgetQueryRows` | `5000` | Most rows one widget plots, from 1 to 100,000. A widget with more says that only the first rows are shown. A widget with a series counts one row for each pair of group and series value, and leaves out whole the groups that would cross the limit. |
 
 `IndicatorDashboard__MaxWidgetsPerProject`, the name of the widget limit before a project could have several dashboards, still works: when `IndicatorDashboard__MaxWidgetsPerDashboard` is not set, `api` uses its value as the limit of each dashboard, checks it the same way (a value that is not a number from 1 to 500 stops `api` at startup), and logs one warning at startup naming both variables. When both are set, `IndicatorDashboard__MaxWidgetsPerDashboard` wins and the old one is ignored. Rename it when convenient. The number of dashboards a project can have, 7, is fixed.
 

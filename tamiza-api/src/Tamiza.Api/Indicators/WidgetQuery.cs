@@ -23,7 +23,11 @@ public static class WidgetQuery
         // A label and a format change nothing in the rows; the query needs only the columns.
         chartType == ChartTypes.Map ? config.Tooltip.Select(item => new WidgetTooltipItem(item.Column)).ToList() : [],
         null,
-        []);
+        [],
+        ChartTypes.HasSeries(chartType) ? config.SeriesBy : null,
+        chartType is ChartTypes.Bar or ChartTypes.Column ? config.Layout : null,
+        chartType == ChartTypes.Pyramid ? config.Pyramid : null,
+        chartType == ChartTypes.Likert ? config.Scale : []);
 
     /// <summary>Plotting the value is always by number, and which column it is makes no sense then.</summary>
     private static WidgetSort SortFor(WidgetSort sort) => sort.By == SortValues.ByValue ? sort with { Column = null, CompareAs = null } : sort;

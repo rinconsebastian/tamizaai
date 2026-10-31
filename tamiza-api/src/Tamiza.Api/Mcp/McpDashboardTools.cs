@@ -21,6 +21,17 @@ public sealed class McpDashboardTools(
     IndicatorDashboard indicators, IOptions<IndicatorDashboardOptions> dashboardOptions) : McpToolBase(gate, call, options)
 {
     private const string ProjectHelp = "The project's id, from list_projects.";
+
+    private const string ChartTypeHelp =
+        "stat, bar, column, line, histogram, pie, map, heatmap (groups as rows, series as columns, cells shaded), pyramid (two series values drawn left and right), " +
+        "likert (agreement scale as bars centered on the neutral value) or crosstab (a table of groups by series with totals).";
+
+    private const string SeriesHelp =
+        "seriesBy is a second column that splits each group into series. It is optional for bar, column and line and required for heatmap, pyramid, likert and crosstab; " +
+        "it must differ from groupBy. For bar and column, layout is grouped (side by side, the default), stacked or percent (each bar's shares of its total); stacked and percent need a measure, not a ratio. " +
+        "Past 8 series (30 for heatmap and crosstab) the smallest are combined as Other. A pyramid needs pyramid = { left, right }, two values of the series column. " +
+        "A likert needs scale = 2 to 11 values of the series column in order, each with a side of negative, neutral or positive (negatives first, at most one neutral, at most 5 per side) and a measure, not a ratio. " +
+        "With a series the result lists series, cells ({ group, series, value, formatted, share? }), totals of every group, series and all rows, and notes; rows are not sent.";
     private const string DashboardHelp = "The dashboard's id, from list_dashboards.";
 
     // Indicators
@@ -46,12 +57,13 @@ public sealed class McpDashboardTools(
 
     [McpServerTool(Name = "query_indicator", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Preview what a widget would plot"),
      Description("Runs a widget query without saving anything and returns what the widget would plot: the measure summed (or the ratio of two columns' sums) per group, formatted with the indicator's format and unit. " +
-                 "Use it before create_widget. config = { indicator, measure | ratio: { numerator, denominator }, groupBy, filters: [{ column, op, value | values | min | max }], geometryColumn, buckets }. " +
-                 "A bar, column, line, pie or map needs groupBy; a stat tile and a histogram do not. At most the widget row limit of rows come back and the result says when it is reached.")]
+                 "Use it before create_widget. config = { indicator, measure | ratio: { numerator, denominator }, groupBy, seriesBy, layout, pyramid: { left, right }, scale: [{ value, side }], filters: [{ column, op, value | values | min | max }], geometryColumn, buckets }. " +
+                 "A bar, column, line, pie, map, heatmap, pyramid, likert or crosstab needs groupBy; a stat tile and a histogram do not. " + SeriesHelp + " " +
+                 "At most the widget row limit of rows come back and the result says when it is reached.")]
     public Task<CallToolResult> QueryIndicator(
         [Description(ProjectHelp)] Guid projectId,
         [Description("The widget's query.")] WidgetConfigInput config,
-        [Description("Optional. stat, bar, column, line, histogram, pie or map; changes what a missing groupBy means.")] string? chartType = null,
+        [Description("Optional. " + ChartTypeHelp + " It changes what a missing groupBy means and which series a pyramid or a Likert widget keeps.")] string? chartType = null,
         CancellationToken ct = default) =>
         RunAsync(async () =>
         {
@@ -60,6 +72,7 @@ public sealed class McpDashboardTools(
                 await IndicatorEndpoints.QueryAsync(projectId, new IndicatorQueryRequest(config, chartType), indicators, ct));
             var meta = await MetaAsync(projectId, ct);
             var info = meta.GetValueOrDefault(config.Indicator ?? "");
+            var series = response.Series is null ? null : SeriesPayload.From(response, chartType ?? ChartTypes.Bar, config.Layout, info);
             return new
             {
                 indicator = config.Indicator,
@@ -69,7 +82,11 @@ public sealed class McpDashboardTools(
                 response.Published,
                 missing = response.Missing.Any ? response.Missing : null,
                 response.RowLimitReached,
-                rows = response.Rows.Select(r => Row(r, info)).ToList(),
+                rows = series is null ? response.Rows.Select(r => Row(r, info)).ToList() : null,
+                series = series?.Series,
+                cells = series?.Cells,
+                totals = series?.Totals,
+                notes = series?.Notes,
             };
         }, hint: "Add a filter or group by a column with fewer values.");
 
@@ -103,7 +120,8 @@ public sealed class McpDashboardTools(
 
     [McpServerTool(Name = "get_widget_data", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Get what the widgets show"),
      Description("What the widgets of a dashboard (or one widget) show, as a member opening the dashboard sees it: for each widget its rows (group and value, with the value formatted as the dashboard formats it), " +
-                 "or the message the widget shows when its indicator has not published, a column is gone or there are no rows. Dashboard filters are at their defaults unless you pass filterValues: [{ column, values | min | max }].")]
+                 "or the message the widget shows when its indicator has not published, a column is gone or there are no rows. A widget with a series (seriesBy) returns series, cells ({ group, series, value, formatted, share? }), totals and notes instead of rows. " +
+                 "Dashboard filters are at their defaults unless you pass filterValues: [{ column, values | min | max }].")]
     public Task<CallToolResult> GetWidgetData(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
@@ -232,14 +250,15 @@ public sealed class McpDashboardTools(
     // Widgets
 
     [McpServerTool(Name = "create_widget", Title = "Add a widget to a dashboard", Idempotent = false, OpenWorld = false, Destructive = false),
-     Description("Adds a widget: a stat tile, bar, column, line, histogram, pie chart or map, with a title and a query over one indicator's table. Check the query with query_indicator first. " +
-                 "config = { indicator, measure | ratio: { numerator, denominator }, groupBy, filters, geometryColumn, buckets, sort, tooltip }. Bar, column, line, pie and map need groupBy; a map also needs geometryColumn (WKT in degrees). " +
+     Description("Adds a widget: a stat tile, bar, column, line, histogram, pie chart, map, heat map, population pyramid, diverging Likert chart or cross table, with a title and a query over one indicator's table. Check the query with query_indicator first. " +
+                 "config = { indicator, measure | ratio: { numerator, denominator }, groupBy, seriesBy, layout, pyramid: { left, right }, scale: [{ value, side }], filters, geometryColumn, buckets, sort, tooltip }. " +
+                 "Every kind but stat tile and histogram needs groupBy; a map also needs geometryColumn (WKT in degrees). " + SeriesHelp + " " +
                  "It goes under the dashboard's widgets unless you give layout = { x, y, w, h } on the 12-column grid. A dashboard holds a limited number of widgets.")]
     public Task<CallToolResult> CreateWidget(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
         [Description("The widget's title, up to 200 characters.")] string title,
-        [Description("stat, bar, column, line, histogram, pie or map.")] string chartType,
+        [Description(ChartTypeHelp)] string chartType,
         [Description("The widget's query.")] WidgetConfigInput config,
         [Description("Optional. Position and size on the grid.")] WidgetLayout? layout = null,
         CancellationToken ct = default) =>
@@ -251,13 +270,13 @@ public sealed class McpDashboardTools(
         });
 
     [McpServerTool(Name = "update_widget", Title = "Change or move a widget", Idempotent = true, OpenWorld = false, Destructive = false),
-     Description("Changes a widget's title, chart type, query or layout, or moves it to another dashboard of the project with moveToDashboardId (it lands under that dashboard's widgets). What you leave out keeps its value.")]
+     Description("Changes a widget's title, chart type, query or layout, or moves it to another dashboard of the project with moveToDashboardId (it lands under that dashboard's widgets). What you leave out keeps its value; a new config replaces the old one whole, including its series settings.")]
     public Task<CallToolResult> UpdateWidget(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
         [Description("The widget's id, from get_dashboard.")] Guid widgetId,
         [Description("Optional. The new title.")] string? title = null,
-        [Description("Optional. The new chart type.")] string? chartType = null,
+        [Description("Optional. The new chart type: " + ChartTypeHelp)] string? chartType = null,
         [Description("Optional. The new query, replacing the old one.")] WidgetConfigInput? config = null,
         [Description("Optional. The new position and size on the grid.")] WidgetLayout? layout = null,
         [Description("Optional. Another dashboard of the project to move the widget to.")] Guid? moveToDashboardId = null,
@@ -330,7 +349,7 @@ public sealed class McpDashboardTools(
         return index < 0 ? null : index + 1;
     }
 
-    private sealed record IndicatorInfo(string Label, string? Unit, string Format);
+    internal sealed record IndicatorInfo(string Label, string? Unit, string Format);
 
     private async Task<Dictionary<string, IndicatorInfo>> MetaAsync(Guid projectId, CancellationToken ct) =>
         (await ScriptEndpoints.CurrentIndicatorsAsync(db, projectId, ct))
@@ -397,6 +416,8 @@ public sealed class McpDashboardTools(
             return Header("noRows", "No rows to show.");
         }
 
+        var series = response.Series is null ? null : SeriesPayload.From(response, widget.ChartType, widget.Config.Layout, info);
+        notes.AddRange(series?.Notes ?? []);
         return new
         {
             widgetId = widget.Id,
@@ -407,7 +428,10 @@ public sealed class McpDashboardTools(
             status = "shown",
             message = (string?)null,
             notes = notes.Count > 0 ? notes : null,
-            rows = response.Rows.Select(r => Row(r, info)).ToList(),
+            rows = series is null ? response.Rows.Select(r => Row(r, info)).ToList() : null,
+            series = series?.Series,
+            cells = series?.Cells,
+            totals = series?.Totals,
         };
     }
 
@@ -429,5 +453,60 @@ public sealed class McpDashboardTools(
         }
 
         return result;
+    }
+}
+
+/// <summary>What a tool says of a widget with a series: its series, one entry per cell with a value, the totals and the notes about what was set aside.</summary>
+internal sealed record SeriesPayload(IReadOnlyList<object> Series, IReadOnlyList<object> Cells, object Totals, IReadOnlyList<string> Notes)
+{
+    private static readonly ReportFormat English = new(CultureInfo.GetCultureInfo("en-US"), TimeZoneInfo.Utc);
+
+    public static SeriesPayload From(IndicatorQueryResponse response, string chartType, string? layout, McpDashboardTools.IndicatorInfo? info)
+    {
+        var table = SeriesTable.From(response, chartType, layout);
+        string? Shown(double? value) => value is { } number ? English.Value(number, info?.Format, info?.Unit) : null;
+        string? KindOf(string kind) => kind == SeriesKinds.Value ? null : kind;
+
+        var cells = new List<object>();
+        foreach (var row in table.Rows)
+        {
+            for (var i = 0; i < table.Columns.Count; i++)
+            {
+                if (row.Cells[i] is { } value)
+                {
+                    cells.Add(new
+                    {
+                        group = row.Group,
+                        series = table.Columns[i].Series,
+                        kind = KindOf(table.Columns[i].Kind),
+                        value,
+                        formatted = Shown(value),
+                        share = row.Shares?[i],
+                    });
+                }
+            }
+        }
+
+        var notes = new List<string>();
+        if (table.LeftOut > 0)
+        {
+            notes.Add($"{table.LeftOut} rows were left out: their group or value is not one the chart shows.");
+        }
+
+        if (table.NegativeLeftOut > 0)
+        {
+            notes.Add($"{table.NegativeLeftOut} negative values were left out of the shares.");
+        }
+
+        return new SeriesPayload(
+            table.Columns.Select(c => (object)new { value = c.Series, kind = KindOf(c.Kind) }).ToList(),
+            cells,
+            new
+            {
+                groups = table.Rows.Select(r => new { group = r.Group, value = r.Total, formatted = Shown(r.Total), r.Rows }).ToList(),
+                series = table.Columns.Select(c => new { series = c.Series, kind = KindOf(c.Kind), value = c.Total, formatted = Shown(c.Total), c.Rows }).ToList(),
+                all = new { value = table.GrandTotal, formatted = Shown(table.GrandTotal), rows = table.GrandRows },
+            },
+            notes);
     }
 }

@@ -7,7 +7,7 @@ Tamiza turns the answers of a KoboToolbox survey into indicators and dashboards.
 1. Cleaning script (script 1, `clean`) turns the flattened submissions (`raw` tables) into the `clean` tables.
 2. Output script (script 2, `output`, optional) prepares the tables of the clean data dashboard.
 3. One indicator script per indicator (`indicator`) turns the clean tables into one small table: dimensions as text columns and numeric measures (`value`, and `numerator` and `denominator` for a rate).
-4. A run publishes all of it. Dashboards hold widgets (stat, bar, column, line, histogram, pie, map), each a saved query over one indicator's table.
+4. A run publishes all of it. Dashboards hold widgets (stat, bar, column, line, histogram, pie, map, heatmap, pyramid, likert, crosstab), each a saved query over one indicator's table.
 
 ## Describing a situation
 
@@ -20,6 +20,18 @@ When the person asks you to describe a situation (for example "access to water b
 5. One indicator script per indicator, each tested and then saved with a label, a unit and a format (`count`, `decimal`, `percent`, `currency`).
 6. `start_run` and wait for it. Read `get_run` for errors; fix and run again.
 7. `create_dashboard`, then for each widget `query_indicator` first to see what it would plot, then `create_widget`. Add dashboard filters on columns the indicator tables share. Finish with `get_widget_data` and describe to the person what the dashboard shows.
+
+## Choosing a widget
+
+A widget groups an indicator table by one column (`groupBy`) and may split each group by a second one (`seriesBy`), so an indicator that feeds a series widget must publish both dimensions as text columns, one row per combination.
+
+- One number: `stat`. One dimension: `bar`, `column` (compare groups), `line` (a trend over ordered groups such as rounds or months), `pie` (shares of a whole, few groups), `histogram` (a distribution), `map` (shapes with a geometry column).
+- Composition of each group by a second dimension (water source by municipality): `column` or `bar` with a `seriesBy` and `layout` `stacked`, or `percent` to compare shares. Compare the series side by side: `layout` `grouped`. A trend per series: `line` with a `seriesBy`.
+- A magnitude over two dimensions: `heatmap`. The same as a table with row and column totals: `crosstab`.
+- Two groups compared across ordered bands, such as women and men by age band: `pyramid` with `seriesBy` and `pyramid` = `{ left, right }`.
+- An agreement scale (strongly disagree to strongly agree): `likert` with `seriesBy` on the answer column and a `scale` that orders its values and marks each negative, neutral or positive. It shows each group's composition in percent.
+- `stacked`, `percent` and `likert` need a measure (counts), not a ratio: rates do not add up. A rate by two dimensions goes in `grouped`, `line`, `heatmap`, `pyramid` or `crosstab`.
+- With `seriesBy`, `query_indicator` and `get_widget_data` return `series`, `cells`, `totals` and `notes` instead of `rows`. Check them before and after you create the widget.
 
 ## Rules
 

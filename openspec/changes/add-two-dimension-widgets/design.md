@@ -202,7 +202,7 @@ Chart types: `stat bar column line histogram pie map heatmap pyramid likert cros
 ```
 
 - `series` is the domain in display order (natural order, then `none`, then `other`). A pyramid's is `[left, right]` and a Likert's the scale in order, whether or not rows exist for them. `kind` is `value`, `none` (the rows with no series value; `value` null) or `other` (the folded series; `value` null).
-- `rows` lists the cells that have a value, group by group in the order of `totals.groups`, and inside a group in the order of `series`. `rows` of a cell is the number of table rows it sums. A missing group value is `group: null`.
+- `rows` lists the cells that have a value, group by group in the order of `totals.groups`, and inside a group in the order of `series`. `rows` of a cell is the number of table rows it sums. A missing group value is `group: null`. A cell's `series` is **left out of the JSON** (absent, not `null`) when its `seriesKind` is `none` or `other`, as a plain row leaves out the members it has no value for: a reader treats absent and `null` alike and matches such a cell to its series by `seriesKind`.
 - `totals.series` has one entry per `series` entry, in the same order; `value` is null and `rows` 0 for a series with no rows (for example after a dashboard filter). `totals.groups` is the authoritative order of the groups. A total is computed from the rows: for a ratio it is the ratio of the sums, never a sum or mean of cells (`value` is null when the denominator sums to zero).
 - `leftOut` is only sent for `pyramid` and `likert`.
 

@@ -760,6 +760,62 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
     }
 
     /// <summary>Brings a database to an earlier schema by applying only the named scripts.</summary>
+    [Fact]
+    public async Task Two_dimension_widgets_script_keeps_existing_widgets_and_accepts_the_four_new_kinds()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        ApplyScripts(
+            connectionString, SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql", "0004_add_pipeline_authoring.sql",
+            "0005_add_choice_labels.sql", "0006_add_performance_dashboard.sql", "0007_add_indicators_dashboard.sql", "0008_split_indicator_scripts.sql",
+            "0009_add_script_workbench.sql", "0010_add_local_dev_kit.sql", "0011_add_script_assistant.sql", "0012_add_multiple_dashboards.sql",
+            "0013_add_account_emails.sql", "0014_add_dashboard_filters.sql", "0015_add_dashboard_reports.sql", "0016_add_mcp_server.sql");
+        const string project = "00000000-0000-0000-0000-0000000000aa";
+        const string ada = "00000000-0000-0000-0000-000000000001";
+        const string dashboard = "00000000-0000-0000-0000-0000000000d1";
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('{{ada}}', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('{{project}}', 'Survey', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(), '{{ada}}', now(), now());
+            INSERT INTO tamiza.dashboards (id, project_id, name, normalized_name, position, created_by, updated_by)
+            VALUES ('{{dashboard}}', '{{project}}', 'Indicators', 'indicators', 0, '{{ada}}', '{{ada}}');
+            INSERT INTO tamiza.dashboard_widgets (id, project_id, dashboard_id, chart_type, title, config, layout, created_by, created_at, updated_by, updated_at)
+            VALUES ('00000000-0000-0000-0000-0000000000c1', '{{project}}', '{{dashboard}}', 'column', 'Coverage',
+                    '{"indicator":"coverage","measure":"value","groupBy":"municipality"}', '{"x":0,"y":0,"w":6,"h":4}', '{{ada}}',
+                    '2026-10-01 08:00:00+00', '{{ada}}', '2026-10-02 09:30:00+00'),
+                   ('00000000-0000-0000-0000-0000000000c2', '{{project}}', '{{dashboard}}', 'map', 'Blocks',
+                    '{"indicator":"blocks","geometryColumn":"geometry","groupBy":"block"}', '{"x":6,"y":0,"w":6,"h":6}', '{{ada}}',
+                    '2026-10-03 08:00:00+00', '{{ada}}', '2026-10-04 17:45:00+00');
+            """);
+        const string widgets = """
+            SELECT string_agg(format('%s %s %s %s %s %s', id, chart_type, title, config, layout, updated_at), ' | ' ORDER BY id)
+            FROM tamiza.dashboard_widgets
+            """;
+        var before = await ScalarAsync<string>(connectionString, widgets);
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        Assert.Contains("0017_add_two_dimension_widgets.sql", Scripts);
+        Assert.Equal(before, await ScalarAsync<string>(connectionString, widgets));
+
+        // The four new kinds are accepted, an unknown kind is still refused by the same check.
+        foreach (var kind in new[] { "heatmap", "pyramid", "likert", "crosstab" })
+        {
+            await ExecuteAsync(connectionString, $$"""
+                INSERT INTO tamiza.dashboard_widgets (project_id, dashboard_id, chart_type, title, created_by, updated_by)
+                VALUES ('{{project}}', '{{dashboard}}', '{{kind}}', '{{kind}}', '{{ada}}', '{{ada}}')
+                """);
+        }
+
+        var bad = await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.dashboard_widgets (project_id, dashboard_id, chart_type, title, created_by, updated_by)
+            VALUES ('{{project}}', '{{dashboard}}', 'radar', 'Bad', '{{ada}}', '{{ada}}')
+            """));
+        Assert.Equal("ck_dashboard_widgets_chart_type", bad.ConstraintName);
+        Assert.Equal(6L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+    }
+
     private static void ApplyScripts(string connectionString, params string[] names)
     {
         var builder = DeployChanges.To

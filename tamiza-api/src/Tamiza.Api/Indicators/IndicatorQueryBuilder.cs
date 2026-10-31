@@ -17,8 +17,10 @@ public sealed record IndicatorSql(string Sql, IReadOnlyList<SqlParam> Parameters
 /// <see cref="Sql"/> is set unless something is <see cref="MissingColumns"/>, in which case there is nothing to run.
 /// </summary>
 /// <param name="NotFiltered">The columns of the dashboard filters that do not narrow this table, in the request's order (design D3).</param>
+/// <param name="Series">Set instead of <paramref name="Sql"/> for a widget with a series (design D3): its statements are built and run in two steps.</param>
 public sealed record IndicatorQueryPlan(
-    IndicatorSql? Sql, IReadOnlyList<string> MissingColumns, IDictionary<string, string[]>? Errors, IReadOnlyList<string>? NotFiltered = null);
+    IndicatorSql? Sql, IReadOnlyList<string> MissingColumns, IDictionary<string, string[]>? Errors, IReadOnlyList<string>? NotFiltered = null,
+    SeriesQueryPlan? Series = null);
 
 /// <summary>Validates a widget query against the indicator table's columns and turns it into SQL.</summary>
 public static class IndicatorQueryBuilder
@@ -44,7 +46,7 @@ public static class IndicatorQueryBuilder
     /// same name: without an order, groups follow the column's own type. With one, the sort key comes first and the group
     /// column breaks ties, so the order is total.
     /// </summary>
-    private static string OrderBy(WidgetConfig config, Dictionary<string, TableColumn> byName, string from, string aggregate)
+    internal static string OrderBy(WidgetConfig config, IReadOnlyDictionary<string, TableColumn> byName, string from, string aggregate)
     {
         var group = $"{from}.{DataSources.Quote(byName[config.GroupBy!].Name)} NULLS LAST";
         if (config.Sort is not { } sort)
@@ -108,7 +110,7 @@ public static class IndicatorQueryBuilder
     /// </param>
     public static IndicatorQueryPlan Plan(
         WidgetConfig config, IReadOnlyList<TableColumn> columns, string timeZone, string from, int maxRows, bool perRow = false,
-        IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null)
+        IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null, string? chartType = null)
     {
         var byName = columns.ToDictionary(c => c.Name, StringComparer.Ordinal);
 
@@ -130,6 +132,7 @@ public static class IndicatorQueryBuilder
         }
 
         Need(config.GroupBy);
+        Need(config.SeriesBy);
         Need(config.GeometryColumn);
         Need(measure);
         Need(config.Ratio?.Numerator);
@@ -200,6 +203,12 @@ public static class IndicatorQueryBuilder
             aggregate = $"sum({Q(ratio.Numerator)})::double precision / nullif(sum({Q(ratio.Denominator)}), 0)";
             plotted = $"{Q(ratio.Numerator)}::double precision / nullif({Q(ratio.Denominator)}, 0)";
             rowFilter = $"({Q(ratio.Numerator)} IS NOT NULL OR {Q(ratio.Denominator)} IS NOT NULL)";
+        }
+
+        if (config.SeriesBy is not null && grouped)
+        {
+            var series = SeriesQueryBuilder.Build(config, chartType, byName, from, aggregate, rowFilter, query, dashboard, maxRows);
+            return new IndicatorQueryPlan(null, missing, null, notFiltered, series);
         }
 
         var group = grouped ? $"{Q(config.GroupBy!)}::text" : "NULL::text";

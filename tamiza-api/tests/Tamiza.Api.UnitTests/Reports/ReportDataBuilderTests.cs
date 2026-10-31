@@ -41,13 +41,13 @@ public sealed class ReportDataBuilderTests
     {
         var rows = new[] { "10", "2", "1", "b", "a" }.Select(g => Row(g, 0));
 
-        Assert.Equal(["1", "2", "10", "a", "b"], rows.Order(ReportDataBuilder.NaturalGroupOrder.Instance).Select(r => r.Group));
+        Assert.Equal(["1", "2", "10", "a", "b"], rows.Order(NaturalOrder.ByGroup.Instance).Select(r => r.Group));
     }
 
     [Fact]
     public void Orders_groups_naturally_with_a_missing_group_last()
     {
-        var ordered = new[] { Row(null, 1), Row("10", 3), Row("2", 2) }.Order(ReportDataBuilder.NaturalGroupOrder.Instance).ToList();
+        var ordered = new[] { Row(null, 1), Row("10", 3), Row("2", 2) }.Order(NaturalOrder.ByGroup.Instance).ToList();
 
         Assert.Equal(["2", "10", null], ordered.Select(r => r.Group));
         Assert.Equal([2d, 3d, 1d], ordered.Select(r => r.Value));
@@ -56,7 +56,7 @@ public sealed class ReportDataBuilderTests
     [Fact]
     public void Ignores_case_and_accents_as_the_page_does()
     {
-        var ordered = new[] { "bogotá", "Bogota", "Árbol", "cali" }.Select(g => Row(g, 0)).Order(ReportDataBuilder.NaturalGroupOrder.Instance);
+        var ordered = new[] { "bogotá", "Bogota", "Árbol", "cali" }.Select(g => Row(g, 0)).Order(NaturalOrder.ByGroup.Instance);
 
         Assert.Equal("Árbol", ordered.First().Group);
         Assert.Equal("cali", ordered.Last().Group);

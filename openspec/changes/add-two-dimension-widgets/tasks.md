@@ -13,41 +13,41 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 1. Schema (api)
 
-- [ ] 1.1 Add `tamiza-api/src/dbUp/Scripts/0017_add_two_dimension_widgets.sql` as design D1: drop `ck_dashboard_widgets_chart_type` and add it again with `stat`, `bar`, `column`, `line`, `histogram`, `pie`, `map`, `heatmap`, `pyramid`, `likert` and `crosstab`. Keep upper-case `CHECK`, `FOREIGN KEY` and `PRIMARY KEY` out of its comment. Verify the analytics integration tests still build their template database.
-- [ ] 1.2 Mirror the CHECK in `TamizaDbContext` (`:430-431`). Verify `SchemaDriftTests` passes.
-- [ ] 1.3 Add `The_two_dimension_widgets_script_widens_one_check` to `ScriptConventionTests`, in the style of the 0014 test. Verify it passes.
-- [ ] 1.4 Add a `SchemaMigratorTests` upgrade test from `0016`: seed a dashboard with a column chart and a map, then `MigrateAsync`. Verify their `chart_type`, `config` and `updated_at` are unchanged, a `heatmap` widget can be inserted, and `radar` is still refused.
+- [x] 1.1 Add `tamiza-api/src/dbUp/Scripts/0017_add_two_dimension_widgets.sql` as design D1: drop `ck_dashboard_widgets_chart_type` and add it again with `stat`, `bar`, `column`, `line`, `histogram`, `pie`, `map`, `heatmap`, `pyramid`, `likert` and `crosstab`. Keep upper-case `CHECK`, `FOREIGN KEY` and `PRIMARY KEY` out of its comment. Verify the analytics integration tests still build their template database.
+- [x] 1.2 Mirror the CHECK in `TamizaDbContext` (`:430-431`). Verify `SchemaDriftTests` passes.
+- [x] 1.3 Add `The_two_dimension_widgets_script_widens_one_check` to `ScriptConventionTests`, in the style of the 0014 test. Verify it passes.
+- [x] 1.4 Add a `SchemaMigratorTests` upgrade test from `0016`: seed a dashboard with a column chart and a map, then `MigrateAsync`. Verify their `chart_type`, `config` and `updated_at` are unchanged, a `heatmap` widget can be inserted, and `radar` is still refused.
 
 ## 2. Kinds, config and validation (api)
 
-- [ ] 2.1 Add the four kinds, `TakesSeries` and `NeedsSeries` to `ChartTypes`, and `SeriesLayouts`, `LikertSides`, `WidgetPyramid` and `LikertStep`; add `SeriesBy`, `Layout`, `Pyramid` and `Scale` to `WidgetConfigInput`, `Normalize()` and `WidgetConfig` (design D1). Verify unit tests: a config saved before has no series; each field survives the JSON round trip that `ReadConfig` and the PATCH use; an empty `seriesBy` normalizes to none.
-- [ ] 2.2 Add the rules of design D2 to `CheckConfig`. Verify `IndicatorValidationTests` with one case per row of D2's table, each naming its key (`config.seriesBy`, `config.layout`, `config.pyramid.right`, `config.scale[2]`…), and that every existing case still passes.
-- [ ] 2.3 Check the series column in `CheckAgainstColumns`, and collect a missing one into `missing.columns` for the query. Give the new kinds their default sizes (D1). Verify `Series column removed by a script change` (the widget is stale and no SQL runs) and the sizes.
-- [ ] 2.4 Make the query endpoint reject an unknown `chartType` with an error on it, and `DefaultSize` switch over every kind with no default branch (design D6). Verify a unit test that iterates `ChartTypes.All` and an integration test for the unknown kind (400).
+- [x] 2.1 Add the four kinds, `TakesSeries` and `NeedsSeries` to `ChartTypes`, and `SeriesLayouts`, `LikertSides`, `WidgetPyramid` and `LikertStep`; add `SeriesBy`, `Layout`, `Pyramid` and `Scale` to `WidgetConfigInput`, `Normalize()` and `WidgetConfig` (design D1). Verify unit tests: a config saved before has no series; each field survives the JSON round trip that `ReadConfig` and the PATCH use; an empty `seriesBy` normalizes to none.
+- [x] 2.2 Add the rules of design D2 to `CheckConfig`. Verify `IndicatorValidationTests` with one case per row of D2's table, each naming its key (`config.seriesBy`, `config.layout`, `config.pyramid.right`, `config.scale[2]`…), and that every existing case still passes.
+- [x] 2.3 Check the series column in `CheckAgainstColumns`, and collect a missing one into `missing.columns` for the query. Give the new kinds their default sizes (D1). Verify `Series column removed by a script change` (the widget is stale and no SQL runs) and the sizes.
+- [x] 2.4 Make the query endpoint reject an unknown `chartType` with an error on it, and `DefaultSize` switch over every kind with no default branch (design D6). Verify a unit test that iterates `ChartTypes.All` and an integration test for the unknown kind (400).
 
 ## 3. Query with a series (api)
 
-- [ ] 3.1 Move `NaturalGroupOrder` from `ReportDataBuilder` to `Indicators/NaturalOrder.cs` and use it from both. Verify the existing report tests pass unchanged.
-- [ ] 3.2 Add `IndicatorQueryBuilder.PlanSeries` (design D3, parts 1 and 2): the domain over the row filter and the widget's filters only, the fold into "Other" past the kind's limit, `kind` and `key`, `GROUPING SETS`, the same filter parameters as `Plan`. Verify `IndicatorQueryBuilderTests`: the domain has no dashboard filter parameter; nothing folds at the limit and the smallest fold past it; the missing value never folds; a ratio's totals use `sum(num) / nullif(sum(den), 0)`.
-- [ ] 3.3 Give the pyramid and the Likert widget their fixed domains, the `included` condition and the `leftOut` count. Verify unit tests for the SQL and integration tests for `Age bands by sex`, `Third value and missing values left out` and `Value outside the scale`.
-- [ ] 3.4 Rank groups and apply the limit (design D3, part 3): the widget's order by group total or by `ColumnSortKey`, the group column's own order otherwise, natural order for a pyramid; the limit counts cells; the kept groups' totals are always returned. Verify `Stacked bars ordered by their totals`, a sort column with a series, `Row limit` counting pairs, and that a widget without a series still runs `Plan` with the same SQL as before (`IndicatorQueryBuilderTests` unchanged).
-- [ ] 3.5 Add the series reader and the response fields (`series`, rows' `series` and `seriesKind`, `totals`, `leftOut`), left out of the JSON for a widget without a series. Verify `IndicatorQueryTests`: `Rows that share a group and a series summed`, `Ratio totals`, `Ten series in a stacked chart`, `Heat map within its limit`, `Natural order`, `Colors kept under a dashboard filter` (the same `series` with and without the filter), `Pyramid side with no rows`, and that the response of every existing widget is byte-for-byte as before.
+- [x] 3.1 Move `NaturalGroupOrder` from `ReportDataBuilder` to `Indicators/NaturalOrder.cs` and use it from both. Verify the existing report tests pass unchanged.
+- [x] 3.2 Add `IndicatorQueryBuilder.PlanSeries` (design D3, parts 1 and 2): the domain over the row filter and the widget's filters only, the fold into "Other" past the kind's limit, `kind` and `key`, `GROUPING SETS`, the same filter parameters as `Plan`. Verify `IndicatorQueryBuilderTests`: the domain has no dashboard filter parameter; nothing folds at the limit and the smallest fold past it; the missing value never folds; a ratio's totals use `sum(num) / nullif(sum(den), 0)`.
+- [x] 3.3 Give the pyramid and the Likert widget their fixed domains, the `included` condition and the `leftOut` count. Verify unit tests for the SQL and integration tests for `Age bands by sex`, `Third value and missing values left out` and `Value outside the scale`.
+- [x] 3.4 Rank groups and apply the limit (design D3, part 3): the widget's order by group total or by `ColumnSortKey`, the group column's own order otherwise, natural order for a pyramid; the limit counts cells; the kept groups' totals are always returned. Verify `Stacked bars ordered by their totals`, a sort column with a series, `Row limit` counting pairs, and that a widget without a series still runs `Plan` with the same SQL as before (`IndicatorQueryBuilderTests` unchanged).
+- [x] 3.5 Add the series reader and the response fields (`series`, rows' `series` and `seriesKind`, `totals`, `leftOut`), left out of the JSON for a widget without a series. Verify `IndicatorQueryTests`: `Rows that share a group and a series summed`, `Ratio totals`, `Ten series in a stacked chart`, `Heat map within its limit`, `Natural order`, `Colors kept under a dashboard filter` (the same `series` with and without the filter), `Pyramid side with no rows`, and that the response of every existing widget is byte-for-byte as before.
 
 ## 4. Series table (api)
 
-- [ ] 4.1 Add `Indicators/SeriesTable.cs` (design D4): rows, columns, cells, totals, the shares of `percent` (negative cells left out and counted) and of Likert, a pyramid's columns, and the notes. Write the JSON fixtures at `tamiza-ui/src/app/pages/projects/indicators/testing/series-tables.json` (ratio totals, "Other", "(none)", percent with a negative cell, pyramid, Likert) and read them from the API's unit tests with `FindUp`, skipped when the UI is not next to them. Verify every fixture.
+- [x] 4.1 Add `Indicators/SeriesTable.cs` (design D4): rows, columns, cells, totals, the shares of `percent` (negative cells left out and counted) and of Likert, a pyramid's columns, and the notes. Write the JSON fixtures at `tamiza-ui/src/app/pages/projects/indicators/testing/series-tables.json` (ratio totals, "Other", "(none)", percent with a negative cell, pyramid, Likert) and read them from the API's unit tests with `FindUp`, skipped when the UI is not next to them. Verify every fixture.
 
 ## 5. Emails (api)
 
-- [ ] 5.1 Make `ReportDataBuilder` switch over every kind with no default branch, and build a widget with a series from `SeriesTable` (design D8). Verify `ReportDataBuilderTests`: a test over `ChartTypes.All`, and the tables of a stacked chart, a 100% chart, a heat map, a pyramid (`Population pyramid` of `dashboard-reports`), a Likert widget and a cross table.
-- [ ] 5.2 Show at most 6 series columns and the "Total" column in the HTML and plain-text blocks, with "N more columns", and add the new `ReportText` strings. Verify `ReportHtmlTests` (`Wide cross table`), the plain-text test and the 80 KB budget test with 50 wide widgets.
-- [ ] 5.3 Write the whole cross table in each widget's sheet, with shares and totals as numbers. Verify `ReportWorkbookTests` (`Shares of a Likert widget`, `Stacked columns`) and a `ReportSenderTests` send of a dashboard holding one widget of each new kind and layout.
+- [x] 5.1 Make `ReportDataBuilder` switch over every kind with no default branch, and build a widget with a series from `SeriesTable` (design D8). Verify `ReportDataBuilderTests`: a test over `ChartTypes.All`, and the tables of a stacked chart, a 100% chart, a heat map, a pyramid (`Population pyramid` of `dashboard-reports`), a Likert widget and a cross table.
+- [x] 5.2 Show at most 6 series columns and the "Total" column in the HTML and plain-text blocks, with "N more columns", and add the new `ReportText` strings. Verify `ReportHtmlTests` (`Wide cross table`), the plain-text test and the 80 KB budget test with 50 wide widgets.
+- [x] 5.3 Write the whole cross table in each widget's sheet, with shares and totals as numbers. Verify `ReportWorkbookTests` (`Shares of a Likert widget`, `Stacked columns`) and a `ReportSenderTests` send of a dashboard holding one widget of each new kind and layout.
 
 ## 6. MCP (api)
 
-- [ ] 6.1 Describe `seriesBy`, `layout`, `pyramid`, `scale` and the four kinds in `query_indicator`, `create_widget` and `update_widget` (design D10). Verify `McpDashboardToolsTests`: `Pyramid through MCP`, `Invalid Likert scale through MCP` (`mcp.validation` with the key) and `McpToolCatalogTests`.
-- [ ] 6.2 Return the `SeriesTable` from `query_indicator` and `get_widget_data` for a widget with a series, with `cells` cut first by the result budget. Verify `Checking a stacked chart`, a Likert widget's shares, and a cut result naming its hint.
-- [ ] 6.3 Update `Mcp/Instructions.md` and `docs/mcp.md`. Verify `McpGuideTests` (the instructions name the new kinds) and that every tool is still named in `docs/mcp.md`.
+- [x] 6.1 Describe `seriesBy`, `layout`, `pyramid`, `scale` and the four kinds in `query_indicator`, `create_widget` and `update_widget` (design D10). Verify `McpDashboardToolsTests`: `Pyramid through MCP`, `Invalid Likert scale through MCP` (`mcp.validation` with the key) and `McpToolCatalogTests`.
+- [x] 6.2 Return the `SeriesTable` from `query_indicator` and `get_widget_data` for a widget with a series, with `cells` cut first by the result budget. Verify `Checking a stacked chart`, a Likert widget's shares, and a cut result naming its hint.
+- [x] 6.3 Update `Mcp/Instructions.md` and `docs/mcp.md`. Verify `McpGuideTests` (the instructions name the new kinds) and that every tool is still named in `docs/mcp.md`.
 
 ## 7. Roles and OpenAPI (api)
 
@@ -92,7 +92,7 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 16. Documentation
 
-- [ ] 16.1 Write design D11's sections in `docs/indicators-dashboard.md`, `docs/operations.md`, `docs/tamiza-brief.md` (section 6 and the roadmap) and `README.md`. Verify the links and that every kind of `ChartTypes.All` is named in `docs/indicators-dashboard.md` (a unit test, as the MCP tools' docs test).
+- [x] 16.1 Write design D11's sections in `docs/indicators-dashboard.md`, `docs/operations.md`, `docs/tamiza-brief.md` (section 6 and the roadmap) and `README.md`. Verify the links and that every kind of `ChartTypes.All` is named in `docs/indicators-dashboard.md` (a unit test, as the MCP tools' docs test).
 
 ## 17. Verification
 

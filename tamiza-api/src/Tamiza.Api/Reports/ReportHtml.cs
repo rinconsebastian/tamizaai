@@ -142,8 +142,9 @@ public static class ReportHtml
             return Row(html.ToString(), "0 24px");
         }
 
+        var shown = widget.BodyColumns;
         html.Append("<table cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;width:100%;font-size:13px;\"><tr>");
-        foreach (var column in widget.Columns)
+        foreach (var column in shown.Select(i => widget.Columns[i]))
         {
             html.Append($"<th align=\"{(column.Numeric ? "right" : "left")}\" style=\"padding:4px 8px;border-bottom:2px solid #d1d5db;color:#374151;\">{E(column.Header)}</th>");
         }
@@ -152,7 +153,7 @@ public static class ReportHtml
         foreach (var row in widget.Rows.Take(rowsPerBlock))
         {
             html.Append("<tr>");
-            for (var i = 0; i < row.Count; i++)
+            foreach (var i in shown)
             {
                 html.Append($"<td align=\"{(widget.Columns[i].Numeric ? "right" : "left")}\" style=\"padding:4px 8px;border-bottom:1px solid #e5e7eb;\">{E(row[i].Text)}</td>");
             }
@@ -164,6 +165,11 @@ public static class ReportHtml
         if (widget.Rows.Count > rowsPerBlock)
         {
             html.Append($"<p style=\"margin:4px 0 0;font-size:12px;{Muted}\">{E(model.Text.MoreRows(widget.Rows.Count - rowsPerBlock))}</p>");
+        }
+
+        if (widget.HiddenSeriesColumns > 0)
+        {
+            html.Append($"<p style=\"margin:4px 0 0;font-size:12px;{Muted}\">{E(model.Text.MoreColumns(widget.HiddenSeriesColumns))}</p>");
         }
 
         return Row(html.ToString(), "0 24px");
@@ -237,15 +243,21 @@ public static class ReportPlainText
                 continue;
             }
 
-            body.AppendLine(string.Join(" | ", widget.Columns.Select(c => c.Header)));
+            var columnsShown = widget.BodyColumns;
+            body.AppendLine(string.Join(" | ", columnsShown.Select(i => widget.Columns[i].Header)));
             foreach (var row in widget.Rows.Take(options.RowsPerBlock))
             {
-                body.AppendLine(string.Join(" | ", row.Select(c => c.Text)));
+                body.AppendLine(string.Join(" | ", columnsShown.Select(i => row[i].Text)));
             }
 
             if (widget.Rows.Count > options.RowsPerBlock)
             {
                 body.AppendLine(text.MoreRows(widget.Rows.Count - options.RowsPerBlock));
+            }
+
+            if (widget.HiddenSeriesColumns > 0)
+            {
+                body.AppendLine(text.MoreColumns(widget.HiddenSeriesColumns));
             }
         }
 

@@ -247,4 +247,24 @@ public sealed class ScriptConventionTests
         Assert.Contains("CREATE INDEX ix_mcp_calls_project_id_started_at ON tamiza.mcp_calls (project_id, started_at DESC)", sql);
         Assert.Contains("REFERENCES tamiza.projects (id) ON DELETE CASCADE", sql);
     }
+
+    [Fact]
+    public void The_two_dimension_widgets_script_widens_one_check()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0017_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0017_add_two_dimension_widgets.sql", resource);
+        Assert.Contains("DROP CONSTRAINT ck_dashboard_widgets_chart_type;", sql);
+        Assert.Contains("ADD CONSTRAINT ck_dashboard_widgets_chart_type", sql);
+        foreach (var kind in new[] { "stat", "bar", "column", "line", "histogram", "pie", "map", "heatmap", "pyramid", "likert", "crosstab" })
+        {
+            Assert.Contains($"'{kind}'", sql);
+        }
+
+        // The one check keeps its name, and nothing else is created, so nothing can be left unnamed.
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"\bCHECK\b"));
+        Assert.Empty(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|INDEX|CREATE TABLE)\b"));
+    }
 }

@@ -13,13 +13,26 @@ public static class ChartTypes
     public const string Histogram = "histogram";
     public const string Pie = "pie";
     public const string Map = "map";
+    public const string Heatmap = "heatmap";
+    public const string Pyramid = "pyramid";
+    public const string Likert = "likert";
+    public const string Crosstab = "crosstab";
 
-    public static readonly IReadOnlyList<string> All = [Stat, Bar, Column, Line, Histogram, Pie, Map];
+    public static readonly IReadOnlyList<string> All = [Stat, Bar, Column, Line, Histogram, Pie, Map, Heatmap, Pyramid, Likert, Crosstab];
 
     public static bool IsKnown(string? chartType) => chartType is not null && All.Contains(chartType);
 
     /// <summary>The charts that group their rows: they need a column to group by. A stat tile and a histogram may plot the rows as they are.</summary>
-    public static bool NeedsGroup(string chartType) => chartType is Bar or Column or Line or Pie or Map;
+    public static bool NeedsGroup(string chartType) => chartType is Bar or Column or Line or Pie or Map or Heatmap or Pyramid or Likert or Crosstab;
+
+    /// <summary>The charts that may split each group by a series column.</summary>
+    public static bool TakesSeries(string chartType) => chartType is Bar or Column or Line;
+
+    /// <summary>The charts that are made of a series column: they cannot be saved without one.</summary>
+    public static bool NeedsSeries(string chartType) => chartType is Heatmap or Pyramid or Likert or Crosstab;
+
+    /// <summary>The charts whose query has a series column when it names one.</summary>
+    public static bool HasSeries(string chartType) => TakesSeries(chartType) || NeedsSeries(chartType);
 }
 
 /// <summary>A widget's size and position on the 12-column grid, in grid units.</summary>
@@ -38,6 +51,38 @@ public static class SortValues
     public const string Asc = "asc";
     public const string Desc = "desc";
 }
+
+/// <summary>The layouts of a bar or column widget with a series (<see cref="WidgetConfig.Layout"/>), stored as strings.</summary>
+public static class SeriesLayouts
+{
+    public const string Grouped = "grouped";
+    public const string Stacked = "stacked";
+    public const string Percent = "percent";
+
+    public static readonly IReadOnlyList<string> All = [Grouped, Stacked, Percent];
+
+    /// <summary>The layouts that add the series up inside a bar: they plot a measure, never a ratio.</summary>
+    public static bool Adds(string? layout) => layout is Stacked or Percent;
+}
+
+/// <summary>The side of a Likert scale's value (<see cref="LikertStep.Side"/>), stored as strings.</summary>
+public static class LikertSides
+{
+    public const string Negative = "negative";
+    public const string Neutral = "neutral";
+    public const string Positive = "positive";
+
+    public static readonly IReadOnlyList<string> All = [Negative, Neutral, Positive];
+
+    /// <summary>The position of a side along the scale: negatives, then the neutral value, then positives.</summary>
+    public static int Rank(string? side) => side switch { Negative => 0, Neutral => 1, Positive => 2, _ => -1 };
+}
+
+/// <summary>The two values of a pyramid's series column: the one drawn to the left of the axis and the one drawn to the right.</summary>
+public sealed record WidgetPyramid(string? Left, string? Right);
+
+/// <summary>One value of a Likert scale and the side of the neutral line it is drawn on.</summary>
+public sealed record LikertStep(string? Value, string? Side);
 
 /// <summary>
 /// The order of a bar or column widget. <paramref name="By"/> is <c>value</c> (the plotted value) or <c>column</c>;
@@ -98,6 +143,10 @@ public sealed record WidgetTooltipItem(string Column, string? Label = null, stri
 /// <param name="Sort">Bar and column only: the order of the bars; left out, the group column's own order.</param>
 /// <param name="Tooltip">Map only: up to <see cref="WidgetConfig.MaxTooltipItems"/> columns of the table shown in each shape's tooltip, in order.</param>
 /// <param name="Basemap">Map only: <c>streets</c>, <c>satellite</c> or null for none. A kind, never checked against what the deployment offers.</param>
+/// <param name="SeriesBy">The column that splits each group into series; see <see cref="ChartTypes.TakesSeries"/> and <see cref="ChartTypes.NeedsSeries"/>.</param>
+/// <param name="Layout">Bar and column with a series only: one of <see cref="SeriesLayouts"/>; left out, grouped.</param>
+/// <param name="Pyramid">Population pyramid only: the series values drawn to the left and to the right.</param>
+/// <param name="Scale">Diverging Likert only: the scale's values in order, each with its side.</param>
 /// <param name="IgnoredDashboardFilters">
 /// The columns of the dashboard filters the widget ignores, at most 8 (design D6). Kept by column, so they hold on any dashboard the
 /// widget is moved or copied to, and for a filter removed and defined again. Not a query setting: a query ignores it.
@@ -113,7 +162,11 @@ public sealed record WidgetConfigInput(
     WidgetSort? Sort = null,
     IReadOnlyList<WidgetTooltipItem>? Tooltip = null,
     string? Basemap = null,
-    IReadOnlyList<string>? IgnoredDashboardFilters = null)
+    IReadOnlyList<string>? IgnoredDashboardFilters = null,
+    string? SeriesBy = null,
+    string? Layout = null,
+    WidgetPyramid? Pyramid = null,
+    IReadOnlyList<LikertStep>? Scale = null)
 {
     public WidgetConfig Normalize() => new(
         Indicator ?? "",
@@ -127,7 +180,12 @@ public sealed record WidgetConfigInput(
         // A null item is kept so validation can name it.
         Tooltip?.Select(item => item?.Normalize()!).ToList() ?? [],
         string.IsNullOrEmpty(Basemap) ? null : Basemap,
-        IgnoredDashboardFilters ?? []);
+        IgnoredDashboardFilters ?? [],
+        string.IsNullOrEmpty(SeriesBy) ? null : SeriesBy,
+        string.IsNullOrEmpty(Layout) ? null : Layout,
+        Pyramid,
+        // A null step is kept so validation can name it.
+        Scale ?? []);
 }
 
 /// <summary>A widget's query with its defaults applied. With no <see cref="Measure"/> and no <see cref="Ratio"/>, the table's default measure is plotted.</summary>
@@ -142,9 +200,22 @@ public sealed record WidgetConfig(
     WidgetSort? Sort = null,
     IReadOnlyList<WidgetTooltipItem>? Tooltip = null,
     string? Basemap = null,
-    IReadOnlyList<string>? IgnoredDashboardFilters = null)
+    IReadOnlyList<string>? IgnoredDashboardFilters = null,
+    string? SeriesBy = null,
+    string? Layout = null,
+    WidgetPyramid? Pyramid = null,
+    IReadOnlyList<LikertStep>? Scale = null)
 {
     public const int DefaultBuckets = 10;
+
+    /// <summary>The fewest and the most values a Likert scale has, and the most on one side of its neutral value.</summary>
+    public const int MinScaleValues = 2;
+    public const int MaxScaleValues = 11;
+    public const int MaxScaleSide = 5;
+
+    /// <summary>The most series a bar, column or line widget shows before the smallest are combined into "Other", and the most a heat map or a cross table shows.</summary>
+    public const int MaxSeries = 8;
+    public const int MaxMatrixSeries = 30;
     public const int MaxBuckets = 100;
 
     /// <summary>The most tooltip columns a map has.</summary>
@@ -161,6 +232,9 @@ public sealed record WidgetConfig(
 
     /// <summary>The columns of the dashboard filters the widget ignores; a config stored before the field existed ignores none.</summary>
     public IReadOnlyList<string> IgnoredDashboardFilters { get; init; } = IgnoredDashboardFilters ?? [];
+
+    /// <summary>The Likert scale; a config stored before the field existed has none.</summary>
+    public IReadOnlyList<LikertStep> Scale { get; init; } = Scale ?? [];
 }
 
 /// <param name="DashboardId">The project dashboard the widget is on.</param>
@@ -212,12 +286,16 @@ public sealed record IndicatorColumns(bool Published, IReadOnlyList<TableColumn>
 /// <param name="Geometry">The geometry column's text from one row of the group; null when none was requested or the row has none.</param>
 /// <param name="Rows">Map only: how many rows of the table the group combines (those its query keeps); left out for every other widget.</param>
 /// <param name="Tooltip">Map only: one value per tooltip column, in order, as <see cref="IndicatorQueryResponse.TooltipTypes"/> types them: a number, text, true/false, or null for no value.</param>
+/// <param name="Series">A widget with a series only: the series value of the cell (<see cref="Rows"/> then counts the table rows it sums). Left out for the rows with no series value and for the folded series.</param>
+/// <param name="SeriesKind">A widget with a series only: <see cref="SeriesKinds.Value"/>, <see cref="SeriesKinds.None"/> or <see cref="SeriesKinds.Other"/>.</param>
 public sealed record IndicatorRow(
     string? Group,
     double Value,
     string? Geometry,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Rows = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<object?>? Tooltip = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<object?>? Tooltip = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Series = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SeriesKind = null);
 
 /// <summary>What a widget's query names that the published table does not have.</summary>
 /// <param name="Indicator">True when the indicator has not published a table.</param>
@@ -233,13 +311,19 @@ public sealed record MissingReferences(bool Indicator, IReadOnlyList<string> Col
 /// The columns of the request's dashboard filters that did not narrow the rows: the table has no such column, or has it with a type
 /// of another kind. Left out when the request had no dashboard filters, and when nothing was drawn.
 /// </param>
+/// <param name="Series">A widget with a series only: its series in display order. <see cref="Rows"/> then holds one <see cref="SeriesCell"/> per group and series value that has a value.</param>
+/// <param name="Totals">A widget with a series only: the totals of its groups, its series and all its rows.</param>
+/// <param name="LeftOut">A population pyramid or a Likert widget only: the rows it left out because their group or series value does not belong.</param>
 public sealed record IndicatorQueryResponse(
     bool Published,
     IReadOnlyList<IndicatorRow> Rows,
     bool RowLimitReached,
     MissingReferences Missing,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<DataColumnType>? TooltipTypes = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? NotFiltered = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? NotFiltered = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SeriesInfo>? Series = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SeriesTotals? Totals = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? LeftOut = null);
 
 /// <summary>The outcome of a query: the response, or the validation errors of the request.</summary>
 public sealed record IndicatorQueryOutcome(IndicatorQueryResponse? Response, IDictionary<string, string[]>? Errors);
