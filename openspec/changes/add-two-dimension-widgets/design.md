@@ -170,6 +170,54 @@ The print rules of `widget-grid.ts` (`print-color-adjust: exact`) apply to the n
 - `docs/indicators-dashboard.md`: "Widgets with a series" (the series, order, colors, "Other", totals), one section per kind, and "Preparing an indicator with two dimensions" (a `groupby` on both columns; age bands as text that sorts naturally, such as `0-4`, `5-9`, `10-14`; a Likert answer as its choice label). "What it does not do" says a widget plots one indicator with at most two dimensions.
 - `docs/mcp.md`: the widget tools' new settings. `docs/operations.md`: the row limit counts pairs of group and series. `docs/tamiza-brief.md`: the chart kinds and config in section 6, and the roadmap item. `README.md`: the widget kinds in the status.
 
+### D12. Wire format
+
+Fixed before either side is built, so the API and the UI can be written apart. All JSON is camelCase; fields marked *omitted* are left out of the JSON when null (as `IndicatorRow.Rows` is today).
+
+**Widget and query config** (`config` of a widget, of `POST .../indicators/query` and of the MCP tools):
+
+| Field | JSON | Saved config when none |
+|---|---|---|
+| `seriesBy` | string | `null` |
+| `layout` | `"grouped"`, `"stacked"` or `"percent"` | `null` |
+| `pyramid` | `{ "left": string, "right": string }` | `null` |
+| `scale` | `[{ "value": string, "side": "negative" \| "neutral" \| "positive" }]` | `[]` |
+
+Chart types: `stat bar column line histogram pie map heatmap pyramid likert crosstab`. Validation errors use the keys of D2 prefixed with `config.` inside a widget (`config.seriesBy`, `config.layout`, `config.pyramid.left`, `config.pyramid.right`, `config.scale`, `config.scale[2]`). The query endpoint's body carries the `chartType`; with `seriesBy` and no `chartType` the query is a bar's.
+
+**Query response**, for a widget with `seriesBy` only (all *omitted* otherwise):
+
+```json
+{
+  "published": true, "rowLimitReached": false, "missing": { "indicator": false, "columns": [] },
+  "series": [ { "value": "Piped", "kind": "value" }, { "value": null, "kind": "none" }, { "value": null, "kind": "other" } ],
+  "rows":   [ { "group": "Cali", "value": 35, "series": "Piped", "seriesKind": "value", "rows": 3 } ],
+  "totals": {
+    "groups": [ { "group": "Cali", "value": 50, "rows": 5 } ],
+    "series": [ { "series": "Piped", "kind": "value", "value": 55, "rows": 4 } ],
+    "all":    { "value": 70, "rows": 6 }
+  },
+  "leftOut": 15
+}
+```
+
+- `series` is the domain in display order (natural order, then `none`, then `other`). A pyramid's is `[left, right]` and a Likert's the scale in order, whether or not rows exist for them. `kind` is `value`, `none` (the rows with no series value; `value` null) or `other` (the folded series; `value` null).
+- `rows` lists the cells that have a value, group by group in the order of `totals.groups`, and inside a group in the order of `series`. `rows` of a cell is the number of table rows it sums. A missing group value is `group: null`.
+- `totals.series` has one entry per `series` entry, in the same order; `value` is null and `rows` 0 for a series with no rows (for example after a dashboard filter). `totals.groups` is the authoritative order of the groups. A total is computed from the rows: for a ratio it is the ratio of the sums, never a sum or mean of cells (`value` is null when the denominator sums to zero).
+- `leftOut` is only sent for `pyramid` and `likert`.
+
+**`SeriesTable`**, the grid every consumer reads, derived from the response with the chart type and the layout (the API's `SeriesTable.cs` and the UI's `series-table.ts` must agree on the cases of `tamiza-ui/src/app/pages/projects/indicators/testing/series-tables.json`):
+
+```
+columns: [ { series, kind, total, rows } ]            // one per response.series, same order
+rows:    [ { group, total, rows, cells, shares } ]    // one per totals.groups, same order
+grandTotal, grandRows, negativeLeftOut, leftOut, rowLimitReached
+```
+
+- `cells[i]` aligns with `columns[i]`: the row's value, or null when the pair has no value.
+- `shares` is null except for `likert`, and for `bar` and `column` with `layout: "percent"`. Then `shares[i]` is `cells[i]` over the sum of the row's non-negative cells; it is null for a cell with no value and for a negative cell (each negative cell counts once in `negativeLeftOut`), and all null when that sum is zero.
+- `total`, `rows`, `grandTotal` and `grandRows` are copied from `totals`.
+
 ## Risks / Trade-offs
 
 - [The `GROUPING SETS` statement scans the table twice (domain and cells)] → Indicator tables are small by contract (one row per combination of dimensions); the 25-second statement limit, the query slots and the row limit still apply. Task 17.3 measures a 100,000-row indicator table.
