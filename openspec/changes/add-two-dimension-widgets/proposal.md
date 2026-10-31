@@ -36,7 +36,7 @@ None. Widget kinds and queries belong to `dashboard-indicators`.
 - `dashboard-indicators`: the widget query gains a series column and totals; the widget kinds gain the series layouts of bars, columns and lines and the four new kinds; stale configuration covers the series column; "Show as table" becomes a cross table for a widget with a series.
 - `dashboard-reports`: a scheduled email shows a widget with a series as a cross table, at most 6 series columns wide in the body and whole in the workbook.
 - `dashboard-printing`: the new kinds print whole with their legends; a cross table widget prints as a table, with the columns that fit.
-- `mcp-server` (from the `add-mcp-server` change, which must be archived first): the widget tools describe, accept and return the series and the new kinds.
+- `mcp-server`: the widget tools describe, accept and return the series and the new kinds.
 
 ## Impact
 

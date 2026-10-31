@@ -179,13 +179,11 @@ The print rules of `widget-grid.ts` (`print-color-adjust: exact`) apply to the n
 - [The API and UI table models drift] → One set of JSON fixtures tests both.
 - [Wide tables in emails and on paper] → 6 series columns in the body and a "N more columns" note; the workbook holds everything; paper says how many columns it left out.
 - [Keyboard navigation adds a pattern to four charts] → It is the map's pattern, reused through one helper, and the cross table is plain HTML.
-- [The `mcp-server` delta modifies a spec that is not archived yet] → `add-mcp-server` is archived before this change (Migration Plan).
 
 ## Migration Plan
 
-1. Archive `add-mcp-server` first, so its `mcp-server` spec exists when this change's delta is applied.
-2. Deploy: `0017` widens the CHECK; existing widgets have no `seriesBy` and draw as before.
-3. Rollback: an earlier release reads a config with `seriesBy`, `layout`, `pyramid` or `scale` by dropping those fields, so a bar, column or line with a series falls back to one series. Widgets of the four new kinds must be removed or changed first, or the earlier release draws them as column charts: `DELETE FROM tamiza.dashboard_widgets WHERE chart_type IN ('heatmap', 'pyramid', 'likert', 'crosstab');`. DbUp never runs scripts backwards; the wider CHECK stays and is harmless.
+1. Deploy: `0017` widens the CHECK; existing widgets have no `seriesBy` and draw as before.
+2. Rollback: an earlier release reads a config with `seriesBy`, `layout`, `pyramid` or `scale` by dropping those fields, so a bar, column or line with a series falls back to one series. Widgets of the four new kinds must be removed or changed first, or the earlier release draws them as column charts: `DELETE FROM tamiza.dashboard_widgets WHERE chart_type IN ('heatmap', 'pyramid', 'likert', 'crosstab');`. DbUp never runs scripts backwards; the wider CHECK stays and is harmless.
 
 ## Open Questions
 

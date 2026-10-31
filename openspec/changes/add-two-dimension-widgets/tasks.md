@@ -1,7 +1,6 @@
 # Tasks
 
 **Order.**
-- Archive `add-mcp-server` before archiving this change (design, Migration Plan).
 - Groups 1 to 7 (api) come first, in order; each ends with its tests green.
 - Groups 8 to 15 (ui) follow, in order; group 8 keeps the UI build and suite green from the first type change. Groups 11 to 14 can be done in any order after group 10.
 - Group 16 (docs) can run any time after group 3. Group 17 is last.
