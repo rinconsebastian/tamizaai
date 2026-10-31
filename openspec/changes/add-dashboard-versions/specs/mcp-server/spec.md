@@ -41,7 +41,7 @@ Each tool SHALL describe its arguments with a JSON schema and SHALL be marked as
 - **THEN** the tool is marked as changing data and not as destructive, and `list_dashboard_versions` and `get_dashboard_version` as read-only
 
 ### Requirement: Removing needs the name
-`remove_dashboard` and `remove_widget` SHALL require, besides the identifier, the current name of the dashboard or the current title of the widget, compared ignoring case and surrounding spaces. When it does not match, the tool SHALL remove nothing and be refused with the code `mcp.nameMismatch`, giving the current name. A removed dashboard cannot be brought back; a removed widget can, by restoring an earlier version of its dashboard. A removed script keeps its versions and can be restored, and `remove_script` is guarded by the current version instead (see "Saving scripts against the current version").
+`remove_dashboard` and `remove_widget` SHALL require, besides the identifier, the current name of the dashboard or the current title of the widget, compared ignoring case and surrounding spaces. When it does not match, the tool SHALL remove nothing and be refused with the code `mcp.nameMismatch`, giving the current name. A removed dashboard cannot be brought back. A removed widget can, while a kept version of its dashboard holds it: it can be added again from that version, or brought back by restoring that version, which also undoes the changes made since. A removed script keeps its versions and can be restored, and `remove_script` is guarded by the current version instead (see "Saving scripts against the current version").
 
 #### Scenario: Wrong dashboard
 - **WHEN** Claude calls `remove_dashboard` with the identifier of "Health" and the name "Field"
@@ -64,12 +64,12 @@ The MCP server SHALL give clients instructions that describe Tamiza, the order o
 
 #### Scenario: Versions explained
 - **WHEN** a client reads the server's instructions
-- **THEN** they say to give the same `change` on every dashboard write made for one request of the person, a new one for the next request, and to undo a request by restoring the version before it with `baseVersion`
+- **THEN** they say to give the same `change` on every dashboard write made for one request of the person, a new one for the next request, and to undo a request by restoring, with `baseVersion`, the version before it on every dashboard it changed
 
 ## ADDED Requirements
 
 ### Requirement: Request given with dashboard changes
-`create_dashboard`, `update_dashboard`, `duplicate_dashboard`, `create_widget`, `update_widget` and `remove_widget` SHALL require `change`, 1 to 120 characters saying what the person asked for, and SHALL refuse a call without it with `mcp.validation` naming `change`, saving nothing. Each SHALL return the number of the current version of every dashboard it changed, and `get_dashboard` and `list_dashboards` SHALL return each dashboard's current version.
+`create_dashboard`, `update_dashboard`, `duplicate_dashboard`, `create_widget`, `update_widget`, `remove_widget` and `restore_dashboard_version` SHALL require `change`, 1 to 120 characters saying what the person asked for, and SHALL refuse a call without it with `mcp.validation` naming `change`, saving nothing. Each SHALL return the current version of every dashboard it changed, as `get_dashboard` and `list_dashboards` SHALL for each dashboard.
 
 #### Scenario: Request missing
 - **WHEN** Claude calls `create_widget` without `change`
@@ -83,8 +83,15 @@ The MCP server SHALL give clients instructions that describe Tamiza, the order o
 - **WHEN** Claude calls `update_dashboard` only to move "Water access" to the first position
 - **THEN** the dashboard moves, no dashboard has a new version, and the result gives the current version of "Water access"
 
+### Requirement: Calls refused after saving part
+When a call that makes several changes is refused after part of it was saved, such as `update_dashboard` renaming a dashboard and then refusing its filters, what was saved SHALL be recorded in a version as for a call that succeeded.
+
+#### Scenario: Part of a call refused
+- **WHEN** Claude calls `update_dashboard` on "Water" with the name "Agua" and filters that are not valid
+- **THEN** the call is refused for the filters, and "Agua" has a new version holding the new name with the filters it had
+
 ### Requirement: One version per request
-Writes through MCP by one person on one dashboard with the same `change`, compared ignoring case and surrounding spaces, SHALL make one version of that dashboard, as long as each comes less than 30 minutes after the previous one and no other version of that dashboard is recorded between them. That version SHALL be marked as made through MCP, attributed to the person, and show the `change`.
+Writes through MCP by one person on one dashboard with the same `change`, compared ignoring case and surrounding spaces, SHALL make one version of that dashboard, as long as each comes less than 30 minutes after the previous one and no other version of that dashboard is recorded between them. That version SHALL be marked as made through MCP, attributed to the person, and show the `change`. A restore SHALL always make a version of its own, which no later write joins.
 
 #### Scenario: Five widgets, one version
 - **WHEN** Claude calls `create_widget` five times on "Water access" with the `change` "Add five water indicators"
@@ -110,12 +117,24 @@ Writes through MCP by one person on one dashboard with the same `change`, compar
 - **WHEN** Claude adds a widget to "Water" with the `change` "Add water widgets" and another with the same `change` 40 minutes later
 - **THEN** "Water" has two new versions
 
+#### Scenario: Calls at the same time
+- **WHEN** Claude makes two `create_widget` calls on "Water" at the same time, both with the `change` "Add water widgets"
+- **THEN** "Water" has one new version that holds both widgets and lists both as added
+
+#### Scenario: Restore then edit in one request
+- **WHEN** Claude restores version 7 of "Water" and then adds a widget, both with the `change` "Go back and add a pie chart"
+- **THEN** "Water" has two new versions: the restore and the widget
+
 ### Requirement: Dashboard versions through MCP
 `list_dashboard_versions` SHALL return a dashboard's kept versions, newest first, with what the version history shows for each and which one is current. `get_dashboard_version` SHALL return a kept version's name, filters and widgets with their settings, as `get_dashboard` returns them. `restore_dashboard_version` SHALL restore a kept version with the rules of the UI and its `change`, and return the new version, whether the name was kept, and the widgets restored as copies.
 
 #### Scenario: Undoing a request
 - **WHEN** an analyst asks Claude to undo its last request on "Water access", whose current version 9 was made by that request
 - **THEN** Claude lists the versions, restores version 8, and "Water access" is as before the request, with version 10 marked "via MCP" saying version 8 was restored
+
+#### Scenario: Undoing a request that moved a widget
+- **WHEN** a request moved the widget "Coverage" from "Health" to "Field", and Claude then restores the version before it on "Field" and after that on "Health"
+- **THEN** "Coverage" is back on "Health" with its identifier, and "Field" no longer holds it
 
 #### Scenario: Comparing a version
 - **WHEN** Claude calls `get_dashboard_version` for version 7 of "Housing", which held a widget since removed

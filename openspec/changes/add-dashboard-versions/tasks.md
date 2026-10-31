@@ -13,9 +13,9 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 1. Schema (api)
 
-- [ ] 1.1 Add `tamiza-api/src/dbUp/Scripts/0018_add_dashboard_versions.sql` exactly as design D1: the table, its index and version 1 of every dashboard. Keep upper-case `CHECK`, `FOREIGN KEY` and `PRIMARY KEY` out of its comment. Verify the analytics integration tests still build their template database.
-- [ ] 1.2 Add the entity `DashboardVersion` and its mapping to `TamizaDbContext`. Map `content` and `changes` as `jsonb` strings, as `dashboards.filters` is, and mirror the checks and the unique index. Verify `SchemaDriftTests` passes.
-- [ ] 1.3 Add a `ScriptConventionTests` case for the 0018 script, in the style of the 0016 test. Verify it passes.
+- [ ] 1.1 Add `tamiza-api/src/dbUp/Scripts/0018_add_dashboard_versions.sql` exactly as design D1: the table, its three indexes and version 1 of every dashboard. Keep upper-case `CHECK`, `FOREIGN KEY` and `PRIMARY KEY` out of its comment. Verify the analytics integration tests still build their template database.
+- [ ] 1.2 Add the entity `DashboardVersion` and its mapping to `TamizaDbContext`. Map `content` and `changes` as `jsonb` strings, as `dashboards.filters` is, and mirror the checks and the indexes. Verify `SchemaDriftTests` passes.
+- [ ] 1.3 Add a `ScriptConventionTests` case for the 0018 script, in the style of the 0016 test, asserting its three indexes. Verify it passes.
 - [ ] 1.4 Add a `SchemaMigratorTests` upgrade test from `0017`. Seed:
   - a dashboard with three widgets, last edited by two users at different times;
   - an empty dashboard.
@@ -37,15 +37,17 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 - [ ] 2.1 Add `Indicators/DashboardVersions.cs` with the content builder of design D2: widgets in reading order with the `id` tiebreak, and `filters`, `config` and `layout` embedded from their stored JSON. Verify:
   - integration tests: one dashboard gives the same content twice;
   - two contents that differ only in key order compare equal in PostgreSQL;
-  - for a dashboard seeded as in 1.4, the content equals what the migration recorded (`Version 1 equals the API's content`).
-- [ ] 2.2 Add `Note` and `FlushAsync` (design D3): under the project lock, compare, insert, and prune to 10 (D6). Also add the `DashboardChange` kinds, with the cap of 20 entries, `more_changes`, and no repeat of the last entry (D2). Verify:
-  - `DashboardVersionTests`: `Numbers never reused` (API part) and `Eleventh version`;
+  - for a dashboard seeded as in 1.4, the content equals what the migration recorded.
+- [ ] 2.2 Add `Note` and `FlushAsync` (design D3): under the project lock, compare, insert, and prune to 10 (D6). Run it with `CancellationToken.None`, and log a failure without changing the answer. Also add the `DashboardChange` kinds, with the cap of 20 entries, `more_changes`, and no repeat of the last entry (D2). Verify:
+  - `DashboardVersionTests`: `Eleventh version`, and the number after pruning is the newest plus one;
   - a flush that finds equal content records nothing and returns the current number;
+  - a flush that throws (a test double) leaves a widget create's 201 and logs the failure;
   - unit tests for the cap and the repeat rule.
-- [ ] 2.3 Add the growth rules of design D4, with `TimeProvider`, and the constants `LayoutWindow`, `RequestWindow` and `Kept`. Verify:
-  - integration tests with a fake clock: `Rearranging a dashboard` (five layout notes within 40 s), `Pause between moves` and `Other change in between` (API parts);
-  - an `initial` version never grows;
-  - unit tests of the MCP rule: same note, a note differing in case and spaces, another note, another person, and 31 minutes later.
+- [ ] 2.3 Add the growth rules of design D4, with `TimeProvider`, and the constants `RequestWindow` and `Kept`. Verify:
+  - `Two drags` (API part): two layout saves make two versions;
+  - an `initial`, `unrecorded` or `restored` version never grows;
+  - unit tests of the MCP rule: same note, a note differing in case and spaces, another note, another person, 31 minutes later, and origin `app`;
+  - with equal content, a flush that D4 lets grow adds its entry (D3 step 4).
 - [ ] 2.4 Add the endpoint filter on the dashboards route group, and make each handler note its change (design D12):
   - `created`, `renamed`, `filtersChanged` and `duplicated` (on the copy only);
   - `widgetAdded`;
@@ -53,8 +55,11 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
   - `widgetMovedOut` and `widgetMovedIn`;
   - `widgetRemoved`, with `DELETE … RETURNING title`.
 
+  Make the widget edit and the filters save write their JSON only when the normalized value differs (D12).
+
   Verify `DashboardVersionTests`:
   - `Widget added`, `One character`, `Filters saved unchanged`, `Widget moved to another dashboard` and `New dashboard`;
+  - `Widget form saved unchanged`: on a widget whose stored config lacks `seriesBy`, a `PATCH` with its current title, chart type and config, and one with only its current layout, record nothing and leave the stored text as it was;
   - `Dashboard moved`, `Scheduled email saved` and `Copy`;
   - `Removed dashboard` (API part: the rows are gone);
   - a refused change, such as a name that is taken, records nothing.
@@ -84,23 +89,28 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
   - `Scheduled email kept` (the report row is unchanged);
   - `Name taken`, `Widget since moved to another dashboard` (the copy has a new id; "Field" is unchanged), `Indicator gone` and `Limit lowered`;
   - `Changed meanwhile`, and `Version deleted meanwhile` and `Dashboard removed meanwhile` (API parts);
-  - restoring the current version writes nothing and answers 200;
-  - a restore never grows: a layout note right after it makes a new version;
+  - `Edit saved as the restore starts`: a widget title written with no version for it (the flush skipped) is recorded as an `unrecorded` version before the restore;
+  - `Version equal to the current one` (API part): it answers 200 and writes nothing, and so does restoring again a version whose name was kept;
+  - a rename of another dashboard to the version's name, committed between the check and the save, gives `nameKept` true and the rest of the version restored;
+  - a restore never grows: a write right after it makes a new version;
   - `First change after the upgrade`: a dashboard seeded with an `initial` version 1, as the migration records it.
 - [ ] 4.3 Check the OpenAPI document. Verify it lists the four new routes with their request and answer schemas, as `ReportEndpointTests` checks the report routes.
 
 ## 5. MCP (api)
 
-- [ ] 5.1 Add the required `change` to `create_dashboard`, `update_dashboard`, `duplicate_dashboard`, `create_widget`, `update_widget` and `remove_widget` (design D10). Validate it first, flush with origin `mcp` after the handlers, and add `dashboardVersions` to their results and `version` to `get_dashboard` and `list_dashboards`. Pass `change` in every existing call of `McpDashboardToolsTests`. Verify:
+- [ ] 5.1 Add the required `change` to `create_dashboard`, `update_dashboard`, `duplicate_dashboard`, `create_widget`, `update_widget` and `remove_widget` (design D10). Validate it first, flush with origin `mcp` in a `finally` after the handlers (D3), and add `dashboardVersions` to their results and `version` to `get_dashboard` and `list_dashboards`. Pass `change` in every existing call of `McpDashboardToolsTests`. Verify:
   - `Request missing`, `Version returned` and `Only the order changed`;
   - `Five widgets, one version`, `New dashboard with its widgets`, `Two dashboards in one request` and `Next request`;
   - `Member changes in between` (the analyst's layout call through REST between Claude's calls);
-  - `Long pause` (the harness clock advanced 40 minutes);
+  - `Long pause` (the API's `TimeProvider` replaced in the harness and advanced 40 minutes);
+  - `Calls at the same time` (two concurrent `create_widget` calls);
+  - `Part of a call refused`, and `create_dashboard` whose move is refused with `dashboards.orderChanged` still has version 1;
   - the version is attributed to the analyst with origin `mcp` and the note.
-- [ ] 5.2 Add `McpDashboardVersionTools` (`list_dashboard_versions`, `get_dashboard_version`, `restore_dashboard_version`) and `mcp.dashboardChanged` in `McpRefusal.cs`. Register the class in `McpRegistration.cs`. Verify `McpDashboardVersionToolsTests`:
+- [ ] 5.2 Add `McpDashboardVersionTools` (`list_dashboard_versions`, `get_dashboard_version`, `restore_dashboard_version`, the last with its required `change`) and `mcp.dashboardChanged` in `McpRefusal.cs`. Register the class in `McpRegistration.cs`. Verify `McpDashboardVersionToolsTests`:
   - `Undoing a request`, `Comparing a version`, `Viewer` and `Version no longer kept`;
   - `Member changed meanwhile`, where `current` names the version, the author, the time and the origin;
-  - `Widget removal undone`;
+  - `Widget removal undone`, `Restore then edit in one request` and `Undoing a request that moved a widget`;
+  - a restore without `change` is refused with `mcp.validation`;
   - the restore's `copies` for a widget since moved.
 - [ ] 5.3 Update the catalog and the role matrix:
   - add the three tools to `McpToolCatalogTests.Expected` with their read-only and destructive flags;
@@ -108,7 +118,7 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
   - describe every new parameter.
 
   Verify `Tool list`, `Removal marked` and `Restore marked`, and that every parameter of every tool has a description.
-- [ ] 5.4 Update the `remove_widget` and `remove_dashboard` descriptions, and add design D10's bullet to `Mcp/Instructions.md`. Verify `McpGuideTests` checks for `change`, `restore_dashboard_version` and `baseVersion` (`Versions explained`).
+- [ ] 5.4 Update the `remove_widget` and `remove_dashboard` descriptions, and add design D10's bullet to `Mcp/Instructions.md`. Verify `McpGuideTests` checks for `change`, `restore_dashboard_version`, `baseVersion` and "every dashboard" (`Versions explained`).
 - [ ] 5.5 Update the MCP docs:
   - `docs/mcp.md`: the three tools, `change` and the versions in results;
   - `docs/tamiza-brief.md`: "31 tools" becomes 34.
@@ -139,21 +149,25 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
   - a widget title holding `<b>` is shown as text;
   - `History at phone width`: every action reachable with the dialog's narrow layout.
 - [ ] 8.3 Send pending layouts before the dialog opens, and wait for them. Verify `Move saved before the history opens`.
+- [ ] 8.4 Add a "Version history" section to `docs/indicators-dashboard.md`: what is versioned and what is not, requests from AI clients, the 10 kept and the history list. Verify the links resolve and the described menu item matches the page.
 
 ## 9. Viewing a version (ui)
 
-- [ ] 9.1 Add the read-only view (design D11): the version's widgets and filters, the notice, **Back to the current version**, and **Restore version N** for an older version. Verify `project-indicators.spec.ts`:
-  - `Viewing an older version`: no edit, move or remove action, and the widgets query by their configs;
+- [ ] 9.1 Add the read-only view (design D11): the version's widgets and filters, the notice, **Back to the current version**, and **Restore version N** for an older version. Hide the header's actions (Print included) and the three Add widget buttons. Verify `project-indicators.spec.ts`:
+  - `Viewing an older version`: no add, edit, move, remove or print action, and the widgets query by their configs;
   - `Back to the current version`;
   - the filter values are not written to the address;
   - opening another dashboard leaves the view;
   - focus moves to the notice, and back to the heading.
+- [ ] 9.2 Describe viewing a version in the "Version history" section of `docs/indicators-dashboard.md`. Verify the described controls match the page.
 
 ## 10. Restoring (ui)
 
 - [ ] 10.1 Add the restore, from the dialog and from the view: the confirmation, then send pending layouts, call the API, read the dashboard again, update the tab name, and show one toast. Verify:
   - `Removed widget brought back` and `Restore undone` (UI parts);
   - `Name taken` (UI part: the toast says the name was kept and why);
+  - `Widget since moved to another dashboard` (UI part: the toast names the copy and the dashboard that still holds it);
+  - `Version equal to the current one` (UI part: the toast says the dashboard already is as in that version, and the page is unchanged);
   - `Filter values in the address`;
   - focus moves to the heading.
 - [ ] 10.2 Handle the failures:
@@ -163,7 +177,7 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
   Add `errors.codes.dashboards.versionNotFound` to both files and to `error-codes.spec.ts`. Verify `Version deleted meanwhile`, `Dashboard removed meanwhile` and `Limit lowered` (UI parts).
 - [ ] 10.3 Update the user docs:
-  - `docs/indicators-dashboard.md`: a "Version history" section covering what is versioned and what is not, moves in a row, requests from AI clients, the 10 kept, viewing, restoring, names, copies and the limit. Change the sentence that says removing cannot be undone (`:21`): a dashboard still cannot be brought back, a widget can.
+  - `docs/indicators-dashboard.md`: restoring, names, copies and the limit, in the "Version history" section. Change the sentence that says removing cannot be undone (`:21`): a dashboard still cannot be brought back, a widget can.
   - `docs/operations.md`: change the line saying dashboards are not versioned (`:461`).
   - `docs/tamiza-brief.md`: the roadmap entry.
   - `README.md`: the status line.
@@ -173,7 +187,7 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 ## 11. Verification
 
 - [ ] 11.1 On a real stack in a separate Compose project (`tamizaverify`), with the user's stack untouched:
-  - build a dashboard with ten edits, including five drags in a row;
+  - build a dashboard with ten edits, including five drags in a row, and check that they make five versions;
   - open the history at 360, 768 and 1,280 pixels, light and dark;
   - view a version, restore it, and undo the restore;
   - restore a version whose name another dashboard took, and one holding a widget since moved;

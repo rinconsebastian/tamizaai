@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Dashboard header
-Each dashboard SHALL show its name as a heading above its widgets. For every member, viewers included, the heading SHALL be followed by the action to print the dashboard whenever it is offered (see `dashboard-printing`). For an `analyst` or `admin`, the heading SHALL also be followed by the actions to add a dashboard and to rename, duplicate, move or remove this one, and to open its version history (see `dashboard-versions`). At every width from 360 pixels the whole name and these actions SHALL be visible without scrolling the page horizontally.
+Each dashboard SHALL show its name as a heading above its widgets. For every member, viewers included, the heading SHALL be followed by the action to print the dashboard whenever it is offered (see `dashboard-printing`). For an `analyst` or `admin`, the heading SHALL also be followed by the actions to add a dashboard and to rename, duplicate, move or remove this one, and to open its version history (see `dashboard-versions`), except while one of its versions is shown. At every width from 360 pixels the whole name and these actions SHALL be visible without scrolling the page horizontally.
 
 #### Scenario: Dashboard header at phone width
 - **WHEN** an `analyst` opens a dashboard with widgets whose name has 40 characters and no space, in a viewport 360 pixels wide
