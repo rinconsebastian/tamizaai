@@ -217,7 +217,7 @@ Bar, column and line widgets MAY have a series column; heat map, population pyra
 - **THEN** it shows one column per group, as before
 
 ### Requirement: Series order and colors
-A widget's series values SHALL be listed in natural order, with a missing series value, shown as "(none)", last. The series a widget shows, their order and their colors SHALL come from the rows that match the widget's own filters, not the dashboard filters, so a member who changes a dashboard filter sees the same series in the same colors and legend.
+A widget's series values SHALL be listed in natural order, then a missing series value, shown as "(none)", then "Other" when some were combined (see "Number of series"). The series a widget shows, their order and their colors SHALL come from the rows that match the widget's own filters, not the dashboard filters, so a member who changes a dashboard filter sees the same series in the same colors and legend.
 
 #### Scenario: Natural order
 - **WHEN** a stacked column chart has the series `round` with the values `10`, `2` and `1`
@@ -228,7 +228,7 @@ A widget's series values SHALL be listed in natural order, with a missing series
 - **THEN** `Piped` and `River` keep their colors and the legend still lists `Well`
 
 ### Requirement: Number of series
-A bar, column or line widget SHALL show at most 8 series, and a heat map or a cross table at most 30. When a widget's own rows hold more series values than that, it SHALL show the ones with the largest totals, one fewer than the limit, and SHALL combine the others into one series named "Other", last, summed or as a ratio of their sums.
+A bar, column or line widget SHALL show at most 8 series, and a heat map or a cross table at most 30. When a widget's own rows hold more series values than that, it SHALL show the ones with the largest totals, one fewer than the limit, and SHALL combine the others into one series named "Other", summed or as a ratio of their sums. A missing series value SHALL count as one of the values and SHALL never be combined into "Other".
 
 #### Scenario: Ten series in a stacked chart
 - **WHEN** a stacked column chart's series column holds 10 values over the widget's rows

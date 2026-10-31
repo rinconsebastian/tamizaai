@@ -8,7 +8,7 @@ The indicator contract already allows several text dimensions in one indicator t
 
 ## What Changes
 
-- **A second dimension in a widget.** A widget's query can name a *series* column next to its group column: one value per pair of group and series, summed or as a ratio of sums, with row, column and grand totals. The series of a widget keep their colors and their order while members change dashboard filters. Past 8 series, the smallest are shown together as *Other*.
+- **A second dimension in a widget.** A widget's query can name a *series* column next to its group column: one value per pair of group and series, summed or as a ratio of sums, with row, column and grand totals. The series of a widget keep their colors and their order while members change dashboard filters. Past 8 series (30 in a heat map or a cross table), the smallest are shown together as *Other*.
 - **Bars and columns by series.** A bar or column widget with a series is drawn **grouped** (side by side), **stacked**, or **stacked to 100%** (each category's composition). Stacked and 100% widgets take a measure, not a ratio: rates do not add up.
 - **Lines by series.** A line widget with a series draws one line per series value.
 - **Heat map** (new kind): groups as rows, series as columns, each cell shaded by its value on the sequential scale the maps already use, with its value on hover and a legend.
