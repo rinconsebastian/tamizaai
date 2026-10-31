@@ -1,7 +1,7 @@
 import { MapStub, stubMap } from '../../../../testing/leaflet';
 import { details, projectId, settle, typeInto } from '../../../../testing/project-harness';
 import { BasemapList } from '../../../core/basemaps.service';
-import { DashboardFilter, IndicatorColumns, IndicatorEntry, Widget, WidgetConfig } from '../../../core/projects/indicators.service';
+import { ChartType, DashboardFilter, IndicatorColumns, IndicatorEntry, Widget, WidgetConfig, chartTypes } from '../../../core/projects/indicators.service';
 import { DashboardEntry } from '../../../core/projects/projects.service';
 import { valueSearchDelayMs } from '../data-filter-dialog';
 import { encodeFilters } from '../data-view';
@@ -9,6 +9,7 @@ import {
   Context,
   all,
   catalog,
+  cell,
   clearOverlay,
   config,
   indicator,
@@ -20,6 +21,7 @@ import {
   overlay,
   result,
   row,
+  seriesResult,
   text,
   wait,
   widget,
@@ -1556,5 +1558,567 @@ describe('the widget dialog on a dashboard with filters', () => {
     await settle(context.harness);
 
     expect(text(dialog().querySelector('[data-testid="dialog-dashboard-filters"] [data-testid="field-error"]'))).toBe("'municipality' is not a valid column name.");
+  });
+});
+
+describe('the widget dialog with a series (design D7)', () => {
+  afterEach(clearOverlay);
+
+  /** The table of `households_by_source`: two text dimensions besides the default `municipality`. */
+  const twoDimensions = (extra: Partial<IndicatorColumns> = {}) =>
+    catalog({ columns: [...catalog().columns, { name: 'water_source', type: 'text', label: null }, { name: 'sex', type: 'text', label: null }], ...extra });
+  const radio = (id: string) => field<HTMLInputElement>(`dialog-layout-${id}`);
+  const queries = (context: Context) => context.http.match(isQuery).filter((r) => !r.cancelled);
+  const typeOf = (request: { request: { body: { chartType: string } } }) => request.request.body.chartType;
+
+  /** Lets the query that lists the values of the series column be sent, and answers it with these values. */
+  async function answerValues(context: Context, values: string[]) {
+    await wait(previewDelayMs + 100);
+    await settle(context.harness);
+    const requests = queries(context).filter((r) => typeOf(r) === 'heatmap');
+    expect(requests).toHaveLength(1);
+    requests[0].flush(seriesResult(values.map((value) => cell('Cali', value, 1)), values));
+    await settle(context.harness);
+    return requests[0].request.body as { config: WidgetConfig; chartType: string };
+  }
+
+  const create = async (context: Context) => {
+    await click(context, field('dialog-save'));
+    return context.http.expectOne(isCreate).request.body as { title: string; chartType: ChartType; config: WidgetConfig };
+  };
+  const config_ = (body: { config: WidgetConfig }) => body.config;
+
+  describe('the fields of each chart type', () => {
+    /** What each kind shows: its series select (and what the first option says), its own settings, and what it still shares. */
+    const expected: Record<ChartType, { series: string | null; own: string[]; sort: boolean }> = {
+      stat: { series: null, own: [], sort: false },
+      bar: { series: 'No series', own: [], sort: true },
+      column: { series: 'No series', own: [], sort: true },
+      line: { series: 'No series', own: [], sort: false },
+      histogram: { series: null, own: ['dialog-buckets'], sort: false },
+      pie: { series: null, own: [], sort: false },
+      map: { series: null, own: ['dialog-geometry', 'dialog-tooltip'], sort: false },
+      heatmap: { series: 'Choose a column', own: [], sort: false },
+      pyramid: { series: 'Choose a column', own: ['dialog-pyramid'], sort: false },
+      likert: { series: 'Choose a column', own: ['dialog-scale'], sort: false },
+      crosstab: { series: 'Choose a column', own: [], sort: false },
+    };
+    const settings = ['dialog-buckets', 'dialog-geometry', 'dialog-tooltip', 'dialog-pyramid', 'dialog-scale', 'dialog-layout'];
+
+    it('lists the eleven kinds in the chart type select', async () => {
+      await openDialog({ columns: twoDimensions() });
+
+      expect(optionsOf('dialog-chart-type')).toEqual([...chartTypes]);
+      expect(optionTexts('dialog-chart-type')).toEqual([
+        'Stat tile',
+        'Bar chart',
+        'Column chart',
+        'Line chart',
+        'Histogram',
+        'Pie chart',
+        'Map',
+        'Heat map',
+        'Population pyramid',
+        'Diverging Likert bars',
+        'Cross table',
+      ]);
+    });
+
+    it.each(chartTypes)('shows the fields of a %s widget and no others', async (type) => {
+      const context = await openDialog({ columns: twoDimensions() });
+      await change(context, field('dialog-chart-type'), type);
+      const want = expected[type];
+
+      if (want.series === null) {
+        expect(field('dialog-series-by')).toBeNull();
+      } else {
+        expect(field('dialog-series-by')).not.toBeNull();
+        expect(optionTexts('dialog-series-by')[0]).toBe(want.series);
+        expect(optionsOf('dialog-series-by')).toEqual(['', 'value', 'numerator', 'denominator', 'round', 'geometry', 'water_source', 'sex']);
+      }
+      for (const id of settings.filter((id) => id !== 'dialog-layout')) {
+        expect(field(id) !== null, `${type} / ${id}`).toBe(want.own.includes(id));
+      }
+      expect(field('dialog-sort-by') !== null).toBe(want.sort);
+      expect(field('dialog-layout')).toBeNull(); // only once a series is chosen
+      expect(field('dialog-group-by') !== null).toBe(type !== 'stat');
+    });
+  });
+
+  describe('the series column', () => {
+    it('offers every column but the group column, and no series for a bar, column or line chart to begin with', async () => {
+      const context = await openDialog({ columns: twoDimensions() });
+
+      expect(field<HTMLSelectElement>('dialog-series-by').value).toBe('');
+      expect(optionsOf('dialog-series-by')).toEqual(['', 'value', 'numerator', 'denominator', 'round', 'geometry', 'water_source', 'sex']);
+      await change(context, field('dialog-group-by'), 'water_source');
+      expect(optionsOf('dialog-series-by')).not.toContain('water_source');
+      expect(optionsOf('dialog-series-by')).toContain('municipality');
+    });
+
+    it('sends no series, as before, when none is chosen', async () => {
+      const context = await openDialog({ columns: twoDimensions() });
+      await change(context, field('dialog-title'), 'Coverage');
+
+      const body = await create(context);
+
+      expect(Object.keys(body.config).sort()).toEqual(Object.keys(config()).sort());
+      expect('seriesBy' in body.config).toBe(false);
+      expect('layout' in body.config).toBe(false);
+    });
+
+    it('saves the series column of a chart that takes one, and previews it', async () => {
+      const context = await openDialog({ columns: twoDimensions() });
+      await change(context, field('dialog-title'), 'Water source by municipality');
+      await change(context, field('dialog-series-by'), 'water_source');
+
+      const preview = await previewAnswer(context, seriesResult([cell('Cali', 'Piped', 5), cell('Cali', 'Well', 3)], ['Piped', 'Well']));
+      expect(preview.config).toMatchObject({ seriesBy: 'water_source', layout: 'grouped' });
+      expect(preview.chartType).toBe('column');
+      expect(all(dialog(), 'legend-name').map(text)).toEqual(['Piped', 'Well']);
+
+      const body = await create(context);
+      expect(body.config).toMatchObject({ groupBy: 'municipality', seriesBy: 'water_source', layout: 'grouped' });
+    });
+
+    it.each(['heatmap', 'pyramid', 'likert', 'crosstab'] as const)('requires the series column of a %s widget', async (type) => {
+      const context = await openDialog({ columns: twoDimensions() });
+      await change(context, field('dialog-chart-type'), type);
+      await change(context, field('dialog-title'), 'Cross');
+
+      await click(context, field('dialog-save'));
+
+      expect(errorOf('widgetSeriesBy')).toBe('Choose the series column.');
+      context.http.expectNone(isCreate);
+    });
+
+    it('refuses the group column as the series column', async () => {
+      const context = await openDialog({ columns: twoDimensions() });
+      await change(context, field('dialog-chart-type'), 'heatmap');
+      await change(context, field('dialog-title'), 'Cross');
+      await change(context, field('dialog-series-by'), 'sex');
+      await change(context, field('dialog-group-by'), 'sex');
+
+      await click(context, field('dialog-save'));
+
+      expect(errorOf('widgetSeriesBy')).toBe('Choose a series column other than the group column.');
+      context.http.expectNone(isCreate);
+    });
+
+    it('drops the series when the indicator changes, as every column chosen from the old table', async () => {
+      const context = await openDialog({ columns: twoDimensions() });
+      await change(context, field('dialog-series-by'), 'water_source');
+      expect(field<HTMLSelectElement>('dialog-series-by').value).toBe('water_source');
+      expect(radio('grouped')).not.toBeNull();
+
+      await change(context, field('dialog-indicator'), 'households_visited');
+      await answerColumns(context, twoDimensions());
+
+      expect(field<HTMLSelectElement>('dialog-series-by').value).toBe('');
+      expect(field('dialog-layout')).toBeNull();
+    });
+
+    it('keeps a saved series column the table no longer has, so the form shows what is saved', async () => {
+      const saved = widget('w1', { chartType: 'heatmap', config: config({ seriesBy: 'gone' }) });
+      await openDialog({ existing: saved, columns: twoDimensions() });
+
+      expect(field<HTMLSelectElement>('dialog-series-by').value).toBe('gone');
+      expect(optionsOf('dialog-series-by')).toContain('gone');
+    });
+
+    it('sends the series of the kinds that take one and of no other', async () => {
+      const context = await openDialog({ columns: twoDimensions() });
+      await change(context, field('dialog-title'), 'Chart');
+      await change(context, field('dialog-series-by'), 'water_source');
+      await change(context, field('dialog-chart-type'), 'pie');
+
+      const body = await create(context);
+
+      expect('seriesBy' in body.config).toBe(false);
+    });
+
+    it('shows the server\'s refusal of the series under the select', async () => {
+      const context = await openDialog({ columns: twoDimensions() });
+      await change(context, field('dialog-title'), 'Chart');
+      await change(context, field('dialog-series-by'), 'water_source');
+      await click(context, field('dialog-save'));
+
+      context.http.expectOne(isCreate).flush({ title: 'x', errors: { 'config.seriesBy': ['A column widget cannot have a series.'] } }, { status: 400, statusText: 'Bad Request' });
+      await settle(context.harness);
+
+      expect(errorOf('widgetSeriesBy')).toBe('A column widget cannot have a series.');
+    });
+  });
+
+  describe('the layout of bars and columns', () => {
+    async function withSeries(type: 'bar' | 'column' = 'column') {
+      const context = await openDialog({ columns: twoDimensions() });
+      await change(context, field('dialog-chart-type'), type);
+      await change(context, field('dialog-title'), 'Water');
+      await change(context, field('dialog-series-by'), 'water_source');
+      return context;
+    }
+
+    it('offers Grouped, Stacked and Stacked to 100% once a bar or column chart has a series, grouped to begin with', async () => {
+      const context = await withSeries();
+
+      expect(Array.from(dialog().querySelectorAll('[data-testid="dialog-layout"] label')).map(text)).toEqual(['Grouped', 'Stacked', 'Stacked to 100%']);
+      expect(radio('grouped').checked).toBe(true);
+      expect(radio('stacked').checked).toBe(false);
+      await change(context, field('dialog-chart-type'), 'bar');
+      expect(field('dialog-layout')).not.toBeNull();
+    });
+
+    it('offers no layout for a line chart or for a chart without a series', async () => {
+      const context = await withSeries();
+      await change(context, field('dialog-chart-type'), 'line');
+      expect(field('dialog-layout')).toBeNull();
+
+      await change(context, field('dialog-chart-type'), 'column');
+      await change(context, field('dialog-series-by'), '');
+      expect(field('dialog-layout')).toBeNull();
+    });
+
+    it('saves the layout chosen', async () => {
+      const context = await withSeries();
+      await click(context, radio('percent'));
+
+      expect(radio('percent').checked).toBe(true);
+      expect(config_(await create(context))).toMatchObject({ seriesBy: 'water_source', layout: 'percent' });
+    });
+
+    it('previews the layout', async () => {
+      const context = await withSeries('bar');
+      await click(context, radio('stacked'));
+
+      const preview = await previewAnswer(context, seriesResult([cell('Cali', 'Piped', 5), cell('Cali', 'Well', 3)], ['Piped', 'Well']));
+
+      expect(preview.config.layout).toBe('stacked');
+      expect(preview.chartType).toBe('bar');
+    });
+
+    it('disables Stacked and 100% while the widget plots a ratio, and says why', async () => {
+      const context = await withSeries();
+      await click(context, radio('stacked'));
+
+      await change(context, field('dialog-mode'), 'ratio');
+
+      expect(radio('stacked').disabled).toBe(true);
+      expect(radio('percent').disabled).toBe(true);
+      expect(radio('grouped').disabled).toBe(false);
+      expect(radio('grouped').checked).toBe(true); // a stacked layout is dropped for a ratio
+      expect(text(field('dialog-layout-reason'))).toBe('Stacked bars add their values, so they need a measure, not a ratio.');
+
+      await change(context, field('dialog-mode'), 'measure');
+      expect(radio('stacked').disabled).toBe(false);
+      expect(field('dialog-layout-reason')).toBeNull();
+    });
+
+    it('shows a saved layout, and the server\'s refusal of a layout', async () => {
+      const saved = widget('w1', { chartType: 'column', config: config({ seriesBy: 'water_source', layout: 'stacked' }) });
+      const context = await openDialog({ existing: saved, columns: twoDimensions() });
+
+      expect(radio('stacked').checked).toBe(true);
+      await change(context, field('dialog-title'), 'Water');
+      await click(context, field('dialog-save'));
+      context.http.expectOne(isPatch).flush({ title: 'x', errors: { 'config.layout': ['Stacked bars add their values, so they need a measure, not a ratio.'] } }, { status: 400, statusText: 'Bad Request' });
+      await settle(context.harness);
+
+      expect(text(dialog().querySelector('[data-testid="dialog-layout"] [data-testid="field-error"]'))).toBe('Stacked bars add their values, so they need a measure, not a ratio.');
+    });
+  });
+
+  describe('the sides of a population pyramid', () => {
+    async function pyramid() {
+      const context = await openDialog({ columns: twoDimensions() });
+      await change(context, field('dialog-chart-type'), 'pyramid');
+      await change(context, field('dialog-title'), 'Population');
+      await change(context, field('dialog-group-by'), 'round');
+      await change(context, field('dialog-series-by'), 'sex');
+      return context;
+    }
+
+    it('offers the values of the series column that the data holds, and accepts a typed value', async () => {
+      const context = await pyramid();
+
+      const asked = await answerValues(context, ['Female', 'Male', 'Other']);
+
+      // The values come from the rows of the widget as a heat map would list them; the sides themselves are not asked for.
+      expect(asked.config).toMatchObject({ groupBy: 'round', seriesBy: 'sex' });
+      expect(Array.from(dialog().querySelectorAll('#widgetSeriesValues option')).map((o) => o.getAttribute('value'))).toEqual(['Female', 'Male', 'Other']);
+      await change(context, field('dialog-pyramid-left'), 'Female');
+      await change(context, field('dialog-pyramid-right'), 'Unknown to the data');
+      expect(field<HTMLInputElement>('dialog-pyramid-right').value).toBe('Unknown to the data');
+    });
+
+    it('requires both sides, and two different ones', async () => {
+      const context = await pyramid();
+
+      await click(context, field('dialog-save'));
+      expect(errorOf('widgetPyramidLeft')).toBe('Name the value drawn to the left.');
+      expect(errorOf('widgetPyramidRight')).toBe('Name the value drawn to the right.');
+
+      await change(context, field('dialog-pyramid-left'), 'Female');
+      await change(context, field('dialog-pyramid-right'), 'Female');
+      expect(errorOf('widgetPyramidRight')).toBe('Choose different values for the two sides.');
+      context.http.expectNone(isCreate);
+    });
+
+    it('saves the sides with the series column, and previews them', async () => {
+      const context = await pyramid();
+      await change(context, field('dialog-pyramid-left'), 'Female');
+      await change(context, field('dialog-pyramid-right'), 'Male');
+
+      await wait(previewDelayMs + 100);
+      await settle(context.harness);
+      const requests = queries(context);
+      const preview = requests.find((r) => typeOf(r) === 'pyramid')!;
+      expect(preview.request.body.config).toMatchObject({ seriesBy: 'sex', pyramid: { left: 'Female', right: 'Male' } });
+      preview.flush(seriesResult([cell('1', 'Female', 5), cell('1', 'Male', 4)], ['Female', 'Male']));
+      requests.filter((r) => r !== preview).forEach((r) => r.flush(seriesResult([cell('1', 'Female', 5)], ['Female', 'Male', 'Other'])));
+      await settle(context.harness);
+      expect(all(dialog(), 'chart-mark')).toHaveLength(2);
+
+      const body = await create(context);
+      expect(body.chartType).toBe('pyramid');
+      expect(body.config).toMatchObject({ seriesBy: 'sex', pyramid: { left: 'Female', right: 'Male' } });
+      expect('layout' in body.config).toBe(false);
+    });
+
+    it('starts again when the series column changes, for its values are another column\'s', async () => {
+      const context = await pyramid();
+      await change(context, field('dialog-pyramid-left'), 'Female');
+
+      await change(context, field('dialog-series-by'), 'water_source');
+
+      expect(field<HTMLInputElement>('dialog-pyramid-left').value).toBe('');
+    });
+
+    it('shows a saved pyramid, and the server\'s refusal of its right side at that field', async () => {
+      const saved = widget('w1', { chartType: 'pyramid', config: config({ groupBy: 'round', seriesBy: 'sex', pyramid: { left: 'Female', right: 'Male' } }) });
+      const context = await openDialog({ existing: saved, columns: twoDimensions() });
+      expect(field<HTMLInputElement>('dialog-pyramid-left').value).toBe('Female');
+      expect(field<HTMLInputElement>('dialog-pyramid-right').value).toBe('Male');
+
+      await change(context, field('dialog-pyramid-right'), 'Female');
+      await change(context, field('dialog-pyramid-right'), 'Male');
+      await click(context, field('dialog-save'));
+      context.http.expectOne(isPatch).flush({ title: 'x', errors: { 'config.pyramid.right': ['Choose a different value for the right side.'] } }, { status: 400, statusText: 'Bad Request' });
+      await settle(context.harness);
+
+      expect(errorOf('widgetPyramidRight')).toBe('Choose a different value for the right side.');
+      expect(errorOf('widgetPyramidLeft')).toBe('');
+    });
+  });
+
+  describe('the scale of a Likert widget', () => {
+    const opinions = ['Strongly agree', 'Agree', 'Neither', 'Disagree', 'Strongly disagree'];
+    const items = () => fields('scale-item');
+    const valuesOf = () => fields('scale-value').map((input) => (input as HTMLInputElement).value);
+    const sidesOf = () => fields('scale-side').map((select) => (select as HTMLSelectElement).value);
+    const setSide = (context: Context, index: number, side: string) => change(context, fields('scale-side')[index], side);
+
+    async function likert(values: string[] = opinions) {
+      const context = await openDialog({ columns: twoDimensions() });
+      await change(context, field('dialog-chart-type'), 'likert');
+      await change(context, field('dialog-title'), 'Opinion');
+      await change(context, field('dialog-series-by'), 'sex');
+      await answerValues(context, values);
+      return context;
+    }
+
+    it('lists the values of the data in natural order, each left out until marked', async () => {
+      await likert();
+
+      expect(valuesOf()).toEqual(['Agree', 'Disagree', 'Neither', 'Strongly agree', 'Strongly disagree']);
+      expect(sidesOf()).toEqual(['out', 'out', 'out', 'out', 'out']);
+      expect(Array.from(fields('scale-side')[0].querySelectorAll('option')).map(text)).toEqual(['Negative', 'Neutral', 'Positive', 'Left out']);
+    });
+
+    it('asks for the series column before it has values to list', async () => {
+      const context = await openDialog({ columns: twoDimensions() });
+      await change(context, field('dialog-chart-type'), 'likert');
+
+      expect(text(field('scale-none'))).toBe('Choose the series column to see the values of the data.');
+      expect(items()).toHaveLength(0);
+    });
+
+    it('marks sides and orders the values with the up and down buttons, and saves the values that are in the scale, in order', async () => {
+      const context = await likert();
+      // The data lists Agree, Disagree, Neither, Strongly agree, Strongly disagree; the scale goes from the most negative to the most positive.
+      const wanted = ['Strongly disagree', 'Disagree', 'Neither', 'Agree', 'Strongly agree'];
+      for (let target = 0; target < wanted.length; target++) {
+        let at = valuesOf().indexOf(wanted[target]);
+        while (at > target) {
+          await click(context, fields('scale-up')[at]);
+          at--;
+        }
+      }
+      expect(valuesOf()).toEqual(wanted);
+      await click(context, fields('scale-down')[0]);
+      expect(valuesOf().slice(0, 2)).toEqual(['Disagree', 'Strongly disagree']);
+      await click(context, fields('scale-up')[1]);
+      expect(valuesOf()).toEqual(wanted);
+      for (const [i, side] of ['negative', 'negative', 'neutral', 'positive', 'positive'].entries()) {
+        await setSide(context, i, side);
+      }
+
+      const body = await create(context);
+
+      expect(body.chartType).toBe('likert');
+      expect(body.config.seriesBy).toBe('sex');
+      expect(body.config.scale).toEqual([
+        { value: 'Strongly disagree', side: 'negative' },
+        { value: 'Disagree', side: 'negative' },
+        { value: 'Neither', side: 'neutral' },
+        { value: 'Agree', side: 'positive' },
+        { value: 'Strongly agree', side: 'positive' },
+      ]);
+    });
+
+    it('leaves out of the scale the values marked so, and removes one at will', async () => {
+      const context = await likert(['Agree', 'Disagree', "Don't know"]);
+      await setSide(context, 0, 'positive');
+      await setSide(context, 1, 'negative');
+      expect(valuesOf()).toEqual(['Agree', 'Disagree', "Don't know"]);
+
+      await click(context, fields('scale-up')[1]);
+      await click(context, fields('scale-remove')[2]);
+
+      expect(valuesOf()).toEqual(['Disagree', 'Agree']);
+      expect(config_(await create(context)).scale).toEqual([
+        { value: 'Disagree', side: 'negative' },
+        { value: 'Agree', side: 'positive' },
+      ]);
+    });
+
+    it('accepts a value typed by hand, left out until it is marked', async () => {
+      const context = await likert(['Agree', 'Disagree']);
+
+      await change(context, field('scale-new'), 'Not sure');
+      await click(context, field('scale-add'));
+
+      expect(valuesOf()).toEqual(['Agree', 'Disagree', 'Not sure']);
+      expect(sidesOf()).toEqual(['out', 'out', 'out']);
+      expect(field<HTMLInputElement>('scale-new').value).toBe('');
+      await change(context, field('scale-new'), 'Not sure'); // already there
+      await click(context, field('scale-add'));
+      expect(valuesOf()).toHaveLength(3);
+    });
+
+    it('names each control for a screen reader by its value, and reaches them all by keyboard', async () => {
+      await likert(['Agree', 'Disagree']);
+
+      const labels = [...fields('scale-up'), ...fields('scale-down'), ...fields('scale-remove'), ...fields('scale-side'), ...fields('scale-value')].map((c) => c.getAttribute('aria-label'));
+      expect(labels).toEqual([
+        'Move Agree up',
+        'Move Disagree up',
+        'Move Agree down',
+        'Move Disagree down',
+        'Remove Agree',
+        'Remove Disagree',
+        'Side of Agree',
+        'Side of Disagree',
+        'Value 1',
+        'Value 2',
+      ]);
+      for (const control of [...fields('scale-down'), ...fields('scale-remove'), ...fields('scale-side'), ...fields('scale-value'), field('scale-add')]) {
+        expect(control.tabIndex).toBeGreaterThanOrEqual(0); // native buttons, selects and inputs: in the tab order
+      }
+    });
+
+    it('shows the rules of a scale before saving', async () => {
+      const context = await likert(['A', 'B', 'C', 'D', 'E', 'F', 'G']);
+      const scaleError = () => text(field('scale-error'));
+
+      await click(context, field('dialog-save'));
+      expect(scaleError()).toBe('A scale has 2 to 11 values.');
+
+      for (let i = 0; i < 6; i++) await setSide(context, i, 'negative');
+      await click(context, field('dialog-save'));
+      expect(scaleError()).toBe('A scale has at most 5 values on one side.');
+
+      await setSide(context, 5, 'positive');
+      await setSide(context, 6, 'neutral');
+      await click(context, field('dialog-save'));
+      expect(scaleError()).toBe('Order the scale from negative to positive: the negative values, then the neutral one, then the positive ones.');
+
+      await click(context, fields('scale-down')[5]); // A..E negative, G neutral, F positive -> in order
+      await click(context, fields('scale-up')[6]);
+      await setSide(context, 5, 'neutral');
+      await setSide(context, 6, 'neutral');
+      await click(context, field('dialog-save'));
+      expect(scaleError()).toBe('A scale has at most one neutral value.');
+      context.http.expectNone(isCreate);
+    });
+
+    it('refuses an empty value and a repeated value', async () => {
+      const context = await likert(['A', 'B']);
+      await setSide(context, 0, 'negative');
+      await setSide(context, 1, 'positive');
+
+      await change(context, fields('scale-value')[1], 'A');
+      await click(context, field('dialog-save'));
+      expect(text(field('scale-error'))).toBe('A value appears twice in the scale.');
+
+      await change(context, fields('scale-value')[1], '  ');
+      await click(context, field('dialog-save'));
+      expect(text(field('scale-error'))).toBe('A value of the scale is empty.');
+    });
+
+    it('refuses a ratio, which a Likert widget cannot show', async () => {
+      const context = await likert(['A', 'B']);
+      await change(context, field('dialog-mode'), 'ratio');
+
+      await click(context, field('dialog-save'));
+
+      expect(errorOf('widgetNumerator')).toBe('A Likert widget shows shares of a measure, not a ratio.');
+    });
+
+    it('shows the server\'s refusal of a value of the scale at that value, and of the scale as a whole under it', async () => {
+      const context = await likert(['A', 'B', 'C']);
+      await setSide(context, 0, 'negative');
+      await setSide(context, 2, 'positive');
+      await click(context, field('dialog-save'));
+
+      // The scale the server read is A and C: its second value is the third of the editor.
+      context.http.expectOne(isCreate).flush({ title: 'x', errors: { 'config.scale[1]': ['Choose a side for this value.'] } }, { status: 400, statusText: 'Bad Request' });
+      await settle(context.harness);
+
+      expect(fields('scale-item').map((item) => text(item.querySelector('[data-testid="scale-item-error"]')))).toEqual(['', '', 'Choose a side for this value.']);
+      expect(field('dialog-error')).toBeNull();
+
+      await setSide(context, 1, 'neutral');
+      await click(context, field('dialog-save'));
+      context.http.expectOne(isCreate).flush({ title: 'x', errors: { 'config.scale': ['A scale has at most one neutral value.'] } }, { status: 400, statusText: 'Bad Request' });
+      await settle(context.harness);
+      expect(text(field('scale-error'))).toBe('A scale has at most one neutral value.');
+    });
+
+    it('shows a saved scale in its order, and previews the widget with it', async () => {
+      const scale = [
+        { value: 'Disagree', side: 'negative' },
+        { value: 'Agree', side: 'positive' },
+      ] as const;
+      const saved = widget('w1', { chartType: 'likert', config: config({ seriesBy: 'sex', scale: [...scale] }) });
+      const context = await openDialog({ existing: saved, columns: twoDimensions() });
+
+      expect(valuesOf()).toEqual(['Disagree', 'Agree']);
+      expect(sidesOf()).toEqual(['negative', 'positive']);
+      await wait(previewDelayMs + 100);
+      await settle(context.harness);
+      const requests = queries(context);
+      const preview = requests.find((r) => typeOf(r) === 'likert')!;
+      expect(preview.request.body.config.scale).toEqual(scale);
+      const values = requests.find((r) => typeOf(r) === 'heatmap')!;
+      preview.flush(seriesResult([cell('Cali', 'Disagree', 1), cell('Cali', 'Agree', 3)], ['Disagree', 'Agree']));
+      values.flush(seriesResult([cell('Cali', 'Disagree', 1), cell('Cali', 'Agree', 3), cell('Cali', "Don't know", 1)], ['Agree', 'Disagree', "Don't know"]));
+      await settle(context.harness);
+
+      expect(all(dialog(), 'chart-mark')).toHaveLength(2);
+      // The value of the data that the scale does not hold is offered, left out, after the scale's.
+      expect(valuesOf()).toEqual(['Disagree', 'Agree', "Don't know"]);
+      expect(sidesOf()).toEqual(['negative', 'positive', 'out']);
+    });
   });
 });

@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { IndicatorsService, WidgetConfig, chartTypes, emptyConfig, needsGroup } from './indicators.service';
+import { IndicatorsService, WidgetConfig, chartTypes, emptyConfig, hasSeries, needsGroup, needsSeries, takesSeries } from './indicators.service';
 
 const base = '/api/v1/projects/p1/indicators';
 const dashboards = '/api/v1/projects/p1/dashboards';
@@ -208,6 +208,30 @@ describe('IndicatorsService', () => {
       ['histogram', false],
       ['pie', true],
       ['map', true],
+      ['heatmap', true],
+      ['pyramid', true],
+      ['likert', true],
+      ['crosstab', true],
     ]);
+  });
+
+  it('knows which chart types take a series, which need one, and so have one at all', () => {
+    expect(chartTypes.map((t) => [t, takesSeries(t), needsSeries(t), hasSeries(t)])).toEqual([
+      ['stat', false, false, false],
+      ['bar', true, false, true],
+      ['column', true, false, true],
+      ['line', true, false, true],
+      ['histogram', false, false, false],
+      ['pie', false, false, false],
+      ['map', false, false, false],
+      ['heatmap', false, true, true],
+      ['pyramid', false, true, true],
+      ['likert', false, true, true],
+      ['crosstab', false, true, true],
+    ]);
+  });
+
+  it('lists the eleven chart types the API knows, in its order', () => {
+    expect(chartTypes).toEqual(['stat', 'bar', 'column', 'line', 'histogram', 'pie', 'map', 'heatmap', 'pyramid', 'likert', 'crosstab']);
   });
 });

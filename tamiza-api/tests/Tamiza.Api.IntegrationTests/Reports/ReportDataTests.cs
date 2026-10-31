@@ -282,7 +282,7 @@ public sealed class ReportDataTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task A_widget_stacked_to_100_percent_shows_shares_and_each_series_share_of_the_whole_in_its_total_row()
+    public async Task A_widget_stacked_to_100_percent_shows_shares_and_a_total_column_but_no_total_row()
     {
         await using var h = await WithSourcesAsync();
         await h.AddWidgetAsync(SeriesWidget("Composition", "bar", new
@@ -296,8 +296,8 @@ public sealed class ReportDataTests(PostgresFixture postgres)
         var cali = widget.Rows.Single(r => r[0].Text == "Cali");
         Assert.Equal(["Cali", "70%", "30%", "50 households"], cali.Select(c => c.Text));
         Assert.Equal(0.7, (double)cali[1].Value!, 6);
-        // The total row: Piped is 55 of the 77 households.
-        Assert.Equal(["Total", "71.4%", "28.6%", "77 households"], widget.Rows[^1].Select(c => c.Text));
+        // As in "Show as table": the group totals are a column, and there is no total row.
+        Assert.Equal(["Buga", "Cali", "Palmira"], Texts(widget, 0));
     }
 
     [Fact]

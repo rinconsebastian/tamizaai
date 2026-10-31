@@ -5,14 +5,18 @@ import { RouterLink } from '@angular/router';
 import { TranslocoDirective } from '@jsverse/transloco';
 import { catchError, distinctUntilChanged, map, of, switchMap, tap, timer } from 'rxjs';
 import { ApiErrors } from '../../../core/api-error';
-import { AppliedDashboardFilter, ChartType, IndicatorEntry, IndicatorsService, QueryResult, WidgetConfig, WidgetSort } from '../../../core/projects/indicators.service';
+import { AppliedDashboardFilter, ChartType, IndicatorEntry, IndicatorsService, QueryResult, WidgetConfig, WidgetSort, hasSeries } from '../../../core/projects/indicators.service';
 import { Alert, ApiLang, Button, Skeleton } from '../../../shared/ui';
-import { AxisChart } from './axis-chart';
+import { AxisChart, AxisKind } from './axis-chart';
+import { CrosstabWidget } from './crosstab-widget';
+import { HeatmapChart } from './heatmap-chart';
+import { LikertChart } from './likert-chart';
 import { plainIndicator, valueFormatter } from './format';
 import { ActiveDashboardFilter, appliedOf } from './dashboard-filters';
 import { DashboardPrint } from './dashboard-print';
 import { MapWidget } from './map-widget';
 import { PieWidget } from './pie-widget';
+import { PyramidChart } from './pyramid-chart';
 import { StatWidget } from './stat-widget';
 
 type State = { kind: 'idle' } | { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; result: QueryResult };
@@ -23,8 +27,22 @@ function sortFor(sort: WidgetSort): WidgetSort {
 }
 
 /**
+ * The settings of the second dimension a chart type uses (design D1, D7): the series column of the kinds that take or need one, the
+ * layout of bars and columns, a pyramid's sides, a Likert widget's scale. A key with no value is left out, not sent as null, so a
+ * widget without a series queries and saves exactly what it did before.
+ */
+function seriesSettings(type: ChartType, config: WidgetConfig): Partial<WidgetConfig> {
+  return {
+    ...(hasSeries(type) && config.seriesBy ? { seriesBy: config.seriesBy } : {}),
+    ...((type === 'bar' || type === 'column') && config.layout ? { layout: config.layout } : {}),
+    ...(type === 'pyramid' && config.pyramid ? { pyramid: config.pyramid } : {}),
+    ...(type === 'likert' && config.scale?.length ? { scale: config.scale } : {}),
+  };
+}
+
+/**
  * The query a chart type actually uses: settings that belong to another chart type are not sent, and a stat tile never groups.
- * Twin of `WidgetQuery.For` in tamiza-api (scheduled dashboard emails); change both together.
+ * Twin of `WidgetQuery.For` in tamiza-api (scheduled dashboard emails and the MCP tools); change both together.
  */
 export function queryFor(type: ChartType, config: WidgetConfig): WidgetConfig {
   return {
@@ -43,7 +61,30 @@ export function queryFor(type: ChartType, config: WidgetConfig): WidgetConfig {
     basemap: null,
     // Which dashboard filters the widget ignores decides what the page sends with the query, not the query itself.
     ignoredDashboardFilters: [],
+    ...seriesSettings(type, config),
   };
+}
+
+/**
+ * The axis chart that draws a chart type, or null for the kinds other components draw. Every kind is listed, with no default branch,
+ * so a kind added later cannot fall into a column chart unseen (design D6).
+ */
+export function axisKindOf(type: ChartType): AxisKind | null {
+  switch (type) {
+    case 'bar':
+    case 'column':
+    case 'line':
+    case 'histogram':
+      return type;
+    case 'stat':
+    case 'pie':
+    case 'map':
+    case 'heatmap':
+    case 'pyramid':
+    case 'likert':
+    case 'crosstab':
+      return null;
+  }
 }
 
 /**
@@ -67,7 +108,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
  */
 @Component({
   selector: 'app-widget-view',
-  imports: [NgTemplateOutlet, RouterLink, TranslocoDirective, Alert, ApiLang, Button, Skeleton, AxisChart, MapWidget, PieWidget, StatWidget],
+  imports: [NgTemplateOutlet, RouterLink, TranslocoDirective, Alert, ApiLang, Button, Skeleton, AxisChart, CrosstabWidget, HeatmapChart, LikertChart, MapWidget, PieWidget, PyramidChart, StatWidget],
   template: `
     <div class="flex h-full min-h-0 flex-col gap-2" *transloco="let t" [attr.aria-busy]="state().kind === 'loading'">
       @switch (state().kind) {
@@ -124,8 +165,29 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
                     @case ('map') {
                       <app-map-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [tooltipTypes]="result.tooltipTypes" [asTable]="asTable()" />
                     }
-                    @default {
-                      <app-axis-chart [kind]="axisKind()" [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [asTable]="asTable()" />
+                    @case ('bar') {
+                      <ng-container *ngTemplateOutlet="axis" />
+                    }
+                    @case ('column') {
+                      <ng-container *ngTemplateOutlet="axis" />
+                    }
+                    @case ('line') {
+                      <ng-container *ngTemplateOutlet="axis" />
+                    }
+                    @case ('histogram') {
+                      <ng-container *ngTemplateOutlet="axis" />
+                    }
+                    @case ('heatmap') {
+                      <app-heatmap-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [asTable]="asTable()" />
+                    }
+                    @case ('pyramid') {
+                      <app-pyramid-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [asTable]="asTable()" />
+                    }
+                    @case ('likert') {
+                      <app-likert-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [asTable]="asTable()" />
+                    }
+                    @case ('crosstab') {
+                      <app-crosstab-widget [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" chartType="crosstab" />
                     }
                   }
                 </div>
@@ -135,6 +197,11 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
         }
       }
     </div>
+
+    <!-- A bar, column or line chart with a series is given the whole answer, which holds the series and the totals. -->
+    <ng-template #axis>
+      <app-axis-chart [kind]="axisKind()!" [rows]="result()!.rows" [answer]="result()" [config]="config()!" [label]="label()" [format]="formatter()" [asTable]="asTable()" />
+    </ng-template>
 
     <ng-template #notPublished>
       <div class="flex flex-col items-start gap-2 text-sm text-body" data-testid="view-not-published" *transloco="let t">
@@ -178,7 +245,8 @@ export class WidgetView {
   protected readonly state = signal<State>({ kind: 'idle' });
   private readonly drawable = computed(() => {
     const result = this.result();
-    return this.chartType() !== 'stat' && !!result && result.published && !result.missing.indicator && !result.missing.columns.length && result.rows.length > 0;
+    // A cross table is a table already: it has no other view to switch to.
+    return this.chartType() !== 'stat' && this.chartType() !== 'crosstab' && !!result && result.published && !result.missing.indicator && !result.missing.columns.length && result.rows.length > 0;
   });
 
   protected readonly result = computed(() => {
@@ -206,10 +274,7 @@ export class WidgetView {
   /** What the widget calls its indicator: the label, or the name when the project lists none. */
   protected readonly label = computed(() => this.indicator()?.label ?? this.config()?.indicator ?? '');
   protected readonly formatter = computed(() => valueFormatter(this.indicator() ?? plainIndicator, this.locale));
-  protected readonly axisKind = computed(() => {
-    const type = this.chartType();
-    return type === 'bar' || type === 'column' || type === 'line' || type === 'histogram' ? type : 'column';
-  });
+  protected readonly axisKind = computed(() => axisKindOf(this.chartType()));
 
   private readonly key = computed(() => {
     const config = this.config();

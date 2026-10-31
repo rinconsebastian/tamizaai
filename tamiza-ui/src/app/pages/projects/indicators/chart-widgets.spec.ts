@@ -1,6 +1,7 @@
 import { byTestId, settle } from '../../../../testing/project-harness';
-import { ChartType, IndicatorEntry, QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
-import { Context, all, clearOverlay, config, indicator, isQuery, open, printOf, result, row, text, wait, widget } from './indicators-testing';
+import { pressKey } from '../../../../testing/cdk';
+import { ChartType, IndicatorEntry, QueryResult, QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
+import { Context, all, cell, clearOverlay, config, indicator, isQuery, open, overlay, printOf, result, row, seriesResult, text, wait, widget } from './indicators-testing';
 
 interface Query {
   config: WidgetConfig;
@@ -13,6 +14,16 @@ async function show(chartType: ChartType, settings: Partial<WidgetConfig>, rows:
   const requests = context.http.match(isQuery);
   expect(requests).toHaveLength(1);
   requests[0].flush(result(rows));
+  await settle(context.harness);
+  return { ...context, query: requests[0].request.body as Query };
+}
+
+/** Opens a dashboard with one widget of `chartType` over `settings`, and answers its one query with the whole `answer` (a widget with a series). */
+async function showAnswer(chartType: ChartType, settings: Partial<WidgetConfig>, answer: QueryResult, indicators?: IndicatorEntry[]) {
+  const context = await open('viewer', [widget('w1', { chartType, config: config(settings) })], null, indicators ? { indicators } : {});
+  const requests = context.http.match(isQuery);
+  expect(requests).toHaveLength(1);
+  requests[0].flush(answer);
   await settle(context.harness);
   return { ...context, query: requests[0].request.body as Query };
 }
@@ -457,6 +468,331 @@ describe('chart widgets', () => {
       expect(context.query.config.sort).toBeNull();
       await toggle(context);
       expect(tableRows(context).map((r) => r[0])).toEqual(['1', '2', '10']);
+    });
+  });
+});
+
+describe('chart widgets with a series (design D5)', () => {
+  afterEach(clearOverlay);
+
+  const hits = (context: Context) => all(context.root, 'chart-hit');
+  const legend = (context: Context) => all(context.root, 'legend-name').map(text);
+  const swatches = (context: Context) => all(context.root, 'legend-swatch').map((s) => s.getAttribute('style'));
+  const tooltip = () => overlay().querySelector<HTMLElement>('[data-testid="chart-tooltip"]');
+  const tooltipLines = () => Array.from(overlay().querySelectorAll('[data-testid="tooltip-line"]')).map(text);
+  const hover = async (context: Context, target: Element) => {
+    target.dispatchEvent(new MouseEvent('pointerenter', { clientX: 40, clientY: 30 }));
+    await settle(context.harness);
+  };
+  const number = (element: Element, name: string) => Number(element.getAttribute(name));
+  /** What the live region says; a zero-width mark makes the same words twice in a row a change, and is not read. */
+  const spoken = (context: Context) => text(byTestId(context.root, 'marks-announcement')).replaceAll('\u200b', '');
+
+  /** `households_by_source` (municipality by water source): Cali has 35 Piped and 15 Well, Palmira 20 Piped. */
+  const answer = () => seriesResult([cell('Cali', 'Piped', 35, 3), cell('Cali', 'Well', 15, 2), cell('Palmira', 'Piped', 20, 1)], ['Piped', 'Well']);
+  const source = { indicator: 'households_visited', groupBy: 'municipality', seriesBy: 'water_source' } as const;
+
+  describe('grouped columns', () => {
+    it('puts one column per series side by side in each group, with a legend (Grouped columns)', async () => {
+      const context = await showAnswer('column', { ...source, layout: 'grouped' }, answer(), [households]);
+
+      const marks_ = marks(context);
+      expect(marks_).toHaveLength(3);
+      const [piped, well] = marks_;
+      expect(x(well)).toBeGreaterThan(x(piped) + number(piped, 'width')); // side by side, with the surface between
+      expect(x(well) - (x(piped) + number(piped, 'width'))).toBeGreaterThanOrEqual(2);
+      expect(number(piped, 'y') + number(piped, 'height')).toBeCloseTo(number(well, 'y') + number(well, 'height'), 1); // one baseline
+      expect(number(piped, 'height')).toBeGreaterThan(number(well, 'height'));
+      expect(legend(context)).toEqual(['Piped', 'Well']);
+      expect(byTestId(context.root, 'chart-caption')).toBeNull(); // the legend takes the caption's place
+      expect(context.query.config).toMatchObject({ seriesBy: 'water_source', layout: 'grouped' });
+    });
+
+    it('keeps a series in the same color in every group, by its place among the series, and thin marks', async () => {
+      const context = await showAnswer('column', { ...source, layout: 'grouped' }, answer(), [households]);
+
+      expect(marks(context).map((m) => m.getAttribute('style'))).toEqual([
+        expect.stringContaining('var(--tmz-series-1)'),
+        expect.stringContaining('var(--tmz-series-2)'),
+        expect.stringContaining('var(--tmz-series-1)'),
+      ]);
+      expect(swatches(context)).toEqual([expect.stringContaining('var(--tmz-series-1)'), expect.stringContaining('var(--tmz-series-2)')]);
+      for (const mark of marks(context)) {
+        expect(number(mark, 'width')).toBeLessThanOrEqual(24);
+      }
+    });
+
+    it('draws a bar chart grouped the same way, the groups down the chart', async () => {
+      const context = await showAnswer('bar', { ...source, layout: 'grouped' }, answer(), [households]);
+
+      const [piped, well, palmira] = marks(context);
+      expect(number(well, 'y')).toBeGreaterThan(number(piped, 'y') + number(piped, 'height'));
+      expect(number(palmira, 'y')).toBeGreaterThan(number(well, 'y'));
+      expect(number(piped, 'x')).toBe(number(well, 'x')); // one baseline
+      expect(number(piped, 'width')).toBeGreaterThan(number(well, 'width'));
+    });
+
+    it('draws a group with no value for a series without that column', async () => {
+      const context = await showAnswer('column', { ...source, layout: 'grouped' }, answer(), [households]);
+
+      // Palmira has no Well: two groups, three columns.
+      expect(marks(context)).toHaveLength(3);
+    });
+  });
+
+  describe('stacked columns', () => {
+    it('stacks the segments from the axis in the order of the series, with two pixels between them', async () => {
+      const context = await showAnswer('column', { ...source, layout: 'stacked' }, answer(), [households]);
+
+      const [piped, well] = marks(context);
+      expect(x(well)).toBe(x(piped));
+      expect(number(piped, 'width')).toBe(number(well, 'width'));
+      const gap = number(piped, 'y') - (number(well, 'y') + number(well, 'height'));
+      expect(gap).toBeCloseTo(2, 1);
+      expect(number(piped, 'height')).toBeGreaterThan(number(well, 'height'));
+      expect(number(piped, 'width')).toBeLessThanOrEqual(28);
+    });
+
+    it('stacks the segments of a bar chart to the right', async () => {
+      const context = await showAnswer('bar', { ...source, layout: 'stacked' }, answer(), [households]);
+
+      const [piped, well] = marks(context);
+      expect(number(well, 'x') - (number(piped, 'x') + number(piped, 'width'))).toBeCloseTo(2, 1);
+      expect(number(piped, 'y')).toBe(number(well, 'y'));
+    });
+
+    it('stacks a value below zero below the axis (a negative value stacked)', async () => {
+      const mixed = seriesResult([cell('Cali', 'Piped', 30), cell('Cali', 'Well', -10), cell('Palmira', 'Piped', 20), cell('Palmira', 'Well', 15)], ['Piped', 'Well']);
+      const context = await showAnswer('column', { ...source, layout: 'stacked' }, mixed, [households]);
+
+      const [piped, well, palmiraPiped, palmiraWell] = marks(context);
+      expect(number(well, 'y')).toBeGreaterThanOrEqual(number(piped, 'y') + number(piped, 'height') - 0.01); // below the axis, not on top
+      expect(number(palmiraWell, 'y')).toBeLessThan(number(palmiraPiped, 'y')); // positive values still stack up
+      expect(svgTexts(context)).toEqual(expect.arrayContaining(['-10', '0']));
+    });
+
+    it('lists a stacked chart as a cross table with a Total column and a Total row (Stacked chart as a table)', async () => {
+      const context = await showAnswer('column', { ...source, layout: 'stacked' }, answer(), [households]);
+
+      await toggle(context);
+      expect(byTestId(context.root, 'chart-svg')).toBeNull();
+      expect(tableHeaders(context)).toEqual(['municipality', 'Piped', 'Well', 'Total']);
+      expect(tableRows(context)).toEqual([
+        ['Cali', '35 households', '15 households', '50 households'],
+        ['Palmira', '20 households', '—', '20 households'],
+        ['Total', '55 households', '15 households', '70 households'],
+      ]);
+    });
+  });
+
+  describe('stacked to 100%', () => {
+    const shares = () => seriesResult([cell('Cali', 'Piped', 60, 6), cell('Cali', 'Well', 40, 4)], ['Piped', 'Well']);
+
+    it('draws each bar as shares on a 0 to 100% axis, whatever the indicator\'s format (Stacked to 100%)', async () => {
+      const context = await showAnswer('bar', { ...source, layout: 'percent' }, shares(), [households]);
+
+      const [piped, well] = marks(context);
+      const plot = number(piped, 'width') + number(well, 'width') + 2;
+      expect(number(piped, 'width') / plot).toBeCloseTo(0.6, 1);
+      expect(number(well, 'width') / plot).toBeCloseTo(0.4, 1);
+      expect(svgTexts(context)).toEqual(expect.arrayContaining(['0%', '25%', '50%', '75%', '100%']));
+    });
+
+    it('reads 60% and 40% in the tooltip of a segment, and the values 60 and 40', async () => {
+      const context = await showAnswer('bar', { ...source, layout: 'percent' }, shares(), [households]);
+
+      await hover(context, hits(context)[0]);
+      expect(text(overlay().querySelector('[data-testid="tooltip-heading"]'))).toBe('Cali');
+      expect(tooltipLines()).toEqual(['Piped: 60%', 'Households visited: 60 households']);
+      await hover(context, hits(context)[1]);
+      expect(tooltipLines()).toEqual(['Well: 40%', 'Households visited: 40 households']);
+    });
+
+    it('leaves a negative value out of the shares and counts it in a note (a negative value left out of a 100% bar)', async () => {
+      const mixed = seriesResult([cell('Palmira', 'Piped', 30), cell('Palmira', 'River', -5), cell('Palmira', 'Well', 10)], ['Piped', 'River', 'Well']);
+      const context = await showAnswer('bar', { ...source, layout: 'percent' }, mixed, [households]);
+
+      expect(marks(context)).toHaveLength(2);
+      const [piped, well] = marks(context);
+      const plot = number(piped, 'width') + number(well, 'width') + 2;
+      expect(number(piped, 'width') / plot).toBeCloseTo(0.75, 1);
+      expect(text(byTestId(context.root, 'series-negative-left-out'))).toBe('1 negative value is left out of the shares.');
+      await toggle(context);
+      expect(tableHeaders(context)).toEqual(['municipality', 'Piped', 'River', 'Well', 'Total']);
+      expect(tableRows(context)).toEqual([['Palmira', '75%', null, '25%', '35 households'].map((cellText) => cellText ?? '—')]);
+    });
+  });
+
+  describe('order and colors', () => {
+    it('draws the bars in the order of the answer and keeps the series in the same order inside each (Stacked bars ordered by their totals)', async () => {
+      const sort = { by: 'value', column: null, compareAs: null, direction: 'desc' } as const;
+      const ordered = seriesResult(
+        [cell('Palmira', 'Piped', 300), cell('Palmira', 'Well', 200), cell('Cali', 'Piped', 100), cell('Cali', 'Well', 200)],
+        ['Piped', 'Well'],
+      );
+      const context = await showAnswer('bar', { ...source, layout: 'stacked', sort }, ordered, [households]);
+
+      expect(context.query.config.sort).toEqual(sort);
+      const [palmiraPiped, palmiraWell, caliPiped, caliWell] = marks(context);
+      expect(number(palmiraPiped, 'y')).toBeLessThan(number(caliPiped, 'y')); // Palmira (500) first, at the top
+      expect(number(palmiraPiped, 'x')).toBe(number(caliPiped, 'x'));
+      expect(number(palmiraWell, 'x')).toBeGreaterThan(number(palmiraPiped, 'x')); // Piped nearest the axis in both
+      expect(number(caliWell, 'x')).toBeGreaterThan(number(caliPiped, 'x'));
+      await toggle(context);
+      expect(tableRows(context).map((r) => r[0])).toEqual(['Palmira', 'Cali', 'Total']);
+    });
+
+    it('lists the series in the order the answer gives, then "(none)", then "Other", the last in its own neutral', async () => {
+      const folded = seriesResult(
+        [cell('Cali', 'Piped', 10), cell('Cali', null, 2, 1, 'none'), cell('Cali', null, 3, 1, 'other')],
+        ['Piped', { value: 'Well', kind: 'value' }, { value: null, kind: 'none' }, { value: null, kind: 'other' }],
+      );
+      const context = await showAnswer('column', { ...source, layout: 'stacked' }, folded, [households]);
+
+      expect(legend(context)).toEqual(['Piped', 'Well', '(none)', 'Other']);
+      expect(swatches(context)).toEqual([
+        expect.stringContaining('var(--tmz-series-1)'),
+        expect.stringContaining('var(--tmz-series-2)'),
+        expect.stringContaining('var(--tmz-series-3)'),
+        expect.stringContaining('var(--tmz-series-other)'),
+      ]);
+      expect(marks(context).map((m) => m.getAttribute('style'))).toEqual([
+        expect.stringContaining('var(--tmz-series-1)'),
+        expect.stringContaining('var(--tmz-series-3)'),
+        expect.stringContaining('var(--tmz-series-other)'),
+      ]);
+    });
+
+    it('keeps the colors and the legend of every series when a dashboard filter leaves one without rows (Colors kept under a dashboard filter)', async () => {
+      // Well has no rows after the filter, but the answer still lists it, in its place.
+      const filtered = seriesResult([cell('Cali', 'Piped', 35), cell('Cali', 'River', 5)], ['Piped', 'Well', 'River']);
+      const context = await showAnswer('column', { ...source, layout: 'stacked' }, filtered, [households]);
+
+      expect(legend(context)).toEqual(['Piped', 'Well', 'River']);
+      expect(marks(context).map((m) => m.getAttribute('style'))).toEqual([expect.stringContaining('var(--tmz-series-1)'), expect.stringContaining('var(--tmz-series-3)')]);
+    });
+
+    it('draws no legend for a widget whose answer holds a single series, and names it in the caption', async () => {
+      const one = seriesResult([cell('Cali', 'Piped', 35), cell('Palmira', 'Piped', 20)], ['Piped']);
+      const context = await showAnswer('column', { ...source, layout: 'grouped' }, one, [households]);
+
+      expect(all(context.root, 'legend-item')).toHaveLength(0);
+      expect(text(byTestId(context.root, 'chart-caption'))).toBe('Households visited by municipality');
+    });
+  });
+
+  describe('lines by series', () => {
+    const rounds = { indicator: 'attendance', groupBy: 'round', seriesBy: 'municipality' } as const;
+
+    it('draws one line per series through its own points, with a legend naming them (One line per series)', async () => {
+      const lines = seriesResult(
+        [cell('1', 'Cali', 60), cell('2', 'Cali', 70), cell('3', 'Cali', 80), cell('1', 'Buga', 50), cell('2', 'Buga', 55), cell('3', 'Buga', 65)],
+        ['Buga', 'Cali'],
+      );
+      const context = await showAnswer('line', rounds, lines);
+
+      expect(all(context.root, 'chart-line')).toHaveLength(2);
+      expect(all(context.root, 'chart-line').map((line) => line.getAttribute('d')!.match(/[ML]/g))).toEqual([['M', 'L', 'L'], ['M', 'L', 'L']]);
+      expect(all(context.root, 'chart-dot')).toHaveLength(6);
+      expect(legend(context)).toEqual(['Buga', 'Cali']);
+      expect(all(context.root, 'chart-line').map((line) => line.getAttribute('style'))).toEqual([expect.stringContaining('var(--tmz-series-1)'), expect.stringContaining('var(--tmz-series-2)')]);
+    });
+
+    it('puts the groups in natural order, 2 before 10, whatever order the answer lists them in', async () => {
+      const lines = seriesResult([cell('10', 'Cali', 90), cell('2', 'Cali', 70), cell('1', 'Cali', 60), cell('10', 'Buga', 95), cell('2', 'Buga', 75)], ['Buga', 'Cali']);
+      const context = await showAnswer('line', rounds, lines);
+
+      const xs = all(context.root, 'chart-hit').map((hit) => number(hit, 'x'));
+      expect(xs).toEqual([...xs].sort((a, b) => a - b));
+      await toggle(context);
+      expect(tableRows(context).map((r) => r[0])).toEqual(['1', '2', '10', 'Total']);
+    });
+
+    it('has a gap, not a segment, where a series has no value for a group (Gap in a line)', async () => {
+      const gapped = seriesResult(
+        [cell('1', 'Cali', 60), cell('2', 'Cali', 70), cell('3', 'Cali', 80), cell('1', 'Buga', 50), cell('3', 'Buga', 65)],
+        ['Buga', 'Cali'],
+      );
+      const context = await showAnswer('line', rounds, gapped);
+
+      const [buga, cali] = all(context.root, 'chart-line');
+      expect(cali.getAttribute('d')!.match(/[ML]/g)).toEqual(['M', 'L', 'L']);
+      expect(buga.getAttribute('d')).toBe(''); // points at 1 and 3, no segment through 2
+      expect(all(context.root, 'chart-dot')).toHaveLength(5);
+    });
+
+    it('breaks a line into runs where it has a gap between longer stretches', async () => {
+      const cells = ['1', '2', '4', '5'].map((round) => cell(round, 'Cali', Number(round) * 10));
+      const context = await showAnswer('line', rounds, seriesResult([...cells, cell('3', 'Buga', 5)], ['Buga', 'Cali']));
+
+      const cali = all(context.root, 'chart-line')[1].getAttribute('d')!;
+      expect(cali.match(/M/g)).toHaveLength(2);
+      expect(cali.match(/L/g)).toHaveLength(2);
+    });
+
+    it('shows one tooltip per group with every series that has a value there', async () => {
+      const lines = seriesResult([cell('1', 'Cali', 60), cell('2', 'Cali', 70), cell('1', 'Buga', 50)], ['Buga', 'Cali']);
+      const context = await showAnswer('line', rounds, lines);
+
+      await hover(context, hits(context)[0]);
+      expect(text(overlay().querySelector('[data-testid="tooltip-heading"]'))).toBe('1');
+      expect(tooltipLines()).toEqual(['Buga: 50', 'Cali: 60']);
+      expect(all(context.root, 'chart-guide')).toHaveLength(1);
+      await hover(context, hits(context)[1]);
+      expect(tooltipLines()).toEqual(['Cali: 70']);
+    });
+  });
+
+  describe('tooltips and keyboard', () => {
+    it('shows the group, the series value and the value with the indicator\'s unit on hover, and closes on leaving (Segment tooltip)', async () => {
+      const context = await showAnswer('column', { ...source, layout: 'stacked' }, answer(), [households]);
+
+      await hover(context, hits(context)[0]);
+      expect(text(overlay().querySelector('[data-testid="tooltip-heading"]'))).toBe('Cali');
+      expect(tooltipLines()).toEqual(['Piped: 35 households']);
+      expect(overlay().querySelector<HTMLElement>('[data-testid="tooltip-key"]')!.getAttribute('style')).toContain('var(--tmz-series-1)');
+
+      hits(context)[0].dispatchEvent(new MouseEvent('pointerleave'));
+      await settle(context.harness);
+      expect(tooltip()).toBeNull();
+    });
+
+    it('is one Tab stop that announces the mark the arrow keys are on, with the same words as its tooltip', async () => {
+      const context = await showAnswer('column', { ...source, layout: 'stacked' }, answer(), [households]);
+      const chart = byTestId(context.root, 'chart-svg')!;
+
+      expect(chart.getAttribute('role')).toBe('application');
+      expect(chart.getAttribute('tabindex')).toBe('0');
+      expect(chart.getAttribute('aria-roledescription')).toBe('chart');
+      expect(document.getElementById(chart.getAttribute('aria-describedby')!)!.textContent).toContain('Left and right arrows move between the groups');
+      expect(all(context.root, 'chart-mark').every((mark) => !mark.hasAttribute('tabindex'))).toBe(true);
+
+      chart.focus();
+      pressKey(chart, 'ArrowRight');
+      await settle(context.harness);
+      expect(tooltipLines()).toEqual(['Piped: 35 households']);
+      expect(spoken(context)).toBe('Cali. Piped: 35 households');
+
+      pressKey(chart, 'ArrowDown'); // the next series of the same group
+      await settle(context.harness);
+      expect(spoken(context)).toBe('Cali. Well: 15 households');
+
+      pressKey(chart, 'ArrowRight'); // the next group: Palmira has no Well, so its nearest series
+      await settle(context.harness);
+      expect(spoken(context)).toBe('Palmira. Piped: 20 households');
+
+      pressKey(chart, 'Escape');
+      await settle(context.harness);
+      expect(tooltip()).toBeNull();
+      expect(document.activeElement).toBe(chart);
+    });
+
+    it('describes itself to assistive technology with its kind, what it plots, and the highest cell', async () => {
+      const context = await showAnswer('column', { ...source, layout: 'percent' }, answer(), [households]);
+
+      expect(label(context)).toBe(
+        'Column chart stacked to 100% of Households visited by municipality and water_source: 2 groups, 2 series, from 15 households to 35 households. Highest: Cali, Piped.',
+      );
     });
   });
 });

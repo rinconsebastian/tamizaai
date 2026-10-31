@@ -201,7 +201,7 @@ public sealed class ReportDataBuilder(
 
     /// <summary>
     /// A widget with a series, as its cross table (design D8): the group, one column per series and a "Total" column, then a "Total" row.
-    /// A 100% layout and a Likert widget show shares in the series columns, and in the "Total" row each series' share of every row.
+    /// A 100% layout and a Likert widget show shares in the series columns and have no "Total" row.
     /// </summary>
     private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>, int, IReadOnlyList<string>) SeriesReportTable(
         IndicatorQueryResponse response, Widget widget, string caption, IndicatorMeta meta, ReportFormat format, ReportText text)
@@ -232,12 +232,14 @@ public sealed class ReportDataBuilder(
             rows.Add(cells);
         }
 
-        var total = new List<ReportCell> { new(text["total"], text["total"]) };
-        total.AddRange(table.Columns.Select(c => shares
-            ? Share(table.GrandTotal is > 0 && c.Total is >= 0 ? c.Total / table.GrandTotal : null)
-            : Value(c.Total)));
-        total.Add(Value(table.GrandTotal));
-        rows.Add(total);
+        // As in "Show as table": a table of shares has the group's total in its own column and no "Total" row.
+        if (!shares)
+        {
+            var total = new List<ReportCell> { new(text["total"], text["total"]) };
+            total.AddRange(table.Columns.Select(c => Value(c.Total)));
+            total.Add(Value(table.GrandTotal));
+            rows.Add(total);
+        }
 
         var notes = table.NegativeLeftOut > 0 ? new[] { text.NegativeLeftOut(table.NegativeLeftOut) } : [];
         return (columns, rows, table.Columns.Count, notes);

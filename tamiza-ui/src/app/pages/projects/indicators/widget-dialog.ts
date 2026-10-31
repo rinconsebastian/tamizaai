@@ -2,7 +2,7 @@ import { DIALOG_DATA, Dialog, DialogRef } from '@angular/cdk/dialog';
 import { Component, Signal, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
-import { Observable, catchError, of, switchMap, tap } from 'rxjs';
+import { Observable, catchError, map, of, switchMap, tap, timer } from 'rxjs';
 import { ApiErrors } from '../../../core/api-error';
 import { Basemaps } from '../../../core/basemaps.service';
 import { DataFilter } from '../../../core/projects/data.service';
@@ -13,18 +13,27 @@ import {
   IndicatorEntry,
   DashboardFilter,
   IndicatorsService,
+  LikertSide,
+  LikertStep,
+  SeriesLayout,
   Widget,
   WidgetConfig,
   WidgetPatch,
   chartTypes,
   emptyConfig,
+  hasSeries,
   maxBuckets,
   maxDashboardFilters,
   maxFilters,
   maxTitleLength,
+  maxLikertSide,
+  maxLikertValues,
   maxTooltipItems,
   maxTooltipLabel,
+  minLikertValues,
   needsGroup,
+  needsSeries,
+  seriesLayouts,
   TooltipFormat,
   WidgetSort,
   WidgetTooltipItem,
@@ -35,7 +44,8 @@ import { Alert, ApiLang, Button, Disclosure, FormField, Input, markApiText } fro
 import { DataFilterDialog, DataFilterDialogData, DataFilterDialogResult } from '../data-filter-dialog';
 import { describeFilter, normalizeFilter } from '../data-view';
 import { FilterValues, activeFilters } from './dashboard-filters';
-import { WidgetView, savedConfig } from './widget-view';
+import { WidgetView, queryFor, savedConfig } from './widget-view';
+import { naturalCompare } from './chart-scales';
 
 export interface WidgetDialogData {
   projectId: string;
@@ -74,10 +84,34 @@ export const previewDelayMs = 400;
 type Mode = 'measure' | 'ratio';
 type Problems = Partial<
   Record<
-    'title' | 'dashboardId' | 'indicator' | 'measure' | 'ratio' | 'groupBy' | 'geometryColumn' | 'buckets' | 'sort' | 'tooltip' | 'basemap' | 'dashboardFilters',
+    | 'title'
+    | 'dashboardId'
+    | 'indicator'
+    | 'measure'
+    | 'ratio'
+    | 'groupBy'
+    | 'geometryColumn'
+    | 'buckets'
+    | 'sort'
+    | 'tooltip'
+    | 'basemap'
+    | 'dashboardFilters'
+    | 'seriesBy'
+    | 'layout'
+    | 'pyramidLeft'
+    | 'pyramidRight'
+    | 'scale',
     string
   >
 >;
+
+/** A value of a Likert scale as the editor holds it: a side, or `out` for a value of the data that is not part of the scale. */
+interface ScaleItem {
+  value: string;
+  side: LikertSide | 'out';
+}
+const scaleSides: readonly (LikertSide | 'out')[] = ['negative', 'neutral', 'positive', 'out'];
+const sideRank: Record<LikertSide, number> = { negative: 0, neutral: 1, positive: 2 };
 /** What the server refused in one tooltip item. */
 type ItemProblems = Partial<Record<'column' | 'label' | 'format', string>>;
 
@@ -206,6 +240,17 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
           </tmz-form-field>
         }
 
+        @if (offersSeries()) {
+          <tmz-form-field [label]="t('indicators.dialog.seriesBy')" fieldId="widgetSeriesBy" [error]="shown().seriesBy" [hint]="requiresSeries() ? t('indicators.dialog.seriesHelpRequired') : t('indicators.dialog.seriesHelp')">
+            <select tmzInput id="widgetSeriesBy" (change)="setSeriesBy($any($event.target).value)" data-testid="dialog-series-by">
+              <option value="" [selected]="!seriesBy()">{{ requiresSeries() ? t('indicators.dialog.columnChoose') : t('indicators.dialog.seriesByNone') }}</option>
+              @for (column of seriesColumns(); track column) {
+                <option [value]="column" [selected]="column === seriesBy()">{{ column }}</option>
+              }
+            </select>
+          </tmz-form-field>
+        }
+
         @if (sortable()) {
           <tmz-form-field [label]="t('indicators.dialog.sortBy')" fieldId="widgetSortBy" [error]="shown().sort">
             <select tmzInput id="widgetSortBy" (change)="setSortKey($any($event.target).value)" data-testid="dialog-sort-by">
@@ -325,6 +370,104 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
         </fieldset>
       }
 
+      @if (offersLayout()) {
+        <fieldset class="min-w-0" data-testid="dialog-layout">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.layout.legend') }}</legend>
+          <div class="flex flex-wrap gap-x-6 gap-y-1">
+            @for (option of layouts; track option) {
+              <label class="flex min-h-10 items-center gap-2 text-sm text-heading" [class.cursor-pointer]="!layoutDisabled(option)" [class.opacity-60]="layoutDisabled(option)">
+                <input
+                  type="radio"
+                  name="widgetLayout"
+                  class="size-4 shrink-0"
+                  [value]="option"
+                  [checked]="layout() === option"
+                  [disabled]="layoutDisabled(option)"
+                  (change)="setLayout(option)"
+                  [attr.data-testid]="'dialog-layout-' + option"
+                />
+                {{ t('indicators.dialog.layout.' + option) }}
+              </label>
+            }
+          </div>
+          @if (mode() === 'ratio') {
+            <p class="mt-1 text-sm text-body" data-testid="dialog-layout-reason">{{ t('indicators.dialog.layout.ratioReason') }}</p>
+          }
+          @if (shown().layout; as message) {
+            <p class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
+          }
+        </fieldset>
+      }
+
+      @if (chartType() === 'pyramid') {
+        <fieldset class="flex flex-col gap-3" data-testid="dialog-pyramid">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.pyramid.legend') }}</legend>
+          <p class="-mt-2 text-sm text-body">{{ t('indicators.dialog.pyramid.help') }}</p>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <tmz-form-field [label]="t('indicators.dialog.pyramid.left')" fieldId="widgetPyramidLeft" [error]="shown().pyramidLeft">
+              <input tmzInput id="widgetPyramidLeft" list="widgetSeriesValues" autocomplete="off" [placeholder]="t('indicators.dialog.pyramid.placeholder')" [value]="pyramidLeft()" (input)="setPyramid('left', $any($event.target).value)" data-testid="dialog-pyramid-left" />
+            </tmz-form-field>
+            <tmz-form-field [label]="t('indicators.dialog.pyramid.right')" fieldId="widgetPyramidRight" [error]="shown().pyramidRight">
+              <input tmzInput id="widgetPyramidRight" list="widgetSeriesValues" autocomplete="off" [placeholder]="t('indicators.dialog.pyramid.placeholder')" [value]="pyramidRight()" (input)="setPyramid('right', $any($event.target).value)" data-testid="dialog-pyramid-right" />
+            </tmz-form-field>
+          </div>
+          <!-- The values the data holds; any other can be typed, for a dashboard filter can hide a side and a script can change the values later. -->
+          <datalist id="widgetSeriesValues">
+            @for (value of seriesValues(); track value) {
+              <option [value]="value"></option>
+            }
+          </datalist>
+        </fieldset>
+      }
+
+      @if (chartType() === 'likert') {
+        <fieldset class="flex flex-col gap-3" data-testid="dialog-scale">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.scale.legend') }}</legend>
+          <p class="-mt-2 text-sm text-body">{{ t('indicators.dialog.scale.help') }}</p>
+          @if (!seriesBy()) {
+            <p class="text-sm text-body" data-testid="scale-none">{{ t('indicators.dialog.scale.none') }}</p>
+          }
+          @for (item of scaleItems(); track $index; let i = $index; let first = $first; let last = $last) {
+            <div class="grid gap-2 rounded-base border border-default p-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto]" data-testid="scale-item">
+              <div class="min-w-0">
+                <input tmzInput autocomplete="off" [attr.id]="'scaleValue' + i" [attr.aria-label]="t('indicators.dialog.scale.value', { n: i + 1 })" [value]="item.value" (input)="setScaleValue(i, $any($event.target).value)" data-testid="scale-value" />
+                @if (scaleItemProblems()[i]; as message) {
+                  <p class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="scale-item-error">{{ message }}</p>
+                }
+              </div>
+              <div class="min-w-0">
+                <select tmzInput [attr.id]="'scaleSide' + i" [attr.aria-label]="t('indicators.dialog.scale.side', { value: item.value })" (change)="setScaleSide(i, $any($event.target).value)" data-testid="scale-side">
+                  @for (side of scaleSides; track side) {
+                    <option [value]="side" [selected]="side === item.side">{{ t('indicators.dialog.scale.' + side) }}</option>
+                  }
+                </select>
+              </div>
+              <div class="flex items-start gap-1 sm:justify-end">
+                <button type="button" class="inline-flex min-h-10 min-w-10 items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary disabled:cursor-not-allowed disabled:opacity-40" [disabled]="first" [attr.aria-label]="t('indicators.dialog.scale.up', { value: item.value })" (click)="moveScale(i, -1)" data-testid="scale-up">
+                  <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6" /></svg>
+                </button>
+                <button type="button" class="inline-flex min-h-10 min-w-10 items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary disabled:cursor-not-allowed disabled:opacity-40" [disabled]="last" [attr.aria-label]="t('indicators.dialog.scale.down', { value: item.value })" (click)="moveScale(i, 1)" data-testid="scale-down">
+                  <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                </button>
+                <button type="button" class="inline-flex min-h-10 min-w-10 items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary" [attr.aria-label]="t('indicators.dialog.scale.remove', { value: item.value })" (click)="removeScale(i)" data-testid="scale-remove">
+                  <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                </button>
+              </div>
+            </div>
+          }
+          @if (shown().scale; as message) {
+            <p class="text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="scale-error">{{ message }}</p>
+          }
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <div class="min-w-0 sm:w-64">
+              <label for="widgetScaleNew" class="mb-2 block text-sm text-body">{{ t('indicators.dialog.scale.addLabel') }}</label>
+              <input tmzInput id="widgetScaleNew" autocomplete="off" [placeholder]="t('indicators.dialog.scale.addPlaceholder')" [value]="scaleNew()" (input)="scaleNew.set($any($event.target).value)" (keydown.enter)="$event.preventDefault(); addScale()" data-testid="scale-new" />
+            </div>
+            <button tmzButton variant="secondary" type="button" (click)="addScale()" data-testid="scale-add">{{ t('indicators.dialog.scale.add') }}</button>
+          </div>
+        </fieldset>
+      }
+
       <tmz-disclosure [heading]="t('indicators.dialog.filtersCount', { count: filters().length })" [open]="startsWithFilters" data-testid="dialog-filters">
         @if (catalog()?.published) {
           @if (filters().length) {
@@ -431,6 +574,8 @@ export class WidgetDialog {
   protected readonly maxTooltipLabel = maxTooltipLabel;
   protected readonly tooltipFormats = tooltipFormats;
   protected readonly previewDelayMs = previewDelayMs;
+  protected readonly layouts = seriesLayouts;
+  protected readonly scaleSides = scaleSides;
 
   private readonly start = this.data.widget?.config ?? emptyConfig();
   /** The filters start open only for a widget that already has some; adding the first one never closes or reopens it. */
@@ -476,6 +621,20 @@ export class WidgetDialog {
   protected readonly tooltip = signal<WidgetTooltipItem[]>((this.start.tooltip ?? []).map((item) => ({ ...item })));
   /** The saved basemap; a kind the deployment no longer offers stays as it is, unless the member changes it. */
   protected readonly basemap = signal<BasemapKind | null>(this.start.basemap ?? null);
+  /** The series column, '' for none (design D7). Changing the indicator or the series column resets what depends on it. */
+  protected readonly seriesBy = signal(this.start.seriesBy ?? '');
+  /** The layout of a bar or column chart with a series; grouped is the default. */
+  protected readonly layout = signal<SeriesLayout>(this.start.layout ?? 'grouped');
+  /** The two sides of a population pyramid, as typed or chosen. */
+  protected readonly pyramidLeft = signal(this.start.pyramid?.left ?? '');
+  protected readonly pyramidRight = signal(this.start.pyramid?.right ?? '');
+  /** The values of a Likert scale in order, with the values of the data that are not in it (side `out`) listed after them. */
+  protected readonly scaleItems = signal<ScaleItem[]>((this.start.scale ?? []).map((step) => ({ value: step.value, side: step.side })));
+  protected readonly scaleNew = signal('');
+  /** What the server refused in each value of the scale, by its place in the editor. */
+  protected readonly scaleItemProblems = signal<Record<number, string>>({});
+  /** The values of the series column in the data, in natural order: what the pyramid's sides and the Likert scale offer. */
+  protected readonly seriesValues = signal<string[]>([]);
   /** The open dashboard's filters, each offered with a box to ignore it. */
   protected readonly dashboardFilters = this.data.filters ?? [];
   /**
@@ -537,6 +696,11 @@ export class WidgetDialog {
 
   /** Whether the chart type plots one value per group, so the group column is required. */
   protected readonly groups = computed(() => needsGroup(this.chartType()));
+  /** Bar, column and line widgets may have a series column; heat map, pyramid, Likert and cross table widgets need one. */
+  protected readonly offersSeries = computed(() => hasSeries(this.chartType()));
+  protected readonly requiresSeries = computed(() => needsSeries(this.chartType()));
+  /** The layout is the choice of a bar or column chart that has a series. */
+  protected readonly offersLayout = computed(() => (this.chartType() === 'bar' || this.chartType() === 'column') && !!this.seriesBy());
 
   /** The table's columns, with any the widget names that the table no longer has kept so the form shows what is saved. */
   private columnsWith(names: readonly string[], current: readonly string[]): string[] {
@@ -547,6 +711,8 @@ export class WidgetDialog {
     this.columnsWith(this.catalog()?.numeric ?? [], [this.measure(), this.numerator(), this.denominator()]).filter((name, i, all) => all.indexOf(name) === i),
   );
   protected readonly allColumns = computed(() => this.columnsWith(this.catalog()?.columns.map((c) => c.name) ?? [], [this.groupBy()]));
+  /** Every column but the group column; a saved series column the table no longer has is kept, so the form shows what is saved. */
+  protected readonly seriesColumns = computed(() => this.columnsWith(this.catalog()?.columns.map((c) => c.name) ?? [], [this.seriesBy()]).filter((name) => name !== this.groupBy()));
   protected readonly sortColumn = computed(() => (this.sortKey().startsWith('column:') ? this.sortKey().slice('column:'.length) : ''));
   /** A saved sort column the table no longer has is kept in front here only, not in the group-by or filter lists. */
   protected readonly sortColumns = computed(() => this.columnsWith(this.catalog()?.columns.map((c) => c.name) ?? [], [this.sortColumn()]));
@@ -587,8 +753,19 @@ export class WidgetDialog {
       tooltip: this.tooltipItems(),
       basemap: this.basemap(),
       ignoredDashboardFilters: this.ignoredDashboardFilters(),
+      seriesBy: this.seriesBy() || null,
+      layout: this.offersLayout() ? this.layout() : null,
+      pyramid: this.pyramidLeft() || this.pyramidRight() ? { left: this.pyramidLeft(), right: this.pyramidRight() } : null,
+      scale: this.scaleSteps(),
     };
   });
+
+  /** The scale to save: the values that are in it, in order. */
+  private scaleSteps(): LikertStep[] {
+    return this.scaleItems()
+      .filter((item): item is ScaleItem & { side: LikertSide } => item.side !== 'out')
+      .map((item) => ({ value: item.value, side: item.side }));
+  }
 
   /**
    * What is saved and what the preview is given: the query, and for a map the whole tooltip items and the basemap. The preview's
@@ -617,6 +794,29 @@ export class WidgetDialog {
     return key === 'value'
       ? { by: 'value', column: null, compareAs: null, direction }
       : { by: 'column', column: this.sortColumn() || null, compareAs: this.compareAs(), direction };
+  }
+
+  /** The first rule a Likert scale breaks (design D2), as the form says it, or null. */
+  private scaleProblem(scale: readonly LikertStep[], t: (key: string, params?: Record<string, unknown>) => string): string | null {
+    if (scale.length < minLikertValues || scale.length > maxLikertValues) {
+      return t('indicators.dialog.errors.scaleCount', { min: minLikertValues, max: maxLikertValues });
+    }
+    if (scale.some((step) => !step.value.trim())) {
+      return t('indicators.dialog.errors.scaleEmpty');
+    }
+    if (new Set(scale.map((step) => step.value)).size !== scale.length) {
+      return t('indicators.dialog.errors.scaleDuplicate');
+    }
+    if (scale.some((step, i) => i > 0 && sideRank[step.side] < sideRank[scale[i - 1].side])) {
+      return t('indicators.dialog.errors.scaleOrder');
+    }
+    if (scale.filter((step) => step.side === 'neutral').length > 1) {
+      return t('indicators.dialog.errors.scaleNeutral');
+    }
+    if (['negative', 'positive'].some((side) => scale.filter((step) => step.side === side).length > maxLikertSide)) {
+      return t('indicators.dialog.errors.scaleSide', { max: maxLikertSide });
+    }
+    return null;
   }
 
   /** What is wrong with the draft, by field. */
@@ -651,6 +851,31 @@ export class WidgetDialog {
     }
     if (config.tooltip.some((item) => !item.column)) {
       problems.tooltip = t('indicators.dialog.errors.tooltip');
+    }
+    if (needsSeries(type) && !config.seriesBy) {
+      problems.seriesBy = t('indicators.dialog.errors.seriesBy');
+    } else if (hasSeries(type) && config.seriesBy && config.seriesBy === config.groupBy) {
+      problems.seriesBy = t('indicators.dialog.errors.seriesSame');
+    }
+    if (type === 'likert' && config.ratio && !problems.ratio) {
+      problems.ratio = t('indicators.dialog.errors.likertRatio');
+    }
+    if (type === 'pyramid') {
+      const { left, right } = { left: this.pyramidLeft(), right: this.pyramidRight() };
+      if (!left.trim()) {
+        problems.pyramidLeft = t('indicators.dialog.errors.pyramidLeft');
+      }
+      if (!right.trim()) {
+        problems.pyramidRight = t('indicators.dialog.errors.pyramidRight');
+      } else if (left === right) {
+        problems.pyramidRight = t('indicators.dialog.errors.pyramidSame');
+      }
+    }
+    if (type === 'likert') {
+      const scale = this.scaleProblem(config.scale ?? [], t);
+      if (scale) {
+        problems.scale = scale;
+      }
     }
     return problems;
   });
@@ -688,6 +913,50 @@ export class WidgetDialog {
         }
         this.fresh = false;
       });
+    // A pyramid's sides and a Likert scale are values of the series column. Their own query has no sides and no scale yet, so it
+    // cannot say which values there are; the same rows as a heat map's columns can, whatever the sides and the scale are (design D7).
+    toObservable(this.seriesDomainKey)
+      .pipe(
+        switchMap((key) =>
+          key === null
+            ? of<string[]>([])
+            : timer(previewDelayMs).pipe(
+                switchMap(() => this.service.query(this.data.projectId, JSON.parse(key) as WidgetConfig, 'heatmap')),
+                map((result) =>
+                  (result.series ?? [])
+                    .filter((entry) => entry.kind === 'value' && entry.value !== null)
+                    .map((entry) => entry.value as string)
+                    .sort(naturalCompare),
+                ),
+                catchError(() => of<string[]>([])),
+              ),
+        ),
+        takeUntilDestroyed(),
+      )
+      .subscribe((values) => this.offerValues(values));
+  }
+
+  /** The query that lists the values of the series column: the widget's own rows, as a heat map. Null while the widget cannot ask. */
+  private readonly seriesDomainKey = computed(() => {
+    const type = this.chartType();
+    const config = this.formConfig();
+    if ((type !== 'pyramid' && type !== 'likert') || !this.catalog()?.published || !config.indicator || !config.groupBy || !config.seriesBy || config.seriesBy === config.groupBy) {
+      return null;
+    }
+    if (config.ratio && (!config.ratio.numerator || !config.ratio.denominator)) {
+      return null;
+    }
+    return JSON.stringify(queryFor('heatmap', config));
+  });
+
+  /** The values of the data arrive: they are offered to the pyramid, and the scale lists those it does not hold yet, left out. */
+  private offerValues(values: string[]): void {
+    this.seriesValues.set(values);
+    this.scaleItems.update((items) => {
+      const held = new Set(items.map((item) => item.value));
+      const added = values.filter((value) => !held.has(value)).map((value): ScaleItem => ({ value, side: 'out' }));
+      return added.length ? [...items, ...added] : items;
+    });
   }
 
   /** What a new widget over the table starts with: its default group column and, for a ratio, the conventional columns. */
@@ -733,7 +1002,7 @@ export class WidgetDialog {
    */
   protected touched(event: Event): void {
     const id = (event.target as HTMLElement | null)?.id;
-    if (id !== 'widgetDashboard' && id !== 'widgetFilterColumn') {
+    if (id !== 'widgetDashboard' && id !== 'widgetFilterColumn' && id !== 'widgetScaleNew') {
       this.edited = true;
     }
   }
@@ -773,7 +1042,89 @@ export class WidgetDialog {
 
   protected setMode(value: string): void {
     this.mode.set(value as Mode);
+    // Stacked bars add their values, so a ratio goes with the grouped layout only.
+    if (value === 'ratio') {
+      this.layout.set('grouped');
+    }
     this.serverFieldErrors.set({});
+  }
+
+  protected setSeriesBy(value: string): void {
+    if (value === this.seriesBy()) {
+      return;
+    }
+    this.seriesBy.set(value);
+    // The sides of a pyramid and the values of a scale belong to the series column: another column has other values.
+    this.pyramidLeft.set('');
+    this.pyramidRight.set('');
+    this.scaleItems.set([]);
+    this.seriesValues.set([]);
+    this.serverFieldErrors.set({});
+    this.scaleItemProblems.set({});
+  }
+
+  protected setLayout(option: SeriesLayout): void {
+    this.layout.set(option);
+    this.serverFieldErrors.update(({ layout: _layout, ...others }) => others);
+  }
+
+  /** Stacked and 100% add the values of a bar, so they cannot plot a ratio. */
+  protected layoutDisabled(option: SeriesLayout): boolean {
+    return this.mode() === 'ratio' && option !== 'grouped';
+  }
+
+  protected setPyramid(side: 'left' | 'right', value: string): void {
+    (side === 'left' ? this.pyramidLeft : this.pyramidRight).set(value);
+    this.serverFieldErrors.update(({ pyramidLeft: _left, pyramidRight: _right, ...others }) => others);
+  }
+
+  protected setScaleValue(index: number, value: string): void {
+    this.updateScale(index, { value });
+  }
+
+  protected setScaleSide(index: number, side: string): void {
+    this.updateScale(index, { side: scaleSides.includes(side as LikertSide | 'out') ? (side as LikertSide | 'out') : 'out' });
+  }
+
+  private updateScale(index: number, change: Partial<ScaleItem>): void {
+    this.scaleItems.update((items) => items.map((item, i) => (i === index ? { ...item, ...change } : item)));
+    this.clearScaleProblems();
+  }
+
+  protected moveScale(index: number, by: -1 | 1): void {
+    this.edited = true;
+    this.scaleItems.update((items) => {
+      const to = index + by;
+      if (to < 0 || to >= items.length) {
+        return items;
+      }
+      const moved = [...items];
+      [moved[index], moved[to]] = [moved[to], moved[index]];
+      return moved;
+    });
+    this.clearScaleProblems();
+  }
+
+  protected removeScale(index: number): void {
+    this.edited = true;
+    this.scaleItems.update((items) => items.filter((_, i) => i !== index));
+    this.clearScaleProblems();
+  }
+
+  /** A value typed by hand, for one the data does not show (a dashboard filter can hide it, a script can change it later). Left out until marked. */
+  protected addScale(): void {
+    const value = this.scaleNew();
+    if (value.trim() && !this.scaleItems().some((item) => item.value === value)) {
+      this.edited = true;
+      this.scaleItems.update((items) => [...items, { value, side: 'out' }]);
+      this.clearScaleProblems();
+    }
+    this.scaleNew.set('');
+  }
+
+  private clearScaleProblems(): void {
+    this.scaleItemProblems.set({});
+    this.serverFieldErrors.update(({ scale: _scale, ...others }) => others);
   }
 
   /** Another indicator has other columns: what was chosen from the old table is dropped, and the new one's defaults fill in. */
@@ -792,9 +1143,16 @@ export class WidgetDialog {
     this.sortDirection.set('asc');
     this.sortCompareAs.set(null);
     this.tooltip.set([]);
+    this.seriesBy.set('');
+    this.layout.set('grouped');
+    this.pyramidLeft.set('');
+    this.pyramidRight.set('');
+    this.scaleItems.set([]);
+    this.seriesValues.set([]);
     this.fresh = true;
     this.serverFieldErrors.set({});
     this.itemProblems.set({});
+    this.scaleItemProblems.set({});
   }
 
   /** The type the table gives a column; null while the table loads, when it cannot be read and when the table has no such column. */
@@ -928,6 +1286,7 @@ export class WidgetDialog {
   protected save(): void {
     this.serverFieldErrors.set({});
     this.itemProblems.set({});
+    this.scaleItemProblems.set({});
     this.error.set(null);
     const { projectId, dashboardId, widget } = this.data;
     const target = widget && this.destination() !== dashboardId ? this.destination() : null;
@@ -954,7 +1313,16 @@ export class WidgetDialog {
         }
         const fields: Problems = {};
         const items: Record<number, ItemProblems> = {};
+        const steps: Record<number, string> = {};
+        // The scale the server read holds only the values that are in it; its `scale[2]` is the third of those, not of the editor.
+        const inScale = this.scaleItems().flatMap((item, i) => (item.side === 'out' ? [] : [i]));
         for (const [path, message] of Object.entries(parsed.fieldErrors)) {
+          const step = this.stepFor(path);
+          if (step !== null) {
+            const at = inScale[step] ?? step;
+            steps[at] = steps[at] ?? message;
+            continue;
+          }
           const item = this.itemFor(path);
           if (item) {
             items[item.index] = { ...items[item.index], [item.part]: items[item.index]?.[item.part] ?? message };
@@ -967,8 +1335,10 @@ export class WidgetDialog {
         }
         this.serverFieldErrors.set(fields);
         this.itemProblems.set(items);
-        const others = Object.entries(parsed.fieldErrors).filter(([path]) => !this.itemFor(path) && !this.fieldFor(path));
-        this.error.set(Object.keys(fields).length && !others.length ? null : others.length ? markApiText(others.map(([, message]) => message).join(' ')) : parsed.message);
+        this.scaleItemProblems.set(steps);
+        const others = Object.entries(parsed.fieldErrors).filter(([path]) => this.stepFor(path) === null && !this.itemFor(path) && !this.fieldFor(path));
+        const shownOnFields = Object.keys(fields).length > 0 || Object.keys(steps).length > 0;
+        this.error.set(shownOnFields && !others.length ? null : others.length ? markApiText(others.map(([, message]) => message).join(' ')) : parsed.message);
         if (fields.dashboardId) {
           // The dashboard chosen was removed meanwhile, or is full: the project is read again, so a removed one leaves the select
           // and the tab row (design D9).
@@ -988,9 +1358,20 @@ export class WidgetDialog {
     return { index: Number(match[1]), part: part === 'label' || part === 'format' ? part : 'column' };
   }
 
+  /** `config.scale[2]`: the place of the value of the scale the server refused. A refusal of the scale as a whole has none. */
+  private stepFor(path: string): number | null {
+    const match = /scale\[(\d+)\]/i.exec(path);
+    return match ? Number(match[1]) : null;
+  }
+
   private fieldFor(path: string): keyof Problems | null {
     const name = path.toLowerCase();
     if (name === 'dashboardid') return 'dashboardId';
+    if (name.includes('seriesby')) return 'seriesBy';
+    if (name.includes('layout')) return 'layout';
+    if (name.includes('pyramid.left')) return 'pyramidLeft';
+    if (name.includes('pyramid')) return 'pyramidRight';
+    if (name.includes('scale')) return 'scale';
     if (name.includes('ignoreddashboardfilters')) return 'dashboardFilters';
     if (name.includes('tooltip')) return 'tooltip';
     if (name.includes('basemap')) return 'basemap';

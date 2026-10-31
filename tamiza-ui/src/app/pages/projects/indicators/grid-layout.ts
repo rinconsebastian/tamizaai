@@ -9,14 +9,26 @@ export interface Placed {
   layout: Layout;
 }
 
-/** The size a new widget gets when the server is not told one (design D7). */
+/**
+ * The size a new widget gets when the server is not told one (design D7). Twin of `DefaultSize` in tamiza-api. Every kind is listed,
+ * with no default branch, so a kind added later has to choose its size.
+ */
 export function defaultSize(type: ChartType): { w: number; h: number } {
   switch (type) {
     case 'stat':
       return { w: 3, h: 2 };
     case 'map':
       return { w: 6, h: 6 };
-    default:
+    case 'heatmap':
+    case 'pyramid':
+    case 'crosstab':
+      return { w: 6, h: 5 };
+    case 'bar':
+    case 'column':
+    case 'line':
+    case 'histogram':
+    case 'pie':
+    case 'likert':
       return { w: 6, h: 4 };
   }
 }

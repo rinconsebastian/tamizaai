@@ -55,40 +55,40 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 8. Types and kinds (ui)
 
-- [ ] 8.1 Extend `indicators.service.ts` (the eleven `chartTypes`, `needsGroup`, `takesSeries`, `needsSeries`, the config fields and the response fields), `queryFor` and `savedConfig` (design D7), `grid-layout.ts` default sizes, `indicators.chartTypes.*` strings, and make the widget view's chart choice switch over every kind (design D6). Verify `query-for.spec.ts` per kind, a spec that iterates `chartTypes`, and `ng build`.
+- [x] 8.1 Extend `indicators.service.ts` (the eleven `chartTypes`, `needsGroup`, `takesSeries`, `needsSeries`, the config fields and the response fields), `queryFor` and `savedConfig` (design D7), `grid-layout.ts` default sizes, `indicators.chartTypes.*` strings, and make the widget view's chart choice switch over every kind (design D6). Verify `query-for.spec.ts` per kind, a spec that iterates `chartTypes`, and `ng build`.
 
 ## 9. Series table, legend and keyboard (ui)
 
-- [ ] 9.1 Add `series-table.ts`, the twin of `SeriesTable`. Verify a spec that reads the same `series-tables.json` and gives the same rows, totals, shares and notes.
-- [ ] 9.2 Add a series legend component and one helper for tooltips and keyboard on marks (design D5): `ChartTooltips` on hover and focus, one Tab stop, arrows, Home, End and Escape, and the `aria-live` announcement. Verify specs for the legend (swatch next to the name in text colors) and the helper (moves, announcement, Escape returns focus).
+- [x] 9.1 Add `series-table.ts`, the twin of `SeriesTable`. Verify a spec that reads the same `series-tables.json` and gives the same rows, totals, shares and notes.
+- [x] 9.2 Add a series legend component and one helper for tooltips and keyboard on marks (design D5): `ChartTooltips` on hover and focus, one Tab stop, arrows, Home, End and Escape, and the `aria-live` announcement. Verify specs for the legend (swatch next to the name in text colors) and the helper (moves, announcement, Escape returns focus).
 
 ## 10. Bars, columns and lines by series (ui)
 
-- [ ] 10.1 Draw grouped, stacked and 100% bars and columns in `axis-chart.ts`, with negatives below the axis when stacked, the 2-pixel gaps, the legend and the helper of 9.2. Verify `chart-widgets.spec.ts`: `Grouped columns`, `Stacked to 100%`, `Stacked bars ordered by their totals`, a negative value stacked and a negative value left out of a 100% bar; and that `indicator-view.spec.ts` (the script editor's reuse of `AxisChart`) passes unchanged.
-- [ ] 10.2 Draw one line per series with gaps. Verify `One line per series` and `Gap in a line`.
+- [x] 10.1 Draw grouped, stacked and 100% bars and columns in `axis-chart.ts`, with negatives below the axis when stacked, the 2-pixel gaps, the legend and the helper of 9.2. Verify `chart-widgets.spec.ts`: `Grouped columns`, `Stacked to 100%`, `Stacked bars ordered by their totals`, a negative value stacked and a negative value left out of a 100% bar; and that `indicator-view.spec.ts` (the script editor's reuse of `AxisChart`) passes unchanged.
+- [x] 10.2 Draw one line per series with gaps. Verify `One line per series` and `Gap in a line`.
 
 ## 11. Heat map (ui)
 
-- [ ] 11.1 Add `heatmap-chart.ts` (design D5): cells on `sequentialColor`, the min-to-max legend, empty cells hatched and outlined, labels only where they fit, and the helper of 9.2. Verify `Cells shaded`, `Empty cell`, keyboard focus through the cells, and dark mode's reversed ramp.
+- [x] 11.1 Add `heatmap-chart.ts` (design D5): cells on `sequentialColor`, the min-to-max legend, empty cells hatched and outlined, labels only where they fit, and the helper of 9.2. Verify `Cells shaded`, `Empty cell`, keyboard focus through the cells, and dark mode's reversed ramp.
 
 ## 12. Population pyramid (ui)
 
-- [ ] 12.1 Add `pyramid-chart.ts`: one scale outward from the center, slots 1 and 2, unsigned labels, the first group at the bottom, the "rows left out" note, the indicator's format. Verify `Age bands by sex`, `Third value and missing values left out`, `Percent indicator` and `Pyramid side with no rows`.
+- [x] 12.1 Add `pyramid-chart.ts`: one scale outward from the center, slots 1 and 2, unsigned labels, the first group at the bottom, the "rows left out" note, the indicator's format. Verify `Age bands by sex`, `Third value and missing values left out`, `Percent indicator` and `Pyramid side with no rows`.
 
 ## 13. Diverging Likert bars (ui)
 
-- [ ] 13.1 Add `--tmz-div-neg-1..5`, `--tmz-div-neutral` and `--tmz-div-pos-1..5` to `styles.css`, light and dark (design D5). Validate each arm as an ordinal ramp against the light and the dark chart surface with the palette validator, fix any step that fails, and record the commands and results in the design's Verification Results.
-- [ ] 13.2 Add `likert-chart.ts`: bars centered on 0%, negatives nearest-first to the left, the neutral split, positives to the right, shares with values in the tooltips, the "rows left out" note. Verify `Composition around the center` and `Value outside the scale`.
+- [x] 13.1 Add `--tmz-div-neg-1..5`, `--tmz-div-neutral` and `--tmz-div-pos-1..5` to `styles.css`, light and dark (design D5). Validate each arm as an ordinal ramp against the light and the dark chart surface with the palette validator, fix any step that fails, and record the commands and results in the design's Verification Results.
+- [x] 13.2 Add `likert-chart.ts`: bars centered on 0%, negatives nearest-first to the left, the neutral split, positives to the right, shares with values in the tooltips, the "rows left out" note. Verify `Composition around the center` and `Value outside the scale`.
 
 ## 14. Cross table, "Show as table" and paper (ui)
 
-- [ ] 14.1 Add `crosstab-widget.ts` from `series-table.ts` (sticky group column, totals, horizontal scroll inside the widget) and use it as the "Show as table" view of every widget with a series. Verify `Contingency table`, `Pair with no rows`, `Stacked chart as a table` and `Likert as a table`.
-- [ ] 14.2 Count the columns left out on paper in `TableModel` and print the new kinds with their legends. Verify `dashboard-print.spec.ts`: `Heat map`, `Stacked chart` and `Wide cross table`.
+- [x] 14.1 Add `crosstab-widget.ts` from `series-table.ts` (sticky group column, totals, horizontal scroll inside the widget) and use it as the "Show as table" view of every widget with a series. Verify `Contingency table`, `Pair with no rows`, `Stacked chart as a table` and `Likert as a table`.
+- [x] 14.2 Count the columns left out on paper in `TableModel` and print the new kinds with their legends. Verify `dashboard-print.spec.ts`: `Heat map`, `Stacked chart` and `Wide cross table`.
 
 ## 15. Widget form (ui)
 
-- [ ] 15.1 Add the series field and the layout radio group to `widget-dialog.ts`, with Stacked and 100% disabled while plotting a ratio and the reason shown. Verify `widget-dialog.spec.ts` ("the fields of each chart type" for the eleven kinds) and that changing the indicator resets the series.
-- [ ] 15.2 Add the pyramid's sides and the Likert scale editor, offering the preview's `series` and accepting a typed value, keyboard reachable, with the form's checks mapped to the API's keys. Verify specs for both editors, a refused scale shown on its field, and the preview with a series.
+- [x] 15.1 Add the series field and the layout radio group to `widget-dialog.ts`, with Stacked and 100% disabled while plotting a ratio and the reason shown. Verify `widget-dialog.spec.ts` ("the fields of each chart type" for the eleven kinds) and that changing the indicator resets the series.
+- [x] 15.2 Add the pyramid's sides and the Likert scale editor, offering the preview's `series` and accepting a typed value, keyboard reachable, with the form's checks mapped to the API's keys. Verify specs for both editors, a refused scale shown on its field, and the preview with a series.
 
 ## 16. Documentation
 

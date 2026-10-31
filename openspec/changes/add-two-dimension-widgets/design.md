@@ -151,7 +151,7 @@ The four quiet fallbacks become exhaustive switches over `ChartTypes.All`: the w
 
 ### D8. Emails (`Reports/`)
 
-- `ReportDataBuilder` builds a widget with a series from `SeriesTable`: columns `[group, series values…, Total]`, shares for `percent` and Likert (formatted `0.0%`, numbers in the workbook), a pyramid's left, right and total, and the notes for rows left out.
+- `ReportDataBuilder` builds a widget with a series from `SeriesTable`: columns `[group, series values…, Total]` and one row per group, then a "Total" row of the series totals. A 100% layout and a Likert widget show shares (formatted `0.0%`, numbers in the workbook) in the series columns and have no "Total" row, as their "Show as table" view; a pyramid shows its left, right and total. The notes say the rows left out and the negative cells set aside.
 - `ReportHtml` and the plain text show the first 6 series columns and the "Total" column, and "N more columns" when there are more (spec "Email body"); the workbook sheet holds the whole table. The 80 KB budget is unchanged.
 - `ReportText` gains the English and Spanish texts: "Total", "Other", "N more columns", "N rows left out", "N negative values left out".
 
