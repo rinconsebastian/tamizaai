@@ -11,6 +11,8 @@ export interface TableModel {
   rows: (string | null)[][];
   /** How each column's cells line up; numbers end, text starts. Without it the first column starts and the others end. */
   align?: ('start' | 'end')[];
+  /** A cross table: the last row and the last column hold totals, and are written in bold. */
+  totals?: { row?: boolean; column?: boolean };
 }
 
 /** The room kept under the rows for the note on the rows left out, about one line of small text. */
@@ -22,22 +24,23 @@ const noteRoom = 24;
   template: `
     <tmz-table-container class="max-h-full overflow-y-auto">
       <table tmzTable data-testid="widget-table">
-        <thead [class]="tableHead + ' sticky top-0'">
+        <thead [class]="tableHead + ' sticky top-0 z-20'">
           <tr>
             @for (header of model().headers; track $index) {
-              <th scope="col" [class]="tableHeaderCell + (endAligned($index) ? ' text-end' : '')">{{ header }}</th>
+              <!-- The first column stays in view when a wide table scrolls inside its widget; on paper only the columns that fit print. -->
+              <th scope="col" [class]="tableHeaderCell + (endAligned($index) ? ' text-end' : '') + (inLastColumn($index) ? ' text-heading' : '') + ($index === 0 ? ' sticky start-0 z-10 bg-neutral-secondary-soft' : '') + ($index >= printedColumns() ? ' paper:hidden' : '')">{{ header }}</th>
             }
           </tr>
         </thead>
         <tbody>
-          @for (row of model().rows; track $index) {
+          @for (row of model().rows; track $index; let lastRow = $last) {
             <!-- On paper only the rows that fit the box are printed, never half a row (dashboard printing, design D8). -->
-            <tr [class]="tableRow + ($index >= printedRows() ? ' paper:hidden' : '')" data-testid="widget-table-row">
+            <tr [class]="tableRow + ($index >= printedRows() ? ' paper:hidden' : '') + (model().totals?.row && lastRow ? ' font-semibold text-heading' : '')" data-testid="widget-table-row">
               @for (cell of row; track $index) {
                 @if ($index === 0) {
-                  <th scope="row" [class]="tableCell + ' max-w-xs break-words font-normal text-heading'">{{ cell }}</th>
+                  <th scope="row" [class]="tableCell + ' sticky start-0 z-10 max-w-xs break-words bg-neutral-primary-soft text-heading ' + (model().totals?.row && lastRow ? 'font-semibold' : 'font-normal')">{{ cell }}</th>
                 } @else {
-                  <td [class]="tableCell + (endAligned($index) ? ' text-end tabular-nums' : '')">{{ cell ?? '—' }}</td>
+                  <td [class]="tableCell + (endAligned($index) ? ' text-end tabular-nums' : '') + (inLastColumn($index) ? ' font-semibold text-heading' : '') + ($index >= printedColumns() ? ' paper:hidden' : '')">{{ cell ?? '—' }}</td>
                 }
               }
             </tr>
@@ -47,6 +50,9 @@ const noteRoom = 24;
     </tmz-table-container>
     @if (leftOut(); as count) {
       <p class="mt-1 hidden text-xs text-body paper:block" data-testid="widget-table-left-out" *transloco="let t">{{ t(leftOutKey(count), { count }) }}</p>
+    }
+    @if (columnsLeftOut(); as count) {
+      <p class="mt-1 hidden text-xs text-body paper:block" data-testid="widget-table-columns-left-out" *transloco="let t">{{ t(columnsLeftOutKey(count), { count }) }}</p>
     }
   `,
   host: { class: 'block min-h-0' },
@@ -73,6 +79,16 @@ export class WidgetTable {
   /** How many rows the paper leaves out; 0 when every row fits. */
   protected readonly leftOut = computed(() => Math.max(0, this.model().rows.length - this.printedRows()));
 
+  /** How many columns fit the box on paper, the first included, measured as the rows are. */
+  private readonly measuredColumns = signal<{ at: Date; columns: number } | null>(null);
+  /** The columns printed: the first and as many after it as fit, while the print they were measured for is on; every column otherwise. */
+  protected readonly printedColumns = computed(() => {
+    const measured = this.measuredColumns();
+    return measured && measured.at === this.print?.printedAt() ? measured.columns : Infinity;
+  });
+  /** How many columns the paper leaves out; 0 when every column fits. */
+  protected readonly columnsLeftOut = computed(() => Math.max(0, this.model().headers.length - this.printedColumns()));
+
   constructor() {
     const print = this.print;
     if (print) {
@@ -88,6 +104,15 @@ export class WidgetTable {
     return countKey('dashboards.print.rowsLeftOut', count, this.transloco.getActiveLang());
   }
 
+  protected columnsLeftOutKey(count: number): string {
+    return countKey('dashboards.print.columnsLeftOut', count, this.transloco.getActiveLang());
+  }
+
+  /** Whether a column holds the totals of a cross table. */
+  protected inLastColumn(column: number): boolean {
+    return !!this.model().totals?.column && column === this.model().headers.length - 1 && column > 0;
+  }
+
   /**
    * Counts the rows whose bottom is inside the box the table has on paper, from the top: a table the member scrolled prints from
    * its first row. When some do not fit, a line is kept for the note that says how many.
@@ -101,6 +126,7 @@ export class WidgetTable {
     const container = host.querySelector('tmz-table-container');
     if (container) {
       container.scrollTop = 0;
+      container.scrollLeft = 0;
     }
     const bottom = host.getBoundingClientRect().bottom;
     const rows = Array.from(host.querySelectorAll('tbody > tr')).map((row) => row.getBoundingClientRect().bottom);
@@ -110,5 +136,21 @@ export class WidgetTable {
       fit = Math.max(0, fitting(bottom - noteRoom));
     }
     this.measured.set({ at, rows: fit === -1 ? rows.length : fit });
+    this.measureColumns(at, container ?? host);
+  }
+
+  /**
+   * Counts the columns whose right edge is inside the box, from the left: the first column always prints, then as many as fit. A wide
+   * table is not cut through a column; the note says how many were left out.
+   */
+  private measureColumns(at: Date, box: Element): void {
+    const limit = box.getBoundingClientRect().right;
+    const columns = Array.from(this.host.nativeElement.querySelectorAll('thead th')).map((header) => header.getBoundingClientRect().right);
+    if (!(limit > 0) || !columns.length || columns.some((right) => !Number.isFinite(right))) {
+      this.measuredColumns.set({ at, columns: columns.length });
+      return;
+    }
+    const outside = columns.findIndex((right) => right > limit + 0.5);
+    this.measuredColumns.set({ at, columns: outside === -1 ? columns.length : Math.max(1, outside) });
   }
 }

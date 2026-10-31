@@ -1,6 +1,9 @@
 import { ApplicationRef, EnvironmentInjector, createEnvironmentInjector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { byTestId, settle } from '../../../../testing/project-harness';
+import { ChartType, WidgetConfig } from '../../../core/projects/indicators.service';
 import { DashboardPrint, printDeadlineMs, printTitle, printingClass } from './dashboard-print';
+import { all, cell, clearOverlay, config, indicator, isQuery, open, paperOn, seriesResult, text, widget } from './indicators-testing';
 
 // Paper mode (dashboard printing, design D1, D5, D6, D9, D10). jsdom lays nothing out and never prints, so these check the steps,
 // their order and the waiting; the sheets themselves are checked in a real browser (tasks, group 7).
@@ -204,5 +207,103 @@ describe('printTitle', () => {
   it('passes names through as text, and falls back to UTC for a zone it does not know', () => {
     const now = new Date('2026-10-29T03:00:00Z');
     expect(printTitle('A/B', '<b>Avance</b>', now, 'Mars/Olympus')).toBe('A/B – <b>Avance</b> – 2026-10-29');
+  });
+});
+
+describe('the new kinds of widget on paper (dashboard printing, "Charts on paper" and "Tables on paper")', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearOverlay();
+    document.documentElement.classList.remove(printingClass);
+    document.getElementById('tmz-print-page')?.remove();
+  });
+
+  const households = indicator('households_visited');
+
+  async function show(chartType: ChartType, settings: Partial<WidgetConfig>, answer: ReturnType<typeof seriesResult>) {
+    const context = await open('viewer', [widget('w1', { chartType, config: config({ indicator: 'households_visited', groupBy: 'municipality', seriesBy: 'water_source', ...settings }) })], null, { indicators: [households] });
+    const requests = context.http.match(isQuery);
+    expect(requests).toHaveLength(1);
+    requests[0].flush(answer);
+    await settle(context.harness);
+    return context;
+  }
+
+  it('prints a heat map whole: its 80 cells, its row and column labels and the legend of its scale (Heat map)', async () => {
+    const names = Array.from({ length: 8 }, (_, i) => `S${i + 1}`);
+    const cells = Array.from({ length: 10 }, (_, g) => names.map((name, s) => cell(`Place ${g + 1}`, name, 10 + g * 8 + s)));
+    const context = await show('heatmap', {}, seriesResult(cells.flat(), names));
+
+    await paperOn(context);
+
+    expect(all(context.root, 'chart-mark')).toHaveLength(80);
+    expect(all(context.root, 'heat-row-label')).toHaveLength(10);
+    expect(all(context.root, 'heat-column-label')).toHaveLength(8);
+    const legend = byTestId(context.root, 'heatmap-legend')!;
+    expect(legend.closest('.paper\\:hidden')).toBeNull();
+    expect(legend.querySelectorAll('[style*="--tmz-seq-"]')).toHaveLength(7);
+    expect(text(byTestId(context.root, 'heatmap-legend-min'))).toBe('10 households');
+    // The svg takes the box it has on paper, and scales into it rather than being cut off.
+    expect(byTestId(context.root, 'chart-svg')!.getAttribute('class')).toContain('tmz-chart-svg');
+    expect(byTestId(context.root, 'chart-svg')!.getAttribute('viewBox')).toMatch(/^0 0 \d+ \d+$/);
+  });
+
+  it('prints a stacked chart with every segment and a legend naming its 4 series, all of it in view (Stacked chart)', async () => {
+    const series = ['Piped', 'Well', 'River', 'Truck'];
+    const cells = ['Cali', 'Buga', 'Pasto'].flatMap((group, g) => series.map((name, s) => cell(group, name, 10 * (g + 1) + s)));
+    const context = await show('column', { layout: 'stacked' }, seriesResult(cells, series));
+
+    await paperOn(context);
+
+    expect(all(context.root, 'chart-mark')).toHaveLength(12);
+    expect(all(context.root, 'legend-name').map(text)).toEqual(series);
+    const legend = byTestId(context.root, 'series-legend')!;
+    expect(legend.className).toContain('flex-wrap'); // it wraps, never scrolls
+    expect(legend.closest('.paper\\:hidden')).toBeNull();
+    expect(all(context.root, 'legend-swatch').map((s) => s.getAttribute('style'))).toEqual(series.map((_, i) => expect.stringContaining(`var(--tmz-series-${i + 1})`)));
+  });
+
+  it('prints the group column and the columns that fit, and says how many it left out (Wide cross table)', async () => {
+    const series = Array.from({ length: 20 }, (_, i) => `S${String(i + 1).padStart(2, '0')}`);
+    const cells = ['Cali', 'Buga'].flatMap((group) => series.map((name, s) => cell(group, name, s + 1)));
+    const context = await show('crosstab', {}, seriesResult(cells, series));
+    // jsdom lays nothing out: the box is 400 px wide and every column 40 px, so the group column and 9 more fit.
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const box = { top: 0, left: 0, width: 0, height: 0, right: 0, bottom: 900 } as DOMRect;
+      if (this.tagName === 'TMZ-TABLE-CONTAINER') {
+        return { ...box, right: 400 };
+      }
+      if (this.matches('thead th')) {
+        return { ...box, right: (Array.from(this.parentElement!.children).indexOf(this) + 1) * 40, bottom: 40 };
+      }
+      if (this.matches('tbody > tr')) {
+        return { ...box, bottom: 40 + (Array.from(this.parentElement!.children).indexOf(this) + 1) * 24 };
+      }
+      return box;
+    });
+
+    await paperOn(context);
+
+    const printed = (selector: string) => Array.from(context.root.querySelectorAll(selector)).filter((c) => !c.classList.contains('paper:hidden'));
+    expect(printed('thead th').map(text)).toEqual(['municipality', ...series.slice(0, 9)]);
+    expect(printed('tbody tr:first-child > *')).toHaveLength(10);
+    const note = byTestId(context.root, 'widget-table-columns-left-out')!;
+    expect(text(note)).toBe('12 columns not printed.'); // 20 series and the Total column: 21 columns, 9 printed
+    expect(note.classList).toContain('paper:block');
+    expect(note.classList).toContain('hidden');
+    expect(byTestId(context.root, 'widget-table-left-out')).toBeNull(); // the 3 rows all fit
+  });
+
+  it('prints every column of a table whose columns all fit, with no note', async () => {
+    const context = await show('crosstab', {}, seriesResult([cell('Cali', 'Piped', 1), cell('Cali', 'Well', 2)], ['Piped', 'Well']));
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const box = { top: 0, left: 0, width: 0, height: 0, right: 0, bottom: 900 } as DOMRect;
+      return this.tagName === 'TMZ-TABLE-CONTAINER' ? { ...box, right: 400 } : this.matches('thead th') ? { ...box, right: (Array.from(this.parentElement!.children).indexOf(this) + 1) * 40 } : box;
+    });
+
+    await paperOn(context);
+
+    expect(Array.from(context.root.querySelectorAll('thead th')).filter((c) => c.classList.contains('paper:hidden'))).toHaveLength(0);
+    expect(byTestId(context.root, 'widget-table-columns-left-out')).toBeNull();
   });
 });

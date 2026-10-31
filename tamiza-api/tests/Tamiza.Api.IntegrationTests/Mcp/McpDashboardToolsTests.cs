@@ -380,4 +380,163 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         Assert.Equal(1, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboards"));
         Assert.Equal(1, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_widgets"));
     }
+
+    // Widgets with a series
+
+    private const string SourceColumns = "municipality text, water_source text, value numeric";
+
+    private static async Task SeedSourcesAsync(McpProjectHarness h) =>
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "households_by_source", SourceColumns,
+            "('Cali', 'Piped', 35), ('Cali', 'Well', 15), ('Palmira', 'Piped', 20), ('Buga', 'Well', 7), ('Buga', NULL, 3)");
+
+    [Fact]
+    public async Task Checking_a_stacked_chart_gives_the_series_the_cells_the_totals_and_no_rows()
+    {
+        await using var h = await CreateAsync();
+        await SeedSourcesAsync(h);
+
+        using var body = (await h.CallAsync("viewer", "query_indicator", new
+        {
+            chartType = "column",
+            config = new { indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source", layout = "stacked" },
+        })).Json();
+
+        var root = body.RootElement;
+        Assert.False(root.TryGetProperty("rows", out _));
+        Assert.Equal(["Piped", "Well", "none"], root.GetProperty("series").EnumerateArray()
+            .Select(x => x.TryGetProperty("kind", out var kind) ? kind.GetString()! : x.GetProperty("value").GetString()!));
+        var cells = root.GetProperty("cells").EnumerateArray().Select(c => $"{c.GetProperty("group").GetString()}|{(c.TryGetProperty("series", out var series) ? series.GetString() : "-")}|{c.GetProperty("value").GetDouble():0.##}").ToArray();
+        Assert.Contains("Cali|Piped|35", cells);
+        Assert.Contains("Buga|-|3", cells);
+        var totals = root.GetProperty("totals");
+        Assert.Equal(["Buga|10", "Cali|50", "Palmira|20"], totals.GetProperty("groups").EnumerateArray().Select(g => $"{g.GetProperty("group").GetString()}|{g.GetProperty("value").GetDouble():0.##}"));
+        Assert.Equal(80, totals.GetProperty("all").GetProperty("value").GetDouble());
+        Assert.Equal("80.00", totals.GetProperty("all").GetProperty("formatted").GetString());
+        Assert.Equal(await RowsCountAsync(h), totals.GetProperty("all").GetProperty("rows").GetInt64());
+        // Nothing was saved.
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+    }
+
+    private static Task<long> RowsCountAsync(McpProjectHarness h) =>
+        TestData.ScalarAsync<long>(h.Db, $"SELECT count(*) FROM \"{PublishedTables.Schema(h.ProjectId, "indicators")}\".households_by_source");
+
+    [Fact]
+    public async Task A_likert_widget_in_widget_data_carries_the_shares_of_each_group()
+    {
+        await using var h = await CreateAsync();
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "agreement", "municipality text, answer text, value numeric",
+            "('Cali', 'No', 30), ('Cali', 'Neither', 20), ('Cali', 'Yes', 50), ('Cali', 'Don''t know', 4)");
+        var dashboard = await FirstDashboardAsync(h);
+        await AddWidgetAsync(h, dashboard, "Agreement", "likert", new
+        {
+            indicator = "agreement", measure = "value", groupBy = "municipality", seriesBy = "answer",
+            scale = new object[] { new { value = "No", side = "negative" }, new { value = "Neither", side = "neutral" }, new { value = "Yes", side = "positive" } },
+        });
+
+        using var body = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard })).Json();
+
+        var widget = body.RootElement.GetProperty("widgets")[0];
+        Assert.Equal("shown", widget.GetProperty("status").GetString());
+        var shares = widget.GetProperty("cells").EnumerateArray().ToDictionary(c => c.GetProperty("series").GetString()!, c => c.GetProperty("share").GetDouble());
+        Assert.Equal(0.3, shares["No"], 6);
+        Assert.Equal(0.5, shares["Yes"], 6);
+        Assert.Contains("1 rows were left out", widget.GetProperty("notes").EnumerateArray().Select(n => n.GetString()).Single(n => n!.Contains("left out")));
+        Assert.False(widget.TryGetProperty("rows", out _));
+    }
+
+    [Fact]
+    public async Task A_pyramid_is_created_through_mcp_and_read_back()
+    {
+        await using var h = await CreateAsync();
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "population", "age_band text, sex text, value numeric",
+            "('0-4', 'Female', 100), ('0-4', 'Male', 90), ('5-9', 'Female', 80), ('5-9', 'Male', 85)");
+        var dashboard = await FirstDashboardAsync(h);
+
+        var id = await AddWidgetAsync(h, dashboard, "Population", "pyramid", new
+        {
+            indicator = "population", measure = "value", groupBy = "age_band", seriesBy = "sex", pyramid = new { left = "Female", right = "Male" },
+        });
+
+        using var dashboardBody = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = dashboard })).Json();
+        var widget = dashboardBody.RootElement.GetProperty("widgets").EnumerateArray().Single(w => w.GetProperty("id").GetString() == id.ToString());
+        Assert.Equal("pyramid", widget.GetProperty("chartType").GetString());
+        Assert.Equal("Female", widget.GetProperty("config").GetProperty("pyramid").GetProperty("left").GetString());
+        Assert.Equal("sex", widget.GetProperty("config").GetProperty("seriesBy").GetString());
+    }
+
+    [Fact]
+    public async Task A_likert_scale_out_of_order_is_refused_with_the_key_and_nothing_is_saved()
+    {
+        await using var h = await CreateAsync();
+        await SeedSourcesAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+
+        var result = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = dashboard, title = "Bad", chartType = "likert",
+            config = new
+            {
+                indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source",
+                scale = new object[] { new { value = "Well", side = "positive" }, new { value = "Piped", side = "negative" } },
+            },
+        });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("scale[1].side", result.Text());
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+    }
+
+    [Fact]
+    public async Task A_stacked_widget_that_plots_a_ratio_is_refused_with_the_key_of_the_layout()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+
+        var result = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = dashboard, title = "Bad", chartType = "column",
+            config = new { indicator = "piped_water_rate", ratio = new { numerator = "numerator", denominator = "denominator" }, groupBy = "municipality", seriesBy = "value", layout = "stacked" },
+        });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("layout", result.Text());
+    }
+
+    [Fact]
+    public async Task A_series_result_longer_than_the_size_is_cut_in_its_cells_and_names_the_filter_that_asks_for_less()
+    {
+        await using var h = await CreateAsync(new Dictionary<string, string?> { ["Mcp:MaxResultCharacters"] = "10000" });
+        var rows = string.Join(", ", Enumerable.Range(1, 300).Select(i => $"('Municipality number {i:000}', 'Piped', {i}), ('Municipality number {i:000}', 'Well', {i})"));
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "households_by_source", SourceColumns, rows);
+
+        var result = await h.CallAsync("viewer", "query_indicator", new
+        {
+            chartType = "heatmap",
+            config = new { indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source" },
+        });
+
+        Assert.True(result.Text().Length <= 10_000, $"{result.Text().Length} characters");
+        using var body = result.Json();
+        var note = body.RootElement.GetProperty("truncated");
+        Assert.True(note.GetProperty("omitted").GetInt32() > 0);
+        Assert.Contains("filter", note.GetProperty("hint").GetString());
+    }
+
+    [Fact]
+    public async Task The_tool_descriptions_name_the_series_settings_and_the_new_kinds()
+    {
+        await using var h = await CreateAsync();
+        var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
+
+        foreach (var tool in new[] { "query_indicator", "create_widget" })
+        {
+            foreach (var word in new[] { "seriesBy", "layout", "pyramid", "scale", "heatmap", "likert", "crosstab" })
+            {
+                Assert.Contains(word, tools[tool].Description);
+            }
+        }
+
+        Assert.Contains("series", tools["get_widget_data"].Description, StringComparison.OrdinalIgnoreCase);
+    }
 }

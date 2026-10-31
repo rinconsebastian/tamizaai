@@ -398,4 +398,35 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
         Assert.True(row.TryGetProperty("tooltip", out _));
         Assert.True(schemas.GetProperty("IndicatorQueryResponse").GetProperty("properties").TryGetProperty("tooltipTypes", out _));
     }
+
+    [Fact]
+    public async Task The_openapi_document_describes_the_series_of_a_widget_and_its_four_new_kinds()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        using var anonymous = h.Factory.CreateClient();
+
+        var document = await anonymous.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        var config = schemas.GetProperty("WidgetConfig").GetProperty("properties");
+        foreach (var name in new[] { "seriesBy", "layout", "pyramid", "scale" })
+        {
+            Assert.True(config.TryGetProperty(name, out _), $"WidgetConfig.{name}");
+            Assert.True(schemas.GetProperty("WidgetConfigInput").GetProperty("properties").TryGetProperty(name, out _), $"WidgetConfigInput.{name}");
+        }
+
+        Assert.Equal(["left", "right"], schemas.GetProperty("WidgetPyramid").GetProperty("properties").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(["side", "value"], schemas.GetProperty("LikertStep").GetProperty("properties").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        var response = schemas.GetProperty("IndicatorQueryResponse").GetProperty("properties");
+        foreach (var name in new[] { "series", "totals", "leftOut" })
+        {
+            Assert.True(response.TryGetProperty(name, out _), $"IndicatorQueryResponse.{name}");
+        }
+
+        var row = schemas.GetProperty("IndicatorRow").GetProperty("properties");
+        Assert.True(row.TryGetProperty("series", out _));
+        Assert.True(row.TryGetProperty("seriesKind", out _));
+        Assert.Equal(["all", "groups", "series"], schemas.GetProperty("SeriesTotals").GetProperty("properties").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(["value", "none", "other"], [Tamiza.Api.Indicators.SeriesKinds.Value, Tamiza.Api.Indicators.SeriesKinds.None, Tamiza.Api.Indicators.SeriesKinds.Other]);
+    }
 }

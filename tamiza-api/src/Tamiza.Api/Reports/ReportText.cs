@@ -43,6 +43,14 @@ public sealed partial class ReportText
         ["range"] = "Range",
         ["rowsOf"] = "Rows of {0}",
         ["share"] = "Share",
+        ["total"] = "Total",
+        ["other"] = "Other",
+        ["moreColumns.one"] = "1 more column",
+        ["moreColumns.other"] = "{0} more columns",
+        ["leftOut.one"] = "1 row was left out: its group or value is not one the chart shows.",
+        ["leftOut.other"] = "{0} rows were left out: their group or value is not one the chart shows.",
+        ["negativeLeftOut.one"] = "1 negative value was left out of the shares.",
+        ["negativeLeftOut.other"] = "{0} negative values were left out of the shares.",
         ["yes"] = "Yes",
         ["no"] = "No",
         ["true"] = "true",
@@ -88,6 +96,14 @@ public sealed partial class ReportText
         ["range"] = "Rango",
         ["rowsOf"] = "Filas de {0}",
         ["share"] = "Proporción",
+        ["total"] = "Total",
+        ["other"] = "Otros",
+        ["moreColumns.one"] = "1 columna más",
+        ["moreColumns.other"] = "{0} columnas más",
+        ["leftOut.one"] = "Se dejó fuera 1 fila: su grupo o su valor no es de los que muestra el gráfico.",
+        ["leftOut.other"] = "Se dejaron fuera {0} filas: su grupo o su valor no es de los que muestra el gráfico.",
+        ["negativeLeftOut.one"] = "Se dejó fuera de las proporciones 1 valor negativo.",
+        ["negativeLeftOut.other"] = "Se dejaron fuera de las proporciones {0} valores negativos.",
         ["yes"] = "Sí",
         ["no"] = "No",
         ["true"] = "verdadero",
@@ -157,4 +173,13 @@ public sealed partial class ReportText
 
     /// <summary>"1 more row" or "22 more rows": both languages have only these two forms.</summary>
     public string MoreRows(int count) => count == 1 ? this["moreRows.one"] : Format("moreRows.other", count);
+
+    /// <summary>"1 more column" or "19 more columns".</summary>
+    public string MoreColumns(int count) => count == 1 ? this["moreColumns.one"] : Format("moreColumns.other", count);
+
+    /// <summary>The note of a pyramid or a Likert widget that left rows out.</summary>
+    public string LeftOut(long count) => count == 1 ? this["leftOut.one"] : Format("leftOut.other", count);
+
+    /// <summary>The note of a widget that shows shares and set negative cells aside.</summary>
+    public string NegativeLeftOut(int count) => count == 1 ? this["negativeLeftOut.one"] : Format("negativeLeftOut.other", count);
 }

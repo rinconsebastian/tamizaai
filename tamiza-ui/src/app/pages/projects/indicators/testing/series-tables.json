@@ -1,0 +1,1119 @@
+{
+ "_comment": "Shared by the API's SeriesTable tests and the UI's series-table.ts spec (design D12). Expected values are worked out by hand: shares are over the non-negative cells of a row, null when the row's non-negative cells sum to zero, null for a cell with no value or a negative value (the latter counted in negativeLeftOut), and only present for the likert kind and for bar and column with layout percent. Totals are copied from the response, never summed from cells.",
+ "cases": [
+  {
+   "name": "stacked columns of a measure",
+   "chartType": "column",
+   "layout": "stacked",
+   "response": {
+    "series": [
+     {
+      "value": "Piped",
+      "kind": "value"
+     },
+     {
+      "value": "Well",
+      "kind": "value"
+     }
+    ],
+    "rows": [
+     {
+      "group": "Cali",
+      "series": "Piped",
+      "seriesKind": "value",
+      "value": 35,
+      "rows": 3
+     },
+     {
+      "group": "Cali",
+      "series": "Well",
+      "seriesKind": "value",
+      "value": 15,
+      "rows": 2
+     },
+     {
+      "group": "Palmira",
+      "series": "Piped",
+      "seriesKind": "value",
+      "value": 20,
+      "rows": 1
+     }
+    ],
+    "totals": {
+     "groups": [
+      {
+       "group": "Cali",
+       "value": 50,
+       "rows": 5
+      },
+      {
+       "group": "Palmira",
+       "value": 20,
+       "rows": 1
+      }
+     ],
+     "series": [
+      {
+       "series": "Piped",
+       "kind": "value",
+       "value": 55,
+       "rows": 4
+      },
+      {
+       "series": "Well",
+       "kind": "value",
+       "value": 15,
+       "rows": 2
+      }
+     ],
+     "all": {
+      "value": 70,
+      "rows": 6
+     }
+    }
+   },
+   "expected": {
+    "columns": [
+     {
+      "series": "Piped",
+      "kind": "value",
+      "total": 55,
+      "rows": 4
+     },
+     {
+      "series": "Well",
+      "kind": "value",
+      "total": 15,
+      "rows": 2
+     }
+    ],
+    "rows": [
+     {
+      "group": "Cali",
+      "total": 50,
+      "rows": 5,
+      "cells": [
+       35,
+       15
+      ],
+      "shares": null
+     },
+     {
+      "group": "Palmira",
+      "total": 20,
+      "rows": 1,
+      "cells": [
+       20,
+       null
+      ],
+      "shares": null
+     }
+    ],
+    "grandTotal": 70,
+    "grandRows": 6,
+    "negativeLeftOut": 0,
+    "leftOut": 0,
+    "rowLimitReached": false
+   }
+  },
+  {
+   "name": "row limit reached is carried",
+   "chartType": "column",
+   "layout": "stacked",
+   "response": {
+    "series": [
+     {
+      "value": "Piped",
+      "kind": "value"
+     },
+     {
+      "value": "Well",
+      "kind": "value"
+     }
+    ],
+    "rows": [
+     {
+      "group": "Cali",
+      "series": "Piped",
+      "seriesKind": "value",
+      "value": 35,
+      "rows": 3
+     },
+     {
+      "group": "Cali",
+      "series": "Well",
+      "seriesKind": "value",
+      "value": 15,
+      "rows": 2
+     },
+     {
+      "group": "Palmira",
+      "series": "Piped",
+      "seriesKind": "value",
+      "value": 20,
+      "rows": 1
+     }
+    ],
+    "totals": {
+     "groups": [
+      {
+       "group": "Cali",
+       "value": 50,
+       "rows": 5
+      },
+      {
+       "group": "Palmira",
+       "value": 20,
+       "rows": 1
+      }
+     ],
+     "series": [
+      {
+       "series": "Piped",
+       "kind": "value",
+       "value": 55,
+       "rows": 4
+      },
+      {
+       "series": "Well",
+       "kind": "value",
+       "value": 15,
+       "rows": 2
+      }
+     ],
+     "all": {
+      "value": 70,
+      "rows": 6
+     }
+    },
+    "rowLimitReached": true
+   },
+   "expected": {
+    "columns": [
+     {
+      "series": "Piped",
+      "kind": "value",
+      "total": 55,
+      "rows": 4
+     },
+     {
+      "series": "Well",
+      "kind": "value",
+      "total": 15,
+      "rows": 2
+     }
+    ],
+    "rows": [
+     {
+      "group": "Cali",
+      "total": 50,
+      "rows": 5,
+      "cells": [
+       35,
+       15
+      ],
+      "shares": null
+     },
+     {
+      "group": "Palmira",
+      "total": 20,
+      "rows": 1,
+      "cells": [
+       20,
+       null
+      ],
+      "shares": null
+     }
+    ],
+    "grandTotal": 70,
+    "grandRows": 6,
+    "negativeLeftOut": 0,
+    "leftOut": 0,
+    "rowLimitReached": true
+   }
+  },
+  {
+   "name": "100% layout shares, a negative cell left out",
+   "chartType": "bar",
+   "layout": "percent",
+   "response": {
+    "series": [
+     {
+      "value": "Piped",
+      "kind": "value"
+     },
+     {
+      "value": "River",
+      "kind": "value"
+     },
+     {
+      "value": "Well",
+      "kind": "value"
+     }
+    ],
+    "rows": [
+     {
+      "group": "Cali",
+      "series": "Piped",
+      "seriesKind": "value",
+      "value": 60,
+      "rows": 6
+     },
+     {
+      "group": "Cali",
+      "series": "Well",
+      "seriesKind": "value",
+      "value": 40,
+      "rows": 4
+     },
+     {
+      "group": "Palmira",
+      "series": "Piped",
+      "seriesKind": "value",
+      "value": 30,
+      "rows": 3
+     },
+     {
+      "group": "Palmira",
+      "series": "River",
+      "seriesKind": "value",
+      "value": -5,
+      "rows": 1
+     },
+     {
+      "group": "Palmira",
+      "series": "Well",
+      "seriesKind": "value",
+      "value": 10,
+      "rows": 1
+     }
+    ],
+    "totals": {
+     "groups": [
+      {
+       "group": "Cali",
+       "value": 100,
+       "rows": 10
+      },
+      {
+       "group": "Palmira",
+       "value": 35,
+       "rows": 5
+      }
+     ],
+     "series": [
+      {
+       "series": "Piped",
+       "kind": "value",
+       "value": 90,
+       "rows": 9
+      },
+      {
+       "series": "River",
+       "kind": "value",
+       "value": -5,
+       "rows": 1
+      },
+      {
+       "series": "Well",
+       "kind": "value",
+       "value": 50,
+       "rows": 5
+      }
+     ],
+     "all": {
+      "value": 135,
+      "rows": 15
+     }
+    }
+   },
+   "expected": {
+    "columns": [
+     {
+      "series": "Piped",
+      "kind": "value",
+      "total": 90,
+      "rows": 9
+     },
+     {
+      "series": "River",
+      "kind": "value",
+      "total": -5,
+      "rows": 1
+     },
+     {
+      "series": "Well",
+      "kind": "value",
+      "total": 50,
+      "rows": 5
+     }
+    ],
+    "rows": [
+     {
+      "group": "Cali",
+      "total": 100,
+      "rows": 10,
+      "cells": [
+       60,
+       null,
+       40
+      ],
+      "shares": [
+       0.6,
+       null,
+       0.4
+      ]
+     },
+     {
+      "group": "Palmira",
+      "total": 35,
+      "rows": 5,
+      "cells": [
+       30,
+       -5,
+       10
+      ],
+      "shares": [
+       0.75,
+       null,
+       0.25
+      ]
+     }
+    ],
+    "grandTotal": 135,
+    "grandRows": 15,
+    "negativeLeftOut": 1,
+    "leftOut": 0,
+    "rowLimitReached": false
+   }
+  },
+  {
+   "name": "100% layout with a row that sums to zero",
+   "chartType": "column",
+   "layout": "percent",
+   "response": {
+    "series": [
+     {
+      "value": "A",
+      "kind": "value"
+     },
+     {
+      "value": "B",
+      "kind": "value"
+     }
+    ],
+    "rows": [
+     {
+      "group": "G",
+      "series": "A",
+      "seriesKind": "value",
+      "value": 0,
+      "rows": 1
+     },
+     {
+      "group": "G",
+      "series": "B",
+      "seriesKind": "value",
+      "value": 0,
+      "rows": 1
+     }
+    ],
+    "totals": {
+     "groups": [
+      {
+       "group": "G",
+       "value": 0,
+       "rows": 2
+      }
+     ],
+     "series": [
+      {
+       "series": "A",
+       "kind": "value",
+       "value": 0,
+       "rows": 1
+      },
+      {
+       "series": "B",
+       "kind": "value",
+       "value": 0,
+       "rows": 1
+      }
+     ],
+     "all": {
+      "value": 0,
+      "rows": 2
+     }
+    }
+   },
+   "expected": {
+    "columns": [
+     {
+      "series": "A",
+      "kind": "value",
+      "total": 0,
+      "rows": 1
+     },
+     {
+      "series": "B",
+      "kind": "value",
+      "total": 0,
+      "rows": 1
+     }
+    ],
+    "rows": [
+     {
+      "group": "G",
+      "total": 0,
+      "rows": 2,
+      "cells": [
+       0,
+       0
+      ],
+      "shares": [
+       null,
+       null
+      ]
+     }
+    ],
+    "grandTotal": 0,
+    "grandRows": 2,
+    "negativeLeftOut": 0,
+    "leftOut": 0,
+    "rowLimitReached": false
+   }
+  },
+  {
+   "name": "ratio totals come from the rows, not from the cells",
+   "chartType": "crosstab",
+   "layout": null,
+   "response": {
+    "series": [
+     {
+      "value": "Female",
+      "kind": "value"
+     },
+     {
+      "value": "Male",
+      "kind": "value"
+     }
+    ],
+    "rows": [
+     {
+      "group": "Cali",
+      "series": "Female",
+      "seriesKind": "value",
+      "value": 0.5,
+      "rows": 2
+     },
+     {
+      "group": "Cali",
+      "series": "Male",
+      "seriesKind": "value",
+      "value": 0.25,
+      "rows": 1
+     }
+    ],
+    "totals": {
+     "groups": [
+      {
+       "group": "Cali",
+       "value": 0.4,
+       "rows": 3
+      }
+     ],
+     "series": [
+      {
+       "series": "Female",
+       "kind": "value",
+       "value": 0.5,
+       "rows": 2
+      },
+      {
+       "series": "Male",
+       "kind": "value",
+       "value": 0.25,
+       "rows": 1
+      }
+     ],
+     "all": {
+      "value": 0.4,
+      "rows": 3
+     }
+    }
+   },
+   "expected": {
+    "columns": [
+     {
+      "series": "Female",
+      "kind": "value",
+      "total": 0.5,
+      "rows": 2
+     },
+     {
+      "series": "Male",
+      "kind": "value",
+      "total": 0.25,
+      "rows": 1
+     }
+    ],
+    "rows": [
+     {
+      "group": "Cali",
+      "total": 0.4,
+      "rows": 3,
+      "cells": [
+       0.5,
+       0.25
+      ],
+      "shares": null
+     }
+    ],
+    "grandTotal": 0.4,
+    "grandRows": 3,
+    "negativeLeftOut": 0,
+    "leftOut": 0,
+    "rowLimitReached": false
+   }
+  },
+  {
+   "name": "missing series value and Other",
+   "chartType": "column",
+   "layout": "stacked",
+   "response": {
+    "series": [
+     {
+      "value": "Piped",
+      "kind": "value"
+     },
+     {
+      "value": "Well",
+      "kind": "value"
+     },
+     {
+      "value": null,
+      "kind": "none"
+     },
+     {
+      "value": null,
+      "kind": "other"
+     }
+    ],
+    "rows": [
+     {
+      "group": "Cali",
+      "series": "Piped",
+      "seriesKind": "value",
+      "value": 10,
+      "rows": 1
+     },
+     {
+      "group": "Cali",
+      "series": null,
+      "seriesKind": "none",
+      "value": 2,
+      "rows": 1
+     },
+     {
+      "group": "Cali",
+      "series": null,
+      "seriesKind": "other",
+      "value": 3,
+      "rows": 1
+     },
+     {
+      "group": "Buga",
+      "series": "Well",
+      "seriesKind": "value",
+      "value": 7,
+      "rows": 2
+     }
+    ],
+    "totals": {
+     "groups": [
+      {
+       "group": "Cali",
+       "value": 15,
+       "rows": 3
+      },
+      {
+       "group": "Buga",
+       "value": 7,
+       "rows": 2
+      }
+     ],
+     "series": [
+      {
+       "series": "Piped",
+       "kind": "value",
+       "value": 10,
+       "rows": 1
+      },
+      {
+       "series": "Well",
+       "kind": "value",
+       "value": 7,
+       "rows": 2
+      },
+      {
+       "series": null,
+       "kind": "none",
+       "value": 2,
+       "rows": 1
+      },
+      {
+       "series": null,
+       "kind": "other",
+       "value": 3,
+       "rows": 1
+      }
+     ],
+     "all": {
+      "value": 22,
+      "rows": 5
+     }
+    }
+   },
+   "expected": {
+    "columns": [
+     {
+      "series": "Piped",
+      "kind": "value",
+      "total": 10,
+      "rows": 1
+     },
+     {
+      "series": "Well",
+      "kind": "value",
+      "total": 7,
+      "rows": 2
+     },
+     {
+      "series": null,
+      "kind": "none",
+      "total": 2,
+      "rows": 1
+     },
+     {
+      "series": null,
+      "kind": "other",
+      "total": 3,
+      "rows": 1
+     }
+    ],
+    "rows": [
+     {
+      "group": "Cali",
+      "total": 15,
+      "rows": 3,
+      "cells": [
+       10,
+       null,
+       2,
+       3
+      ],
+      "shares": null
+     },
+     {
+      "group": "Buga",
+      "total": 7,
+      "rows": 2,
+      "cells": [
+       null,
+       7,
+       null,
+       null
+      ],
+      "shares": null
+     }
+    ],
+    "grandTotal": 22,
+    "grandRows": 5,
+    "negativeLeftOut": 0,
+    "leftOut": 0,
+    "rowLimitReached": false
+   }
+  },
+  {
+   "name": "population pyramid with rows left out",
+   "chartType": "pyramid",
+   "layout": null,
+   "response": {
+    "series": [
+     {
+      "value": "Female",
+      "kind": "value"
+     },
+     {
+      "value": "Male",
+      "kind": "value"
+     }
+    ],
+    "leftOut": 15,
+    "rows": [
+     {
+      "group": "0-4",
+      "series": "Female",
+      "seriesKind": "value",
+      "value": 100,
+      "rows": 10
+     },
+     {
+      "group": "0-4",
+      "series": "Male",
+      "seriesKind": "value",
+      "value": 90,
+      "rows": 9
+     },
+     {
+      "group": "5-9",
+      "series": "Female",
+      "seriesKind": "value",
+      "value": 80,
+      "rows": 8
+     },
+     {
+      "group": "10-14",
+      "series": "Female",
+      "seriesKind": "value",
+      "value": 60,
+      "rows": 6
+     },
+     {
+      "group": "10-14",
+      "series": "Male",
+      "seriesKind": "value",
+      "value": 70,
+      "rows": 7
+     }
+    ],
+    "totals": {
+     "groups": [
+      {
+       "group": "0-4",
+       "value": 190,
+       "rows": 19
+      },
+      {
+       "group": "5-9",
+       "value": 80,
+       "rows": 8
+      },
+      {
+       "group": "10-14",
+       "value": 130,
+       "rows": 13
+      }
+     ],
+     "series": [
+      {
+       "series": "Female",
+       "kind": "value",
+       "value": 240,
+       "rows": 24
+      },
+      {
+       "series": "Male",
+       "kind": "value",
+       "value": 160,
+       "rows": 16
+      }
+     ],
+     "all": {
+      "value": 400,
+      "rows": 40
+     }
+    }
+   },
+   "expected": {
+    "columns": [
+     {
+      "series": "Female",
+      "kind": "value",
+      "total": 240,
+      "rows": 24
+     },
+     {
+      "series": "Male",
+      "kind": "value",
+      "total": 160,
+      "rows": 16
+     }
+    ],
+    "rows": [
+     {
+      "group": "0-4",
+      "total": 190,
+      "rows": 19,
+      "cells": [
+       100,
+       90
+      ],
+      "shares": null
+     },
+     {
+      "group": "5-9",
+      "total": 80,
+      "rows": 8,
+      "cells": [
+       80,
+       null
+      ],
+      "shares": null
+     },
+     {
+      "group": "10-14",
+      "total": 130,
+      "rows": 13,
+      "cells": [
+       60,
+       70
+      ],
+      "shares": null
+     }
+    ],
+    "grandTotal": 400,
+    "grandRows": 40,
+    "negativeLeftOut": 0,
+    "leftOut": 15,
+    "rowLimitReached": false
+   }
+  },
+  {
+   "name": "Likert shares over the scale",
+   "chartType": "likert",
+   "layout": null,
+   "response": {
+    "series": [
+     {
+      "value": "Strongly disagree",
+      "kind": "value"
+     },
+     {
+      "value": "Disagree",
+      "kind": "value"
+     },
+     {
+      "value": "Neither",
+      "kind": "value"
+     },
+     {
+      "value": "Agree",
+      "kind": "value"
+     },
+     {
+      "value": "Strongly agree",
+      "kind": "value"
+     }
+    ],
+    "leftOut": 7,
+    "rows": [
+     {
+      "group": "Cali",
+      "series": "Strongly disagree",
+      "seriesKind": "value",
+      "value": 10,
+      "rows": 1
+     },
+     {
+      "group": "Cali",
+      "series": "Disagree",
+      "seriesKind": "value",
+      "value": 20,
+      "rows": 2
+     },
+     {
+      "group": "Cali",
+      "series": "Neither",
+      "seriesKind": "value",
+      "value": 20,
+      "rows": 2
+     },
+     {
+      "group": "Cali",
+      "series": "Agree",
+      "seriesKind": "value",
+      "value": 30,
+      "rows": 3
+     },
+     {
+      "group": "Cali",
+      "series": "Strongly agree",
+      "seriesKind": "value",
+      "value": 20,
+      "rows": 2
+     },
+     {
+      "group": "Buga",
+      "series": "Agree",
+      "seriesKind": "value",
+      "value": 5,
+      "rows": 1
+     },
+     {
+      "group": "Buga",
+      "series": "Strongly agree",
+      "seriesKind": "value",
+      "value": 5,
+      "rows": 1
+     }
+    ],
+    "totals": {
+     "groups": [
+      {
+       "group": "Cali",
+       "value": 100,
+       "rows": 10
+      },
+      {
+       "group": "Buga",
+       "value": 10,
+       "rows": 2
+      }
+     ],
+     "series": [
+      {
+       "series": "Strongly disagree",
+       "kind": "value",
+       "value": 10,
+       "rows": 1
+      },
+      {
+       "series": "Disagree",
+       "kind": "value",
+       "value": 20,
+       "rows": 2
+      },
+      {
+       "series": "Neither",
+       "kind": "value",
+       "value": 20,
+       "rows": 2
+      },
+      {
+       "series": "Agree",
+       "kind": "value",
+       "value": 35,
+       "rows": 4
+      },
+      {
+       "series": "Strongly agree",
+       "kind": "value",
+       "value": 25,
+       "rows": 3
+      }
+     ],
+     "all": {
+      "value": 110,
+      "rows": 12
+     }
+    }
+   },
+   "expected": {
+    "columns": [
+     {
+      "series": "Strongly disagree",
+      "kind": "value",
+      "total": 10,
+      "rows": 1
+     },
+     {
+      "series": "Disagree",
+      "kind": "value",
+      "total": 20,
+      "rows": 2
+     },
+     {
+      "series": "Neither",
+      "kind": "value",
+      "total": 20,
+      "rows": 2
+     },
+     {
+      "series": "Agree",
+      "kind": "value",
+      "total": 35,
+      "rows": 4
+     },
+     {
+      "series": "Strongly agree",
+      "kind": "value",
+      "total": 25,
+      "rows": 3
+     }
+    ],
+    "rows": [
+     {
+      "group": "Cali",
+      "total": 100,
+      "rows": 10,
+      "cells": [
+       10,
+       20,
+       20,
+       30,
+       20
+      ],
+      "shares": [
+       0.1,
+       0.2,
+       0.2,
+       0.3,
+       0.2
+      ]
+     },
+     {
+      "group": "Buga",
+      "total": 10,
+      "rows": 2,
+      "cells": [
+       null,
+       null,
+       null,
+       5,
+       5
+      ],
+      "shares": [
+       null,
+       null,
+       null,
+       0.5,
+       0.5
+      ]
+     }
+    ],
+    "grandTotal": 110,
+    "grandRows": 12,
+    "negativeLeftOut": 0,
+    "leftOut": 7,
+    "rowLimitReached": false
+   }
+  },
+  {
+   "name": "no rows",
+   "chartType": "crosstab",
+   "layout": null,
+   "response": {
+    "series": [],
+    "rows": [],
+    "totals": {
+     "groups": [],
+     "series": [],
+     "all": {
+      "value": null,
+      "rows": 0
+     }
+    }
+   },
+   "expected": {
+    "columns": [],
+    "rows": [],
+    "grandTotal": null,
+    "grandRows": 0,
+    "negativeLeftOut": 0,
+    "leftOut": 0,
+    "rowLimitReached": false
+   }
+  }
+ ]
+}

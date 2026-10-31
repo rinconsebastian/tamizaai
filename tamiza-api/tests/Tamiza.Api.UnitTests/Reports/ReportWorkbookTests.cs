@@ -182,4 +182,37 @@ public sealed class ReportWorkbookTests : IDisposable
         Assert.Equal("census-2026_housing_2026-10-28.xlsx", ReportWorkbook.FileName(Model([])));
         Assert.Equal("census-2026_dashboard_2026-10-28.xlsx", ReportWorkbook.FileName(Model([], dashboard: "住房")));
     }
+
+    [Fact]
+    public void A_cross_table_sheet_holds_every_series_column_and_the_total_as_numbers()
+    {
+        var names = Write(Model([CrossTable(1, "Sources", series: 25)]));
+
+        Assert.Equal(["Summary", "1. Sources"], names);
+        var rows = Rows("1. Sources");
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(27, rows[0].Count);
+        Assert.Equal(["municipality", "S1", "S2"], rows[0].Keys.Take(3));
+        Assert.Equal("Total", rows[0].Keys.Last());
+        Assert.Equal(25, Convert.ToDouble(rows[0]["S25"], System.Globalization.CultureInfo.InvariantCulture) / 1);
+        Assert.Equal("Total", rows[^1]["municipality"]);
+        Assert.Equal("#,##0", CellFormat(1, "B2"));
+    }
+
+    [Fact]
+    public void A_share_column_and_a_value_column_with_the_same_header_do_not_share_a_number_format()
+    {
+        var shares = new ReportWidget(1, "Shares", ChartTypes.Likert, "Caption", WidgetOutcome.Shown,
+            [new ReportColumn("municipality"), new ReportColumn("Agree", "0.0%")],
+            [[new ReportCell("Cali", "Cali"), new ReportCell(0.3, "30%")]], null, null, [], 1);
+        var values = new ReportWidget(2, "Counts", ChartTypes.Column, "Caption", WidgetOutcome.Shown,
+            [new ReportColumn("municipality"), new ReportColumn("Agree", "#,##0")],
+            [[new ReportCell("Cali", "Cali"), new ReportCell(30d, "30")]], null, null, [], 1);
+
+        Write(Model([shares, values]));
+
+        Assert.Equal("0.0%", CellFormat(1, "B2"));
+        Assert.Equal("#,##0", CellFormat(2, "B2"));
+        Assert.Contains("Agree (2)", Rows("2. Counts")[0].Keys);
+    }
 }

@@ -1534,7 +1534,11 @@
       "line": "Line chart",
       "histogram": "Histogram",
       "pie": "Pie chart",
-      "map": "Map"
+      "map": "Map",
+      "heatmap": "Heat map",
+      "pyramid": "Population pyramid",
+      "likert": "Diverging Likert bars",
+      "crosstab": "Cross table"
     },
     "grid": {
       "move": "Move {{ title }}",
@@ -1695,7 +1699,19 @@
         "sort": "Choose the column to order by.",
         "geometry": "Choose the geometry column of the map.",
         "buckets": "Enter a whole number from 1 to {{ max }}, or leave it empty.",
-        "tooltip": "Choose a column for every tooltip column, or remove the empty ones."
+        "tooltip": "Choose a column for every tooltip column, or remove the empty ones.",
+        "seriesBy": "Choose the series column.",
+        "pyramidLeft": "Name the value drawn to the left.",
+        "pyramidRight": "Name the value drawn to the right.",
+        "pyramidSame": "Choose different values for the two sides.",
+        "scaleCount": "A scale has {{ min }} to {{ max }} values.",
+        "scaleEmpty": "A value of the scale is empty.",
+        "scaleDuplicate": "A value appears twice in the scale.",
+        "scaleOrder": "Order the scale from negative to positive: the negative values, then the neutral one, then the positive ones.",
+        "scaleNeutral": "A scale has at most one neutral value.",
+        "scaleSide": "A scale has at most {{ max }} values on one side.",
+        "likertRatio": "A Likert widget shows shares of a measure, not a ratio.",
+        "seriesSame": "Choose a series column other than the group column."
       },
       "filtersCount": "Filters ({{ count }})",
       "tooltip": {
@@ -1719,7 +1735,92 @@
       "dashboardFilters": "Dashboard filters",
       "dashboardFiltersHelp": "A filter left unchecked does not narrow this widget, as for a total that must not change when a member filters the dashboard.",
       "applyFilter": "Narrow by {{ label }}",
-      "previewFiltered": "Preview filtered by: {{ names }}"
+      "previewFiltered": "Preview filtered by: {{ names }}",
+      "seriesBy": "Series column",
+      "seriesByNone": "No series",
+      "seriesHelp": "Splits each group by the values of this column.",
+      "seriesHelpRequired": "Each value of this column is drawn as a series.",
+      "layout": {
+        "legend": "Layout",
+        "grouped": "Grouped",
+        "stacked": "Stacked",
+        "percent": "Stacked to 100%",
+        "ratioReason": "Stacked bars add their values, so they need a measure, not a ratio."
+      },
+      "pyramid": {
+        "legend": "Pyramid sides",
+        "help": "Name two values of the series column: one is drawn to the left of the axis and the other to the right.",
+        "left": "Left side",
+        "right": "Right side",
+        "placeholder": "Type or choose a value"
+      },
+      "scale": {
+        "legend": "Scale",
+        "help": "List the values of the scale in order, from the most negative to the most positive, and mark each as negative, neutral or positive. A value marked “Left out” is not part of the scale.",
+        "none": "Choose the series column to see the values of the data.",
+        "value": "Value {{ n }}",
+        "side": "Side of {{ value }}",
+        "negative": "Negative",
+        "neutral": "Neutral",
+        "positive": "Positive",
+        "out": "Left out",
+        "up": "Move {{ value }} up",
+        "down": "Move {{ value }} down",
+        "remove": "Remove {{ value }}",
+        "addLabel": "Add a value of the scale",
+        "addPlaceholder": "Another value",
+        "add": "Add"
+      }
+    },
+    "series": {
+      "legend": "Series",
+      "none": "(none)",
+      "other": "Other",
+      "total": "Total",
+      "share": "Share",
+      "noValue": "No value",
+      "caption": "{{ what }} by {{ group }} and {{ series }}",
+      "roleDescription": "chart",
+      "keyHelpAcross": "Left and right arrows move between the groups, and up and down between the series. Home and End go to the first and the last mark, and Escape leaves the marks.",
+      "keyHelpDown": "Up and down arrows move between the groups, and left and right between the series. Home and End go to the first and the last mark, and Escape leaves the marks.",
+      "keyHelpGroups": "Left and right arrows move between the groups. Home and End go to the first and the last, and Escape leaves the marks.",
+      "groupsCount": "{{ count }} groups",
+      "groupsCountOne": "{{ count }} group",
+      "seriesCount": "{{ count }} series",
+      "seriesCountOne": "{{ count }} series",
+      "summary": "{{ kind }} of {{ what }} by {{ group }} and {{ series }}: {{ groups }}, {{ seriesCount }}, from {{ min }} to {{ max }}. Highest: {{ top }}.",
+      "kinds": {
+        "barGrouped": "Grouped bar chart",
+        "barStacked": "Stacked bar chart",
+        "barPercent": "Bar chart stacked to 100%",
+        "columnGrouped": "Grouped column chart",
+        "columnStacked": "Stacked column chart",
+        "columnPercent": "Column chart stacked to 100%",
+        "line": "Line chart with one line per series"
+      },
+      "negativeLeftOut": "{{ count }} negative values are left out of the shares.",
+      "negativeLeftOutOne": "{{ count }} negative value is left out of the shares."
+    },
+    "heatmap": {
+      "summary": "Heat map of {{ what }}, {{ group }} by {{ series }}: {{ groups }}, {{ seriesCount }}, from {{ min }} to {{ max }}. Highest: {{ top }}.",
+      "scale": "Scale from {{ min }} to {{ max }}"
+    },
+    "pyramid": {
+      "summary": "Population pyramid of {{ what }} by {{ group }}: {{ left }} on the left and {{ right }} on the right, {{ groups }}, up to {{ max }}. Largest: {{ top }}.",
+      "leftOut": "{{ count }} rows left out: they have no group or series value, or a series value other than the two sides.",
+      "leftOutOne": "{{ count }} row left out: it has no group or series value, or a series value other than the two sides."
+    },
+    "likert": {
+      "summary": "Diverging Likert bars of {{ what }} by {{ group }}: {{ groups }}, {{ seriesCount }} on the scale. Most positive: {{ top }}, {{ share }}.",
+      "leftOut": "{{ count }} rows left out: they have no group or answer, or an answer outside the scale.",
+      "leftOutOne": "{{ count }} row left out: it has no group or answer, or an answer outside the scale.",
+      "sides": {
+        "negative": "Negative",
+        "neutral": "Neutral",
+        "positive": "Positive"
+      },
+      "toLeft": "To the left: {{ share }}",
+      "toRight": "To the right: {{ share }}"
     }
   },
   "dashboards": {
@@ -1827,7 +1928,9 @@
       "preparing": "Preparing the print…",
       "printedAt": "Printed {{ time }} ({{ zone }})",
       "publishedAt": "Data published {{ time }}",
-      "notPublished": "The data has not been published yet."
+      "notPublished": "The data has not been published yet.",
+      "columnsLeftOut": "{{ count }} columns not printed.",
+      "columnsLeftOutOne": "1 column not printed."
     }
   },
   "dashboardFilters": {

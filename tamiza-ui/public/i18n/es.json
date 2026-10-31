@@ -1534,7 +1534,11 @@
       "line": "Gráfico de líneas",
       "histogram": "Histograma",
       "pie": "Gráfico circular",
-      "map": "Mapa"
+      "map": "Mapa",
+      "heatmap": "Mapa de calor",
+      "pyramid": "Pirámide de población",
+      "likert": "Barras Likert divergentes",
+      "crosstab": "Tabla cruzada"
     },
     "grid": {
       "move": "Mover {{ title }}",
@@ -1695,7 +1699,19 @@
         "sort": "Elige la columna por la que ordenar.",
         "geometry": "Elige la columna de geometría del mapa.",
         "buckets": "Escribe un número entero de 1 a {{ max }}, o déjalo vacío.",
-        "tooltip": "Elige una columna para cada columna de información emergente, o elimina las vacías."
+        "tooltip": "Elige una columna para cada columna de información emergente, o elimina las vacías.",
+        "seriesBy": "Elija la columna de series.",
+        "pyramidLeft": "Indique el valor que se dibuja a la izquierda.",
+        "pyramidRight": "Indique el valor que se dibuja a la derecha.",
+        "pyramidSame": "Elija valores distintos para los dos lados.",
+        "scaleCount": "Una escala tiene de {{ min }} a {{ max }} valores.",
+        "scaleEmpty": "Un valor de la escala está vacío.",
+        "scaleDuplicate": "Un valor aparece dos veces en la escala.",
+        "scaleOrder": "Ordene la escala de negativo a positivo: los valores negativos, luego el neutral y luego los positivos.",
+        "scaleNeutral": "Una escala tiene como máximo un valor neutral.",
+        "scaleSide": "Una escala tiene como máximo {{ max }} valores en un lado.",
+        "likertRatio": "Un widget Likert muestra proporciones de una medida, no una razón.",
+        "seriesSame": "Elija una columna de series distinta de la columna de grupo."
       },
       "filtersCount": "Filtros ({{ count }})",
       "tooltip": {
@@ -1719,7 +1735,92 @@
       "dashboardFilters": "Filtros del tablero",
       "dashboardFiltersHelp": "Un filtro sin marcar no reduce este widget, como para un total que no debe cambiar cuando un miembro filtra el tablero.",
       "applyFilter": "Reducir por {{ label }}",
-      "previewFiltered": "Vista previa filtrada por: {{ names }}"
+      "previewFiltered": "Vista previa filtrada por: {{ names }}",
+      "seriesBy": "Columna de series",
+      "seriesByNone": "Sin series",
+      "seriesHelp": "Divide cada grupo según los valores de esta columna.",
+      "seriesHelpRequired": "Cada valor de esta columna se dibuja como una serie.",
+      "layout": {
+        "legend": "Disposición",
+        "grouped": "Agrupadas",
+        "stacked": "Apiladas",
+        "percent": "Apiladas al 100%",
+        "ratioReason": "Las barras apiladas suman sus valores, así que necesitan una medida, no una razón."
+      },
+      "pyramid": {
+        "legend": "Lados de la pirámide",
+        "help": "Indique dos valores de la columna de series: uno se dibuja a la izquierda del eje y el otro a la derecha.",
+        "left": "Lado izquierdo",
+        "right": "Lado derecho",
+        "placeholder": "Escriba o elija un valor"
+      },
+      "scale": {
+        "legend": "Escala",
+        "help": "Enumere los valores de la escala en orden, del más negativo al más positivo, y marque cada uno como negativo, neutral o positivo. Un valor marcado «Omitido» no forma parte de la escala.",
+        "none": "Elija la columna de series para ver los valores de los datos.",
+        "value": "Valor {{ n }}",
+        "side": "Lado de {{ value }}",
+        "negative": "Negativo",
+        "neutral": "Neutral",
+        "positive": "Positivo",
+        "out": "Omitido",
+        "up": "Subir {{ value }}",
+        "down": "Bajar {{ value }}",
+        "remove": "Quitar {{ value }}",
+        "addLabel": "Agregar un valor de la escala",
+        "addPlaceholder": "Otro valor",
+        "add": "Agregar"
+      }
+    },
+    "series": {
+      "legend": "Series",
+      "none": "(ninguno)",
+      "other": "Otros",
+      "total": "Total",
+      "share": "Proporción",
+      "noValue": "Sin valor",
+      "caption": "{{ what }} por {{ group }} y {{ series }}",
+      "roleDescription": "gráfico",
+      "keyHelpAcross": "Las flechas izquierda y derecha pasan de un grupo a otro, y las de arriba y abajo de una serie a otra. Inicio y Fin van a la primera y a la última marca, y Escape sale de las marcas.",
+      "keyHelpDown": "Las flechas arriba y abajo pasan de un grupo a otro, y las de izquierda y derecha de una serie a otra. Inicio y Fin van a la primera y a la última marca, y Escape sale de las marcas.",
+      "keyHelpGroups": "Las flechas izquierda y derecha pasan de un grupo a otro. Inicio y Fin van al primero y al último, y Escape sale de las marcas.",
+      "groupsCount": "{{ count }} grupos",
+      "groupsCountOne": "{{ count }} grupo",
+      "seriesCount": "{{ count }} series",
+      "seriesCountOne": "{{ count }} serie",
+      "summary": "{{ kind }} de {{ what }} por {{ group }} y {{ series }}: {{ groups }}, {{ seriesCount }}, de {{ min }} a {{ max }}. Más alto: {{ top }}.",
+      "kinds": {
+        "barGrouped": "Gráfico de barras agrupadas",
+        "barStacked": "Gráfico de barras apiladas",
+        "barPercent": "Gráfico de barras apiladas al 100%",
+        "columnGrouped": "Gráfico de columnas agrupadas",
+        "columnStacked": "Gráfico de columnas apiladas",
+        "columnPercent": "Gráfico de columnas apiladas al 100%",
+        "line": "Gráfico de líneas con una línea por serie"
+      },
+      "negativeLeftOut": "{{ count }} valores negativos no entran en las proporciones.",
+      "negativeLeftOutOne": "{{ count }} valor negativo no entra en las proporciones."
+    },
+    "heatmap": {
+      "summary": "Mapa de calor de {{ what }}, {{ group }} por {{ series }}: {{ groups }}, {{ seriesCount }}, de {{ min }} a {{ max }}. Más alto: {{ top }}.",
+      "scale": "Escala de {{ min }} a {{ max }}"
+    },
+    "pyramid": {
+      "summary": "Pirámide de población de {{ what }} por {{ group }}: {{ left }} a la izquierda y {{ right }} a la derecha, {{ groups }}, hasta {{ max }}. Mayor: {{ top }}.",
+      "leftOut": "{{ count }} filas omitidas: no tienen valor de grupo o de serie, o tienen un valor de serie distinto de los dos lados.",
+      "leftOutOne": "{{ count }} fila omitida: no tiene valor de grupo o de serie, o tiene un valor de serie distinto de los dos lados."
+    },
+    "likert": {
+      "summary": "Barras Likert divergentes de {{ what }} por {{ group }}: {{ groups }}, {{ seriesCount }} en la escala. Más positivo: {{ top }}, {{ share }}.",
+      "leftOut": "{{ count }} filas omitidas: no tienen grupo o respuesta, o tienen una respuesta fuera de la escala.",
+      "leftOutOne": "{{ count }} fila omitida: no tiene grupo o respuesta, o tiene una respuesta fuera de la escala.",
+      "sides": {
+        "negative": "Negativo",
+        "neutral": "Neutral",
+        "positive": "Positivo"
+      },
+      "toLeft": "A la izquierda: {{ share }}",
+      "toRight": "A la derecha: {{ share }}"
     }
   },
   "dashboards": {
@@ -1827,7 +1928,9 @@
       "preparing": "Preparando la impresión…",
       "printedAt": "Impreso el {{ time }} ({{ zone }})",
       "publishedAt": "Datos publicados el {{ time }}",
-      "notPublished": "Los datos aún no se han publicado."
+      "notPublished": "Los datos aún no se han publicado.",
+      "columnsLeftOut": "{{ count }} columnas no se imprimieron.",
+      "columnsLeftOutOne": "1 columna no se imprimió."
     }
   },
   "dashboardFilters": {

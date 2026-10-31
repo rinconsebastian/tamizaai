@@ -118,7 +118,7 @@ A widget that fits on one sheet SHALL NOT be split between two: when it would cr
 - **THEN** nothing of that widget, not even a line of its border, shows at the foot of the previous sheet
 
 ### Requirement: Charts on paper
-Every chart, pie chart and stat tile SHALL print whole inside its widget's box, with all its marks, labels and legend. Each widget SHALL print as the member shows it at that moment, as a chart or as a table.
+Every chart, pie chart, heat map, population pyramid, Likert widget and stat tile SHALL print whole inside its widget's box, with all its marks, labels and legend. Each widget SHALL print as the member shows it at that moment, as a chart or as a table.
 
 #### Scenario: Column chart
 - **WHEN** a member prints a column chart with 12 columns
@@ -127,6 +127,14 @@ Every chart, pie chart and stat tile SHALL print whole inside its widget's box, 
 #### Scenario: Widget shown as a table
 - **WHEN** a member shows one widget of "Housing" as a table and prints the dashboard
 - **THEN** that widget prints as a table and the others as charts
+
+#### Scenario: Heat map
+- **WHEN** a member prints a heat map with 10 rows and 8 columns
+- **THEN** the sheet shows its 80 cells, its row and column labels and the legend of its scale inside the widget's box
+
+#### Scenario: Stacked chart
+- **WHEN** a member prints a stacked column chart with 4 series
+- **THEN** the sheet shows every segment and the legend naming the 4 series
 
 ### Requirement: Maps on paper
 A map SHALL print its shapes, its basemap and its legend, with the basemap's attribution. A map the member has not zoomed or moved SHALL show all its shapes; one they have zoomed or moved SHALL show the area they were looking at.
@@ -147,7 +155,7 @@ Chart marks, map shapes and legend swatches SHALL print in their colors even whe
 - **THEN** the map's legend swatches print in their colors
 
 ### Requirement: Tables on paper
-A widget shown as a table SHALL print the rows that fit in its box. When some rows do not fit, it SHALL say how many were left out.
+A widget shown as a table, and a cross table widget, SHALL print the rows that fit in its box. When some rows do not fit, it SHALL say how many were left out. A table whose columns do not all fit SHALL print the group column and the columns that fit, and SHALL say how many columns were left out.
 
 #### Scenario: Long table
 - **WHEN** a member prints a widget shown as a table with 40 rows, of which 12 fit in its box
@@ -156,6 +164,10 @@ A widget shown as a table SHALL print the rows that fit in its box. When some ro
 #### Scenario: Short table
 - **WHEN** a member prints a widget shown as a table whose 5 rows all fit
 - **THEN** the sheet shows the 5 rows and no note about rows left out
+
+#### Scenario: Wide cross table
+- **WHEN** a member prints a cross table with 20 series columns, of which 9 fit in its box
+- **THEN** the sheet shows the group column and those 9 columns, and says that 12 columns were not printed
 
 ### Requirement: Document title while printing
 While the print dialog is open, the page's title SHALL be the project's name, the dashboard's name and the date it was printed, written year-month-day in the project's time zone. Afterwards it SHALL go back to what it was.

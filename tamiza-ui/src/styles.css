@@ -50,8 +50,15 @@
 
 /*
  * Chart colors for the indicator widgets: eight categorical hues in a fixed order (a series keeps its color) and one sequential
- * ramp of seven steps for magnitude, the map's fill. The dark values are stepped for the dark surface, not an inversion; the
- * sequential ramp runs light to dark on the light theme and dark to light on the dark one, so the low end recedes in both.
+ * ramp of seven steps for magnitude, the map's and the heat map's fill (--tmz-seq-ink-n is the label that sits on step n: white or
+ * near-black, whichever reads better on it). The dark values are stepped for the dark surface, not an inversion; the sequential
+ * ramp runs light to dark on the light theme and dark to light on the dark one, so the low end recedes in both.
+ *
+ * The diverging Likert scale has two arms of five steps, a red one for the negative side and a blue one (the sequential hue) for the
+ * positive, each stepped by its distance from the neutral midpoint, which reads as "nothing" (--tmz-div-neutral). The steps nearest the
+ * neutral are the lightest on the light theme and the darkest on the dark one, as the sequential ramp's low end is. Each arm was
+ * validated as an ordinal ramp with the palette validator (`--ordinal`), against white and against the dark chart surface (#101828);
+ * the commands and results are in the Verification Results of openspec/changes/add-two-dimension-widgets/design.md.
  */
 :root {
   --tmz-series-1: #2a78d6;
@@ -70,6 +77,24 @@
   --tmz-seq-5: #256abf;
   --tmz-seq-6: #184f95;
   --tmz-seq-7: #0d366b;
+  --tmz-seq-ink-1: #0b0b0b;
+  --tmz-seq-ink-2: #0b0b0b;
+  --tmz-seq-ink-3: #0b0b0b;
+  --tmz-seq-ink-4: #0b0b0b;
+  --tmz-seq-ink-5: #ffffff;
+  --tmz-seq-ink-6: #ffffff;
+  --tmz-seq-ink-7: #ffffff;
+  --tmz-div-neg-1: #ea9a93;
+  --tmz-div-neg-2: #dd716a;
+  --tmz-div-neg-3: #c74845;
+  --tmz-div-neg-4: #9e3432;
+  --tmz-div-neg-5: #762221;
+  --tmz-div-neutral: #f0efec;
+  --tmz-div-pos-1: #86b6ef;
+  --tmz-div-pos-2: #5598e7;
+  --tmz-div-pos-3: #2a78d6;
+  --tmz-div-pos-4: #1c5cab;
+  --tmz-div-pos-5: #104281;
 }
 
 .dark {
@@ -88,6 +113,24 @@
   --tmz-seq-5: #6da7ec;
   --tmz-seq-6: #9ec5f4;
   --tmz-seq-7: #cde2fb;
+  --tmz-seq-ink-1: #ffffff;
+  --tmz-seq-ink-2: #ffffff;
+  --tmz-seq-ink-3: #0b0b0b;
+  --tmz-seq-ink-4: #0b0b0b;
+  --tmz-seq-ink-5: #0b0b0b;
+  --tmz-seq-ink-6: #0b0b0b;
+  --tmz-seq-ink-7: #0b0b0b;
+  --tmz-div-neg-1: #892b2a;
+  --tmz-div-neg-2: #b13f3c;
+  --tmz-div-neg-3: #d75853;
+  --tmz-div-neg-4: #e4857e;
+  --tmz-div-neg-5: #f1aea8;
+  --tmz-div-neutral: #383835;
+  --tmz-div-pos-1: #184f95;
+  --tmz-div-pos-2: #256abf;
+  --tmz-div-pos-3: #3987e5;
+  --tmz-div-pos-4: #6da7ec;
+  --tmz-div-pos-5: #9ec5f4;
 }
 
 /*

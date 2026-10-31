@@ -44,6 +44,52 @@ public sealed class ReportSenderTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Sends_a_dashboard_with_a_widget_of_each_new_kind_and_layout_and_every_sheet_holds_its_whole_cross_table()
+    {
+        await using var h = await ReportsHarness.CreateAsync(postgres);
+        await h.Indicators.PublishAsync("sources", "municipality text, water_source text, value numeric",
+            string.Join(", ", Enumerable.Range(1, 12).SelectMany(m => Enumerable.Range(1, 9).Select(w => $"('M{m:00}', 'Source {w}', {m * w})"))),
+            label: "Sources", format: "count");
+        var y = 0;
+        async Task AddAsync(string title, string chartType, object config) =>
+            await h.Indicators.AddWidgetAsync(new { title, chartType, config, layout = new { x = 0, y = y += 4, w = 12, h = 4 } });
+        await AddAsync("Total", "stat", new { indicator = "sources", measure = "value" });
+        await AddAsync("Grouped", "column", new { indicator = "sources", measure = "value", groupBy = "municipality", seriesBy = "water_source", layout = "grouped" });
+        await AddAsync("Stacked", "bar", new { indicator = "sources", measure = "value", groupBy = "municipality", seriesBy = "water_source", layout = "stacked" });
+        await AddAsync("Percent", "column", new { indicator = "sources", measure = "value", groupBy = "municipality", seriesBy = "water_source", layout = "percent" });
+        await AddAsync("Lines", "line", new { indicator = "sources", measure = "value", groupBy = "municipality", seriesBy = "water_source" });
+        await AddAsync("Heat", "heatmap", new { indicator = "sources", measure = "value", groupBy = "municipality", seriesBy = "water_source" });
+        await AddAsync("Table", "crosstab", new { indicator = "sources", measure = "value", groupBy = "municipality", seriesBy = "water_source" });
+        await AddAsync("Pyramid", "pyramid", new { indicator = "sources", measure = "value", groupBy = "municipality", seriesBy = "water_source", pyramid = new { left = "Source 1", right = "Source 2" } });
+        await AddAsync("Likert", "likert", new
+        {
+            indicator = "sources", measure = "value", groupBy = "municipality", seriesBy = "water_source",
+            scale = new object[] { new { value = "Source 1", side = "negative" }, new { value = "Source 2", side = "neutral" }, new { value = "Source 3", side = "positive" } },
+        });
+        await h.SaveReportAsync();
+
+        await SendAsync(h);
+
+        var sent = Assert.Single(h.Email.Sent);
+        Assert.Null(await FailureAsync(h));
+        // The body shows six series columns and says how many more; the text part does too.
+        Assert.Contains("3 more columns", sent.Message.HtmlBody);
+        Assert.Contains("3 more columns", sent.Message.TextBody);
+        Assert.DoesNotContain(">Source 9</th>", sent.Message.HtmlBody);
+        var attachment = Assert.IsType<MimePart>(Assert.Single(sent.Message.Attachments));
+        using var content = new MemoryStream();
+        await attachment.Content.DecodeToAsync(content);
+        content.Position = 0;
+        var names = MiniExcelLibs.MiniExcel.GetSheetNames(content);
+        Assert.Equal(["Summary", "2. Grouped", "3. Stacked", "4. Percent", "5. Lines", "6. Heat", "7. Table", "8. Pyramid", "9. Likert"], names);
+        content.Position = 0;
+        var heat = MiniExcelLibs.MiniExcel.Query(content, useHeaderRow: true, sheetName: "6. Heat").Cast<IDictionary<string, object?>>().ToList();
+        // Twelve municipalities and the total row; the group column, nine sources and the total column.
+        Assert.Equal(13, heat.Count);
+        Assert.Equal(11, heat[0].Count);
+    }
+
+    [Fact]
     public async Task Empty_dashboard()
     {
         await using var h = await ReportsHarness.CreateAsync(postgres);

@@ -35,6 +35,7 @@ public sealed record ReportCell(object? Value, string Text);
 /// <param name="StatValue">A stat tile's value as the email shows it.</param>
 /// <param name="Reason">Why the widget shows no table or value, in the email's language; null when it has one.</param>
 /// <param name="Notes">What the reader should know about the rows shown: the row limit, or filters that do not narrow it.</param>
+/// <param name="SeriesColumns">A cross table's series columns, which come between the group column and the "Total" column; 0 for any other table.</param>
 public sealed record ReportWidget(
     int Position,
     string Title,
@@ -45,9 +46,24 @@ public sealed record ReportWidget(
     IReadOnlyList<IReadOnlyList<ReportCell>> Rows,
     string? StatValue,
     string? Reason,
-    IReadOnlyList<string> Notes)
+    IReadOnlyList<string> Notes,
+    int SeriesColumns = 0)
 {
+    /// <summary>The most series columns the body of an email shows for one widget; the workbook shows them all.</summary>
+    public const int BodySeriesColumns = 6;
+
     public bool IsStat => ChartType == ChartTypes.Stat;
+
+    /// <summary>The series columns the body leaves out; 0 for a table that fits.</summary>
+    public int HiddenSeriesColumns => Math.Max(0, SeriesColumns - BodySeriesColumns);
+
+    /// <summary>
+    /// The columns of the body's table, by index: all of them, or for a cross table of more than <see cref="BodySeriesColumns"/> series
+    /// the group column, the first series and the "Total" column.
+    /// </summary>
+    public IReadOnlyList<int> BodyColumns => HiddenSeriesColumns == 0
+        ? [.. Enumerable.Range(0, Columns.Count)]
+        : [0, .. Enumerable.Range(1, BodySeriesColumns), Columns.Count - 1];
 
     /// <summary>Not published, a missing column, settings that no longer fit, or a timeout: the widget could not be read.</summary>
     public bool Unreadable => Outcome is WidgetOutcome.NotPublished or WidgetOutcome.MissingColumns or WidgetOutcome.NoLongerFits or WidgetOutcome.TimedOut;

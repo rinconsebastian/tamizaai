@@ -155,4 +155,40 @@ public sealed class WidgetQueryTests
     [Fact]
     public void Filters_without_a_default_are_never_named() =>
         Assert.Empty(WidgetQuery.NotNarrowedBy(Filters, Config(ignored: ["urban"]), notFiltered: ["urban"]));
+
+    private static WidgetConfig WithSeries() => new WidgetConfigInput(
+        "population", "value", GroupBy: "age_band", SeriesBy: "sex", Layout: SeriesLayouts.Stacked, Pyramid: new WidgetPyramid("Female", "Male"),
+        Scale: [new LikertStep("No", LikertSides.Negative), new LikertStep("Yes", LikertSides.Positive)]).Normalize();
+
+    [Fact]
+    public void Only_the_charts_that_have_a_series_send_the_series_column()
+    {
+        foreach (var chartType in ChartTypes.All)
+        {
+            var query = WidgetQuery.For(chartType, WithSeries());
+
+            Assert.Equal(ChartTypes.HasSeries(chartType) ? "sex" : null, query.SeriesBy);
+        }
+    }
+
+    [Fact]
+    public void The_layout_goes_with_bars_and_columns_the_sides_with_the_pyramid_and_the_scale_with_the_likert_widget()
+    {
+        foreach (var chartType in ChartTypes.All)
+        {
+            var query = WidgetQuery.For(chartType, WithSeries());
+
+            Assert.Equal(chartType is ChartTypes.Bar or ChartTypes.Column ? "stacked" : null, query.Layout);
+            Assert.Equal(chartType == ChartTypes.Pyramid ? new WidgetPyramid("Female", "Male") : null, query.Pyramid);
+            Assert.Equal(chartType == ChartTypes.Likert ? 2 : 0, query.Scale?.Count ?? 0);
+        }
+    }
+
+    [Fact]
+    public void The_new_charts_keep_their_group_column_and_a_stat_tile_still_drops_it()
+    {
+        Assert.Equal("age_band", WidgetQuery.For(ChartTypes.Heatmap, WithSeries()).GroupBy);
+        Assert.Equal("age_band", WidgetQuery.For(ChartTypes.Crosstab, WithSeries()).GroupBy);
+        Assert.Null(WidgetQuery.For(ChartTypes.Stat, WithSeries()).GroupBy);
+    }
 }

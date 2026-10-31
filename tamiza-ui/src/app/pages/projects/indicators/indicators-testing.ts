@@ -11,6 +11,8 @@ import {
   IndicatorsOverview,
   QueryResult,
   QueryRow,
+  QuerySeries,
+  SeriesKind,
   Widget,
   WidgetConfig,
   emptyConfig,
@@ -123,6 +125,37 @@ export function result(rows: QueryRow[], overrides: Partial<QueryResult> = {}): 
 /** A row of an answer; a map's carry how many table rows they combine (`rows`) and the values of the tooltip columns (`tooltip`). */
 export function row(group: string | null, value: number, geometry: string | null = null, extra: Pick<QueryRow, 'rows' | 'tooltip'> = {}): QueryRow {
   return { group, value, geometry, ...extra };
+}
+
+/** A cell of the answer of a widget with a series (design D12): the value of one pair of group and series value, and the rows it sums. */
+export function cell(group: string | null, series: string | null, value: number, rows = 1, seriesKind: SeriesKind = 'value'): QueryRow {
+  return { group, value, geometry: null, series, seriesKind, rows };
+}
+
+/**
+ * The answer of a widget with a series: the cells, the series in the order given (a name is a `value` series) and the totals, worked
+ * out from the cells as the server does for a measure: the groups in order of appearance, the sum of each group, of each series and of
+ * all of it.
+ */
+export function seriesResult(cells: QueryRow[], series: (string | QuerySeries)[], overrides: Partial<QueryResult> = {}): QueryResult {
+  const domain: QuerySeries[] = series.map((entry) => (typeof entry === 'string' ? { value: entry, kind: 'value' } : entry));
+  const groups = [...new Set(cells.map((c) => c.group))];
+  const sum = (selected: QueryRow[]) => (selected.length ? selected.reduce((total, c) => total + c.value, 0) : null);
+  const rowsOf = (selected: QueryRow[]) => selected.reduce((total, c) => total + (c.rows ?? 1), 0);
+  const slot = (c: QueryRow) => ((c.seriesKind ?? 'value') === 'value' ? `value:${c.series}` : c.seriesKind!);
+  return {
+    ...result(cells),
+    series: domain,
+    totals: {
+      groups: groups.map((group) => ({ group, value: sum(cells.filter((c) => c.group === group)), rows: rowsOf(cells.filter((c) => c.group === group)) })),
+      series: domain.map((entry) => {
+        const own = cells.filter((c) => slot(c) === (entry.kind === 'value' ? `value:${entry.value}` : entry.kind));
+        return { series: entry.value, kind: entry.kind, value: sum(own), rows: rowsOf(own) };
+      }),
+      all: { value: sum(cells), rows: rowsOf(cells) },
+    },
+    ...overrides,
+  };
 }
 
 export const text = (element: Element | null) => element?.textContent?.replace(/\s+/g, ' ').trim() ?? '';

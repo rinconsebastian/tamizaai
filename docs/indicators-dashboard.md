@@ -129,7 +129,7 @@ The **unit**, when there is one, goes after the value (`12,450 households`). A s
 
 ## Widget types
 
-Every widget has a title, a type, one **indicator**, what to **plot** (a measure or a ratio, see below), the column to **group by**, up to 50 **filters**, and for a map its **geometry column** and up to 5 [**tooltip columns**](#tooltip-and-tooltip-columns) and a [**basemap**](#basemap). A widget form shows a live preview while you edit.
+Every widget has a title, a type, one **indicator**, what to **plot** (a measure or a ratio, see below), the column to **group by**, for many types a second column to split each group by (the [series](#widgets-with-a-series)), up to 50 **filters**, and for a map its **geometry column** and up to 5 [**tooltip columns**](#tooltip-and-tooltip-columns) and a [**basemap**](#basemap). A widget form shows a live preview while you edit.
 
 | Type | Shows | Group by | Notes |
 |---|---|---|---|
@@ -140,6 +140,10 @@ Every widget has a title, a type, one **indicator**, what to **plot** (a measure
 | **Histogram** | How many rows fall in each of a number of equal-width ranges of the plotted value. | Optional | 10 ranges by default, up to 100. Without a group column each row of the table is counted; with one, each group's value. |
 | **Pie chart** | One slice per group value, sized by its share of the total. | Required | See below. |
 | **Map** | Regions or points, colored by the plotted value. | Required | Needs a geometry column; see [Maps](#maps). |
+| **Heat map** | Groups as rows and [series](#widgets-with-a-series) as columns, each cell shaded by its value. | Required | Needs a series column; see [Heat map](#heat-map). |
+| **Population pyramid** | Two series values as bars to the left and to the right of a central axis, one row per group. | Required | Needs a series column and its two sides; see [Population pyramid](#population-pyramid). |
+| **Likert bars** | Each group's composition over an agreement scale, centered on the neutral value. | Required | Needs a series column and a scale; see [Likert bars](#likert-bars). |
+| **Cross table** | A table of groups by series, with totals. | Required | Needs a series column; see [Cross table](#cross-table). |
 
 - **Rows with no value** in the plotted measure are left out of every widget.
 - A group with no value in the group column is shown as **(none)**.
@@ -175,6 +179,76 @@ Line charts keep their natural order (`2` before `10`) and, like pie, histogram 
 ### Filters
 
 Filters work as in the [clean data dashboard](clean-data-dashboard.md#filters): **contains**, **is exactly** and **is one of** for text; **is between** for numbers, dates and timestamps; **is one of** for true/false; **is empty** and **is not empty** for any column. A row has to match all of them. A widget takes at most 50 filters, and **is one of** takes at most 100 values. Filters are added once the indicator's table is published, because they are chosen from its columns. These are the widget's own filters, the same for everyone; a dashboard's [filters](#dashboard-filters) narrow it further, on each member's screen.
+
+## Widgets with a series
+
+A widget groups its indicator's table by one column. A **series column** splits each group by a second one: the water sources inside each municipality, the sexes inside each age band, the answers inside each municipality. The widget then has one value for every pair of group and series value, plus a **total** for each group, for each series value and for all its rows.
+
+| Type | Series column |
+|---|---|
+| Bar, column and line chart | Optional |
+| Heat map, population pyramid, Likert bars and cross table | Required |
+| Stat tile, histogram, pie chart and map | Not allowed |
+
+The series column has to be another column than the group column. Everything else about the query is the same: the measure or ratio, the widget's filters and the dashboard's filters.
+
+- **Rows that share a group and a series value are summed**, or combined as a ratio of sums, as rows that share a group are.
+- **Totals come from the rows, never from adding the cells.** For a rate, a group's total is the sum of its numerators over the sum of its denominators, not the sum or the mean of its cells' rates.
+- **Order.** Series are listed in natural order (2 before 10). So are the groups of a line chart, a heat map, a pyramid, Likert bars and a cross table, which have no order setting; bars and columns keep the [order](#bar-and-column-order) of their group column or the one you choose. Rows with no value in the series column come next as **(none)**, and the folded series last as **Other**.
+- **At most 8 series** in a bar, column or line chart, and **30** in a heat map or a cross table. When the widget's rows hold more, the ones with the largest totals are kept, one fewer than the limit, and the rest are combined in one **Other** series. **(none)** is never folded into **Other**.
+- **Colors and legend stay put.** The series, their order and their colors come from the rows that match the widget's *own* filters, not the dashboard's. A member who changes a dashboard filter keeps every series in its color and in the legend, even one that no longer has rows. Editing the widget's own filters can change them.
+- **Row limit.** The limit counts cells (a group and a series value). A group that would cross it is left out whole, with the groups after it, and the widget says the limit was reached. The totals of series and of all rows still cover every row the widget matches.
+- **Show as table** is the cross table: groups as rows in the chart's order, series as columns, and the totals.
+
+### Bars and columns by series
+
+A bar or column chart with a series has a **layout**:
+
+- **Grouped** (the default): one bar or column per series value, side by side. With many groups and series the bars get thin: twelve municipalities by five sources are sixty bars, so give the widget the full width of the grid, or use a stacked layout.
+- **Stacked**: the series end to end from the axis, so the bar's length is the group's total. Negative values stack on the other side of the axis.
+- **Stacked to 100%**: each bar shows the shares of its total, so you compare compositions. The tooltip gives the share and the value. A value below zero has no share: it is left out and the widget says how many.
+
+Stacked and 100% layouts add the series up, so they plot a **measure**, not a ratio (rates do not add). A rate by two dimensions belongs in grouped bars, a line chart, a heat map, a pyramid or a cross table. With an [order](#bar-and-column-order) by the plotted value, a bar's value is its total over all series.
+
+A **line chart** with a series draws one line per series value, through the groups in natural order. A series with no value for a group has a gap there.
+
+### Heat map
+
+Groups are rows (in natural order, so `5-9` comes before `10-14`), series values are columns, and each cell is shaded on the same blue scale as the maps, from the smallest to the largest value shown, with a legend of that range. A cell with no value is drawn empty with a hatch, which is not the same as a cell whose value is 0.
+
+### Population pyramid
+
+Pick the two values of the series column that go to the **left** and to the **right** of a central axis, for example `Female` and `Male`. The group values (age bands) are the rows in natural order (`0-4`, `5-9`, `10-14`), the first at the bottom, and both sides use one scale, measured outward and labelled without signs. Values follow the indicator's format: counts as numbers, a percent indicator as percentages.
+
+- A row with any **other** series value is left out. A row with no group or no series value draws no bar. The widget says how many rows it left out.
+- If one side has no rows (a dashboard filter on `sex` hides it), that side is drawn empty and the widget is not stale.
+
+### Likert bars
+
+For agreement scales. In the form you order the scale's values (2 to 11) and mark each one **negative**, **neutral** or **positive**: negatives first, at most one neutral, at most 5 on each side. Each group is one bar of its composition in percent, centered on the line between negative and positive: negatives extend left with the values nearest the neutral nearest the center, the neutral share is split in half across the line, and positives extend right. Each value's colour follows its side, a red arm and a blue arm of increasing strength. The tooltips give each value's share and its count.
+
+Values outside the scale (`Don't know`) are left out and counted in a note. Likert bars plot a measure, usually counts of answers.
+
+### Cross table
+
+A table of groups by series values (the groups in natural order), with the indicator's format in every cell, a **Total** column, a **Total** row and the grand total. A pair without rows reads "—". A table wider than its widget scrolls inside it and keeps the group column in view. It is also what **Show as table** gives for every widget with a series; for stacked-to-100% bars and Likert bars it lists each cell's share.
+
+### Preparing an indicator with two dimensions
+
+A series widget reads a table with **two text dimension columns and one number**. Publish one row per combination:
+
+```python
+def compute(clean, ctx):
+    df = clean["main"]
+    out = df.groupby(["age_band", "sex"], dropna=False).size().reset_index(name="value")
+    out["age_band"] = out["age_band"].astype(str)
+    return out
+```
+
+- Give every dimension the same name in every indicator, so a [dashboard filter](#dashboard-filters) can narrow them.
+- Order bands so that they sort naturally as text: `0-4`, `5-9`, `10-14` sort right (a run of digits compares as a number), `Under 5` does not. To order bars by something else, publish a sort column (see [Bar and column order](#bar-and-column-order)).
+- For a Likert widget, keep the answers as their **choice labels** and publish a count per group and answer; the scale in the widget names the values and their sides.
+- For a rate by two dimensions, also publish `numerator` and `denominator`, as for any rate.
 
 ## Maps
 
@@ -314,7 +388,7 @@ Each dashboard has its own grid of 12 columns. A new widget goes below the exist
 
 ## Show as table
 
-Every widget except the stat tile has a table button in its header (shown once the widget has rows to draw) that replaces the picture with the numbers it plots, formatted like the chart (a histogram lists its ranges and their counts, a map its groups with their tooltip columns, written as in the tooltip, and the kind of shape each has). The button above the grid, **Show all as tables**, does the same for every widget of the dashboard at once, in reading order, and resets the choice made on single widgets. Each chart also carries a text description for assistive technology.
+Every widget except the stat tile has a table button in its header (shown once the widget has rows to draw) that replaces the picture with the numbers it plots, formatted like the chart (a histogram lists its ranges and their counts, a map its groups with their tooltip columns, written as in the tooltip, and the kind of shape each has). The button above the grid, **Show all as tables**, does the same for every widget of the dashboard at once, in reading order, and resets the choice made on single widgets. Each chart also carries a text description for assistive technology. A widget with a [series](#widgets-with-a-series) shows its cross table: groups as rows, series as columns, and a **Total** column and row; for bars stacked to 100% and for Likert bars the cells are shares.
 
 ## Export
 
@@ -355,6 +429,9 @@ The other widgets keep working. A dashboard filter on a column the new table no 
 | Length of a dashboard filter's label | 40 characters |
 | Values in an **is one of** filter | 100 |
 | Ranges in a histogram | 100 (10 by default) |
+| Series in a bar, column or line chart | 8 (the smallest are combined as Other) |
+| Series in a heat map or a cross table | 30 |
+| Values in a Likert scale | 2 to 11, at most 5 on each side of the neutral value |
 | Tooltip columns in a map | 5 |
 | Length of a tooltip column's label | 80 characters |
 | Length of a text in a tooltip | 200 characters (cut with an ellipsis) |
@@ -365,7 +442,7 @@ An operator can change the first two; the others are fixed. See [operations.md](
 
 ## What it does not do
 
-- A widget plots **one indicator**; it does not combine several indicator tables in one chart.
+- A widget plots **one indicator** with at most **two dimensions** (a group and a series); it does not combine several indicator tables in one chart, add a third dimension, plot two measures, sort its series by value or let you choose their colors.
 - Its basemap is a background and nothing more: there is no satellite imagery from anyone but Google, no street labels over the imagery, no basemap you define yourself, and no administrative boundaries of its own, since the shapes come from your script.
 - It does not save a zoomed view as the map's starting view, and only maps have a tooltip with columns; a tooltip column's numbers are always summed, with no choice of minimum, maximum or average.
 - Clicking a bar, slice or shape does not filter the other widgets, a filter's values do not depend on another filter (a department, then its municipalities), and there are no relative periods such as "the last 7 days".

@@ -1,4 +1,4 @@
-import { Layout } from '../../../core/projects/indicators.service';
+import { Layout, chartTypes } from '../../../core/projects/indicators.service';
 import { Placed, changed, clampLayout, defaultSize, movedBy, overlaps, readingOrder, reflow, resizedBy, unitsFor } from './grid-layout';
 
 const at = (id: string, x: number, y: number, w: number, h: number): Placed => ({ id, layout: { x, y, w, h } });
@@ -9,6 +9,29 @@ describe('grid layout', () => {
     expect(defaultSize('stat')).toEqual({ w: 3, h: 2 });
     expect(defaultSize('map')).toEqual({ w: 6, h: 6 });
     for (const type of ['bar', 'column', 'line', 'histogram', 'pie'] as const) expect(defaultSize(type)).toEqual({ w: 6, h: 4 });
+  });
+
+  it('sizes the new kinds: heat map, pyramid and cross table 6x5, Likert 6x4 (twin of DefaultSize)', () => {
+    for (const type of ['heatmap', 'pyramid', 'crosstab'] as const) expect(defaultSize(type)).toEqual({ w: 6, h: 5 });
+    expect(defaultSize('likert')).toEqual({ w: 6, h: 4 });
+  });
+
+  it('gives each of the eleven kinds a size inside the grid, none by a default branch', () => {
+    const sizes = chartTypes.map((type) => [type, defaultSize(type)] as const);
+
+    expect(sizes).toEqual([
+      ['stat', { w: 3, h: 2 }],
+      ['bar', { w: 6, h: 4 }],
+      ['column', { w: 6, h: 4 }],
+      ['line', { w: 6, h: 4 }],
+      ['histogram', { w: 6, h: 4 }],
+      ['pie', { w: 6, h: 4 }],
+      ['map', { w: 6, h: 6 }],
+      ['heatmap', { w: 6, h: 5 }],
+      ['pyramid', { w: 6, h: 5 }],
+      ['likert', { w: 6, h: 4 }],
+      ['crosstab', { w: 6, h: 5 }],
+    ]);
   });
 
   describe('clampLayout', () => {

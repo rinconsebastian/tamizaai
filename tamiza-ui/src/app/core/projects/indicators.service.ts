@@ -9,13 +9,57 @@ import { DashboardEntry } from './projects.service';
 // table one indicator script published (config) and a place on the 12-column grid (layout). It belongs to one of the project's
 // own dashboards (tamiza.dashboards), each a grid of its own.
 
-export type ChartType = 'stat' | 'bar' | 'column' | 'line' | 'histogram' | 'pie' | 'map';
+export type ChartType = 'stat' | 'bar' | 'column' | 'line' | 'histogram' | 'pie' | 'map' | 'heatmap' | 'pyramid' | 'likert' | 'crosstab';
 
-export const chartTypes: readonly ChartType[] = ['stat', 'bar', 'column', 'line', 'histogram', 'pie', 'map'];
+export const chartTypes: readonly ChartType[] = ['stat', 'bar', 'column', 'line', 'histogram', 'pie', 'map', 'heatmap', 'pyramid', 'likert', 'crosstab'];
 
-/** Bar, column, line, pie and map widgets plot one value per group, so they need a column to group by; a stat tile and a histogram do not. */
+/** Every kind but a stat tile and a histogram plots one value per group (or per pair of group and series), so it needs a column to group by. */
 export function needsGroup(type: ChartType): boolean {
   return type !== 'stat' && type !== 'histogram';
+}
+
+/** Bar, column and line widgets may have a series column (`ChartTypes.TakesSeries` in tamiza-api). */
+export function takesSeries(type: ChartType): boolean {
+  return type === 'bar' || type === 'column' || type === 'line';
+}
+
+/** Heat map, population pyramid, diverging Likert and cross table widgets cannot be drawn without one (`ChartTypes.NeedsSeries`). */
+export function needsSeries(type: ChartType): boolean {
+  return type === 'heatmap' || type === 'pyramid' || type === 'likert' || type === 'crosstab';
+}
+
+/** Whether a widget of this kind has a series column at all, optional or required. */
+export function hasSeries(type: ChartType): boolean {
+  return takesSeries(type) || needsSeries(type);
+}
+
+/** How the bars or columns of a widget with a series are laid out: side by side, end to end, or end to end as shares of 100% (`SeriesLayouts`). */
+export type SeriesLayout = 'grouped' | 'stacked' | 'percent';
+
+export const seriesLayouts: readonly SeriesLayout[] = ['grouped', 'stacked', 'percent'];
+
+/** Which side of the center of a Likert widget a value of its scale falls on (`LikertSides`). */
+export type LikertSide = 'negative' | 'neutral' | 'positive';
+
+export const likertSides: readonly LikertSide[] = ['negative', 'neutral', 'positive'];
+
+/** The most and the fewest values a Likert scale has, the most on one side, and the most series a heat map or a cross table shows (design D2, D3). */
+export const maxLikertValues = 11;
+export const minLikertValues = 2;
+export const maxLikertSide = 5;
+export const maxSeriesAxis = 8;
+export const maxSeriesGrid = 30;
+
+/** A value of a Likert scale, as text (it is compared with the series column's text), and the side it falls on. */
+export interface LikertStep {
+  value: string;
+  side: LikertSide;
+}
+
+/** The two values of the series column a population pyramid draws, one to the left and one to the right of its axis. */
+export interface WidgetPyramid {
+  left: string;
+  right: string;
 }
 
 export const gridColumns = 12;
@@ -121,6 +165,18 @@ export interface WidgetConfig {
   sort: WidgetSort | null;
   /** Maps only: up to `maxTooltipItems` columns shown in the tooltip. A query sends their names only (see `queryFor`). */
   tooltip: WidgetTooltipItem[];
+  /**
+   * The second dimension (design D1, D12): the column whose values are the series of bar, column and line widgets (optional) and of heat
+   * map, pyramid, Likert and cross table widgets (required). The four fields below are left out of a query and of a saved widget that
+   * has none, so a widget without a series sends and saves exactly what it did before.
+   */
+  seriesBy?: string | null;
+  /** Bar and column with a series only; null is `grouped`. */
+  layout?: SeriesLayout | null;
+  /** Population pyramids only. */
+  pyramid?: WidgetPyramid | null;
+  /** Diverging Likert widgets only: the scale's values in order. */
+  scale?: LikertStep[];
   /** Maps only; null draws none. Saved with the widget, never part of the query. */
   basemap: BasemapKind | null;
   /**
@@ -176,10 +232,34 @@ export interface IndicatorColumns {
   defaults: { measure: string | null; groupBy: string | null };
 }
 
+/**
+ * What a series stands for in the response (design D3, D12): a `value` of the series column, `none` for the rows that have no value
+ * there ("(none)") or `other` for the series folded past the limit ("Other").
+ */
+export type SeriesKind = 'value' | 'none' | 'other';
+
+/** One series of a widget with a series, in display order: natural order, then `none`, then `other`. `value` is null for the last two. */
+export interface QuerySeries {
+  value: string | null;
+  kind: SeriesKind;
+}
+
+/** The totals of a widget with a series, computed from the rows (design D12): never a sum or a mean of the plotted cells. */
+export interface QueryTotals {
+  /** One per group, and the authority on the order of the groups. */
+  groups: { group: string | null; value: number | null; rows: number }[];
+  /** One per entry of `QueryResult.series`, in the same order; `value` null and `rows` 0 for a series with no rows. */
+  series: { series: string | null; kind: SeriesKind; value: number | null; rows: number }[];
+  all: { value: number | null; rows: number };
+}
+
 export interface QueryRow {
   group: string | null;
   value: number;
   geometry: string | null;
+  /** A widget with a series only: the cell's series value (null with `seriesKind` none or other) and its kind. */
+  series?: string | null;
+  seriesKind?: SeriesKind;
   /** Maps only: how many rows of the table the group combines. */
   rows?: number;
   /** Maps only: the value of each tooltip column, in the widget's order (see `QueryResult.tooltipTypes`). */
@@ -194,6 +274,10 @@ export interface QueryResult {
   missing: { indicator: boolean; columns: string[] };
   /** Maps only: the type of each tooltip column, so a value is written without asking the catalog. */
   tooltipTypes?: DataColumnType[];
+  /** A widget with a series only (design D12): the series in display order, the totals, and for a pyramid or a Likert widget the rows left out. */
+  series?: QuerySeries[];
+  totals?: QueryTotals;
+  leftOut?: number;
   /**
    * The columns of the dashboard filters sent that did not narrow the rows: the table has no such column, or has it with another kind
    * of type. Only when the query sent dashboard filters and drew something.

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Tamiza.Api.IntegrationTests.Indicators;
+using Tamiza.Api.Indicators;
 using Tamiza.Api.IntegrationTests.Infrastructure;
 using Tamiza.Api.Reports;
 
@@ -237,5 +238,211 @@ public sealed class ReportDataTests(PostgresFixture postgres)
         Assert.NotNull(model.DataPublishedAt);
         Assert.Equal($"https://tamiza.test/projects/{h.ProjectId}/dashboards/{h.DashboardId}", model.DashboardAddress);
         Assert.Equal("Summary", model.Text["summary"]);
+    }
+
+    // Widgets with a series (design D8)
+
+    private const string SourceColumns = "municipality text, water_source text, value numeric, numerator numeric, denominator numeric";
+
+    private async Task<IndicatorsHarness> WithSourcesAsync(string rows = """
+        ('Cali', 'Piped', 35, 7, 10), ('Cali', 'Well', 15, 3, 10), ('Palmira', 'Piped', 20, 2, 10), ('Buga', 'Well', 7, 1, 10)
+        """)
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("households_by_source", SourceColumns, rows, label: "Households", format: "count", unit: "households");
+        return h;
+    }
+
+    private static object SeriesWidget(string title, string chartType, object config) => Widget(title, chartType, config, y: 0, w: 12, height: 4);
+
+    [Fact]
+    public async Task A_stacked_chart_is_its_cross_table_with_a_total_column_and_a_total_row()
+    {
+        await using var h = await WithSourcesAsync();
+        await h.AddWidgetAsync(SeriesWidget("Sources", "column", new
+        {
+            indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source", layout = "stacked",
+        }));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal(WidgetOutcome.Shown, widget.Outcome);
+        Assert.Equal(["municipality", "Piped", "Well", "Total"], widget.Columns.Select(c => c.Header));
+        Assert.Equal(2, widget.SeriesColumns);
+        Assert.Equal(
+            [["Buga", "—", "7 households", "7 households"], ["Cali", "35 households", "15 households", "50 households"],
+             ["Palmira", "20 households", "—", "20 households"], ["Total", "55 households", "22 households", "77 households"]],
+            widget.Rows.Select(r => r.Select(c => c.Text).ToArray()).ToArray());
+        // The workbook's cells are numbers with the indicator's number format; a pair without a value is empty.
+        Assert.Equal(7d, widget.Rows[0][2].Value);
+        Assert.Null(widget.Rows[0][1].Value);
+        Assert.All(widget.Columns.Skip(1), c => Assert.Equal("#,##0", c.ExcelFormat));
+        Assert.Equal("households", widget.Columns[1].Unit);
+        Assert.Empty(widget.Notes);
+    }
+
+    [Fact]
+    public async Task A_widget_stacked_to_100_percent_shows_shares_and_a_total_column_but_no_total_row()
+    {
+        await using var h = await WithSourcesAsync();
+        await h.AddWidgetAsync(SeriesWidget("Composition", "bar", new
+        {
+            indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source", layout = "percent",
+        }));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal("0.0%", widget.Columns[1].ExcelFormat);
+        var cali = widget.Rows.Single(r => r[0].Text == "Cali");
+        Assert.Equal(["Cali", "70%", "30%", "50 households"], cali.Select(c => c.Text));
+        Assert.Equal(0.7, (double)cali[1].Value!, 6);
+        // As in "Show as table": the group totals are a column, and there is no total row.
+        Assert.Equal(["Buga", "Cali", "Palmira"], Texts(widget, 0));
+    }
+
+    [Fact]
+    public async Task A_ratio_in_a_cross_table_has_ratio_totals()
+    {
+        await using var h = await WithSourcesAsync();
+        await h.AddWidgetAsync(SeriesWidget("Rate", "crosstab", new
+        {
+            indicator = "households_by_source", ratio = new { numerator = "numerator", denominator = "denominator" }, groupBy = "municipality", seriesBy = "water_source",
+        }));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        // Cali: 7 of 10 piped, 3 of 10 well, and 10 of 20 in all.
+        var cali = widget.Rows.Single(r => r[0].Text == "Cali");
+        Assert.Equal([0.7, 0.3, 0.5], cali.Skip(1).Select(c => Math.Round((double)c.Value!, 6)));
+        Assert.Equal(13.0 / 40, (double)widget.Rows[^1][^1].Value!, 6);
+    }
+
+    [Fact]
+    public async Task A_pyramid_lists_its_two_sides_and_a_total_and_notes_the_rows_it_left_out()
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        await using var owner = h;
+        await h.PublishAsync("population", "age_band text, sex text, value numeric",
+            "('0-4', 'Female', 100), ('0-4', 'Male', 90), ('5-9', 'Female', 80), ('5-9', 'Other', 5), (NULL, 'Male', 3)", label: "Population", format: "count");
+        await h.AddWidgetAsync(SeriesWidget("Pyramid", "pyramid", new
+        {
+            indicator = "population", measure = "value", groupBy = "age_band", seriesBy = "sex", pyramid = new { left = "Female", right = "Male" },
+        }));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal(["age_band", "Female", "Male", "Total"], widget.Columns.Select(c => c.Header));
+        Assert.Equal(["0-4", "5-9", "Total"], Texts(widget, 0));
+        Assert.Equal("2 rows were left out: their group or value is not one the chart shows.", Assert.Single(widget.Notes));
+    }
+
+    [Fact]
+    public async Task A_likert_widget_shows_shares_and_the_workbook_holds_them_as_numbers()
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        await using var owner = h;
+        await h.PublishAsync("agreement", "municipality text, answer text, value numeric",
+            "('Cali', 'No', 30), ('Cali', 'Neither', 20), ('Cali', 'Yes', 50)", label: "Agreement", format: "count");
+        await h.AddWidgetAsync(SeriesWidget("Agreement", "likert", new
+        {
+            indicator = "agreement", measure = "value", groupBy = "municipality", seriesBy = "answer",
+            scale = new object[] { new { value = "No", side = "negative" }, new { value = "Neither", side = "neutral" }, new { value = "Yes", side = "positive" } },
+        }));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal(["Cali", "30%", "20%", "50%", "100"], widget.Rows[0].Select(c => c.Text));
+        Assert.Equal(0.3, (double)widget.Rows[0][1].Value!, 6);
+        Assert.Equal("0.0%", widget.Columns[1].ExcelFormat);
+        Assert.Empty(widget.Notes);
+    }
+
+    [Fact]
+    public async Task Negative_values_set_aside_from_the_shares_are_noted()
+    {
+        await using var h = await WithSourcesAsync("('Cali', 'Piped', 60, 0, 1), ('Cali', 'Well', -5, 0, 1), ('Cali', 'Rain', 40, 0, 1)");
+        await h.AddWidgetAsync(SeriesWidget("Composition", "column", new
+        {
+            indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source", layout = "percent",
+        }));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal("1 negative value was left out of the shares.", Assert.Single(widget.Notes));
+        // Natural order of the series: Piped, Rain, Well. The negative cell has no share, and the row total still counts it.
+        Assert.Equal(["Cali", "60%", "40%", "—", "95 households"], widget.Rows[0].Select(c => c.Text));
+    }
+
+    [Fact]
+    public async Task Series_columns_other_and_none_read_in_the_emails_language()
+    {
+        var rows = string.Join(", ", Enumerable.Range(1, 10).Select(i => $"('A', 's{i}', {i}, 0, 1)")) + ", ('A', NULL, 1, 0, 1)";
+        await using var h = await WithSourcesAsync(rows);
+        await h.AddWidgetAsync(SeriesWidget("Sources", "column", new
+        {
+            indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source", layout = "stacked",
+        }));
+
+        var english = (await BuildAsync(h, "en-US")).Widgets.Single();
+        var spanish = (await BuildAsync(h, "es-CO")).Widgets.Single();
+
+        Assert.Equal(["(none)", "Other", "Total"], english.Columns.TakeLast(3).Select(c => c.Header));
+        Assert.Equal(["(ninguno)", "Otros", "Total"], spanish.Columns.TakeLast(3).Select(c => c.Header));
+        Assert.Equal(8, english.SeriesColumns);
+    }
+
+    [Fact]
+    public async Task A_widget_made_of_a_series_whose_series_column_was_removed_is_stale_and_the_email_still_goes()
+    {
+        await using var h = await WithSourcesAsync();
+        await h.AddWidgetAsync(SeriesWidget("Sources", "heatmap", new
+        {
+            indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source",
+        }));
+        await h.AddWidgetAsync(Widget("Plain", "column", new { indicator = "households_by_source", measure = "value", groupBy = "municipality" }, y: 4));
+        await h.PublishAsync("households_by_source", "municipality text, value numeric", "('Cali', 1)");
+
+        var model = await BuildAsync(h);
+
+        Assert.Equal(WidgetOutcome.MissingColumns, model.Widgets[0].Outcome);
+        Assert.Contains("water_source", model.Widgets[0].Reason);
+        Assert.Equal(WidgetOutcome.Shown, model.Widgets[1].Outcome);
+    }
+
+    [Fact]
+    public async Task Every_chart_type_builds_a_table_or_a_value()
+    {
+        await using var h = await WithSourcesAsync();
+        var configs = new Dictionary<string, object>
+        {
+            ["stat"] = new { indicator = "households_by_source", measure = "value" },
+            ["bar"] = new { indicator = "households_by_source", measure = "value", groupBy = "municipality" },
+            ["column"] = new { indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source" },
+            ["line"] = new { indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source" },
+            ["histogram"] = new { indicator = "households_by_source", measure = "value", buckets = 3 },
+            ["pie"] = new { indicator = "households_by_source", measure = "value", groupBy = "municipality" },
+            ["heatmap"] = new { indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source" },
+            ["crosstab"] = new { indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source" },
+            ["pyramid"] = new { indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source", pyramid = new { left = "Piped", right = "Well" } },
+            ["likert"] = new
+            {
+                indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source",
+                scale = new object[] { new { value = "Piped", side = "negative" }, new { value = "Well", side = "positive" } },
+            },
+        };
+        var y = 0;
+        foreach (var (chartType, config) in configs)
+        {
+            await h.AddWidgetAsync(Widget(chartType, chartType, config, y: y));
+            y += 4;
+        }
+
+        var model = await BuildAsync(h);
+
+        Assert.Equal(configs.Count, model.Widgets.Count);
+        Assert.All(model.Widgets, w => Assert.Equal(WidgetOutcome.Shown, w.Outcome));
+        Assert.All(model.Widgets.Where(w => !w.IsStat), w => Assert.NotEmpty(w.Rows));
+        // The map needs a geometry column, and is covered by the test of the shapes; every other kind is here.
+        Assert.Equal(ChartTypes.All.Where(t => t != ChartTypes.Map).Order(), model.Widgets.Select(w => w.ChartType).Order());
     }
 }

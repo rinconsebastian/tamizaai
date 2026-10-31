@@ -21,7 +21,9 @@ public static class IndicatorValidation
     {
         ChartTypes.Stat => (3, 2),
         ChartTypes.Map => (6, 6),
-        _ => (6, 4),
+        ChartTypes.Heatmap or ChartTypes.Pyramid or ChartTypes.Crosstab => (6, 5),
+        ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line or ChartTypes.Histogram or ChartTypes.Pie or ChartTypes.Likert => (6, 4),
+        _ => throw new ArgumentOutOfRangeException(nameof(chartType), chartType, "Not a chart type."),
     };
 
     public static void CheckTitle(string? title, FieldErrors errors)
@@ -125,6 +127,8 @@ public static class IndicatorValidation
         {
             errors.Add(prefix + "groupBy", $"A {chartType} widget needs a column to group by.");
         }
+
+        CheckSeries(config, chartType, prefix, errors);
 
         if (config.Buckets is { } buckets && (buckets < 1 || buckets > WidgetConfig.MaxBuckets))
         {
@@ -230,6 +234,174 @@ public static class IndicatorValidation
             {
                 errors.Add(field + ".format", $"The format must be one of {string.Join(", ", TooltipFormats.All)}.");
             }
+        }
+    }
+
+    /// <summary>
+    /// The series column and what goes with it (design D2): which kinds may or must have one, its layout, a pyramid's sides and a Likert
+    /// scale. Per-kind rules are skipped when <paramref name="chartType"/> is null, as the query endpoint may have none.
+    /// </summary>
+    private static void CheckSeries(WidgetConfig config, string? chartType, string prefix, FieldErrors errors)
+    {
+        CheckColumnName(config.SeriesBy, prefix + "seriesBy", "series column", errors);
+        if (config.SeriesBy is not null && config.SeriesBy == config.GroupBy)
+        {
+            errors.Add(prefix + "seriesBy", "Choose a series column other than the group column.");
+        }
+        else if (config.SeriesBy is not null && config.GroupBy is null)
+        {
+            errors.Add(prefix + "seriesBy", "A series needs a column to group by.");
+        }
+
+        if (chartType is not null)
+        {
+            if (config.SeriesBy is not null && !ChartTypes.HasSeries(chartType))
+            {
+                errors.Add(prefix + "seriesBy", $"A {chartType} widget cannot have a series.");
+            }
+            else if (config.SeriesBy is null && ChartTypes.NeedsSeries(chartType))
+            {
+                errors.Add(prefix + "seriesBy", $"A {chartType} widget needs a series column.");
+            }
+        }
+
+        if (config.Layout is { } layout)
+        {
+            if (!SeriesLayouts.All.Contains(layout))
+            {
+                errors.Add(prefix + "layout", $"The layout must be '{SeriesLayouts.Grouped}', '{SeriesLayouts.Stacked}' or '{SeriesLayouts.Percent}'.");
+            }
+            else if (chartType is not null && chartType is not (ChartTypes.Bar or ChartTypes.Column))
+            {
+                errors.Add(prefix + "layout", "Only bar and column widgets have a layout.");
+            }
+            else if (config.SeriesBy is null)
+            {
+                errors.Add(prefix + "layout", "A layout needs a series column.");
+            }
+            else if (SeriesLayouts.Adds(layout) && config.Ratio is not null)
+            {
+                errors.Add(prefix + "layout", "Stacked bars add their values, so they need a measure, not a ratio.");
+            }
+        }
+
+        CheckPyramid(config.Pyramid, chartType, prefix, errors);
+        CheckScale(config, chartType, prefix, errors);
+    }
+
+    private static void CheckPyramid(WidgetPyramid? pyramid, string? chartType, string prefix, FieldErrors errors)
+    {
+        if (chartType is not null && chartType != ChartTypes.Pyramid)
+        {
+            if (pyramid is not null)
+            {
+                errors.Add(prefix + "pyramid", "Only population pyramids have sides.");
+            }
+
+            return;
+        }
+
+        if (pyramid is null)
+        {
+            if (chartType == ChartTypes.Pyramid)
+            {
+                errors.Add(prefix + "pyramid", "A population pyramid needs a left and a right value.");
+            }
+
+            return;
+        }
+
+        CheckSeriesValue(pyramid.Left, prefix + "pyramid.left", "Choose the value drawn to the left.", errors);
+        CheckSeriesValue(pyramid.Right, prefix + "pyramid.right", "Choose the value drawn to the right.", errors);
+        if (!string.IsNullOrEmpty(pyramid.Left) && string.Equals(pyramid.Left, pyramid.Right, StringComparison.Ordinal))
+        {
+            errors.Add(prefix + "pyramid.right", "The left and right values must differ.");
+        }
+    }
+
+    private static void CheckScale(WidgetConfig config, string? chartType, string prefix, FieldErrors errors)
+    {
+        var scale = config.Scale;
+        if (chartType is not null && chartType != ChartTypes.Likert)
+        {
+            if (scale.Count > 0)
+            {
+                errors.Add(prefix + "scale", "Only Likert widgets have a scale.");
+            }
+
+            return;
+        }
+
+        if (chartType is null && scale.Count == 0)
+        {
+            return;
+        }
+
+        if (chartType == ChartTypes.Likert && config.Ratio is not null)
+        {
+            errors.Add(prefix + "measure", "A Likert widget shows shares of a measure, not a ratio.");
+        }
+
+        if (scale.Count < WidgetConfig.MinScaleValues || scale.Count > WidgetConfig.MaxScaleValues)
+        {
+            errors.Add(prefix + "scale", $"A Likert scale has between {WidgetConfig.MinScaleValues} and {WidgetConfig.MaxScaleValues} values.");
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var counts = new int[3];
+        var lastRank = -1;
+        for (var i = 0; i < scale.Count; i++)
+        {
+            var field = $"{prefix}scale[{i}]";
+            if (scale[i] is not { } step)
+            {
+                errors.Add(field, "Each value of the scale needs a name and a side.");
+                continue;
+            }
+
+            CheckSeriesValue(step.Value, field + ".value", "Name the value.", errors);
+            if (!string.IsNullOrEmpty(step.Value) && !seen.Add(step.Value))
+            {
+                errors.Add(field + ".value", $"'{step.Value}' is already in the scale.");
+            }
+
+            var rank = LikertSides.Rank(step.Side);
+            if (rank < 0)
+            {
+                errors.Add(field + ".side", $"The side must be '{LikertSides.Negative}', '{LikertSides.Neutral}' or '{LikertSides.Positive}'.");
+                continue;
+            }
+
+            counts[rank]++;
+            if (rank < lastRank)
+            {
+                errors.Add(field + ".side", "Negative values come first, then the neutral one, then the positive ones.");
+            }
+
+            lastRank = Math.Max(lastRank, rank);
+        }
+
+        if (counts[1] > 1)
+        {
+            errors.Add(prefix + "scale", "A scale has at most one neutral value.");
+        }
+
+        if (counts[0] > WidgetConfig.MaxScaleSide || counts[2] > WidgetConfig.MaxScaleSide)
+        {
+            errors.Add(prefix + "scale", $"A scale has at most {WidgetConfig.MaxScaleSide} values on each side.");
+        }
+    }
+
+    /// <summary>A value of the series column named in a pyramid or a scale: text, not empty, as long as a filter's value may be.</summary>
+    private static void CheckSeriesValue(string? value, string field, string emptyMessage, FieldErrors errors)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            errors.Add(field, emptyMessage);
+        }
+        else if (value.Length > DataQueryBuilder.MaxTextLength)
+        {
+            errors.Add(field, $"The value is longer than {DataQueryBuilder.MaxTextLength} characters.");
         }
     }
 
@@ -415,6 +587,11 @@ public static class IndicatorValidation
         if (config.GroupBy is not null && !byName.ContainsKey(config.GroupBy))
         {
             errors.Add(prefix + "groupBy", $"The table has no column '{config.GroupBy}'.");
+        }
+
+        if (config.SeriesBy is not null && !byName.ContainsKey(config.SeriesBy))
+        {
+            errors.Add(prefix + "seriesBy", $"The table has no column '{config.SeriesBy}'.");
         }
 
         if (config.GeometryColumn is not null && !byName.ContainsKey(config.GeometryColumn))

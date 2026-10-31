@@ -64,6 +64,10 @@ public sealed class IndicatorValidationTests
     [InlineData("histogram", 6, 4)]
     [InlineData("pie", 6, 4)]
     [InlineData("map", 6, 6)]
+    [InlineData("heatmap", 6, 5)]
+    [InlineData("pyramid", 6, 5)]
+    [InlineData("crosstab", 6, 5)]
+    [InlineData("likert", 6, 4)]
     public void Each_chart_type_has_a_default_size(string chartType, int w, int h) =>
         Assert.Equal((w, h), IndicatorValidation.DefaultSize(chartType));
 
@@ -630,5 +634,273 @@ public sealed class IndicatorValidationTests
 
         Assert.Equal(["dashboardFilters[1]", "dashboardFilters[2]", "dashboardFilters[3]", "dashboardFilters[4]"], errors.Keys.Order());
         Assert.Contains("'visit'", errors["dashboardFilters[3]"].Single());
+    }
+
+    // Every chart type
+
+    [Fact]
+    public void There_are_eleven_chart_types_and_each_has_a_default_size()
+    {
+        Assert.Equal(11, ChartTypes.All.Count);
+        Assert.All(ChartTypes.All, chartType => Assert.True(IndicatorValidation.DefaultSize(chartType).W > 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => IndicatorValidation.DefaultSize("radar"));
+    }
+
+    [Fact]
+    public void Every_chart_type_is_exactly_one_of_a_widget_without_series_one_that_may_have_a_series_or_one_made_of_a_series()
+    {
+        foreach (var chartType in ChartTypes.All)
+        {
+            Assert.False(ChartTypes.TakesSeries(chartType) && ChartTypes.NeedsSeries(chartType), chartType);
+            Assert.Equal(ChartTypes.TakesSeries(chartType) || ChartTypes.NeedsSeries(chartType), ChartTypes.HasSeries(chartType));
+        }
+
+        Assert.Equal(["bar", "column", "line"], ChartTypes.All.Where(ChartTypes.TakesSeries));
+        Assert.Equal(["heatmap", "pyramid", "likert", "crosstab"], ChartTypes.All.Where(ChartTypes.NeedsSeries));
+    }
+
+    [Theory]
+    [InlineData("heatmap")]
+    [InlineData("pyramid")]
+    [InlineData("likert")]
+    [InlineData("crosstab")]
+    public void The_new_charts_group_their_rows(string chartType) => Assert.True(ChartTypes.NeedsGroup(chartType));
+
+    // Series (design D2)
+
+    private static WidgetConfig WithSeries(
+        string? seriesBy = "water_source", string? layout = null, WidgetRatio? ratio = null, WidgetPyramid? pyramid = null,
+        IReadOnlyList<LikertStep>? scale = null, string? groupBy = "municipality", WidgetSort? sort = null) =>
+        new WidgetConfigInput("households_by_source", GroupBy: groupBy, SeriesBy: seriesBy, Layout: layout, Ratio: ratio, Pyramid: pyramid, Scale: scale, Sort: sort).Normalize();
+
+    private static readonly LikertStep[] FiveStep =
+    [
+        new("Strongly disagree", LikertSides.Negative), new("Disagree", LikertSides.Negative), new("Neither", LikertSides.Neutral),
+        new("Agree", LikertSides.Positive), new("Strongly agree", LikertSides.Positive),
+    ];
+
+    private static readonly WidgetPyramid Sides = new("Female", "Male");
+
+    [Fact]
+    public void A_config_saved_before_series_existed_has_none()
+    {
+        var config = new WidgetConfigInput("coverage", GroupBy: "municipality").Normalize();
+
+        Assert.Null(config.SeriesBy);
+        Assert.Null(config.Layout);
+        Assert.Null(config.Pyramid);
+        Assert.Empty(config.Scale);
+    }
+
+    [Fact]
+    public void Empty_text_in_a_series_or_a_layout_counts_as_left_out()
+    {
+        var config = new WidgetConfigInput("a", SeriesBy: "", Layout: "").Normalize();
+
+        Assert.Null(config.SeriesBy);
+        Assert.Null(config.Layout);
+    }
+
+    [Fact]
+    public void The_series_fields_survive_the_json_round_trip_the_widget_endpoints_use()
+    {
+        var options = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var input = new WidgetConfigInput("population", GroupBy: "age_band", SeriesBy: "sex", Layout: SeriesLayouts.Stacked, Pyramid: Sides, Scale: FiveStep);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(input, options);
+        var back = System.Text.Json.JsonSerializer.Deserialize<WidgetConfigInput>(json, options)!.Normalize();
+
+        Assert.Equal("sex", back.SeriesBy);
+        Assert.Equal("stacked", back.Layout);
+        Assert.Equal(Sides, back.Pyramid);
+        Assert.Equal(FiveStep, back.Scale);
+        Assert.Contains("\"seriesBy\":\"sex\"", json);
+        Assert.Contains("\"side\":\"negative\"", json);
+    }
+
+    [Theory]
+    [InlineData("bar")]
+    [InlineData("column")]
+    [InlineData("line")]
+    public void Bars_columns_and_lines_may_have_a_series_or_not(string chartType)
+    {
+        Assert.Empty(Check(WithSeries(), chartType));
+        Assert.Empty(Check(WithSeries(seriesBy: null), chartType));
+    }
+
+    [Theory]
+    [InlineData("stat")]
+    [InlineData("histogram")]
+    [InlineData("pie")]
+    public void Some_charts_cannot_have_a_series(string chartType)
+    {
+        var errors = Check(WithSeries(), chartType);
+
+        Assert.Equal($"A {chartType} widget cannot have a series.", Assert.Single(errors["config.seriesBy"]));
+    }
+
+    [Fact]
+    public void A_map_cannot_have_a_series()
+    {
+        var config = new WidgetConfigInput("blocks", GroupBy: "block", GeometryColumn: "geometry", SeriesBy: "sex").Normalize();
+
+        Assert.Equal("A map widget cannot have a series.", Assert.Single(Check(config, "map")["config.seriesBy"]));
+    }
+
+    [Theory]
+    [InlineData("heatmap")]
+    [InlineData("crosstab")]
+    public void A_heat_map_and_a_cross_table_need_a_series(string chartType)
+    {
+        Assert.Equal($"A {chartType} widget needs a series column.", Assert.Single(Check(WithSeries(seriesBy: null), chartType)["config.seriesBy"]));
+        Assert.Empty(Check(WithSeries(), chartType));
+    }
+
+    [Fact]
+    public void A_pyramid_and_a_likert_widget_need_a_series()
+    {
+        Assert.Contains("config.seriesBy", Check(WithSeries(seriesBy: null, pyramid: Sides), "pyramid").Keys);
+        Assert.Contains("config.seriesBy", Check(WithSeries(seriesBy: null, scale: FiveStep), "likert").Keys);
+    }
+
+    [Fact]
+    public void The_series_column_cannot_be_the_group_column_and_must_be_a_valid_name()
+    {
+        Assert.Equal(
+            "Choose a series column other than the group column.",
+            Assert.Single(Check(WithSeries(seriesBy: "municipality"), "column")["config.seriesBy"]));
+        Assert.Contains("config.seriesBy", Check(WithSeries(seriesBy: new string('x', 501)), "column").Keys);
+        // The query endpoint may have no chart type: the group rule still holds.
+        Assert.Contains("config.seriesBy", Check(WithSeries(seriesBy: "municipality"), null).Keys);
+        Assert.Equal("A series needs a column to group by.", Assert.Single(Check(WithSeries(groupBy: null), null)["config.seriesBy"]));
+        Assert.Empty(Check(WithSeries(), null));
+    }
+
+    [Theory]
+    [InlineData("grouped")]
+    [InlineData("stacked")]
+    [InlineData("percent")]
+    public void Bars_and_columns_with_a_series_take_each_layout(string layout)
+    {
+        Assert.Empty(Check(WithSeries(layout: layout), "bar"));
+        Assert.Empty(Check(WithSeries(layout: layout), "column"));
+    }
+
+    [Fact]
+    public void A_layout_must_be_known_and_belong_to_a_bar_or_column_with_a_series()
+    {
+        Assert.Contains("config.layout", Check(WithSeries(layout: "tiled"), "column").Keys);
+        Assert.Equal("Only bar and column widgets have a layout.", Assert.Single(Check(WithSeries(layout: "stacked"), "line")["config.layout"]));
+        Assert.Equal("A layout needs a series column.", Assert.Single(Check(WithSeries(seriesBy: null, layout: "stacked"), "column")["config.layout"]));
+    }
+
+    [Theory]
+    [InlineData("stacked")]
+    [InlineData("percent")]
+    public void Stacked_layouts_need_a_measure_and_a_grouped_one_may_plot_a_ratio(string layout)
+    {
+        var ratio = new WidgetRatio("numerator", "denominator");
+
+        Assert.Equal(
+            "Stacked bars add their values, so they need a measure, not a ratio.",
+            Assert.Single(Check(WithSeries(layout: layout, ratio: ratio), "column")["config.layout"]));
+        Assert.Empty(Check(WithSeries(layout: "grouped", ratio: ratio), "column"));
+    }
+
+    [Fact]
+    public void A_pyramid_needs_two_different_sides()
+    {
+        Assert.Empty(Check(WithSeries(pyramid: Sides), "pyramid"));
+        Assert.Equal("A population pyramid needs a left and a right value.", Assert.Single(Check(WithSeries(), "pyramid")["config.pyramid"]));
+        Assert.Equal("Choose the value drawn to the left.", Assert.Single(Check(WithSeries(pyramid: new(null, "Male")), "pyramid")["config.pyramid.left"]));
+        Assert.Equal("Choose the value drawn to the right.", Assert.Single(Check(WithSeries(pyramid: new("Female", "")), "pyramid")["config.pyramid.right"]));
+        Assert.Equal("The left and right values must differ.", Assert.Single(Check(WithSeries(pyramid: new("Female", "Female")), "pyramid")["config.pyramid.right"]));
+        Assert.Contains("config.pyramid.left", Check(WithSeries(pyramid: new(new string('x', 501), "Male")), "pyramid").Keys);
+    }
+
+    [Fact]
+    public void Only_a_pyramid_has_sides_and_only_a_likert_widget_has_a_scale()
+    {
+        Assert.Equal("Only population pyramids have sides.", Assert.Single(Check(WithSeries(pyramid: Sides), "heatmap")["config.pyramid"]));
+        Assert.Equal("Only Likert widgets have a scale.", Assert.Single(Check(WithSeries(scale: FiveStep), "heatmap")["config.scale"]));
+    }
+
+    [Fact]
+    public void A_likert_scale_of_five_values_is_valid()
+    {
+        Assert.Empty(Check(WithSeries(scale: FiveStep), "likert"));
+        Assert.Empty(Check(WithSeries(scale: [new("No", LikertSides.Negative), new("Yes", LikertSides.Positive)]), "likert"));
+    }
+
+    [Fact]
+    public void A_likert_scale_has_between_two_and_eleven_values()
+    {
+        Assert.Equal("A Likert scale has between 2 and 11 values.", Assert.Single(Check(WithSeries(scale: []), "likert")["config.scale"]));
+        Assert.Contains("config.scale", Check(WithSeries(scale: [new("Only", LikertSides.Neutral)]), "likert").Keys);
+        LikertStep[] twelve = [.. Enumerable.Range(0, 5).Select(i => new LikertStep($"n{i}", LikertSides.Negative)), new("mid", LikertSides.Neutral), .. Enumerable.Range(0, 5).Select(i => new LikertStep($"p{i}", LikertSides.Positive)), new("extra", LikertSides.Positive)];
+        Assert.Contains("A Likert scale has between 2 and 11 values.", Check(WithSeries(scale: twelve), "likert")["config.scale"]);
+    }
+
+    [Fact]
+    public void A_likert_scale_keeps_its_sides_in_order_and_within_their_limits()
+    {
+        var outOfOrder = Check(WithSeries(scale: [new("Agree", LikertSides.Positive), new("Disagree", LikertSides.Negative)]), "likert");
+        var twoNeutral = Check(WithSeries(scale: [new("No", LikertSides.Negative), new("A", LikertSides.Neutral), new("B", LikertSides.Neutral)]), "likert");
+        var sixNegative = Check(WithSeries(scale: [.. Enumerable.Range(0, 6).Select(i => new LikertStep($"n{i}", LikertSides.Negative)), new("Yes", LikertSides.Positive)]), "likert");
+
+        Assert.Equal("Negative values come first, then the neutral one, then the positive ones.", Assert.Single(outOfOrder["config.scale[1].side"]));
+        Assert.Equal("A scale has at most one neutral value.", Assert.Single(twoNeutral["config.scale"]));
+        Assert.Equal("A scale has at most 5 values on each side.", Assert.Single(sixNegative["config.scale"]));
+    }
+
+    [Fact]
+    public void Each_value_of_a_likert_scale_is_named_once_and_has_a_known_side()
+    {
+        var errors = Check(WithSeries(scale: [new("A", LikertSides.Negative), new("A", LikertSides.Positive), new("", LikertSides.Positive), new("B", "middle"), null!]), "likert");
+
+        Assert.Equal("'A' is already in the scale.", Assert.Single(errors["config.scale[1].value"]));
+        Assert.Equal("Name the value.", Assert.Single(errors["config.scale[2].value"]));
+        Assert.Contains("config.scale[3].side", errors.Keys);
+        Assert.Contains("config.scale[4]", errors.Keys);
+    }
+
+    [Fact]
+    public void A_likert_widget_plots_a_measure()
+    {
+        var errors = Check(WithSeries(scale: FiveStep, ratio: new WidgetRatio("numerator", "denominator")), "likert");
+
+        Assert.Equal("A Likert widget shows shares of a measure, not a ratio.", Assert.Single(errors["config.measure"]));
+    }
+
+    [Theory]
+    [InlineData("heatmap")]
+    [InlineData("pyramid")]
+    [InlineData("likert")]
+    [InlineData("crosstab")]
+    public void The_new_charts_cannot_be_sorted(string chartType)
+    {
+        var sort = new WidgetSort(SortValues.ByValue, null, null, SortValues.Desc);
+
+        Assert.Contains("config.sort", Check(WithSeries(sort: sort), chartType).Keys);
+    }
+
+    [Fact]
+    public void A_bar_with_a_series_may_be_sorted()
+    {
+        var sort = new WidgetSort(SortValues.ByValue, null, null, SortValues.Desc);
+
+        Assert.Empty(Check(WithSeries(sort: sort), "bar"));
+    }
+
+    [Fact]
+    public void A_missing_series_column_is_an_error_against_the_table_and_an_existing_one_is_not()
+    {
+        var errors = new FieldErrors();
+        IndicatorValidation.CheckAgainstColumns(WithSeries(seriesBy: "water_source"), Columns, "UTC", "config.", errors);
+        var found = new FieldErrors();
+        IndicatorValidation.CheckAgainstColumns(WithSeries(seriesBy: "municipality", groupBy: "indicator"), Columns, "UTC", "config.", found);
+
+        Assert.Equal("The table has no column 'water_source'.", Assert.Single(errors.ToDictionary()["config.seriesBy"]));
+        Assert.DoesNotContain("config.seriesBy", found.ToDictionary().Keys);
     }
 }

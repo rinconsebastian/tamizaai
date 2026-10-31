@@ -135,9 +135,20 @@ public sealed class ReportDataBuilder(
             notes.Add(text.Format("rowLimit", response.Rows.Count));
         }
 
+        if (response.LeftOut is > 0 and var leftOut)
+        {
+            notes.Add(text.LeftOut(leftOut));
+        }
+
         if (response.Rows.Count == 0)
         {
             return Without(WidgetOutcome.NoRows, text["empty"], notes);
+        }
+
+        if (response.Series is not null)
+        {
+            var (seriesColumns, seriesRows, seriesCount, seriesNotes) = SeriesReportTable(response, widget, caption, meta, format, text);
+            return new(position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, seriesColumns, seriesRows, null, null, [.. notes, .. seriesNotes], seriesCount);
         }
 
         if (widget.ChartType == ChartTypes.Stat)
@@ -146,12 +157,20 @@ public sealed class ReportDataBuilder(
                 format.Value(response.Rows[0].Value, meta.Format, meta.Unit), null, notes);
         }
 
+        // A widget made of a series that came back without one cannot be told apart from a settings change: it no longer fits.
+        if (ChartTypes.NeedsSeries(widget.ChartType))
+        {
+            return Without(WidgetOutcome.NoLongerFits, text["noLongerFits"], notes);
+        }
+
         var (columns, rows) = widget.ChartType switch
         {
             ChartTypes.Histogram => HistogramTable(response.Rows, widget.Config, caption, meta, format, text),
             ChartTypes.Pie => PieTable(response.Rows, widget.Config, caption, meta, format, text),
             ChartTypes.Map => MapTable(response, widget.Config, caption, meta, format, text),
-            _ => AxisTable(response.Rows, widget.Config, caption, meta, format, text, natural: widget.ChartType == ChartTypes.Line),
+            ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line =>
+                AxisTable(response.Rows, widget.Config, caption, meta, format, text, natural: widget.ChartType == ChartTypes.Line),
+            _ => throw new InvalidOperationException($"A {widget.ChartType} widget has no table."),
         };
         return new(position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, columns, rows, null, null, notes);
     }
@@ -175,9 +194,55 @@ public sealed class ReportDataBuilder(
     private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>) AxisTable(
         IReadOnlyList<IndicatorRow> rows, WidgetConfig config, string caption, IndicatorMeta meta, ReportFormat format, ReportText text, bool natural)
     {
-        IEnumerable<IndicatorRow> ordered = natural ? rows.Order(NaturalGroupOrder.Instance) : rows;
+        IEnumerable<IndicatorRow> ordered = natural ? rows.Order(NaturalOrder.ByGroup.Instance) : rows;
         return ([new(config.GroupBy ?? ""), ValueColumn(caption, meta)],
             ordered.Select(r => (IReadOnlyList<ReportCell>)[GroupCell(r.Group, text), ValueCell(r.Value, meta, format)]).ToList());
+    }
+
+    /// <summary>
+    /// A widget with a series, as its cross table (design D8): the group, one column per series and a "Total" column, then a "Total" row.
+    /// A 100% layout and a Likert widget show shares in the series columns and have no "Total" row.
+    /// </summary>
+    private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>, int, IReadOnlyList<string>) SeriesReportTable(
+        IndicatorQueryResponse response, Widget widget, string caption, IndicatorMeta meta, ReportFormat format, ReportText text)
+    {
+        var table = SeriesTable.From(response, widget.ChartType, widget.Config.Layout);
+        var shares = SeriesTable.ShowsShares(widget.ChartType, widget.Config.Layout);
+        var valueColumn = ValueColumn(caption, meta);
+        string Label(SeriesTableColumn column) => column.Kind switch
+        {
+            SeriesKinds.None => text["noGroup"],
+            SeriesKinds.Other => text["other"],
+            _ => column.Series ?? "",
+        };
+
+        var columns = new List<ReportColumn> { new(widget.Config.GroupBy ?? "") };
+        columns.AddRange(table.Columns.Select(c => shares ? new ReportColumn(Label(c), "0.0%") : valueColumn with { Header = Label(c) }));
+        columns.Add(valueColumn with { Header = text["total"] });
+
+        ReportCell Value(double? value) => value is { } number ? ValueCell(number, meta, format) : new(null, "—");
+        ReportCell Share(double? share) => share is { } fraction ? new(fraction, format.Share(fraction)) : new(null, "—");
+
+        var rows = new List<IReadOnlyList<ReportCell>>();
+        foreach (var row in table.Rows)
+        {
+            var cells = new List<ReportCell> { GroupCell(row.Group, text) };
+            cells.AddRange(row.Cells.Select((value, i) => shares ? Share(row.Shares?[i]) : Value(value)));
+            cells.Add(Value(row.Total));
+            rows.Add(cells);
+        }
+
+        // As in "Show as table": a table of shares has the group's total in its own column and no "Total" row.
+        if (!shares)
+        {
+            var total = new List<ReportCell> { new(text["total"], text["total"]) };
+            total.AddRange(table.Columns.Select(c => Value(c.Total)));
+            total.Add(Value(table.GrandTotal));
+            rows.Add(total);
+        }
+
+        var notes = table.NegativeLeftOut > 0 ? new[] { text.NegativeLeftOut(table.NegativeLeftOut) } : [];
+        return (columns, rows, table.Columns.Count, notes);
     }
 
     /// <summary>A histogram: each range of the plotted value and how many rows fall in it.</summary>
@@ -319,24 +384,5 @@ public sealed class ReportDataBuilder(
         }
 
         return !string.IsNullOrEmpty(value.Min) ? text.Format("range.min", value.Min) : text.Format("range.max", value.Max);
-    }
-
-    /// <summary>
-    /// The natural order of group values: runs of digits compare as numbers, so 2 comes before 10, case and accents are ignored, and a
-    /// missing group goes last. Twin of <c>naturalCompare</c> in tamiza-ui <c>indicators/chart-scales.ts</c>.
-    /// </summary>
-    public sealed class NaturalGroupOrder : IComparer<IndicatorRow>
-    {
-        public static readonly NaturalGroupOrder Instance = new();
-
-        private static readonly CompareInfo Compare = CultureInfo.InvariantCulture.CompareInfo;
-
-        int IComparer<IndicatorRow>.Compare(IndicatorRow? a, IndicatorRow? b) => (a?.Group, b?.Group) switch
-        {
-            (null, null) => 0,
-            (null, _) => 1,
-            (_, null) => -1,
-            var (x, y) => Compare.Compare(x, y, CompareOptions.NumericOrdering | CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace),
-        };
     }
 }

@@ -71,10 +71,12 @@ Every tool runs the same code as the interface's own action, with the same check
 | Tests and runs | `test_script`, `get_test` | analyst | Try a draft on a sample without publishing anything, waiting up to two minutes |
 | | `start_run`, `get_run` | analyst | Queue a run and read it |
 | Indicators | `list_indicators`, `get_indicator_columns` | viewer | Indicators with their publish state, and the columns of a table |
-| | `query_indicator` | viewer | What a widget would plot, without saving anything |
+| | `query_indicator` | viewer | What a widget would plot, without saving anything; with a series column it returns the series, the cells and the totals |
 | Dashboards | `list_dashboards`, `get_dashboard`, `get_widget_data` | viewer | Dashboards, their filters and widgets, and what the widgets show |
 | | `create_dashboard`, `update_dashboard`, `duplicate_dashboard`, `remove_dashboard` | analyst | Add, rename, move, set the filters of, copy and remove dashboards |
-| | `create_widget`, `update_widget`, `remove_widget` | analyst | Add, change, move to another dashboard and remove widgets |
+| | `create_widget`, `update_widget`, `remove_widget` | analyst | Add, change, move to another dashboard and remove widgets of any kind, including the series settings (`seriesBy`, `layout`, `pyramid`, `scale`) |
+
+**Widgets with two dimensions.** The widget tools take every chart type of the dashboard: `stat`, `bar`, `column`, `line`, `histogram`, `pie`, `map`, `heatmap`, `pyramid`, `likert` and `crosstab`, and the settings that go with a second column (see [indicators-dashboard.md](indicators-dashboard.md#widgets-with-a-series)). A refused setting answers `mcp.validation` with its key (`config.seriesBy`, `config.layout`, `config.pyramid.right`, `config.scale[1].side`), and nothing is saved. For a widget with a series, `query_indicator` and `get_widget_data` return `series`, `cells`, `totals` and `notes` instead of `rows`; a result that is too long is cut from its `cells`.
 
 There is also the prompt `describe_situation` (a project and a situation), which starts the work described below.
 
