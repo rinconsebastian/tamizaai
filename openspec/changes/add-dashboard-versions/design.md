@@ -292,15 +292,23 @@ All routes require `analyst` (`RequireProjectRole(ProjectRole.Analyst)`) and liv
 |---|---|
 | `GET .../dashboards/{dashboardId}/versions` | 200 `DashboardVersionList(int Current, IReadOnlyList<DashboardVersionSummary> Versions)`, newest first |
 | `GET .../dashboards/{dashboardId}/versions/{number:int}` | 200 `DashboardVersionDetails` |
-| `POST .../dashboards/{dashboardId}/versions/{number:int}/restore` | 201 `DashboardRestore` (D7) |
+| `POST .../dashboards/{dashboardId}/versions/{number:int}/restore` | 201 `DashboardRestore` with `Restored` true (D7); 200 with `Restored` false when there was nothing to do |
 | `PUT .../dashboards/{dashboardId}/layout` | 200 the widgets saved, as `Widget` |
 
-- `DashboardVersionSummary(Number, Current, Name, Widgets, Filters, Changes, MoreChanges, RestoredFrom, Origin, Note, Author, CreatedAt, SavedAt)`:
-  - `Widgets` and `Filters` are counts;
-  - `Changes` is a list of `DashboardChange(Kind, Widget?, Dashboard?, Version?)`;
+The records, serialized in camelCase as every answer of the API:
+- `DashboardVersionSummary(Number, Current, Name, WidgetCount, FilterCount, Changes, MoreChanges, RestoredFrom, Origin, Note, Author, CreatedAt, SavedAt)`:
+  - `Origin` is `"app"` or `"mcp"`, and `Note` the AI client's `change` (null for `"app"`);
+  - `Changes` is a list of `DashboardChange(Kind, Widget?, Dashboard?, Version?)`, with `Kind` one of D2's kinds; absent fields are left out of the JSON;
   - `Author` is the existing `Person(Id, Name)` from `Pipeline/PipelineModels.cs`.
-- `DashboardVersionDetails` adds the filters as `GET .../dashboards/{id}` returns them, and the widgets as `VersionWidget(Id, Title, ChartType, Config, Layout)`. `Config` is read with the same reader as `GetDashboardAsync`, so the page's widget view and MCP use it unchanged.
-- `Dashboard`, the answer of `GET .../dashboards/{id}`, gains `Version`: the newest number, null when there is none.
+- `DashboardVersionDetails(Number, Current, Name, Filters, Widgets, Changes, MoreChanges, RestoredFrom, Origin, Note, Author, CreatedAt, SavedAt)`:
+  - `Filters` is the list as `GET .../dashboards/{id}` returns it;
+  - `Widgets` is a list of `VersionWidget(Id, Title, ChartType, Config, Layout)`, in reading order. `Config` is read with the same reader as `GetDashboardAsync`, so the page's widget view and MCP use it unchanged.
+- `DashboardRestore(Restored, Version, NameKept, Copies, Dashboard)`:
+  - `Version` is the new version's summary, or the current one when `Restored` is false;
+  - `Copies` is a list of `RestoredCopy(OriginalId, CopyId, Title, DashboardId, DashboardName)`, the last two naming the dashboard that still holds the original;
+  - `Dashboard` has the shape of `GET .../dashboards/{id}`.
+- The layout body is `DashboardLayoutRequest(Widgets)`, a list of `WidgetLayoutItem(Id, Layout)` with `Layout` as the widget `PATCH` takes it.
+- The answer of `GET .../dashboards/{id}` gains `Version`: the newest number, null when there is none.
 - `dashboards.versionNotFound` joins the codes at `DashboardEndpoints.cs:23-26`.
 
 ### D10. MCP (api)
