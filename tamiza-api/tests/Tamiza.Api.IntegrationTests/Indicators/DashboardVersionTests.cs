@@ -340,6 +340,28 @@ public sealed class DashboardVersionTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_rename_to_the_name_it_has_answers_200_and_changes_neither_its_versions_nor_its_last_change_and_one_of_case_is_a_rename()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        var water = await h.AddDashboardAsync("Water");
+        var dashboards = await h.StoredDashboardsAsync();
+        var versions = await AllVersionsAsync(h);
+
+        var same = await h.Analyst.PatchJsonAsync(h.DashboardUrl(water), new { name = " Water " });
+
+        Assert.Equal(HttpStatusCode.OK, same.StatusCode);
+        var entry = await same.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal((water, "Water"), (entry.GetProperty("id").GetGuid(), entry.GetProperty("name").GetString()));
+        // Who changed it last and when stay as they were.
+        Assert.Equal(dashboards, await h.StoredDashboardsAsync());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+
+        await RenameAsync(h, water, "WATER");
+
+        Assert.Equal("""2 grace app [{"kind": "renamed", "dashboard": "WATER"}]""", (await VersionsAsync(h, water))[^1]);
+    }
+
+    [Fact]
     public async Task A_widget_removed_makes_a_version_naming_it_and_holding_the_others()
     {
         await using var h = await PublishedAsync();
@@ -1035,6 +1057,45 @@ public sealed class DashboardVersionTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Widget_since_moved_restoring_the_version_again_keeps_the_copy_answers_200_and_changes_nothing()
+    {
+        await using var h = await PublishedAsync();
+        var health = await h.AddDashboardAsync("Health");
+        var field = await h.AddDashboardAsync("Field");
+        var coverage = await AddWidgetAsync(h, "Coverage", health, Layout(0, 0));
+        await AddWidgetAsync(h, "Households", health, Layout(6, 0));
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(coverage, health), new { dashboardId = field })).StatusCode);
+        var copyId = (await RestoredAsync(h, health, 3)).GetProperty("copies")[0].GetProperty("copyId").GetGuid();
+        var dashboards = await h.StoredDashboardsAsync();
+        var widgets = await h.StoredWidgetsAsync();
+        var versions = await AllVersionsAsync(h);
+
+        // A second click, a retry, or another analyst whose history still shows version 3.
+        var again = await RestoreAsync(h, health, 3);
+        var answer = await again.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        Assert.False(answer.GetProperty("restored").GetBoolean());
+        Assert.Equal(5, answer.GetProperty("version").GetProperty("number").GetInt32());
+        Assert.Contains(copyId, Ids(answer.GetProperty("dashboard").GetProperty("widgets")));
+        Assert.Equal(dashboards, await h.StoredDashboardsAsync());
+        Assert.Equal(widgets, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+
+        // Once the dashboard changed, a restore of the version keeps that copy, with its id, and makes no other.
+        await RenameAsync(h, health, "Salud");
+        var restore = await RestoredAsync(h, health, 3);
+
+        var copy = restore.GetProperty("copies").EnumerateArray().Single();
+        Assert.Equal((coverage, copyId), (copy.GetProperty("originalId").GetGuid(), copy.GetProperty("copyId").GetGuid()));
+        Assert.Equal("Health", restore.GetProperty("dashboard").GetProperty("name").GetString());
+        Assert.Equal(["Coverage", "Households"], Titles(restore.GetProperty("dashboard")));
+        Assert.Contains(copyId, Ids(restore.GetProperty("dashboard").GetProperty("widgets")));
+        Assert.Equal(3, (await h.StoredWidgetsAsync()).Length);
+        Assert.True(await SameContentAsync(h, health, 5, 7));
+    }
+
+    [Fact]
     public async Task Indicator_gone_the_widget_is_restored_as_it_was_and_its_query_says_its_indicator_is_not_published()
     {
         await using var h = await PublishedAsync();
@@ -1145,6 +1206,138 @@ public sealed class DashboardVersionTests(PostgresFixture postgres)
         // That member's flush then finds the restored dashboard recorded, and adds nothing.
         await FlushAsync(h, DashboardVersionOrigin.App, null, (housing, new DashboardChange(DashboardChangeKinds.WidgetChanged, Widget: "Coverage.")));
         Assert.Equal(Enumerable.Range(1, 4), await NumbersAsync(h, housing));
+    }
+
+    [Fact]
+    public async Task Title_saved_by_another_member_while_the_restore_runs_waits_for_it_and_is_recorded_after_it_so_it_is_never_lost()
+    {
+        var write = new WriteDuringRestore();
+        await using var h = await PublishedAsync(services =>
+            services.ConfigureDbContext<TamizaDbContext>(options => options.AddInterceptors(write)));
+        var housing = await h.AddDashboardAsync("Housing");
+        var id = await AddWidgetAsync(h, "Coverage", housing);
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { title = "Coverage 2" })).StatusCode);
+        // Another member's title, sent once the restore of version 2, which holds "Coverage", has read the widget.
+        write.Arm(h.Db, () => h.Admin.PatchJsonAsync(h.WidgetUrl(id, housing), new { title = "Coverage." }),
+            "SELECT EXISTS (SELECT FROM tamiza.dashboard_widgets WHERE title = 'Coverage.')");
+
+        var restore = await RestoredAsync(h, housing, 2);
+        var edit = await write.Sent!;
+
+        Assert.True(await HeldAsync(h, housing, "Coverage."), "No version holds the title saved as the restore ran.");
+        // It could not commit inside the restore: it waited for the restore's commit, then saved over it with a version of its own.
+        Assert.True(write.Blocked);
+        Assert.Equal(HttpStatusCode.OK, edit.StatusCode);
+        Assert.Equal(["Coverage"], Titles(restore.GetProperty("dashboard")));
+        Assert.True(await SameContentAsync(h, housing, 2, 4));
+        Assert.Equal(
+            [
+                """3 grace app [{"kind": "widgetChanged", "widget": "Coverage 2"}]""",
+                """4 grace app [{"kind": "restored", "version": 2}]""",
+                """5 ada app [{"kind": "widgetChanged", "widget": "Coverage."}]""",
+            ],
+            (await VersionsAsync(h, housing))[2..]);
+        Assert.Equal(["Coverage."], Titles(await ContentAsync(h, housing, 5)));
+    }
+
+    [Fact]
+    public async Task Widget_removed_by_another_member_while_the_restore_runs_waits_for_it_and_the_restored_version_holds_the_widget()
+    {
+        var write = new WriteDuringRestore();
+        await using var h = await PublishedAsync(services =>
+            services.ConfigureDbContext<TamizaDbContext>(options => options.AddInterceptors(write)));
+        var housing = await h.AddDashboardAsync("Housing");
+        var coverage = await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+        var households = await AddWidgetAsync(h, "Households", housing, Layout(6, 0));
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(coverage, housing), new { title = "Coverage 2" })).StatusCode);
+        // Version 3 holds "Households" as it is, so the restore writes nothing to it; another member removes it as the restore runs.
+        write.Arm(h.Db, () => h.Admin.DeleteAsync(h.WidgetUrl(households, housing)),
+            $"SELECT NOT EXISTS (SELECT FROM tamiza.dashboard_widgets WHERE id = '{households}')");
+
+        var restore = await RestoredAsync(h, housing, 3);
+        var removal = await write.Sent!;
+
+        Assert.Equal([coverage, households], Ids(restore.GetProperty("dashboard").GetProperty("widgets")));
+        Assert.True(await SameContentAsync(h, housing, 3, 5));
+        Assert.True(write.Blocked);
+        // The removal then either finds no widget, or removes it after the restore with a version of its own.
+        var versions = await VersionsAsync(h, housing);
+        if (removal.StatusCode == HttpStatusCode.NotFound)
+        {
+            Assert.Equal(Enumerable.Range(1, 5), await NumbersAsync(h, housing));
+            Assert.Equal([coverage, households], Ids(await h.GetWidgetsAsync(housing)));
+        }
+        else
+        {
+            Assert.Equal(HttpStatusCode.NoContent, removal.StatusCode);
+            Assert.Equal("""6 ada app [{"kind": "widgetRemoved", "widget": "Households"}]""", versions[^1]);
+            Assert.Equal(["Coverage"], Titles(await ContentAsync(h, housing, 6)));
+        }
+    }
+
+    /// <summary>Whether a kept version of the dashboard holds a widget with this title.</summary>
+    private static Task<bool> HeldAsync(IndicatorsHarness h, Guid dashboardId, string title) =>
+        TestData.ScalarAsync<bool>(h.Db,
+            """
+            SELECT EXISTS (SELECT FROM tamiza.dashboard_versions AS v, jsonb_array_elements(v.content -> 'widgets') AS w
+                           WHERE v.dashboard_id = @dashboard AND w ->> 'title' = @title)
+            """,
+            ("dashboard", dashboardId), ("title", title));
+
+    /// <summary>
+    /// Another member's write that takes no lock, sent while a restore runs: once armed, on the restore's read of its newest version,
+    /// after it has read the dashboard and its widgets, it sends the write as a request of its own, once. It waits until that write has
+    /// committed, or until it waits for a row the restore holds, and lets the restore go on; the request finishes when it can.
+    /// </summary>
+    private sealed class WriteDuringRestore : DbCommandInterceptor
+    {
+        private (string Db, Func<Task<HttpResponseMessage>> Write, string Committed)? _armed;
+
+        /// <summary>The write's request, once sent.</summary>
+        public Task<HttpResponseMessage>? Sent { get; private set; }
+
+        /// <summary>Whether the write waited for a row the restore holds instead of committing while the restore ran.</summary>
+        public bool Blocked { get; private set; }
+
+        /// <param name="committed">A query that answers true once the write has committed.</param>
+        public void Arm(string db, Func<Task<HttpResponseMessage>> write, string committed) => _armed = (db, write, committed);
+
+        private async Task RunAsync(DbCommand command)
+        {
+            if (_armed is not { } armed
+                || !command.CommandText.Contains("FROM tamiza.dashboard_versions", StringComparison.Ordinal)
+                || !command.CommandText.Contains("DESC", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _armed = null;
+            Sent = Task.Run(armed.Write);
+            for (var i = 0; i < 200; i++)
+            {
+                if (await TestData.ScalarAsync<bool>(armed.Db, armed.Committed))
+                {
+                    return;
+                }
+
+                // A row lock: a wait for another transaction, not for the project's lock, which the write's flush waits for.
+                if (await TestData.ScalarAsync<bool>(armed.Db,
+                        "SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND wait_event <> 'advisory')"))
+                {
+                    Blocked = true;
+                    return;
+                }
+
+                await Task.Delay(50);
+            }
+        }
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            await RunAsync(command);
+            return await base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 
     [Fact]

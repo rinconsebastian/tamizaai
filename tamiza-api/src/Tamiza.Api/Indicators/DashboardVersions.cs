@@ -493,7 +493,8 @@ public sealed class DashboardVersions(
             {
                 // Renames take no lock, so another dashboard may take the version's name after the check: the unique index refuses the
                 // save, and the restore runs again keeping the current name, as an add answers a name taken meanwhile (design D7 step 5).
-                // Widget removals take no lock either: one removed meanwhile is restored again as a widget that is nowhere.
+                // A save that finds a row gone runs again too, on the rows as they then are; the restore locks the dashboard's rows
+                // before it reads them, so a widget removed meanwhile is gone before the reads or waits for the restore's commit.
                 keepName |= DashboardEndpoints.IsNameTaken(exception);
                 db.ChangeTracker.Clear();
             }
@@ -506,6 +507,16 @@ public sealed class DashboardVersions(
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await DashboardEndpoints.LockProjectAsync(db, projectId, ct);
+        // A rename, a filters save, a widget's change that stays on the dashboard and a widget's removal take no project lock, so they
+        // could commit between the reads below and the save, and be overwritten or mixed into the restored state with no version
+        // holding them. Locking the dashboard's row and its widgets' rows first makes each of them either commit before the reads,
+        // so step 2 records it, or wait for this commit and land after the restore, where its own flush records it (design D7).
+        // Those writers lock one row in a statement of their own and take the project lock only later, in their flush, so they
+        // never hold what the restore waits for.
+        await db.Database.ExecuteSqlAsync(
+            $"SELECT 1 FROM tamiza.dashboards WHERE id = {dashboardId} AND project_id = {projectId} FOR UPDATE", ct);
+        await db.Database.ExecuteSqlAsync(
+            $"SELECT 1 FROM tamiza.dashboard_widgets WHERE dashboard_id = {dashboardId} AND project_id = {projectId} FOR UPDATE", ct);
 
         // 1. Checks.
         var dashboard = await db.Dashboards.SingleOrDefaultAsync(d => d.Id == dashboardId && d.ProjectId == projectId, ct);
@@ -558,11 +569,19 @@ public sealed class DashboardVersions(
             throw changed;
         }
 
-        // 4. Nothing to do: the version, with the name the restore would give it, is the dashboard as it is, which the newest version holds.
+        // 4. Nothing to do: the version as the restore would write it, with the name it would give the dashboard and the copies it would
+        // keep (step 7), is the dashboard as it is, which the newest version holds. So restoring again a version whose name was kept, or
+        // whose widget came back as a copy, changes nothing.
         var nameKept = version.Name != dashboard.Name
             && (keepName || await DashboardEndpoints.NameTakenAsync(db, projectId, version.Name, except: dashboardId, ct) is not null);
         var name = nameKept ? dashboard.Name : version.Name;
-        var written = WithName(stored, name);
+        var ids = version.Widgets.Select(w => w.Id).ToList();
+        var elsewhere = await db.DashboardWidgets.AsNoTracking()
+            .Where(w => w.ProjectId == projectId && w.DashboardId != dashboardId && ids.Contains(w.Id))
+            .Join(db.Dashboards, w => w.DashboardId, d => d.Id, (w, d) => new { w.Id, DashboardId = d.Id, d.Name })
+            .ToDictionaryAsync(w => w.Id, ct);
+        var kept = KeptCopies(version.Widgets.Where(w => elsewhere.ContainsKey(w.Id)), widgets.Where(w => !ids.Contains(w.Id)));
+        var written = Written(stored, name, kept);
         if (await Of(db, projectId, dashboardId).Where(v => v.Number == latest).Select(v => v.Content == written).SingleAsync(ct))
         {
             var unchanged = await AnswerAsync(projectId, dashboardId, restored: false, latest, nameKept, [], ct);
@@ -582,12 +601,7 @@ public sealed class DashboardVersions(
         // 7. Widgets, with the JSON the version holds. The published tables are not checked: the config was valid when saved, and a
         // widget whose indicator or columns are gone shows its message, as after a move.
         var now = DashboardEndpoints.Now(time);
-        var ids = version.Widgets.Select(w => w.Id).ToList();
         var onDashboard = widgets.ToDictionary(w => w.Id);
-        var elsewhere = await db.DashboardWidgets.AsNoTracking()
-            .Where(w => w.ProjectId == projectId && w.DashboardId != dashboardId && ids.Contains(w.Id))
-            .Join(db.Dashboards, w => w.DashboardId, d => d.Id, (w, d) => new { w.Id, DashboardId = d.Id, d.Name })
-            .ToDictionaryAsync(w => w.Id, ct);
         var copies = new List<RestoredCopy>();
         foreach (var saved in version.Widgets)
         {
@@ -598,9 +612,17 @@ public sealed class DashboardVersions(
             }
             else if (elsewhere.TryGetValue(saved.Id, out var holder))
             {
-                // The other dashboard keeps it as it is: this one gets a copy.
-                var copy = NewWidget(Guid.CreateVersion7(now), projectId, dashboardId, saved, authorId, now);
-                db.DashboardWidgets.Add(copy);
+                // The other dashboard keeps it as it is: this one gets a copy, the one it already has when an earlier restore made it.
+                if (kept.TryGetValue(saved.Id, out var copy))
+                {
+                    WriteBack(copy, saved, authorId, now);
+                }
+                else
+                {
+                    copy = NewWidget(Guid.CreateVersion7(now), projectId, dashboardId, saved, authorId, now);
+                    db.DashboardWidgets.Add(copy);
+                }
+
                 copies.Add(new RestoredCopy(saved.Id, copy.Id, saved.Title, holder.DashboardId, holder.Name));
             }
             else
@@ -609,7 +631,8 @@ public sealed class DashboardVersions(
             }
         }
 
-        db.DashboardWidgets.RemoveRange(widgets.Where(w => !ids.Contains(w.Id)));
+        var keptIds = kept.Values.Select(w => w.Id).ToHashSet();
+        db.DashboardWidgets.RemoveRange(widgets.Where(w => !ids.Contains(w.Id) && !keptIds.Contains(w.Id)));
 
         // 8. The dashboard's last change.
         dashboard.UpdatedBy = authorId;
@@ -658,17 +681,56 @@ public sealed class DashboardVersions(
     private static (Guid By, DateTimeOffset At) LastEdit(Dashboard dashboard, IEnumerable<DashboardWidget> widgets) =>
         new[] { (dashboard.UpdatedBy, dashboard.UpdatedAt) }.Concat(widgets.Select(w => (w.UpdatedBy, w.UpdatedAt))).MaxBy(edit => edit.UpdatedAt);
 
-    /// <summary>A content with another name, as the restore would write it when it keeps the current name.</summary>
-    private static string WithName(string content, string name)
+    /// <summary>
+    /// A version's content as the restore would write it: with the name it gives the dashboard, which is the current one when it keeps
+    /// it, and each widget it keeps a copy of under that copy's id. The version's own text when it changes neither.
+    /// </summary>
+    private static string Written(string content, string name, IReadOnlyDictionary<Guid, DashboardWidget> kept)
     {
         var node = JsonNode.Parse(content)!.AsObject();
-        if (node["name"]?.GetValue<string>() == name)
+        if (node["name"]?.GetValue<string>() == name && kept.Count == 0)
         {
             return content;
         }
 
         node["name"] = name;
+        if (node["widgets"] is JsonArray widgets)
+        {
+            foreach (var widget in widgets.OfType<JsonObject>())
+            {
+                if (widget["id"]?.GetValue<string>() is { } id && kept.TryGetValue(Guid.Parse(id), out var copy))
+                {
+                    widget["id"] = copy.Id;
+                }
+            }
+        }
+
         return node.ToJsonString();
+    }
+
+    /// <summary>
+    /// The copies a restore keeps (design D7 steps 4 and 7). For each of <paramref name="moved"/>, the version's widgets that another
+    /// dashboard now holds, a widget of <paramref name="others"/>, those of this dashboard that the version does not hold, with the same
+    /// title, chart type, config and layout, such as the copy an earlier restore of the version made. A widget stands for one of the
+    /// version's at most, so two of its widgets that are the same never claim the same copy; the older is taken first.
+    /// </summary>
+    private static Dictionary<Guid, DashboardWidget> KeptCopies(IEnumerable<VersionContentWidget> moved, IEnumerable<DashboardWidget> others)
+    {
+        var free = others.OrderBy(w => w.CreatedAt).ThenBy(w => w.Id).ToList();
+        var kept = new Dictionary<Guid, DashboardWidget>();
+        foreach (var saved in moved)
+        {
+            var copy = free.Find(w => w.Title == saved.Title && w.ChartType == saved.ChartType
+                && JsonNode.DeepEquals(JsonNode.Parse(w.Config), JsonNode.Parse(saved.Config))
+                && JsonNode.DeepEquals(JsonNode.Parse(w.Layout), JsonNode.Parse(saved.Layout)));
+            if (copy is not null)
+            {
+                kept[saved.Id] = copy;
+                free.Remove(copy);
+            }
+        }
+
+        return kept;
     }
 
     /// <summary>Writes a version's widget back over the widget with its id, where they differ.</summary>

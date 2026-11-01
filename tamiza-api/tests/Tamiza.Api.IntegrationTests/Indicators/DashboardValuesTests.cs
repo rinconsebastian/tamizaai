@@ -105,6 +105,70 @@ public sealed class DashboardValuesTests(PostgresFixture postgres)
         Assert.Single(IndicatorsHarness.Errors(await search.Content.ReadFromJsonAsync<JsonElement>(), "search"));
     }
 
+    // The indicators of a version's widgets (design D11 of dashboard versions)
+
+    private static Task<HttpResponseMessage> GetValuesOfAsync(IndicatorsHarness h, Guid? dashboardId, params string[] indicators) =>
+        h.Viewer.GetAsync($"{h.DashboardUrl(dashboardId)}/values?column=municipality"
+            + string.Concat(indicators.Select(i => "&indicator=" + Uri.EscapeDataString(i))));
+
+    private static async Task<string[]> ValuesOfAsync(IndicatorsHarness h, params string[] indicators)
+    {
+        var response = await GetValuesOfAsync(h, null, indicators);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return body.GetProperty("values").EnumerateArray().Select(v => v.GetProperty("value").GetString()!).ToArray();
+    }
+
+    [Fact]
+    public async Task The_indicators_named_give_the_values_instead_of_the_dashboards_widgets()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("coverage", "municipality text, value numeric", "('Cali', 1), ('Cali', 1)");
+        await h.PublishAsync("attendance", "municipality text, value numeric", "('Palmira', 1)");
+        await h.PublishAsync("removed", "municipality text, value numeric", "('Buga', 1), ('Buga', 1), ('Buga', 1)");
+        await AddStatAsync(h, "coverage");
+
+        // A version held widgets of "removed" and "attendance", which the dashboard no longer has.
+        Assert.Equal(["Buga", "Palmira"], await ValuesOfAsync(h, "removed", "attendance"));
+        Assert.Equal(["Cali"], await ValuesOfAsync(h));
+        Assert.Equal(["Buga", "Palmira"], await ValuesOfAsync(h, "removed", "attendance", "unpublished"));
+    }
+
+    [Fact]
+    public async Task An_indicator_name_a_script_cannot_publish_one_named_twice_or_more_than_a_dashboard_holds_is_refused()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres, new() { ["IndicatorDashboard:MaxWidgetsPerDashboard"] = "2" });
+        string[][] refused = [["Coverage"], ["coverage", "x;drop"], ["coverage", "coverage"], ["a", "b", "c"]];
+
+        foreach (var indicators in refused)
+        {
+            var response = await GetValuesOfAsync(h, null, indicators);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Single(IndicatorsHarness.Errors(await response.Content.ReadFromJsonAsync<JsonElement>(), "indicator"));
+        }
+
+        Assert.Empty(await ValuesOfAsync(h, "a", "b"));
+    }
+
+    [Fact]
+    public async Task An_indicator_of_another_project_is_not_read_and_a_removed_dashboard_is_not_found()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        var (other, otherDashboard) = await h.AddOtherProjectAsync();
+        await h.PublishAsync("coverage", "municipality text, value numeric", "('Cali', 1)");
+        await PublishedTables.PublishTableAsync(h.Db, other, "indicators", "coverage", "municipality text, value numeric", "('Hidden', 1)");
+        await PublishedTables.PublishTableAsync(h.Db, other, "indicators", "secret", "municipality text, value numeric", "('Hidden', 1)");
+        var health = await h.AddDashboardAsync("Health");
+        await h.RemoveDashboardAsync(health);
+
+        // Looked up in this project's tables only, whatever another project publishes under the name.
+        Assert.Equal(["Cali"], await ValuesOfAsync(h, "coverage"));
+        Assert.Empty(await ValuesOfAsync(h, "secret"));
+        Assert.Equal(HttpStatusCode.NotFound, (await GetValuesOfAsync(h, health, "secret")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await GetValuesOfAsync(h, otherDashboard, "secret")).StatusCode);
+    }
+
     [Fact]
     public async Task A_removed_dashboard_is_not_found()
     {

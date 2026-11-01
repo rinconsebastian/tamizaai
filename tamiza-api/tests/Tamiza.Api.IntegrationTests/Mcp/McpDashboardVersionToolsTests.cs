@@ -308,6 +308,11 @@ public sealed class McpDashboardVersionToolsTests(PostgresFixture postgres)
 
         Assert.Equal("mcp.validation", missing.Code());
         Assert.Contains("change", missing.Text());
+        using (var left = missing.Json())
+        {
+            Assert.True(left.RootElement.GetProperty("fields").TryGetProperty("change", out _), missing.Text());
+        }
+
         Assert.Equal("mcp.validation", blank.Code());
         using var body = blank.Json();
         Assert.True(body.RootElement.GetProperty("fields").TryGetProperty("change", out _));
@@ -335,5 +340,30 @@ public sealed class McpDashboardVersionToolsTests(PostgresFixture postgres)
         Assert.Equal([(copyId, "Coverage")], await WidgetsAsync(h, health));
         Assert.Equal(fieldBefore, await StoredAsync(h, field));
         Assert.Equal([(coverage, "Coverage")], await WidgetsAsync(h, field));
+    }
+
+    [Fact]
+    public async Task Restoring_again_a_version_whose_widget_came_back_as_a_copy_answers_restored_false_and_keeps_the_copy()
+    {
+        await using var h = await CreateAsync();
+        var health = await AddDashboardInTamizaAsync(h, "Health");
+        var coverage = await AddWidgetInTamizaAsync(h, health, "Coverage");
+        var field = await AddDashboardInTamizaAsync(h, "Field");
+        Assert.Equal(HttpStatusCode.OK, (await Rest(h, "analyst").PatchAsJsonAsync($"{DashboardsUrl(h)}/{health}/widgets/{coverage}", new { dashboardId = field })).StatusCode);
+        var first = Body(await RestoreAsync(h, health, 2, 3, "Bring coverage back to Health"));
+        var copyId = first.GetProperty("copies")[0].GetProperty("copyId").GetGuid();
+        var stored = await StoredAsync(h, health);
+        var versions = await VersionsAsync(h, health);
+
+        // The client calls it again, having read the restore's version 4 as the current one.
+        var again = Body(await RestoreAsync(h, health, 2, 4, "Bring coverage back to Health"));
+
+        Assert.Equal(4, first.GetProperty("version").GetInt32());
+        Assert.False(again.GetProperty("restored").GetBoolean());
+        Assert.Equal(4, again.GetProperty("version").GetInt32());
+        Assert.Equal(4, again.GetProperty("dashboardVersions")[0].GetProperty("version").GetInt32());
+        Assert.Equal([(copyId, "Coverage")], await WidgetsAsync(h, health));
+        Assert.Equal(stored, await StoredAsync(h, health));
+        Assert.Equal(versions, await VersionsAsync(h, health));
     }
 }

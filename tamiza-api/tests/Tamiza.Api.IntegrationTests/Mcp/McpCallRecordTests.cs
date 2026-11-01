@@ -103,7 +103,10 @@ public sealed class McpCallRecordTests(PostgresFixture postgres)
 
         Assert.Equal("mcp.validation", missing.Code());
         Assert.Contains("milliseconds", missing.Text());
+        // A required argument left out is refused under its own name; a value that cannot be read, under arguments.
+        Assert.Equal(["milliseconds"], FieldsOf(missing));
         Assert.Equal("mcp.validation", wrongType.Code());
+        Assert.Equal(["arguments"], FieldsOf(wrongType));
         Assert.Equal("mcp.notFound", unknown.Code());
         Assert.Contains("tools/list", unknown.Text());
         var rows = await ReadAsync(harness.ConnectionString);
@@ -191,6 +194,13 @@ public sealed class McpCallRecordTests(PostgresFixture postgres)
         Assert.Equal(2, deleted);
         var left = (await ReadAsync(harness.ConnectionString)).Select(r => r.Tool).Order().ToArray();
         Assert.Equal(["old_0", "old_10", "old_179"], left);
+    }
+
+    /// <summary>The keys of a refusal's <c>fields</c>.</summary>
+    private static string[] FieldsOf(ModelContextProtocol.Protocol.CallToolResult result)
+    {
+        using var body = result.Json();
+        return body.RootElement.GetProperty("fields").EnumerateObject().Select(f => f.Name).ToArray();
     }
 
     private static async Task<Row> WaitForRowAsync(string connectionString, string tool)

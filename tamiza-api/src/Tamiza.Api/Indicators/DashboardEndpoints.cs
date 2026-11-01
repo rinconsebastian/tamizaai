@@ -106,10 +106,13 @@ public static class DashboardEndpoints
 
     /// <summary>
     /// The most frequent values of a text column across the indicator tables of the dashboard's widgets, optionally only those that
-    /// contain <c>search</c>, for a text filter (design D5). Empty when no table has the column as text.
+    /// contain <c>search</c>, for a text filter (design D5). Empty when no table has the column as text. The page showing a version of
+    /// the dashboard names the indicators of that version's widgets in <c>indicator</c>, since the dashboard's own widgets may be others
+    /// now (design D11 of dashboard versions): any of the project's indicators, which a viewer can already query one by one.
     /// </summary>
     private static async Task<Results<Ok<DataValueList>, ValidationProblem, ProblemHttpResult>> GetValuesAsync(
-        Guid projectId, Guid dashboardId, string? column, string? search, IndicatorDashboard indicators, TamizaDbContext db, CancellationToken ct)
+        Guid projectId, Guid dashboardId, string? column, string? search, string[]? indicator, IndicatorDashboard indicators, TamizaDbContext db,
+        IOptions<IndicatorDashboardOptions> options, CancellationToken ct)
     {
         if (!await DashboardExistsAsync(db, projectId, dashboardId, ct))
         {
@@ -126,9 +129,36 @@ public static class DashboardEndpoints
             return Problems.Validation("search", $"The search text is longer than {DataQueryBuilder.MaxTextLength} characters.");
         }
 
-        var configs = await db.DashboardWidgets.AsNoTracking().Where(w => w.DashboardId == dashboardId).ToListAsync(ct);
-        // Saved configs name valid indicators; the check keeps it so whatever a stored row holds.
-        var names = configs.Select(w => ReadConfig(w).Indicator).Where(Pipeline.ColumnNames.IsValidTableName).Distinct(StringComparer.Ordinal).ToList();
+        List<string> names;
+        if (indicator is { Length: > 0 })
+        {
+            // At most as many as a dashboard holds widgets, since each is a table to read, each a name a script can publish, once each.
+            // They are looked up in this project's schema only, as the widgets' indicators are.
+            var max = options.Value.MaxWidgetsPerDashboard;
+            if (indicator.Length > max)
+            {
+                return Problems.Validation("indicator", $"Name at most {max} indicators.");
+            }
+
+            if (!indicator.All(Pipeline.ColumnNames.IsValidTableName))
+            {
+                return Problems.Validation("indicator", "Each indicator must be a published indicator's name.");
+            }
+
+            if (indicator.Distinct(StringComparer.Ordinal).Count() < indicator.Length)
+            {
+                return Problems.Validation("indicator", "Name each indicator once.");
+            }
+
+            names = [.. indicator];
+        }
+        else
+        {
+            var configs = await db.DashboardWidgets.AsNoTracking().Where(w => w.DashboardId == dashboardId).ToListAsync(ct);
+            // Saved configs name valid indicators; the check keeps it so whatever a stored row holds.
+            names = configs.Select(w => ReadConfig(w).Indicator).Where(Pipeline.ColumnNames.IsValidTableName).Distinct(StringComparer.Ordinal).ToList();
+        }
+
         try
         {
             return TypedResults.Ok(new DataValueList(await indicators.ValuesAsync(projectId, names, column!, search, ct)));
@@ -246,14 +276,17 @@ public static class DashboardEndpoints
             return taken;
         }
 
-        // No lock: the last rename wins. A dashboard removed since the check updates no row (design D3).
+        // No lock: the last rename wins. A dashboard removed since the check updates no row (design D3). Nor does the name it already
+        // has, compared in the update so no other rename slips in between: the dashboard keeps who changed it last and when, and no
+        // change is noted, so a request of an AI client that grows a version adds no rename to it (design D12 of dashboard versions).
+        // The comparison is ordinal, so a change of case is a rename.
         var normalized = DashboardValidation.Normalize(name!);
         var now = Now(time);
         int updated;
         try
         {
             updated = await db.Dashboards
-                .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
+                .Where(d => d.Id == dashboardId && d.ProjectId == projectId && d.Name != name)
                 .ExecuteUpdateAsync(set => set
                     .SetProperty(d => d.Name, name!)
                     .SetProperty(d => d.NormalizedName, normalized)
@@ -267,10 +300,9 @@ public static class DashboardEndpoints
 
         if (updated == 0)
         {
-            return DashboardNotFound();
+            return await DashboardExistsAsync(db, projectId, dashboardId, ct) ? TypedResults.Ok(new DashboardEntry(dashboardId, name!)) : DashboardNotFound();
         }
 
-        // The same name again changes nothing the version holds, so the flush records nothing for it.
         versions.Note(projectId, dashboardId, new DashboardChange(DashboardChangeKinds.Renamed, Dashboard: name));
         return TypedResults.Ok(new DashboardEntry(dashboardId, name!));
     }

@@ -643,6 +643,12 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
             var missing = await h.CallAsync("analyst", tool, args);
             Assert.True(missing.Code() == "mcp.validation", $"{tool}: {missing.Text()}");
             Assert.Contains("change", missing.Text());
+            // Under the same key as a blank one, although the SDK refuses it before the tool runs.
+            using (var left = missing.Json())
+            {
+                Assert.True(left.RootElement.GetProperty("fields").TryGetProperty("change", out _), $"{tool}: {missing.Text()}");
+            }
+
             foreach (var change in new[] { "   ", new string('x', 121) })
             {
                 var refused = await h.CallAsync("analyst", tool, new Dictionary<string, object?>(args) { ["change"] = change });
@@ -870,6 +876,50 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         Assert.Equal("""3 | analyst | mcp | Rename Water and filter by municipality | [{"kind": "renamed", "dashboard": "Agua"}]""", (await VersionsAsync(h, water))[^1]);
         Assert.Equal("""{"name": "Agua", "filters": [{"kind": "text", "label": "Municipality", "column": "municipality", "default": null}], "widgets": []}""",
             await TestData.ScalarAsync<string>(h.Db, "SELECT content::text FROM tamiza.dashboard_versions WHERE dashboard_id = @d AND number = 3", ("d", water)));
+    }
+
+    [Fact]
+    public async Task The_name_it_has_given_with_new_filters_is_no_rename_and_the_version_lists_only_the_filters()
+    {
+        await using var h = await CreateAsync();
+        var water = await AddDashboardInTamizaAsync(h, "Water");
+
+        var result = await h.CallAsync("analyst", "update_dashboard", new
+        {
+            dashboardId = water,
+            name = "Water",
+            filters = new[] { new { column = "municipality", label = "Municipality", kind = "text" } },
+            change = "Add a municipality filter",
+        });
+
+        Assert.Equal([(water, 2)], DashboardVersionsOf(result));
+        Assert.Equal(
+            [
+                """1 | analyst | app | - | [{"kind": "created"}]""",
+                """2 | analyst | mcp | Add a municipality filter | [{"kind": "filtersChanged"}]""",
+            ],
+            await VersionsAsync(h, water));
+    }
+
+    [Fact]
+    public async Task The_name_it_has_alone_in_a_request_that_grows_a_version_leaves_its_changes_and_its_time_as_they_were()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var water = await AddDashboardInTamizaAsync(h, "Water");
+        Assert.Null((await AddWidgetForAsync(h, water, "Rate", AddWaterWidgets)).Code());
+        const string version = "SELECT format('%s %s', changes, saved_at) FROM tamiza.dashboard_versions WHERE dashboard_id = @d AND number = 2";
+        const string dashboard = "SELECT format('%s %s %s', name, updated_by, updated_at) FROM tamiza.dashboards WHERE id = @d";
+        var before = await TestData.ScalarAsync<string>(h.Db, version, ("d", water));
+        var stored = await TestData.ScalarAsync<string>(h.Db, dashboard, ("d", water));
+
+        // The same request, which would grow version 2, gives the name the dashboard has.
+        var result = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, name = "Water", change = AddWaterWidgets });
+
+        Assert.Equal([(water, 2)], DashboardVersionsOf(result));
+        Assert.Equal(Enumerable.Range(1, 2), await NumbersAsync(h, water));
+        Assert.Equal(before, await TestData.ScalarAsync<string>(h.Db, version, ("d", water)));
+        Assert.Equal(stored, await TestData.ScalarAsync<string>(h.Db, dashboard, ("d", water)));
     }
 
     [Fact]
