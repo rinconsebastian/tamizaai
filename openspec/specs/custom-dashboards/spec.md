@@ -56,7 +56,7 @@ A dashboard's name SHALL be 1 to 40 characters long once leading and trailing sp
 - **THEN** its tab, the select and every message that names it show those characters as text, and nothing is rendered as markup
 
 ### Requirement: Dashboard header
-Each dashboard SHALL show its name as a heading above its widgets. For every member, viewers included, the heading SHALL be followed by the action to print the dashboard whenever it is offered (see `dashboard-printing`). For an `analyst` or `admin`, the heading SHALL also be followed by the actions to add a dashboard and to rename, duplicate, move or remove this one. At every width from 360 pixels the whole name and these actions SHALL be visible without scrolling the page horizontally.
+Each dashboard SHALL show its name as a heading above its widgets. For every member, viewers included, the heading SHALL be followed by the action to print the dashboard whenever it is offered (see `dashboard-printing`). For an `analyst` or `admin`, it SHALL also be followed by the actions to add a dashboard and to rename, duplicate, move or remove this one or open its version history (`dashboard-versions`), except while a version is shown. At every width from 360 pixels the whole name and these actions SHALL be visible without scrolling the page horizontally.
 
 #### Scenario: Dashboard header at phone width
 - **WHEN** an `analyst` opens a dashboard with widgets whose name has 40 characters and no space, in a viewport 360 pixels wide
@@ -65,6 +65,10 @@ Each dashboard SHALL show its name as a heading above its widgets. For every mem
 #### Scenario: Viewer's dashboard header
 - **WHEN** a `viewer` opens a dashboard that has widgets
 - **THEN** the heading is followed by the Print action and by no other action
+
+#### Scenario: Version history offered
+- **WHEN** an `analyst` opens the actions of a dashboard
+- **THEN** **Version history** is among them
 
 ### Requirement: Adding a dashboard
 An `analyst` or `admin` SHALL be able to add a dashboard by giving its name. It SHALL be placed after the project's other dashboards, start with no widgets, and open for the member who added it. A project that already has 7 dashboards SHALL refuse another with a message naming the limit, and the action to add one SHALL then be unavailable and say why.
@@ -178,18 +182,18 @@ An `analyst` or `admin` SHALL be able to remove a dashboard together with all it
 - **THEN** one dashboard is removed and the other request is refused because a project needs at least one dashboard
 
 ### Requirement: Roles for dashboards
-Only an `analyst` or `admin` SHALL be able to add, rename, move, duplicate or remove a dashboard, change its filters, or manage its scheduled email. A `viewer` SHALL be refused with 403 and SHALL NOT be offered these actions. A user who is not a member SHALL get the same answer as for a project that does not exist.
+Only an `analyst` or `admin` SHALL be able to add, rename, move, duplicate or remove a dashboard, change its filters, manage its scheduled email, or read and restore its versions. A `viewer` SHALL be refused with 403 and SHALL NOT be offered these actions. A user who is not a member SHALL get the same answer as for a project that does not exist.
 
 #### Scenario: Viewer refused
-- **WHEN** a `viewer` asks the API to add, rename, move, duplicate or remove a dashboard, to change its filters, or to read, save, remove or send its scheduled email
+- **WHEN** a `viewer` asks the API to add, rename, move, duplicate or remove a dashboard, to change its filters, to read, save, remove or send its scheduled email, or to list, read or restore its versions
 - **THEN** the API responds 403 and the project's dashboards are unchanged
 
 #### Scenario: No actions for a viewer
 - **WHEN** a `viewer` opens a dashboard
-- **THEN** no action to add, rename, move, duplicate or remove a dashboard, to edit its filters, or to schedule its email, is shown
+- **THEN** no action to add, rename, move, duplicate or remove a dashboard, to edit its filters, to schedule its email, or to open its version history, is shown
 
 #### Scenario: Not a member
-- **WHEN** a user who is not a member of the project requests one of its dashboards or asks to change them
+- **WHEN** a user who is not a member of the project requests one of its dashboards or its versions, or asks to change them
 - **THEN** the API responds 404
 
 ### Requirement: Dashboard address
