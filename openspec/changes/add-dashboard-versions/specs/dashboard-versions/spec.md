@@ -109,7 +109,7 @@ For an `analyst` or `admin`, the dashboard's actions SHALL include **Version his
 - **THEN** the current version holds the widget in its new place
 
 ### Requirement: Viewing a version
-From the version history, an `analyst` or `admin` SHALL be able to view a version on the dashboard page: its name, filters and widgets with the current data, read-only, and a notice naming the version, its author and time, with actions to go back to the current version and, for an older version, to restore it. While a version is shown, the page SHALL offer no other action that changes or prints the dashboard.
+From the version history, an `analyst` or `admin` SHALL be able to view a version on the dashboard page: its name, filters and widgets with the current data, read-only, with a notice naming the version, its author and time, and actions to go back to the current version and to restore an older one. Its filters SHALL offer its widgets' values. While it is shown, the page SHALL offer no other action that changes or prints the dashboard, and a sheet printed from the browser SHALL name the version.
 
 #### Scenario: Viewing an older version
 - **WHEN** an `analyst` views version 9 of "Housing", which had a widget since removed
@@ -118,6 +118,14 @@ From the version history, an `analyst` or `admin` SHALL be able to view a versio
 #### Scenario: Back to the current version
 - **WHEN** that `analyst` chooses to go back to the current version
 - **THEN** the page shows "Housing" as it is now
+
+#### Scenario: Filter values of a version
+- **WHEN** an `analyst` views a version of "Housing" whose filter "Source" is on a column of a widget removed since, and opens that filter
+- **THEN** it offers the values of that widget's indicator
+
+#### Scenario: Printed from the browser
+- **WHEN** an `analyst` prints from the browser's menu while version 9 of "Housing" is shown
+- **THEN** the sheet says it is version 9, with its author and time, and shows no button or notice
 
 ### Requirement: Restoring a version
 An `analyst` or `admin` SHALL be able to restore a kept version after confirming. The dashboard's name, filters and widgets SHALL become those of that version, recorded as a new version that names the version restored, so the state it replaced stays in the history. The dashboard SHALL keep its address, its place and its scheduled email. A restore that would leave the dashboard as it is SHALL change nothing and say so.
@@ -155,6 +163,10 @@ A restore SHALL bring back the widgets of the version with their settings. A wid
 #### Scenario: Widget since moved to another dashboard
 - **WHEN** the widget "Coverage" was moved from "Health" to "Field" and an `analyst` restores a version of "Health" that holds it
 - **THEN** "Health" holds a copy of "Coverage", "Field" still holds "Coverage", and the message says "Coverage" came back as a copy and is still on "Field"
+
+#### Scenario: Copy restored again
+- **WHEN** an `analyst` restores again the version of "Health" whose widget "Coverage" came back as a copy, with nothing changed since
+- **THEN** nothing changes, no version is added, and the message says "Health" already is as in that version
 
 #### Scenario: Indicator gone
 - **WHEN** an `analyst` restores a version whose widget uses an indicator that was removed since
