@@ -129,7 +129,7 @@ The **unit**, when there is one, goes after the value (`12,450 households`). A s
 
 ## Widget types
 
-Every widget has a title, a type, one **indicator**, what to **plot** (a measure or a ratio, see below), the column to **group by**, for many types a second column to split each group by (the [series](#widgets-with-a-series)), up to 50 **filters**, and for a map its **geometry column** and up to 5 [**tooltip columns**](#tooltip-and-tooltip-columns) and a [**basemap**](#basemap). A widget form shows a live preview while you edit.
+Every widget has a title, a type, one **indicator**, what to **plot** (a measure or a ratio, see below), the column to **group by**, for many types a second column to split each group by (the [series](#widgets-with-a-series)), up to 50 **filters**, and for a map its **geometry column** and up to 5 [**tooltip columns**](#tooltip-and-tooltip-columns) and a [**basemap**](#basemap). A bar, column or line chart with no series and a histogram also have a [**color**](#widget-color-and-scale), and a map and a heat map a [**scale**](#widget-color-and-scale). A widget form shows a live preview while you edit.
 
 | Type | Shows | Group by | Notes |
 |---|---|---|---|
@@ -147,8 +147,8 @@ Every widget has a title, a type, one **indicator**, what to **plot** (a measure
 
 - **Rows with no value** in the plotted measure are left out of every widget.
 - A group with no value in the group column is shown as **(none)**.
-- The **pie chart** orders slices from the largest. When there are more than 8 groups, the 7 largest keep their slice and the rest are folded into one **Other** slice. A group whose value is zero or negative has no share and is not drawn; the widget says how many, and **Show as table** lists them.
-- Colors, light or dark, follow the theme.
+- The **pie chart** orders slices from the largest. When there are more than 8 groups, the 7 largest keep their slice and the rest are folded into one **Other** slice. A group whose value is zero or negative has no share and is not drawn; the widget says how many, and **Show as table** lists them. The slices' colors, and which groups are folded into **Other**, come from the rows that match the widget's *own* filters, not the dashboard's, so a member who changes a dashboard filter sees each slice in the same color.
+- Colors come from the dashboard's [palette](#colors), with the widget's own [color or scale](#widget-color-and-scale) where its type has one, and, light or dark, follow the theme.
 
 ### What to plot: a measure or a ratio
 
@@ -196,7 +196,7 @@ The series column has to be another column than the group column. Everything els
 - **Totals come from the rows, never from adding the cells.** For a rate, a group's total is the sum of its numerators over the sum of its denominators, not the sum or the mean of its cells' rates.
 - **Order.** Series are listed in natural order (2 before 10). So are the groups of a line chart, a heat map, a pyramid, Likert bars and a cross table, which have no order setting; bars and columns keep the [order](#bar-and-column-order) of their group column or the one you choose. Rows with no value in the series column come next as **(none)**, and the folded series last as **Other**.
 - **At most 8 series** in a bar, column or line chart, and **30** in a heat map or a cross table. When the widget's rows hold more, the ones with the largest totals are kept, one fewer than the limit, and the rest are combined in one **Other** series. **(none)** is never folded into **Other**.
-- **Colors and legend stay put.** The series, their order and their colors come from the rows that match the widget's *own* filters, not the dashboard's. A member who changes a dashboard filter keeps every series in its color and in the legend, even one that no longer has rows. Editing the widget's own filters can change them.
+- **Colors and legend stay put.** The series, their order and their colors come from the rows that match the widget's *own* filters, not the dashboard's, with the dashboard's [palette and colors kept by value](#colors). A member who changes a dashboard filter keeps every series in its color and in the legend, even one that no longer has rows. Editing the widget's own filters can change them.
 - **Row limit.** The limit counts cells (a group and a series value). A group that would cross it is left out whole, with the groups after it, and the widget says the limit was reached. The totals of series and of all rows still cover every row the widget matches.
 - **Show as table** is the cross table: groups as rows in the chart's order, series as columns, and the totals.
 
@@ -214,7 +214,7 @@ A **line chart** with a series draws one line per series value, through the grou
 
 ### Heat map
 
-Groups are rows (in natural order, so `5-9` comes before `10-14`), series values are columns, and each cell is shaded on the same blue scale as the maps, from the smallest to the largest value shown, with a legend of that range. A cell with no value is drawn empty with a hatch, which is not the same as a cell whose value is 0.
+Groups are rows (in natural order, so `5-9` comes before `10-14`), series values are columns, and each cell is shaded on the same sequential scale as the maps (the dashboard palette's scale, blue in Tamiza, unless the widget [picks another](#widget-color-and-scale); see [Colors](#colors)), from the smallest to the largest value shown, with a legend of that range. A cell with no value is drawn empty with a hatch, which is not the same as a cell whose value is 0.
 
 ### Population pyramid
 
@@ -252,7 +252,7 @@ def compute(clean, ctx):
 
 ## Maps
 
-A map draws the shapes of its rows, colored by the plotted value on a sequential scale of seven steps, with the lowest and highest value shown as a legend. It reads the shapes from a **geometry column** that the indicator script publishes: a text column of WKT, chosen in the widget form (any text column of the table is offered).
+A map draws the shapes of its rows, colored by the plotted value on a sequential scale of seven steps (the dashboard palette's scale unless the widget [picks another](#widget-color-and-scale); see [Colors](#colors)), with the lowest and highest value shown as a legend. It reads the shapes from a **geometry column** that the indicator script publishes: a text column of WKT, chosen in the widget form (any text column of the table is offered).
 
 - Only three WKT types are drawn: `POINT`, `POLYGON` (holes included) and `MULTIPOLYGON`. A `Z` or `M` coordinate and an `SRID=4326;` prefix are accepted and ignored. Anything else (`LINESTRING`, `MULTIPOINT`, `GEOMETRYCOLLECTION`, `EMPTY`, text that does not parse) is not drawn.
 - A polygon is a filled region and a point is a marker, both colored by the value. A row whose geometry is missing or cannot be read is **left out and counted** next to the map; **Show as table** lists it as "Left out".
@@ -354,6 +354,69 @@ Add a **Map** widget over `survey_progress`, group by `block_code`, choose `geom
 - **Capped or not.** `progress.clip(upper=1)` draws a block that went over its target as 100%, so the colors stay between 0 and 100%. Without it a block at 120% stretches the scale and every other block looks paler; `achieved` in the tooltip still tells how many surveys were made.
 - **A target of 0.** Dividing by a zero target gives infinity (or not-a-number when nothing was done), which is no progress to plot. Dividing by `sample_target.where(sample_target > 0)`, as above, leaves that block's progress **empty**, and a row with no value in the plotted measure is left out of every widget, so the block is not drawn. To draw it, fill the progress in (`.fillna(0)` for no progress, or `.fillna(1)` for a block with nothing to do) before returning.
 
+## Colors
+
+A dashboard draws its widgets in one **palette**: eight categorical colors in a fixed order, and a default sequential scale for its maps and heat maps. It can also keep a color for chosen values, so the same category reads in the same color in every widget. Analysts and admins set both from **Colors** in **Dashboard actions**, next to **Filters**; every member sees the dashboard in them, viewers included. A viewer is not offered **Colors**, and the API refuses their request (403). The action is not offered either while a [version is shown](#viewing-a-version). A dashboard uses one palette: its widgets do not mix palettes. A widget picks its own color, or its own scale, from that palette in the widget form (see [Widget color and scale](#widget-color-and-scale)).
+
+### Palettes
+
+| Palette | Its eight colors, in order | Its scale for maps and heat maps |
+|---|---|---|
+| **Tamiza** (the default) | blue, orange, aqua, yellow, magenta, green, violet, red | Blue |
+| **Institutional** | navy blue, turquoise, burgundy, sky blue, mustard, slate, salmon, steel blue | Teal |
+| **Earth** | terracotta, indigo, ochre, wine, moss, brown, plum, olive | Orange |
+| **Vivid** | purple, cyan, lime, fuchsia, green, blue, crimson, orange | Purple |
+
+- **Choosing.** **Colors** shows each palette as a card with its name, its eight colors in order and its scale as a gradient; the dashboard's current palette is selected. Pick one and **Save colors**. The change shows at once, without loading the widgets' data again.
+- **Fixed sets.** The palettes are a fixed set. You cannot type a color code or add a palette of your own. Each one is checked, in the light and in the dark theme, so that neighbouring colors stay apart for readers with the common color-vision deficiencies and for full-color readers, and so that no color is too pale or too dull.
+- **Tamiza is today's colors.** A dashboard has the palette Tamiza until another is chosen, so a dashboard that existed before palettes looks as it did.
+- **Other.** The folded series or slice called **Other** is the same neutral grey in every palette, whatever colors are kept.
+- **Not covered.** Stat tiles have no color of their own, and the red and blue arms of [Likert bars](#likert-bars) are the same in every palette.
+- **Printing.** A printed dashboard uses its palette, with **Background graphics** off, as the other colors do (see [Printing a dashboard](#printing-a-dashboard)).
+- **Versions.** The palette and the colors kept by value are part of the dashboard's versions: saving them with a change makes a version, and viewing a version draws it in its own colors. Restoring one brings them back, and a version recorded before palettes restores the palette Tamiza with no colors kept. Saving colors without changing anything makes no version (see [Version history](#version-history)). Duplicating a dashboard copies its colors, and the copy changes them on its own.
+
+### Widget color and scale
+
+A bar, column or line chart with no series, a histogram, a map and a heat map can be given a color or a scale in the widget form, from the dashboard's palette. The preview shows the choice in the dashboard's colors before the widget is saved, and choosing asks the server for nothing: the data is not loaded again.
+
+| Widget | Choice in the form | When nothing is chosen |
+|---|---|---|
+| Bar, column or line chart with **no series**, and histogram | **Color**: one of the palette's eight colors | Color 1 |
+| Map and heat map | **Scale**: one of seven sequential scales | **Palette's scale** |
+| Any other widget, and a bar, column or line chart **with a series** | None: the colors follow the values (see [Colors kept by value](#colors-kept-by-value)) | |
+
+- **Color.** The eight colors of the dashboard's palette are numbered swatches. Each is read to a screen reader by its number and the name of its hue ("Color 3, aqua"), the name of the chosen one is also written under the swatches, and the arrow keys move between them. A column or bar chart with no series draws every bar in the widget's color, except a bar whose value has a [color kept](#colors-kept-by-value), which has that color.
+- **Scale.** **Palette's scale** is the default and uses the scale of the dashboard's palette (Blue in Tamiza, Teal in Institutional, Orange in Earth, Purple in Vivid). The other choices are Blue, Teal, Green, Orange, Red, Purple and Gray, each shown as its seven steps and named in words, and the map's shapes and legend, or the heat map's cells and legend, use that scale's steps.
+- **A place, not a color code.** A widget keeps its number, not a color. When the dashboard's palette changes, or the widget moves to another dashboard, it keeps its number and is drawn in the palette of the dashboard it is on: color 3 of Tamiza becomes color 3 of Vivid. A widget on **Palette's scale** follows the new palette's scale, and one that has a scale of its own keeps it.
+- **Kinds that take none.** The form does not offer a color to a widget of another type or to a chart with a series, nor a scale to anything but a map or a heat map, and the API refuses them (400, with an error on the color or the scale). A widget that is given a series, or changes into another type, is saved without its color; the form keeps the choice until the widget is saved, so changing back finds it.
+- **Versions.** A widget's color and scale are part of the widget, so changing one makes a version that says the widget changed ("Widget “Coverage” changed"), and saving the form without changing anything makes none (see [What makes a version](#what-makes-a-version)). A widget saved before colors existed is drawn in color 1, or on its palette's scale, as it always was.
+
+### Colors kept by value
+
+A color kept for a value of a column gives that value one of the palette's eight colors on the whole dashboard: for example `sex` = `Female` in color 5, or `answer` = `No` in color 8. Wherever a widget of the dashboard colors by that column, that value then has that color:
+
+- the series of a bar, column or line chart with a series, in the bars, the lines, the legend and the tooltips;
+- the two sides of a population pyramid;
+- the slices of a pie chart;
+- the bars or columns of a bar or column chart with no series, by its group column, so one value can be highlighted: the bar of `Rionegro` in color 2 while the others keep the widget's color.
+
+A color kept does not change maps, heat maps, Likert bars, cross tables, histograms, stat tiles or a line chart with no series.
+
+**Colors** lists the colors kept, in the order they were saved. Each has:
+
+- a **column**, chosen among the text columns of the tables of the dashboard's indicators, the same columns the [filters form](#defining-a-dashboards-filters) offers;
+- a **value**, which you pick from the column's values, suggested as you type, or write as any text;
+- a **color**, one of the palette's eight, shown as numbered swatches. Each is read to a screen reader by its number and the name of its hue ("Color 3, aqua"), and reached from the keyboard, where the arrow keys move between the swatches.
+
+**Add a color kept by value** adds a row, up to 64 on a dashboard, and **Remove** takes one out. **Save colors** saves the palette and the whole list at once; saving what the dashboard already has sends nothing.
+
+- **One value, one color; one color, one value.** In a column, a value and a color each appear at most once, so two values of a widget never share a color. The same color may be used in two columns (`Female` of `sex` and `Rural` of `zone`, both in color 5). A list that breaks this is refused, and the form shows the message on the row it names, such as "sex already uses color 5.".
+- **Values are matched as exact text.** Case counts: a color kept for `piped` does not color `Piped`. A missing value, shown as **(none)**, and **Other** never take a color kept.
+- **Entries are not checked against the data.** A value that no widget shows stays saved and changes nothing, so a value can be prepared before the first run or after the data changes.
+- **The other values take the palette in order.** A value with no color kept takes the palette's colors in the widget's series order, after the colors kept in that widget are set aside. A chart whose series are `Piped`, `River` and `Well`, with color 1 kept for `Well`, draws `Well` in color 1, `Piped` in color 2 and `River` in color 3. In a chart with no series, a bar with no color kept is drawn in the widget's own color.
+- **Colors follow the value, never its rank.** A [series](#widgets-with-a-series) or a pie slice keeps its color when a dashboard filter changes the rows that are shown, since both come from the widget's own rows.
+- **Two indicators with the same column name share its colors.** Colors kept are matched by column *name*, as [dashboard filters](#which-widgets-a-filter-narrows) are, not by indicator. If two indicators have a column called `type` and it means different things, a color kept for `type` = `A` colors the value `A` in both. Give each dimension a name of its own in the indicator scripts when it means something different, and the same name everywhere when it means the same.
+
 ## Building the dashboard
 
 The **Add widget** button opens the widget form, and the widget is added to the open dashboard. Each widget has an actions menu in its header with **Edit widget** and **Remove widget**. Above the widgets, editors see how many of the allowed widgets the dashboard holds; when the limit is reached the line says so and **Add widget** is off. All of this is for **analysts and admins**: a `viewer` sees every widget, switches to tables and exports, but has no add, edit, remove or move controls, and the API refuses their requests.
@@ -409,13 +472,13 @@ Every widget except the stat tile has a table button in its header (shown once t
 
 ## Version history
 
-Tamiza keeps a history of each of a project's own dashboards. Every change saved to a dashboard records a new **version**: the dashboard as it is after the change, with its name, its filters with their defaults, and its widgets with their title, type, query, the dashboard filters they ignore, position and size. The newest version is the dashboard as it is. Analysts and admins open the history from **Dashboard actions** with **Version history**; viewers are not offered it, and the API refuses their requests (403). Performance and Clean data have no history.
+Tamiza keeps a history of each of a project's own dashboards. Every change saved to a dashboard records a new **version**: the dashboard as it is after the change, with its name, its filters with their defaults, its palette and colors kept by value, and its widgets with their title, type, query, the dashboard filters they ignore, position and size. The newest version is the dashboard as it is. Analysts and admins open the history from **Dashboard actions** with **Version history**; viewers are not offered it, and the API refuses their requests (403). Performance and Clean data have no history.
 
 ### What makes a version
 
-- **Every change, however small:** adding the dashboard, renaming or duplicating it, saving its filters, and adding, editing, removing, moving or resizing a widget, or moving one to or from another dashboard. Adding a full stop to a widget's title is a version.
+- **Every change, however small:** adding the dashboard, renaming or duplicating it, saving its filters, saving its [colors](#colors) (the palette and the colors kept by value), and adding, editing, removing, moving or resizing a widget, or moving one to or from another dashboard. Adding a full stop to a widget's title is a version.
 - **One action, one version.** A drag is one version, with the widgets it pushed down, and so is a run of arrow presses on a widget's handle: the page saves them together once the dragging has been still for a moment (see [The grid](#the-grid)). Two drags with a pause between them are two versions. A widget moved to another dashboard makes one version on each: one says the widget went to the other dashboard, the other that it came from it.
-- **No change, no version.** Saving the filters or a widget's form without changing anything makes none.
+- **No change, no version.** Saving the filters, the colors or a widget's form without changing anything makes none.
 - **A copy starts its own history.** **Duplicate** gives the copy a version 1 that says which dashboard it was duplicated from, and the original keeps its versions. A move or resize made on the original a moment before is saved first, as the original's own version.
 - **Removing a dashboard removes its versions with it.**
 
@@ -436,7 +499,7 @@ Each dashboard keeps its 10 newest versions, the current one included: the chang
 **Version history** first saves a move or resize still waiting for its pause, so the newest version holds the widgets where you left them, then lists the kept versions, newest first. Each shows:
 
 - its number, with **Current** on the newest;
-- what changed, up to three lines ("Widget “Water source” added", "Renamed to “Agua”", "Widgets moved or resized"), then how many more ("and 2 more");
+- what changed, up to three lines ("Widget “Water source” added", "Renamed to “Agua”", "Colors changed", "Widgets moved or resized"), then how many more ("and 2 more");
 - for a version an AI client made, the request in quotes;
 - who made it and when its last change was saved ("Ana Pérez · Oct 31, 2026, 10:32 AM"), followed by **via MCP** for a version an AI client made.
 
@@ -444,7 +507,7 @@ Names and titles are shown as they were at the time, as text. Every version but 
 
 ### Viewing a version
 
-**View** shows the version on the dashboard page, in place of the dashboard as it is: its name as the heading, its filters at their defaults, and its widgets with today's data. Each widget is drawn from the settings the version holds, so a widget removed since shows again, and one whose indicator or columns are gone since says so, as a [stale widget](#when-a-table-changes) does. A notice above it says which version it is, who saved it and when ("Viewing version 9, saved by Ana Pérez on Oct 31, 2026, 10:32 AM. It is read-only."); the focus moves to it, so screen readers read it.
+**View** shows the version on the dashboard page, in place of the dashboard as it is: its name as the heading, its filters at their defaults, its palette and colors kept by value, and its widgets with today's data. Each widget is drawn from the settings the version holds, so a widget removed since shows again, and one whose indicator or columns are gone since says so, as a [stale widget](#when-a-table-changes) does. A notice above it says which version it is, who saved it and when ("Viewing version 9, saved by Ana Pérez on Oct 31, 2026, 10:32 AM. It is read-only."); the focus moves to it, so screen readers read it.
 
 - **Read-only.** While a version is shown, the heading has no actions, **Print** included, and there is no **Add widget**, no count of widgets, no handles to move or resize a widget and no widget menu. **Show all as tables**, the widgets' table buttons and the exports in the list of indicators stay: they change nothing. Printing from the browser's menu (Ctrl+P) while a version is shown prints the version, and the sheet names it under the heading ("Version 9, saved by Ana Pérez on Oct 31, 2026, 10:32 AM"), as the PDF's file name does.
 - **Filters.** Change the version's filter values as on any dashboard; they change only your screen. The page address keeps the values of the dashboard as it is, so a link copied meanwhile opens the dashboard as it is, not the version. The values a text filter offers come from the indicators of the version's widgets, not of the dashboard's.
@@ -453,7 +516,7 @@ Names and titles are shown as they were at the time, as text. Every version but 
 
 ### Restoring a version
 
-**Restore**, in the history or in the notice of a version shown, asks first ("Restore version 9?": "The name, filters and widgets of “Housing” go back to how they were on Oct 31, 2026, 10:32 AM. The current state stays in the history."). On **Restore**, a move or resize still waiting for its pause is saved first, then the dashboard's name, its filters with their defaults and its widgets become those of the version, for every member. The restore is a new version that says which version it restored ("Version 9 restored"), so the state it replaced stays in the history, and a restore can itself be undone by restoring the version before it. The dashboard keeps its address, its place among the dashboards and its [scheduled email](operations.md#email-optional), whose recipients, days and time stay as they were and whose next email shows the restored widgets.
+**Restore**, in the history or in the notice of a version shown, asks first ("Restore version 9?": "The name, filters, colors and widgets of “Housing” go back to how they were on Oct 31, 2026, 10:32 AM. The current state stays in the history."). On **Restore**, a move or resize still waiting for its pause is saved first, then the dashboard's name, its filters with their defaults, its palette and colors kept by value and its widgets become those of the version, for every member. The restore is a new version that says which version it restored ("Version 9 restored"), so the state it replaced stays in the history, and a restore can itself be undone by restoring the version before it. The dashboard keeps its address, its place among the dashboards and its [scheduled email](operations.md#email-optional), whose recipients, days and time stay as they were and whose next email shows the restored widgets.
 
 The page then shows the dashboard as restored, with the focus on its heading, and one message says what was done ("Restored version 9 as version 13."). Values in the page address for filters the restored version does not define are dropped, with the notice for them (see [Filtered views in the address](#filtered-views-in-the-address)). A version that holds the dashboard exactly as it is changes nothing and makes no version, and the message says so ("“Housing” already is as in version 9.").
 
@@ -492,17 +555,20 @@ The other widgets keep working. A dashboard filter on a column the new table no 
 | Length of a text in a tooltip | 200 characters (cut with an ellipsis) |
 | Indicators in a project | 100 |
 | Length of a title | 200 characters |
+| Colors kept by value on a dashboard | 64 |
+| Length of the value of a color kept | 500 characters |
 | Versions a dashboard keeps | 10, the current one included |
 
 An operator can change the first two; the others are fixed. See [operations.md](operations.md#common-changes). A widget whose query matches more rows than the limit shows the first ones and says so ("Only the first 5,000 rows are shown"); add a filter or group by a coarser column. A query that takes longer than the dashboard time limit (25 seconds by default, shared with the clean data dashboard) is stopped with a message.
 
 ## What it does not do
 
-- A widget plots **one indicator** with at most **two dimensions** (a group and a series); it does not combine several indicator tables in one chart, add a third dimension, plot two measures, sort its series by value or let you choose their colors.
+- A widget plots **one indicator** with at most **two dimensions** (a group and a series); it does not combine several indicator tables in one chart, add a third dimension, plot two measures or sort its series by value.
+- Its colors are those of the dashboard's [palette](#palettes), one of four, its [colors kept by value](#colors-kept-by-value) and, for a few types, the widget's own [color or scale](#widget-color-and-scale). You cannot type a color code, define a palette of your own, color a stat tile, change the red and blue arms of Likert bars or color by a threshold (good, warning, critical), and the scheduled email shows tables with no colors.
 - Its basemap is a background and nothing more: there is no satellite imagery from anyone but Google, no street labels over the imagery, no basemap you define yourself, and no administrative boundaries of its own, since the shapes come from your script.
 - It does not save a zoomed view as the map's starting view, and only maps have a tooltip with columns; a tooltip column's numbers are always summed, with no choice of minimum, maximum or average.
 - Clicking a bar, slice or shape does not filter the other widgets, a filter's values do not depend on another filter (a department, then its municipalities), and there are no relative periods such as "the last 7 days".
-- A dashboard filter matches columns by name: it cannot narrow a column called `municipality` in one indicator and `mpio` in another. Name a dimension the same in every indicator.
+- A dashboard filter matches columns by name: it cannot narrow a column called `municipality` in one indicator and `mpio` in another. Name a dimension the same in every indicator. A color kept by value matches by name too (see [Colors kept by value](#colors-kept-by-value)).
 - Your filter values are not remembered between visits, except in the page address.
 - Every member sees every dashboard: there are no dashboards for some members only, and no dashboards of one's own.
 - It does not copy a dashboard or a widget to another project, and a removed dashboard cannot be brought back.

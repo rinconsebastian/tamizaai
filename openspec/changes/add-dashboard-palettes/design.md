@@ -226,3 +226,447 @@ The domain holds at most 8 entries, "Other" included, and a column keeps each co
 ## Open Questions
 
 - The exact hues and hex values of `institutional`, `earth` and `vivid` and of the six new scales, chosen with the validator during implementation (D2). They change no spec or task.
+
+## Verification Results
+
+Palettes and sequential scales (tasks 7.1 to 7.3). The values of `institutional`, `earth` and `vivid` and of the six new scales were designed by five independent runs of the dataviz method, each against the same gates; the lead then re-ran every command below on the values as they went into `styles.css` and recomputed every number with its own OKLab code (the helpers of `chart-tokens.spec.ts`). **No hex value was changed after validation: every palette and every scale shipped as it was designed, so there were no repairs and no palette or scale was dropped from the catalog.**
+
+Commands run in the development sandbox (Node 22) with the validator of the dataviz skill, `scripts/validate_palette.js`, written below as `validate_palette.js`. The chart surface is `#ffffff` in the light theme and `#101828` (Flowbite `neutral-primary-soft`, gray-900) in the dark theme, the surfaces of `chart-tokens.spec.ts`. A palette is validated as a categorical palette on adjacent pairs, which is what a stacked chart, a legend and a bar chart with a series show side by side; a scale is validated as an ordinal ramp (`--ordinal`).
+
+### The palettes
+
+The gates, all hard: OKLab L inside the band (0.43 to 0.77 light, 0.48 to 0.67 dark), OKLab chroma at least 0.10, adjacent CVD ΔE at least 8 (protan and deutan; tritan is reported), adjacent normal-vision ΔE at least 15. Contrast against the surface below 3:1 is a WARN, accepted with the relief Tamiza already has: legends for two or more series, tooltips and "Show as table".
+
+| Palette | Theme | L range | Lowest chroma | Worst adjacent CVD ΔE | Worst adjacent normal ΔE | Lowest contrast | Slots under 3:1 |
+|---|---|---|---|---|---|---|---|
+| `tamiza` | light | 0.527 to 0.764 | 0.141 | 9.1 (tritan 5.8) | 19.6 | 2.17:1 | 3 (2.82:1), 4 (2.17:1), 5 (2.69:1) |
+| `tamiza` | dark | 0.529 to 0.670 | 0.128 | 8.4 (tritan 8.7) | 19.3 | 3.59:1 | none |
+| `institutional` | light | 0.446 to 0.745 | 0.104 | 23.8 (tritan 20.6) | 24.1 | 2.36:1 | 2 (2.67:1), 4 (2.49:1), 5 (2.70:1), 7 (2.36:1) |
+| `institutional` | dark | 0.539 to 0.662 | 0.108 | 14.6 (tritan 13.9) | 16.5 | 3.29:1 | none |
+| `earth` | light | 0.441 to 0.660 | 0.104 | 16.6 (tritan 7.3) | 19.2 | 3.15:1 | none |
+| `earth` | dark | 0.513 to 0.666 | 0.104 | 14.8 (tritan 9.3) | 20.9 | 3.05:1 | none |
+| `vivid` | light | 0.529 to 0.761 | 0.137 | 17.4 (tritan 7.2) | 24.3 | 2.05:1 | 2 (2.06:1), 3 (2.05:1), 8 (2.48:1) |
+| `vivid` | dark | 0.540 to 0.665 | 0.118 | 13.1 (tritan 9.1) | 19.3 | 3.11:1 | none |
+
+The numbers in the table are the lead's own, recomputed from the hex values; the validator's lines below give the same worst pairs. Each command is followed by what the validator printed, with the PASS, WARN and FAIL lines only.
+
+**`tamiza`** (the colors the charts had before palettes, unchanged; its dark set was already in `styles.css`)
+
+```
+$ node validate_palette.js "#2a78d6,#eb6834,#1baf7a,#eda100,#e87ba4,#008300,#6250d6,#e34948" --mode light --surface "#ffffff"
+  [PASS] Lightness band         all 8 inside L 0.43–0.77
+  [PASS] Chroma floor           all 8 >= 0.1
+  [PASS] CVD separation         worst adjacent #eda100↔#1baf7a ΔE 9.1 (protan) · tritan 5.8
+  [PASS] Normal-vision floor    worst adjacent #e87ba4↔#eda100 ΔE 19.6 (normal)
+  [WARN] Contrast vs surface    below 3:1 — relief required (visible labels or table view): [["#1baf7a",2.82],["#eda100",2.17],["#e87ba4",2.69]]
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#3987e5,#d95926,#199e70,#c98500,#d55181,#008300,#9085e9,#e66767" --mode dark --surface "#101828"
+  [PASS] Lightness band         all 8 inside L 0.48–0.67
+  [PASS] Chroma floor           all 8 >= 0.1
+  [PASS] CVD separation         worst adjacent #c98500↔#199e70 ΔE 8.4 (protan) · tritan 8.7
+  [PASS] Normal-vision floor    worst adjacent #d55181↔#c98500 ΔE 19.3 (normal)
+  [PASS] Contrast vs surface    all 8 >= 3:1
+  → ALL CHECKS PASS   (exit 0)
+```
+
+**`institutional`**
+
+```
+$ node validate_palette.js "#1f5398,#18aec2,#893747,#52ade3,#be9922,#4a5e9f,#e5957b,#076392" --mode light --surface "#ffffff"
+  [PASS] Lightness band         all 8 inside L 0.43–0.77
+  [PASS] Chroma floor           all 8 >= 0.1
+  [PASS] CVD separation         worst adjacent #be9922↔#52ade3 ΔE 23.8 (protan) · tritan 20.6
+  [PASS] Normal-vision floor    worst adjacent #be9922↔#52ade3 ΔE 24.1 (normal)
+  [WARN] Contrast vs surface    below 3:1 — relief required (visible labels or table view): [["#18aec2",2.67],["#52ade3",2.49],["#be9922",2.7],["#e5957b",2.36]]
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#3f6cbb,#00a5b6,#a94d58,#26a0ca,#a98900,#6473bd,#cf785c,#357cb1" --mode dark --surface "#101828"
+  [PASS] Lightness band         all 8 inside L 0.48–0.67
+  [PASS] Chroma floor           all 8 >= 0.1
+  [PASS] CVD separation         worst adjacent #a94d58↔#00a5b6 ΔE 14.6 (deutan) · tritan 13.9
+  [PASS] Normal-vision floor    worst adjacent #00a5b6↔#3f6cbb ΔE 16.5 (normal)
+  [PASS] Contrast vs surface    all 8 >= 3:1
+  → ALL CHECKS PASS   (exit 0)
+```
+
+**`earth`**
+
+```
+$ node validate_palette.js "#af4a1b,#345895,#b88a01,#82344e,#669929,#7e4701,#934791,#676e02" --mode light --surface "#ffffff"
+  [PASS] Lightness band         all 8 inside L 0.43–0.77
+  [PASS] Chroma floor           all 8 >= 0.1
+  [PASS] CVD separation         worst adjacent #676e02↔#934791 ΔE 16.6 (deutan) · tritan 7.3
+  [PASS] Normal-vision floor    worst adjacent #934791↔#7e4701 ΔE 19.2 (normal)
+  [PASS] Contrast vs surface    all 8 >= 3:1
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#b34027,#506cad,#988904,#984e6b,#65a84b,#8e5a01,#a860b0,#677401" --mode dark --surface "#101828"
+  [PASS] Lightness band         all 8 inside L 0.48–0.67
+  [PASS] Chroma floor           all 8 >= 0.1
+  [PASS] CVD separation         worst adjacent #8e5a01↔#65a84b ΔE 14.8 (deutan) · tritan 9.3
+  [PASS] Normal-vision floor    worst adjacent #8e5a01↔#65a84b ΔE 20.9 (normal)
+  [PASS] Contrast vs surface    all 8 >= 3:1
+  → ALL CHECKS PASS   (exit 0)
+```
+
+**`vivid`**
+
+```
+$ node validate_palette.js "#9d32e5,#00c5ec,#95c500,#f22dbd,#009d1f,#5485ff,#c4134d,#ff8210" --mode light --surface "#ffffff"
+  [PASS] Lightness band         all 8 inside L 0.43–0.77
+  [PASS] Chroma floor           all 8 >= 0.1
+  [PASS] CVD separation         worst adjacent #009d1f↔#f22dbd ΔE 17.4 (deutan) · tritan 7.2
+  [PASS] Normal-vision floor    worst adjacent #95c500↔#00c5ec ΔE 24.3 (normal)
+  [WARN] Contrast vs surface    below 3:1 — relief required (visible labels or table view): [["#00c5ec",2.06],["#95c500",2.05],["#ff8210",2.48]]
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#b054ff,#00a5c1,#7ca400,#c500a7,#009f20,#485edf,#cc004f,#df7100" --mode dark --surface "#101828"
+  [PASS] Lightness band         all 8 inside L 0.48–0.67
+  [PASS] Chroma floor           all 8 >= 0.1
+  [PASS] CVD separation         worst adjacent #00a5c1↔#b054ff ΔE 13.1 (deutan) · tritan 9.1
+  [PASS] Normal-vision floor    worst adjacent #df7100↔#cc004f ΔE 19.3 (normal)
+  [PASS] Contrast vs surface    all 8 >= 3:1
+  → ALL CHECKS PASS   (exit 0)
+```
+
+Contrast, in the light theme only, is what the WARNs name: `institutional` slots 2 turquoise, 4 sky blue, 5 mustard and 7 salmon (2.67, 2.49, 2.70, 2.36:1) and `vivid` slots 2 cyan, 3 lime and 8 orange (2.06, 2.05, 2.48:1), like Tamiza's aqua, yellow and magenta (2.82, 2.17, 2.69:1). `earth` has no WARN in either theme (lowest 3.15:1 light, 3.05:1 dark), and no palette has one in the dark theme. Where a label is drawn on a fill of `institutional` slot 2, 4, 5 or 7 in the light theme, near-black reads better than white; this matters for the data labels of `add-widget-display-options`.
+
+**Beyond adjacent pairs (information, not a gate).** Forms that put marks side by side in any order (scatter, bubble, small multiples) need every pair apart, which no eight colors can do (the reference palette has the same limit). The first three slots of every palette pass `--pairs all` in both themes, and `vivid` passes with its first four. The first four slots of `institutional` (turquoise and sky blue are 6.2 apart in the light theme and 3.9 in the dark one) and of `earth` (terracotta and wine, 13.3 and 9.6) do not, so a form that needs every pair apart should carry at most three series in those palettes:
+
+```
+$ node validate_palette.js "#2a78d6,#eb6834,#1baf7a" --mode light --surface "#ffffff" --pairs all
+  [PASS] Lightness band         all 3 inside L 0.43–0.77
+  [PASS] Chroma floor           all 3 >= 0.1
+  [PASS] CVD separation         worst all-pairs #1baf7a↔#eb6834 ΔE 9.2 (deutan) · tritan 9.6
+  [PASS] Normal-vision floor    worst all-pairs #1baf7a↔#2a78d6 ΔE 24.0 (normal)
+  [WARN] Contrast vs surface    below 3:1 — relief required (visible labels or table view): [["#1baf7a",2.82]]
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#3987e5,#d95926,#199e70" --mode dark --surface "#101828" --pairs all
+  [PASS] Lightness band         all 3 inside L 0.48–0.67
+  [PASS] Chroma floor           all 3 >= 0.1
+  [PASS] CVD separation         worst all-pairs #199e70↔#d95926 ΔE 9.4 (deutan) · tritan 4.0
+  [PASS] Normal-vision floor    worst all-pairs #199e70↔#3987e5 ΔE 20.9 (normal)
+  [PASS] Contrast vs surface    all 3 >= 3:1
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#1f5398,#18aec2,#893747" --mode light --surface "#ffffff" --pairs all
+  [PASS] Lightness band         all 3 inside L 0.43–0.77
+  [PASS] Chroma floor           all 3 >= 0.1
+  [PASS] CVD separation         worst all-pairs #893747↔#1f5398 ΔE 13.5 (protan) · tritan 21.7
+  [PASS] Normal-vision floor    worst all-pairs #893747↔#1f5398 ΔE 20.0 (normal)
+  [WARN] Contrast vs surface    below 3:1 — relief required (visible labels or table view): [["#18aec2",2.67]]
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#3f6cbb,#00a5b6,#a94d58" --mode dark --surface "#101828" --pairs all
+  [PASS] Lightness band         all 3 inside L 0.48–0.67
+  [PASS] Chroma floor           all 3 >= 0.1
+  [PASS] CVD separation         worst all-pairs #a94d58↔#00a5b6 ΔE 14.6 (deutan) · tritan 13.9
+  [PASS] Normal-vision floor    worst all-pairs #00a5b6↔#3f6cbb ΔE 16.5 (normal)
+  [PASS] Contrast vs surface    all 3 >= 3:1
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#af4a1b,#345895,#b88a01" --mode light --surface "#ffffff" --pairs all
+  [PASS] Lightness band         all 3 inside L 0.43–0.77
+  [PASS] Chroma floor           all 3 >= 0.1
+  [PASS] CVD separation         worst all-pairs #b88a01↔#af4a1b ΔE 12.6 (deutan) · tritan 14.8
+  [PASS] Normal-vision floor    worst all-pairs #b88a01↔#af4a1b ΔE 16.1 (normal)
+  [PASS] Contrast vs surface    all 3 >= 3:1
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#b34027,#506cad,#988904" --mode dark --surface "#101828" --pairs all
+  [PASS] Lightness band         all 3 inside L 0.48–0.67
+  [PASS] Chroma floor           all 3 >= 0.1
+  [PASS] CVD separation         worst all-pairs #988904↔#b34027 ΔE 9.4 (deutan) · tritan 16.2
+  [PASS] Normal-vision floor    worst all-pairs #988904↔#b34027 ΔE 18.6 (normal)
+  [PASS] Contrast vs surface    all 3 >= 3:1
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#9d32e5,#00c5ec,#95c500" --mode light --surface "#ffffff" --pairs all
+  [PASS] Lightness band         all 3 inside L 0.43–0.77
+  [PASS] Chroma floor           all 3 >= 0.1
+  [PASS] CVD separation         worst all-pairs #00c5ec↔#9d32e5 ΔE 22.2 (deutan) · tritan 10.4
+  [PASS] Normal-vision floor    worst all-pairs #95c500↔#00c5ec ΔE 24.3 (normal)
+  [WARN] Contrast vs surface    below 3:1 — relief required (visible labels or table view): [["#00c5ec",2.06],["#95c500",2.05]]
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#b054ff,#00a5c1,#7ca400" --mode dark --surface "#101828" --pairs all
+  [PASS] Lightness band         all 3 inside L 0.48–0.67
+  [PASS] Chroma floor           all 3 >= 0.1
+  [PASS] CVD separation         worst all-pairs #00a5c1↔#b054ff ΔE 13.1 (deutan) · tritan 9.1
+  [PASS] Normal-vision floor    worst all-pairs #7ca400↔#00a5c1 ΔE 20.5 (normal)
+  [PASS] Contrast vs surface    all 3 >= 3:1
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#9d32e5,#00c5ec,#95c500,#f22dbd" --mode light --surface "#ffffff" --pairs all
+  [PASS] Lightness band         all 4 inside L 0.43–0.77
+  [PASS] Chroma floor           all 4 >= 0.1
+  [PASS] CVD separation         worst all-pairs #f22dbd↔#9d32e5 ΔE 8.1 (protan) · tritan 10.4
+  [PASS] Normal-vision floor    worst all-pairs #f22dbd↔#9d32e5 ΔE 18.2 (normal)
+  [WARN] Contrast vs surface    below 3:1 — relief required (visible labels or table view): [["#00c5ec",2.06],["#95c500",2.05]]
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#b054ff,#00a5c1,#7ca400,#c500a7" --mode dark --surface "#101828" --pairs all
+  [PASS] Lightness band         all 4 inside L 0.48–0.67
+  [PASS] Chroma floor           all 4 >= 0.1
+  [PASS] CVD separation         worst all-pairs #c500a7↔#00a5c1 ΔE 9.4 (deutan) · tritan 9.1
+  [PASS] Normal-vision floor    worst all-pairs #c500a7↔#b054ff ΔE 15.7 (normal)
+  [PASS] Contrast vs surface    all 4 >= 3:1
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#1f5398,#18aec2,#893747,#52ade3" --mode light --surface "#ffffff" --pairs all
+  [PASS] Lightness band         all 4 inside L 0.43–0.77
+  [PASS] Chroma floor           all 4 >= 0.1
+  [FAIL] CVD separation         worst all-pairs #52ade3↔#18aec2 ΔE 4.6 (deutan) · tritan 1.8
+  [FAIL] Normal-vision floor    worst all-pairs #52ade3↔#18aec2 ΔE 6.2 (normal) — below 15, hard to tell apart even with full color vision
+  [WARN] Contrast vs surface    below 3:1 — relief required (visible labels or table view): [["#18aec2",2.67],["#52ade3",2.49]]
+  → FAILED — fix the marked checks   (exit 1)
+
+$ node validate_palette.js "#3f6cbb,#00a5b6,#a94d58,#26a0ca" --mode dark --surface "#101828" --pairs all
+  [PASS] Lightness band         all 4 inside L 0.48–0.67
+  [PASS] Chroma floor           all 4 >= 0.1
+  [FAIL] CVD separation         worst all-pairs #26a0ca↔#00a5b6 ΔE 3.4 (deutan) · tritan 0.8
+  [FAIL] Normal-vision floor    worst all-pairs #26a0ca↔#00a5b6 ΔE 3.9 (normal) — below 15, hard to tell apart even with full color vision
+  [PASS] Contrast vs surface    all 4 >= 3:1
+  → FAILED — fix the marked checks   (exit 1)
+
+$ node validate_palette.js "#af4a1b,#345895,#b88a01,#82344e" --mode light --surface "#ffffff" --pairs all
+  [PASS] Lightness band         all 4 inside L 0.43–0.77
+  [PASS] Chroma floor           all 4 >= 0.1
+  [PASS] CVD separation         worst all-pairs #82344e↔#345895 ΔE 12.5 (protan) · tritan 11.0
+  [FAIL] Normal-vision floor    worst all-pairs #82344e↔#af4a1b ΔE 13.3 (normal) — below 15, hard to tell apart even with full color vision
+  [PASS] Contrast vs surface    all 4 >= 3:1
+  → FAILED — fix the marked checks   (exit 1)
+
+$ node validate_palette.js "#b34027,#506cad,#988904,#984e6b" --mode dark --surface "#101828" --pairs all
+  [PASS] Lightness band         all 4 inside L 0.48–0.67
+  [PASS] Chroma floor           all 4 >= 0.1
+  [PASS] CVD separation         worst all-pairs #988904↔#b34027 ΔE 9.4 (deutan) · tritan 8.2
+  [FAIL] Normal-vision floor    worst all-pairs #984e6b↔#b34027 ΔE 9.6 (normal) — below 15, hard to tell apart even with full color vision
+  [PASS] Contrast vs surface    all 4 >= 3:1
+  → FAILED — fix the marked checks   (exit 1)
+```
+
+**Against the neutral of "Other"** (`#898781`, the same in every palette): the lowest normal-vision ΔE (OKLab ×100) of any palette color is 14.5 (tamiza), 13.7 (institutional), 13.1 (earth) and 19.1 (vivid) in the light theme, and 12.6, 11.8, 12.1 and 13.0 in the dark one. Under protan and deutan (the smaller of the two) the lowest is 5.1 (tamiza), 9.0 (institutional), 9.8 (earth) and 8.0 (vivid) in the light theme, and 1.1, 5.2, 9.0 and 8.6 in the dark one; the weakest new color is `institutional` salmon in the dark theme, and Tamiza's own colors were already closer. `chart-tokens.spec.ts` keeps every palette color at least 10 from "Other" for full-color readers.
+
+**Against Tamiza** (ΔE ×100 to the nearest Tamiza color of the same theme): the first four colors of each new palette are at least 10.8 (institutional), 11.1 (earth) and 11.2 (vivid) away in the light theme and at least 8.8, 8.2 and 11.1 in the dark one, so none is a near-duplicate of a Tamiza color. Over all eight, the nearest are 8.1 (institutional), 9.0 (earth) and 7.5 (vivid, slot 8, orange, in the crowded warm zone) in the light theme and 5.5, 7.6 and 5.7 in the dark one (institutional slot 5, mustard, and vivid slot 8). These are looked at, not gated.
+
+### The sequential scales
+
+Each scale has seven steps and the label on each step. The light ladder is the lightness ladder of `blue` (OKLab L 0.905 to 0.338 in steps of 0.092 to 0.096) with one hue per scale (red leans rosier at its pale end so that it keeps off orange; gray is a cool tint) and chroma set per step, fitted into sRGB. The dark ladder is its own, from L 0.43 or 0.45 to 0.905, not an inversion of the light one. The scales are validated with `--ordinal`, whose checks are: lightness monotone, adjacent ΔL at least 0.06, the lightest step at least 2:1 against the surface, and one hue within 40°.
+
+| Scale | Theme | L first to last | Smallest step | Hue spread | Chroma | Lowest label contrast | Labels | Step 1 on the surface |
+|---|---|---|---|---|---|---|---|---|
+| `blue` | light | 0.905 to 0.338 | 0.093 | 4.1° | 0.041 to 0.161 | 5.39:1 | BBBBWWW | 1.32:1 |
+| `blue` | dark | 0.433 to 0.905 | 0.046 | 3.7° | 0.041 to 0.161 | 5.39:1 | WWBBBBB | 2.19:1 |
+| `teal` | light | 0.904 to 0.337 | 0.092 | 1.6° | 0.055 to 0.106 | 5.11:1 | BBBBWWW | 1.30:1 |
+| `teal` | dark | 0.433 to 0.906 | 0.075 | 1.0° | 0.068 to 0.108 | 5.25:1 | WWBBBBB | 2.30:1 |
+| `green` | light | 0.904 to 0.338 | 0.093 | 0.4° | 0.080 to 0.164 | 5.02:1 | BBBBWWW | 1.30:1 |
+| `green` | dark | 0.432 to 0.904 | 0.073 | 0.2° | 0.085 to 0.185 | 5.31:1 | WWBBBBB | 2.33:1 |
+| `orange` | light | 0.904 to 0.340 | 0.093 | 1.6° | 0.052 to 0.152 | 5.19:1 | BBBBWWW | 1.34:1 |
+| `orange` | dark | 0.433 to 0.906 | 0.075 | 0.5° | 0.050 to 0.160 | 4.75:1 | WWBBBBB | 2.14:1 |
+| `red` | light | 0.905 to 0.338 | 0.093 | 12.5° | 0.046 to 0.189 | 4.97:1 | BBBBWWW | 1.35:1 |
+| `red` | dark | 0.452 to 0.905 | 0.068 | 12.5° | 0.046 to 0.193 | 4.93:1 | WWBBBBB | 2.23:1 |
+| `purple` | light | 0.905 to 0.338 | 0.093 | 9.7° | 0.052 to 0.204 | 5.00:1 | BBBBWWW | 1.35:1 |
+| `purple` | dark | 0.452 to 0.905 | 0.068 | 9.2° | 0.048 to 0.197 | 4.97:1 | WWBBBBB | 2.21:1 |
+| `gray` | light | 0.905 to 0.338 | 0.093 | 12.8° | 0.005 to 0.017 | 5.33:1 | BBBBWWW | 1.33:1 |
+| `gray` | dark | 0.452 to 0.905 | 0.068 | 14.4° | 0.005 to 0.016 | 5.37:1 | WWBBBBB | 2.41:1 |
+
+Labels: `B` is near-black `#0b0b0b` and `W` is white, per step 1 to 7; each is the better of the two on its fill, and the pattern is the same on every scale, light `BBBBWWW` and dark `WWBBBBB`, so the existing "flips the label colors" expectation holds for all seven. `gray` is a near-neutral (chroma 0.005 to 0.017), whose hue angle is rounding noise; the one-hue check does not apply to it, and it is held below a chroma of 0.02 instead.
+
+**The validator's ordinal run, as printed.** Light theme first, then dark, for each scale:
+
+```
+$ node validate_palette.js "#cde2fb,#9ec5f4,#6da7ec,#3987e5,#256abf,#184f95,#0d366b" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [FAIL] Light-end contrast     #cde2fb at 1.32:1 vs surface — below 2:1 floor
+  [PASS] Single hue             hue spread 4°
+  → FAILED — fix the marked checks   (exit 1)
+
+$ node validate_palette.js "#184f95,#256abf,#3987e5,#5598e7,#6da7ec,#9ec5f4,#cde2fb" --mode dark --surface "#101828" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [FAIL] Adjacent ΔL            steps too close: [["#3987e5","#5598e7",0.049],["#5598e7","#6da7ec",0.046]]
+  [PASS] Light-end contrast     #184f95 at 2.19:1 vs surface
+  [PASS] Single hue             hue spread 4°
+  → FAILED — fix the marked checks   (exit 1)
+
+$ node validate_palette.js "#adeee9,#75d5cf,#3fb9b2,#149a95,#0a7b76,#065d59,#05403e" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [FAIL] Light-end contrast     #adeee9 at 1.30:1 vs surface — below 2:1 floor
+  [PASS] Single hue             hue spread 2°
+  → FAILED — fix the marked checks   (exit 1)
+
+$ node validate_palette.js "#095d59,#117772,#1b938d,#2bada7,#4bc5bf,#78dbd5,#abefea" --mode dark --surface "#101828" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #095d59 at 2.30:1 vs surface
+  [PASS] Single hue             hue spread 1°
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#bfeebf,#92d593,#61bb67,#359f41,#1e802c,#12611e,#074411" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [FAIL] Light-end contrast     #bfeebf at 1.30:1 vs surface — below 2:1 floor
+  [PASS] Single hue             hue spread 0°
+  → FAILED — fix the marked checks   (exit 1)
+
+$ node validate_palette.js "#12611e,#197c28,#279936,#38b447,#55cd5f,#82e186,#bdefbd" --mode dark --surface "#101828" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #12611e at 2.33:1 vs surface
+  [PASS] Single hue             hue spread 0°
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#fcd7c0,#f2b185,#e68942,#ca6907,#a15306,#7b3e06,#572a02" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [FAIL] Light-end contrast     #fcd7c0 at 1.34:1 vs surface — below 2:1 floor
+  [PASS] Single hue             hue spread 2°
+  → FAILED — fix the marked checks   (exit 1)
+
+$ node validate_palette.js "#793f0d,#9a5111,#be6517,#e0791f,#fb903c,#fab688,#fbd8c1" --mode dark --surface "#101828" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #793f0d at 2.14:1 vs surface
+  [PASS] Single hue             hue spread 1°
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#fdd4d6,#f7aaaa,#ef7d79,#e24a48,#b93432,#8f2420,#651714" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [FAIL] Light-end contrast     #fdd4d6 at 1.35:1 vs surface — below 2:1 floor
+  [PASS] Single hue             hue spread 12°
+  → FAILED — fix the marked checks   (exit 1)
+
+$ node validate_palette.js "#982622,#bc2e2e,#e34746,#f16c6a,#f49190,#f7b4b4,#fdd4d6" --mode dark --surface "#101828" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #982622 at 2.23:1 vs surface
+  [PASS] Single hue             hue spread 12°
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#e9d7fb,#d0b2f4,#b68bf0,#9d61ea,#8041cc,#602fa0,#421f72" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [FAIL] Light-end contrast     #e9d7fb at 1.35:1 vs surface — below 2:1 floor
+  [PASS] Single hue             hue spread 10°
+  → FAILED — fix the marked checks   (exit 1)
+
+$ node validate_palette.js "#6436a6,#7d45c8,#9a62e9,#ae80f1,#c09ef0,#d4bbf3,#e8d8f9" --mode dark --surface "#101828" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #6436a6 at 2.21:1 vs surface
+  [PASS] Single hue             hue spread 9°
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#dde0e3,#bdc2c8,#9ea4ad,#818791,#646c74,#4b515a,#32383f" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [FAIL] Light-end contrast     #dde0e3 at 1.33:1 vs surface — below 2:1 floor
+  [PASS] Single hue             hue spread 13°
+  → FAILED — fix the marked checks   (exit 1)
+
+$ node validate_palette.js "#51565f,#656b74,#80878f,#959da5,#abb2b9,#c5c8cd,#dde0e3" --mode dark --surface "#101828" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #51565f at 2.41:1 vs surface
+  [PASS] Single hue             hue spread 14°
+  → ALL CHECKS PASS   (exit 0)
+```
+
+**Where the validator and the design disagree, and how it was settled.**
+
+1. *Light-end contrast.* `--ordinal` wants the lightest step at 2:1 against the surface. On the light theme step 1 is 1.30:1 to 1.35:1 for every scale, and the `blue` scale that has shipped all along is 1.32:1: all seven fail this one check and pass the other three. Design D2 and the spec ask for one hue, one direction of lightness with visible steps and labels at 4.5:1, and the sequential tests of `chart-tokens.spec.ts` have always had the low end recede into the surface in both themes: the pale end is meant to recede, as the dataviz palette reference allows for a full-range sequential scale. The design binds, so step 1 was not darkened. To show that nothing else is wrong, steps 3 to 7 of each scale, the way a Likert arm uses a ramp, pass every ordinal check, with the light end at 2.38:1 to 2.67:1:
+
+```
+$ node validate_palette.js "#6da7ec,#3987e5,#256abf,#184f95,#0d366b" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #6da7ec at 2.50:1 vs surface
+  [PASS] Single hue             hue spread 3°
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#3fb9b2,#149a95,#0a7b76,#065d59,#05403e" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #3fb9b2 at 2.39:1 vs surface
+  [PASS] Single hue             hue spread 2°
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#61bb67,#359f41,#1e802c,#12611e,#074411" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #61bb67 at 2.38:1 vs surface
+  [PASS] Single hue             hue spread 0°
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#e68942,#ca6907,#a15306,#7b3e06,#572a02" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #e68942 at 2.62:1 vs surface
+  [PASS] Single hue             hue spread 1°
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#ef7d79,#e24a48,#b93432,#8f2420,#651714" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #ef7d79 at 2.67:1 vs surface
+  [PASS] Single hue             hue spread 4°
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#b68bf0,#9d61ea,#8041cc,#602fa0,#421f72" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #b68bf0 at 2.64:1 vs surface
+  [PASS] Single hue             hue spread 4°
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#9ea4ad,#818791,#646c74,#4b515a,#32383f" --mode light --surface "#ffffff" --ordinal
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #9ea4ad at 2.51:1 vs surface
+  [PASS] Single hue             hue spread 13°
+  → ALL CHECKS PASS   (exit 0)
+```
+
+   On the dark theme the six new scales pass all four checks (step 1 at 2.14:1 to 2.41:1).
+2. *Smallest step.* The validator's ΔL of 0.06 is stricter than the `blue` that ships: its dark ladder reuses light steps and has two gaps of 0.046 and 0.049 (`#3987e5` to `#5598e7` to `#6da7ec`). `blue` is claimed to stay unchanged, so it was not re-stepped. The six new scales keep 0.068 or more in both themes. `chart-tokens.spec.ts` asks 0.06 of the new scales and 0.04 of `blue`.
+3. *Categorical checks do not apply to a ramp.* They fail a correct ramp by design (the ramp spans the lightness band and its pale steps are under the chroma floor), so they were not run on a scale.
+4. *Labels.* No fill with a luminance between 0.1833 and 0.1900 reaches 4.5:1 with either label, so the designers nudged the lightness ladders to leave that window empty (dark step 3 of `red` and `purple` is L 0.620, where 0.600 sits at the crossover); no step of any scale falls in it. The lowest label contrast is 4.75:1 (`orange`, dark, step 3).
+
+**Telling the scales apart.** At the same step, the nearest pair of scales is 3.3 apart in OKLab ×100 (red and orange at step 1 of the light theme and step 7 of the dark one, where every scale converges on the surface); the nearest pair per step is 3.3, 5.8, 7.8, 9.5, 8.2, 6.9 and 5.0 in the light theme and 7.2, 8.2, 9.4, 9.0, 9.0, 5.9 and 3.3 in the dark one. `chart-tokens.spec.ts` asks 3. Under protan and deutan, at their worst step, the closest pairs fall to 0.2 to 1.2 in the light theme (blue and purple 0.2, teal and gray 0.2, green and orange 0.5, green and red 1.1, orange and red 1.2) and 0.4 to 1.3 in the dark one (green and orange 0.4, blue and purple 0.5, teal and gray 1.3): one ladder of lightness with another hue is what a reader who cannot see the hue is left with. A scale is therefore always chosen by its name and its gradient in text (design D9), a widget draws only one scale, and its legend carries the values, so a scale never relies on hue alone.
+
+### What `chart-tokens.spec.ts` keeps
+
+The spec has a `Checks on every palette` block (spec "Palette checks", scenario "Checks on every palette"):
+
+- the tokens are exactly the 4 palettes of 8 colors and the 7 scales of 7 steps and 7 labels, in both themes, and the `--tmz-series-1..8` are gone;
+- every palette and scale holds the hex values above, pinned literally, so `tamiza` and `blue` equal the values validated before this change;
+- per palette and theme: 8 distinct colors, each inside the band and above the chroma floor, neighbors at least 15 apart (OKLab ×100, normal vision), each at least 10 from "Other". The CVD check stays with the validator and its recorded results;
+- per scale and theme: lightness in one direction with steps of at least 0.06 (`blue`: 0.04), one hue within 40° (`gray` instead stays under a chroma of 0.02, its measured maximum being 0.017), step 1 a tint (at least 1.25:1 on white, measured 1.30 to 1.35; at least 2:1 on the dark surface, measured 2.14 to 2.41), and a label of white or near-black at 4.5:1 and at least as good as the other;
+- the scales are at least 3 apart at every step;
+- the `--tmz-seq-n` and `--tmz-seq-ink-n` that a mark reads are the blue scale in both themes;
+- the checks themselves fail on a missing or repeated color, a color off the band, dull, too close to its neighbor or to "Other", steps out of order, a second hue, a gray with a hue, a lost first step and a faint or wrong label.
+
+### Repairs
+
+None. Every palette passed every hard gate in both themes on the first run, every scale passed its checks except the two settled above (the light end on the light theme, and the dark steps of `blue`), and no hex value was changed.
+
+
+### UI checks after the tokens (tasks 7.2 and 7.3)
+
+Run in the same sandbox, with the other groups of this change still in progress in the working tree, so the totals are those of the moment, not final.
+
+| Check | Result |
+|---|---|
+| `chart-tokens.spec.ts` | 77 tests pass: the Likert tests as they were, and the `Checks on every palette` block (the tokens, each of the 4 palettes and 7 scales in both themes, the scales together, and the checks failing on a broken color) |
+| `translations.spec.ts` | passes with the new `colors.palettes`, `colors.scales` and `colors.hues` keys in `en.json` and `es.json` (4 palette names, 7 scale names, 32 hue names each) |
+| `map-styles.spec.ts`, `print-styles.spec.ts` | pass: the `.tmz-map` rules are untouched and still read `--tmz-seq-n` |
+| UI, whole suite (`npm test -- --watch=false`) | 101 files, 2,392 tests passed. One unhandled error, `Cannot read properties of undefined (reading 'total')` in `ProjectPerformance`, raised during `project-indicators.spec.ts`: it was there before this change (baseline: 99 files, 2,256 tests, the same error) and still makes the exit code 1 |
+| `ng build` | succeeds. The initial bundle is 657.47 kB against a warning budget of 650 kB (error budget 1 MB): the change before this one ended at 649.56 kB. All of the 7.9 kB comes from `styles.css`: the tokens of the built CSS went from about 1 kB to 8.8 kB (244 more custom properties, 3.7 kB of them the labels on the scale steps) |
+| `npm run check:safety` | clean |
+
+`--tmz-series-1..8` no longer exist in `styles.css`. Until group 10 moves `chart-scales.ts` (`seriesColor`) and `series-legend.ts` to `chart-colors.ts`, a series is drawn in `var(--tmz-series-n)`, which resolves to nothing: the specs of those files only read the string.
