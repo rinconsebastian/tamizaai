@@ -155,5 +155,5 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
   Check it at 390 and 1,280 pixels with a keyboard pass, and record the results in the design.
 - [x] 14.2 Print the dashboard on A4 with background graphics off: every palette color, kept color and scale on paper.
 - [x] 14.3 From an MCP client, set a palette and a kept color with `update_dashboard`, create a map with a scale, and read them back with `get_dashboard`.
-- [ ] 14.4 Run `npm run check:safety` in `tamiza-ui/` and both full suites.
+- [x] 14.4 Run `npm run check:safety` in `tamiza-ui/` and both full suites.
 - [x] 14.5 Write "Deviations from the plan" and "Verification Results" in the design, update `docs/tamiza-brief.md` (data model and roadmap: `add-widget-display-options` next), and run `openspec validate add-dashboard-palettes --strict`.
