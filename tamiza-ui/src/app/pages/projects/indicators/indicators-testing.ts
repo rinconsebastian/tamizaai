@@ -9,6 +9,7 @@ import {
   IndicatorColumns,
   IndicatorEntry,
   IndicatorsOverview,
+  Layout,
   QueryResult,
   QueryRow,
   QuerySeries,
@@ -42,6 +43,18 @@ export const isQuery = (r: { url: string; method: string }) => r.method === 'POS
 export const isDashboardValues = (r: { url: string; method: string }) => r.method === 'GET' && /^\/api\/v1\/projects\/[^/]+\/dashboards\/[^/]+\/values$/.test(r.url);
 /** A change to a widget, on whichever dashboard of the project it is. */
 export const isPatch = (r: { url: string; method: string }) => r.method === 'PATCH' && /^\/api\/v1\/projects\/[^/]+\/dashboards\/[^/]+\/widgets\/[^/]+$/.test(r.url);
+/** Where a dashboard saves the places of several widgets at once (add-dashboard-versions, design D8). */
+export const layoutUrlOf = (id: string) => `${dashboardUrlOf(id)}/layout`;
+/** A layout save, on whichever dashboard of the project it is: one request for a drag and the widgets it pushed. */
+export const isLayout = (r: { url: string; method: string }) => r.method === 'PUT' && /^\/api\/v1\/projects\/[^/]+\/dashboards\/[^/]+\/layout$/.test(r.url);
+/** The widgets and places a layout save sends, by widget. */
+export const layoutsOf = (request: TestRequest) =>
+  Object.fromEntries((request.request.body as { widgets: { id: string; layout: Layout }[] }).widgets.map((w) => [w.id, w.layout]));
+/** Answers a layout save as the API does: the widgets it saved, with their new places. */
+export function flushLayout(request: TestRequest, widgets: Widget[]): void {
+  const places = layoutsOf(request);
+  request.flush(widgets.filter((w) => w.id in places).map((w) => ({ ...w, layout: places[w.id] })));
+}
 
 export const downloader = { start: vi.fn() };
 
@@ -96,9 +109,9 @@ export function overview(overrides: Partial<IndicatorsOverview> = {}): Indicator
   };
 }
 
-/** The dashboard "Indicators" with these widgets. */
+/** The dashboard "Indicators" with these widgets, at its version 1. */
 export function dashboard(widgets: Widget[], overrides: Partial<Dashboard> = {}): Dashboard {
-  return { id: dashboardId, name: 'Indicators', filters: [], widgets, ...overrides };
+  return { id: dashboardId, name: 'Indicators', filters: [], widgets, version: 1, ...overrides };
 }
 
 export function catalog(overrides: Partial<IndicatorColumns> = {}): IndicatorColumns {

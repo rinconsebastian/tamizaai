@@ -163,7 +163,8 @@
         "notFound": "The dashboard no longer exists.",
         "limit": "A project can have at most 7 dashboards. Remove one before adding another.",
         "lastOne": "A project needs at least one dashboard.",
-        "orderChanged": "The project’s dashboards have changed. Reload and try again."
+        "orderChanged": "The project’s dashboards have changed. Reload and try again.",
+        "versionNotFound": "That version is no longer kept."
       },
       "accountEmail": {
         "disabled": "Account emails are not available on this installation.",
@@ -1836,7 +1837,8 @@
       "moveRight": "Move right",
       "remove": "Remove",
       "filters": "Filters",
-      "report": "Scheduled email…"
+      "report": "Scheduled email…",
+      "versions": "Version history"
     },
     "unavailable": {
       "limit": "A project can have at most {{ max }} dashboards.",
@@ -1929,8 +1931,53 @@
       "printedAt": "Printed {{ time }} ({{ zone }})",
       "publishedAt": "Data published {{ time }}",
       "notPublished": "The data has not been published yet.",
+      "version": "Version {{ number }}, saved by {{ author }} on {{ time }}",
+      "versionTitle": "{{ name }} (version {{ number }})",
       "columnsLeftOut": "{{ count }} columns not printed.",
       "columnsLeftOutOne": "1 column not printed."
+    },
+    "versions": {
+      "title": "Version history of {{ name }}",
+      "intro": "Every change saved to this dashboard makes a version. The {{ count }} newest are kept, the current one included.",
+      "close": "Close",
+      "loading": "Reading the versions…",
+      "empty": "No versions recorded yet. The next change saved to this dashboard makes its first version.",
+      "number": "Version {{ number }}",
+      "current": "Current",
+      "note": "“{{ note }}”",
+      "viaMcp": "via MCP",
+      "more": "and {{ count }} more",
+      "view": "View",
+      "viewLabel": "View version {{ number }}",
+      "restore": "Restore",
+      "restoreLabel": "Restore version {{ number }}",
+      "changes": {
+        "initial": "State before version history",
+        "created": "Dashboard added",
+        "duplicated": "Duplicated from “{{ dashboard }}”",
+        "renamed": "Renamed to “{{ dashboard }}”",
+        "filtersChanged": "Filters changed",
+        "widgetAdded": "Widget “{{ widget }}” added",
+        "widgetChanged": "Widget “{{ widget }}” changed",
+        "widgetRemoved": "Widget “{{ widget }}” removed",
+        "widgetMovedOut": "Widget “{{ widget }}” moved to “{{ dashboard }}”",
+        "widgetMovedIn": "Widget “{{ widget }}” moved here from “{{ dashboard }}”",
+        "layoutChanged": "Widgets moved or resized",
+        "restored": "Version {{ number }} restored",
+        "unrecorded": "Changes kept before a restore"
+      },
+      "viewing": "Viewing version {{ number }}, saved by {{ author }} on {{ time }}. It is read-only.",
+      "backToCurrent": "Back to the current version",
+      "noWidgets": "No widgets in this version",
+      "confirm": {
+        "title": "Restore version {{ number }}?",
+        "message": "The name, filters and widgets of “{{ name }}” go back to how they were on {{ time }}. The current state stays in the history.",
+        "action": "Restore"
+      },
+      "restored": "Restored version {{ number }} as version {{ version }}.",
+      "nameKept": "It keeps the name “{{ current }}”, since another dashboard is named “{{ name }}”.",
+      "copy": "“{{ title }}” came back as a copy: the original is still on “{{ dashboard }}”.",
+      "unchanged": "“{{ name }}” already is as in version {{ number }}."
     }
   },
   "dashboardFilters": {

@@ -560,6 +560,29 @@ public sealed class ProjectsApiTests(PostgresFixture postgres) : IDisposable
         Assert.Equal(0, opened.GetProperty("widgets").GetArrayLength());
     }
 
+    // Dashboards: New dashboard (dashboard-versions)
+
+    [Fact]
+    public async Task A_new_projects_dashboard_has_version_1_added_by_the_projects_creator_when_the_project_was()
+    {
+        var (factory, db) = await FactoryAsync();
+        await using var owner = factory;
+        using var client = TestData.ClientFor(factory, "ada", "ada@example.org");
+
+        var created = (await CreateProjectAsync(client)).GetProperty("project");
+
+        var dashboard = Assert.Single(Dashboards(created));
+        Assert.Equal(
+            $$"""{{dashboard.Id}}|1|{"name": "Indicators", "filters": [], "widgets": []}|[{"kind": "created"}]|0|app|t|t|t""",
+            await TestData.ScalarAsync<string>(db,
+                """
+                SELECT string_agg(concat_ws('|', v.dashboard_id, v.number, v.content, v.changes, v.more_changes, v.origin,
+                                            v.note IS NULL AND v.restored_from IS NULL, v.author_id = p.created_by,
+                                            v.created_at = p.created_at AND v.saved_at = p.created_at), ',')
+                FROM tamiza.dashboard_versions AS v JOIN tamiza.projects AS p ON p.id = v.project_id
+                """));
+    }
+
     [Fact]
     public async Task The_details_list_the_dashboards_in_their_order_to_every_member_including_a_viewer()
     {

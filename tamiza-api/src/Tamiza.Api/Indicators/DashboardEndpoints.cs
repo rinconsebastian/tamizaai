@@ -16,7 +16,9 @@ namespace Tamiza.Api.Indicators;
 /// A project's own dashboards, 1 to <see cref="IndicatorDashboardOptions.MaxDashboards"/> in an order, each a canvas of widgets over the
 /// tables the indicator scripts published (design D4). A route with a <c>dashboardId</c> answers 404 <see cref="NotFoundCode"/> when the
 /// project has no such dashboard, whatever else it names. Every change to the project's set or order of dashboards, or to the number
-/// of widgets of one of them, runs under one lock per project (design D3).
+/// of widgets of one of them, runs under one lock per project (design D3). Each handler that changes a dashboard notes what it changed
+/// once its write has committed, and the route group records a version of each dashboard changed once the handler has run (design D3
+/// and D12 of dashboard versions). The group also lists, reads and restores a dashboard's versions (<see cref="DashboardVersionEndpoints"/>).
 /// </summary>
 public static class DashboardEndpoints
 {
@@ -24,6 +26,9 @@ public static class DashboardEndpoints
     public const string LimitCode = "dashboards.limit";
     public const string LastOneCode = "dashboards.lastOne";
     public const string OrderChangedCode = "dashboards.orderChanged";
+
+    /// <summary>The dashboard does not keep the version asked for: it was never recorded, or newer ones pushed it out (design D6 of dashboard versions).</summary>
+    public const string VersionNotFoundCode = "dashboards.versionNotFound";
 
     /// <summary>The name of the dashboard every project starts with, as the migration gave the projects that existed before (design D7).</summary>
     public const string FirstName = "Indicators";
@@ -38,7 +43,8 @@ public static class DashboardEndpoints
 
     public static RouteGroupBuilder MapDashboardEndpoints(this RouteGroupBuilder api)
     {
-        var dashboards = api.MapGroup("/projects/{projectId:guid}/dashboards").WithTags("Dashboards");
+        var dashboards = api.MapGroup("/projects/{projectId:guid}/dashboards").WithTags("Dashboards")
+            .AddEndpointFilter<RecordDashboardVersions>();
         dashboards.MapPost("", AddAsync).RequireProjectRole(ProjectRole.Analyst).WithName("AddDashboard");
         // "order" never reads as a dashboard: the id segments only match a guid.
         dashboards.MapPut("/order", ReorderAsync).RequireProjectRole(ProjectRole.Analyst).WithName("ReorderDashboards");
@@ -54,12 +60,27 @@ public static class DashboardEndpoints
             .RequireProjectRole(ProjectRole.Analyst).WithName("UpdateDashboardWidget");
         dashboards.MapDelete("/{dashboardId:guid}/widgets/{widgetId:guid}", DeleteWidgetAsync)
             .RequireProjectRole(ProjectRole.Analyst).WithName("DeleteDashboardWidget");
+        dashboards.MapPut("/{dashboardId:guid}/layout", SaveLayoutAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveDashboardLayout");
+        // Versions hold no rows, but only those who change a dashboard read or restore them (design D9 of dashboard versions).
+        dashboards.MapGet("/{dashboardId:guid}/versions", DashboardVersionEndpoints.ListAsync)
+            .RequireProjectRole(ProjectRole.Analyst).WithName("ListDashboardVersions");
+        dashboards.MapGet("/{dashboardId:guid}/versions/{number:int}", DashboardVersionEndpoints.GetAsync)
+            .RequireProjectRole(ProjectRole.Analyst).WithName("GetDashboardVersion");
+        dashboards.MapPost("/{dashboardId:guid}/versions/{number:int}/restore", DashboardVersionEndpoints.RestoreAsync)
+            .RequireProjectRole(ProjectRole.Analyst).WithName("RestoreDashboardVersion");
         return api;
     }
 
-    /// <summary>The dashboard's name, its filters and its widgets in reading order, listed whether or not their indicator is published.</summary>
+    /// <summary>
+    /// The dashboard's name, its filters and its widgets in reading order, listed whether or not their indicator is published, and the
+    /// number of its current version.
+    /// </summary>
     internal static async Task<Results<Ok<DashboardView>, ProblemHttpResult>> GetDashboardAsync(
-        Guid projectId, Guid dashboardId, TamizaDbContext db, CancellationToken ct)
+        Guid projectId, Guid dashboardId, TamizaDbContext db, CancellationToken ct) =>
+        await ViewAsync(db, projectId, dashboardId, ct) is { } view ? TypedResults.Ok(view) : DashboardNotFound();
+
+    /// <summary>The dashboard as <see cref="GetDashboardAsync"/> answers it; null when the project has no such dashboard.</summary>
+    internal static async Task<DashboardView?> ViewAsync(TamizaDbContext db, Guid projectId, Guid dashboardId, CancellationToken ct)
     {
         var dashboard = await db.Dashboards.AsNoTracking()
             .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
@@ -67,11 +88,12 @@ public static class DashboardEndpoints
             .SingleOrDefaultAsync(ct);
         if (dashboard is null)
         {
-            return DashboardNotFound();
+            return null;
         }
 
         var widgets = await ReadWidgetsAsync(db, dashboardId, ct);
-        return TypedResults.Ok(new DashboardView(dashboardId, dashboard.Name, ReadFilters(dashboard.Filters), widgets));
+        var version = await DashboardVersions.CurrentAsync(db, projectId, dashboardId, ct);
+        return new DashboardView(dashboardId, dashboard.Name, ReadFilters(dashboard.Filters), widgets, version);
     }
 
     /// <summary>A dashboard's widgets in reading order: top to bottom, then left to right, then the older first.</summary>
@@ -84,10 +106,13 @@ public static class DashboardEndpoints
 
     /// <summary>
     /// The most frequent values of a text column across the indicator tables of the dashboard's widgets, optionally only those that
-    /// contain <c>search</c>, for a text filter (design D5). Empty when no table has the column as text.
+    /// contain <c>search</c>, for a text filter (design D5). Empty when no table has the column as text. The page showing a version of
+    /// the dashboard names the indicators of that version's widgets in <c>indicator</c>, since the dashboard's own widgets may be others
+    /// now (design D11 of dashboard versions): any of the project's indicators, which a viewer can already query one by one.
     /// </summary>
     private static async Task<Results<Ok<DataValueList>, ValidationProblem, ProblemHttpResult>> GetValuesAsync(
-        Guid projectId, Guid dashboardId, string? column, string? search, IndicatorDashboard indicators, TamizaDbContext db, CancellationToken ct)
+        Guid projectId, Guid dashboardId, string? column, string? search, string[]? indicator, IndicatorDashboard indicators, TamizaDbContext db,
+        IOptions<IndicatorDashboardOptions> options, CancellationToken ct)
     {
         if (!await DashboardExistsAsync(db, projectId, dashboardId, ct))
         {
@@ -104,9 +129,36 @@ public static class DashboardEndpoints
             return Problems.Validation("search", $"The search text is longer than {DataQueryBuilder.MaxTextLength} characters.");
         }
 
-        var configs = await db.DashboardWidgets.AsNoTracking().Where(w => w.DashboardId == dashboardId).ToListAsync(ct);
-        // Saved configs name valid indicators; the check keeps it so whatever a stored row holds.
-        var names = configs.Select(w => ReadConfig(w).Indicator).Where(Pipeline.ColumnNames.IsValidTableName).Distinct(StringComparer.Ordinal).ToList();
+        List<string> names;
+        if (indicator is { Length: > 0 })
+        {
+            // At most as many as a dashboard holds widgets, since each is a table to read, each a name a script can publish, once each.
+            // They are looked up in this project's schema only, as the widgets' indicators are.
+            var max = options.Value.MaxWidgetsPerDashboard;
+            if (indicator.Length > max)
+            {
+                return Problems.Validation("indicator", $"Name at most {max} indicators.");
+            }
+
+            if (!indicator.All(Pipeline.ColumnNames.IsValidTableName))
+            {
+                return Problems.Validation("indicator", "Each indicator must be a published indicator's name.");
+            }
+
+            if (indicator.Distinct(StringComparer.Ordinal).Count() < indicator.Length)
+            {
+                return Problems.Validation("indicator", "Name each indicator once.");
+            }
+
+            names = [.. indicator];
+        }
+        else
+        {
+            var configs = await db.DashboardWidgets.AsNoTracking().Where(w => w.DashboardId == dashboardId).ToListAsync(ct);
+            // Saved configs name valid indicators; the check keeps it so whatever a stored row holds.
+            names = configs.Select(w => ReadConfig(w).Indicator).Where(Pipeline.ColumnNames.IsValidTableName).Distinct(StringComparer.Ordinal).ToList();
+        }
+
         try
         {
             return TypedResults.Ok(new DataValueList(await indicators.ValuesAsync(projectId, names, column!, search, ct)));
@@ -119,13 +171,18 @@ public static class DashboardEndpoints
 
     /// <summary>
     /// Replaces the dashboard's filters with the list sent, in its order (design D4). No lock: the last save wins. A dashboard removed
-    /// since the check updates no row.
+    /// since the check updates no row. A list equal to the stored one, as the API reads it, is not written again, so the dashboard keeps
+    /// its stored JSON and makes no version (design D12).
     /// </summary>
     internal static async Task<Results<Ok<DashboardFilterList>, ValidationProblem, ProblemHttpResult>> SaveFiltersAsync(
-        Guid projectId, Guid dashboardId, DashboardFiltersRequest? request, TamizaDbContext db, ICurrentUser user, TimeProvider time,
-        CancellationToken ct)
+        Guid projectId, Guid dashboardId, DashboardFiltersRequest? request, TamizaDbContext db, DashboardVersions versions, ICurrentUser user,
+        TimeProvider time, CancellationToken ct)
     {
-        if (!await DashboardExistsAsync(db, projectId, dashboardId, ct))
+        var stored = await db.Dashboards.AsNoTracking()
+            .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
+            .Select(d => d.Filters)
+            .SingleOrDefaultAsync(ct);
+        if (stored is null)
         {
             return DashboardNotFound();
         }
@@ -138,6 +195,11 @@ public static class DashboardEndpoints
         }
 
         var json = JsonSerializer.Serialize(filters, Json);
+        if (json == JsonSerializer.Serialize(ReadFilters(stored), Json))
+        {
+            return TypedResults.Ok(new DashboardFilterList(filters));
+        }
+
         var now = Now(time);
         var updated = await db.Dashboards
             .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
@@ -145,12 +207,19 @@ public static class DashboardEndpoints
                 .SetProperty(d => d.Filters, json)
                 .SetProperty(d => d.UpdatedBy, user.Id)
                 .SetProperty(d => d.UpdatedAt, now), ct);
-        return updated == 0 ? DashboardNotFound() : TypedResults.Ok(new DashboardFilterList(filters));
+        if (updated == 0)
+        {
+            return DashboardNotFound();
+        }
+
+        versions.Note(projectId, dashboardId, new DashboardChange(DashboardChangeKinds.FiltersChanged));
+        return TypedResults.Ok(new DashboardFilterList(filters));
     }
 
     /// <summary>Adds a dashboard with no widgets after the project's others.</summary>
     internal static async Task<Results<Created<DashboardEntry>, ValidationProblem, ProblemHttpResult>> AddAsync(
-        Guid projectId, DashboardNameRequest? request, TamizaDbContext db, ICurrentUser user, TimeProvider time, CancellationToken ct)
+        Guid projectId, DashboardNameRequest? request, TamizaDbContext db, DashboardVersions versions, ICurrentUser user, TimeProvider time,
+        CancellationToken ct)
     {
         var (name, error) = DashboardValidation.Name(request?.Name);
         if (error is not null)
@@ -181,13 +250,14 @@ public static class DashboardEndpoints
             return raced;
         }
 
+        versions.Note(projectId, dashboard.Id, new DashboardChange(DashboardChangeKinds.Created));
         return TypedResults.Created($"/api/v1/projects/{projectId}/dashboards/{dashboard.Id}", ToEntry(dashboard));
     }
 
     /// <summary>Renames the dashboard. Its widgets, its place and its address stay the same.</summary>
     internal static async Task<Results<Ok<DashboardEntry>, ValidationProblem, ProblemHttpResult>> RenameAsync(
-        Guid projectId, Guid dashboardId, DashboardNameRequest? request, TamizaDbContext db, ICurrentUser user, TimeProvider time,
-        CancellationToken ct)
+        Guid projectId, Guid dashboardId, DashboardNameRequest? request, TamizaDbContext db, DashboardVersions versions, ICurrentUser user,
+        TimeProvider time, CancellationToken ct)
     {
         if (!await DashboardExistsAsync(db, projectId, dashboardId, ct))
         {
@@ -206,14 +276,17 @@ public static class DashboardEndpoints
             return taken;
         }
 
-        // No lock: the last rename wins. A dashboard removed since the check updates no row (design D3).
+        // No lock: the last rename wins. A dashboard removed since the check updates no row (design D3). Nor does the name it already
+        // has, compared in the update so no other rename slips in between: the dashboard keeps who changed it last and when, and no
+        // change is noted, so a request of an AI client that grows a version adds no rename to it (design D12 of dashboard versions).
+        // The comparison is ordinal, so a change of case is a rename.
         var normalized = DashboardValidation.Normalize(name!);
         var now = Now(time);
         int updated;
         try
         {
             updated = await db.Dashboards
-                .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
+                .Where(d => d.Id == dashboardId && d.ProjectId == projectId && d.Name != name)
                 .ExecuteUpdateAsync(set => set
                     .SetProperty(d => d.Name, name!)
                     .SetProperty(d => d.NormalizedName, normalized)
@@ -225,7 +298,13 @@ public static class DashboardEndpoints
             return await NameTakenAsync(db, projectId, name!, except: dashboardId, ct) ?? NameTaken(name!);
         }
 
-        return updated == 0 ? DashboardNotFound() : TypedResults.Ok(new DashboardEntry(dashboardId, name!));
+        if (updated == 0)
+        {
+            return await DashboardExistsAsync(db, projectId, dashboardId, ct) ? TypedResults.Ok(new DashboardEntry(dashboardId, name!)) : DashboardNotFound();
+        }
+
+        versions.Note(projectId, dashboardId, new DashboardChange(DashboardChangeKinds.Renamed, Dashboard: name));
+        return TypedResults.Ok(new DashboardEntry(dashboardId, name!));
     }
 
     /// <summary>Removes the dashboard with its widgets. The project's only dashboard stays.</summary>
@@ -293,7 +372,7 @@ public static class DashboardEndpoints
     /// query and layout, a new id, and the caller as their author. Later changes to one leave the other as it is.
     /// </summary>
     internal static async Task<Results<Created<DashboardEntry>, ValidationProblem, ProblemHttpResult>> DuplicateAsync(
-        Guid projectId, Guid dashboardId, DashboardNameRequest? request, TamizaDbContext db, ICurrentUser user,
+        Guid projectId, Guid dashboardId, DashboardNameRequest? request, TamizaDbContext db, DashboardVersions versions, ICurrentUser user,
         IOptions<IndicatorDashboardOptions> options, TimeProvider time, CancellationToken ct)
     {
         if (!await DashboardExistsAsync(db, projectId, dashboardId, ct))
@@ -364,13 +443,15 @@ public static class DashboardEndpoints
             return raced;
         }
 
+        // The copy starts its own history; the original's versions stay with it (design D12).
+        versions.Note(projectId, copy.Id, new DashboardChange(DashboardChangeKinds.Duplicated, Dashboard: dashboards[source].Name));
         return TypedResults.Created($"/api/v1/projects/{projectId}/dashboards/{copy.Id}", ToEntry(copy));
     }
 
     /// <summary>Adds a widget to the dashboard. Without a layout it is placed under that dashboard's widgets.</summary>
     internal static async Task<Results<Created<Widget>, ValidationProblem, ProblemHttpResult>> CreateWidgetAsync(
-        Guid projectId, Guid dashboardId, CreateWidgetRequest? request, IndicatorDashboard indicators, TamizaDbContext db, ICurrentUser user,
-        IOptions<IndicatorDashboardOptions> options, TimeProvider time, CancellationToken ct)
+        Guid projectId, Guid dashboardId, CreateWidgetRequest? request, IndicatorDashboard indicators, TamizaDbContext db,
+        DashboardVersions versions, ICurrentUser user, IOptions<IndicatorDashboardOptions> options, TimeProvider time, CancellationToken ct)
     {
         if (!await DashboardExistsAsync(db, projectId, dashboardId, ct))
         {
@@ -434,16 +515,19 @@ public static class DashboardEndpoints
         db.DashboardWidgets.Add(widget);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+        versions.Note(projectId, dashboardId, new DashboardChange(DashboardChangeKinds.WidgetAdded, Widget: widget.Title));
         return TypedResults.Created($"/api/v1/projects/{projectId}/dashboards/{dashboardId}/widgets/{widget.Id}", ToWidget(widget));
     }
 
     /// <summary>
     /// Changes any of a widget's title, chart type, query and layout, or moves it to another dashboard of the project. A move or a
-    /// rename leaves the query as it is, even if the table no longer has what it names.
+    /// rename leaves the query as it is, even if the table no longer has what it names. Only what differs from what is stored, as the
+    /// API reads it, is written: a form saved unchanged writes nothing, and a config saved before later fields existed does not gain
+    /// them, so the dashboard makes no version (design D2, D12).
     /// </summary>
     internal static async Task<Results<Ok<Widget>, ValidationProblem, ProblemHttpResult>> UpdateWidgetAsync(
         Guid projectId, Guid dashboardId, Guid widgetId, UpdateWidgetRequest? request, IndicatorDashboard indicators, TamizaDbContext db,
-        ICurrentUser user, IOptions<IndicatorDashboardOptions> options, TimeProvider time, CancellationToken ct)
+        DashboardVersions versions, ICurrentUser user, IOptions<IndicatorDashboardOptions> options, TimeProvider time, CancellationToken ct)
     {
         var widget = await db.DashboardWidgets.SingleOrDefaultAsync(
             w => w.Id == widgetId && w.ProjectId == projectId && w.DashboardId == dashboardId, ct);
@@ -498,6 +582,8 @@ public static class DashboardEndpoints
         // are read again: a widget moved or removed meanwhile is not found, and the target cannot be removed or filled as it lands
         // (design D3, D9). Any other change takes no lock.
         await using var transaction = target is null ? null : await db.Database.BeginTransactionAsync(ct);
+        // The names of the two dashboards of a move, for what each one's version says changed.
+        (string From, string To)? moved = null;
         if (target is { } destination)
         {
             await LockProjectAsync(db, projectId, ct);
@@ -507,7 +593,10 @@ public static class DashboardEndpoints
                 return await NotFoundAsync(db, projectId, dashboardId, ct);
             }
 
-            if (!await DashboardExistsAsync(db, projectId, destination, ct))
+            var names = await db.Dashboards.AsNoTracking()
+                .Where(d => d.ProjectId == projectId && (d.Id == dashboardId || d.Id == destination))
+                .ToDictionaryAsync(d => d.Id, d => d.Name, ct);
+            if (!names.ContainsKey(destination))
             {
                 return Problems.Validation("dashboardId", MissingTargetMessage);
             }
@@ -535,13 +624,43 @@ public static class DashboardEndpoints
             // A moved widget keeps the size it has, under the destination's lowest widget.
             var size = ReadLayout(widget.Layout);
             layout = PlaceBelow(existing.Select(ReadLayout), size.W, size.H);
-            widget.DashboardId = destination;
+            moved = (names[dashboardId], names[destination]);
         }
 
+        // Compared as the API reads them, so a config stored before later fields existed keeps its stored text when saved unchanged.
+        var configJson = JsonSerializer.Serialize(config, Json);
+        var layoutJson = JsonSerializer.Serialize(layout, Json);
+        var configDiffers = configJson != JsonSerializer.Serialize(ReadConfig(widget), Json);
+        var layoutDiffers = layoutJson != JsonSerializer.Serialize(ReadLayout(widget.Layout), Json);
+        var widgetDiffers = title != widget.Title || chartType != widget.ChartType || configDiffers;
+        if (moved is null && !widgetDiffers && !layoutDiffers)
+        {
+            return TypedResults.Ok(ToWidget(widget));
+        }
+
+        widget.DashboardId = target ?? widget.DashboardId;
         widget.Title = title;
         widget.ChartType = chartType;
-        widget.Config = JsonSerializer.Serialize(config, Json);
-        widget.Layout = JsonSerializer.Serialize(layout, Json);
+        if (configDiffers)
+        {
+            widget.Config = configJson;
+        }
+
+        // A request that sent the chart type or the query writes both, as the pair checked above, even the one equal to what was read.
+        // A change that stays on its dashboard takes no lock, so a restore or another member may save the widget between the read and
+        // this write, which waits for it: writing only the column that differs would pair it with one never checked against it (design
+        // D7, D12). A config left as it was keeps its stored text.
+        if (configChanged)
+        {
+            db.Entry(widget).Property(w => w.ChartType).IsModified = true;
+            db.Entry(widget).Property(w => w.Config).IsModified = true;
+        }
+
+        if (layoutDiffers)
+        {
+            widget.Layout = layoutJson;
+        }
+
         widget.UpdatedBy = user.Id;
         widget.UpdatedAt = Now(time);
         try
@@ -559,29 +678,151 @@ public static class DashboardEndpoints
             await transaction.CommitAsync(ct);
         }
 
+        if (moved is { } move)
+        {
+            // One version on each dashboard, each saying where the widget went or came from (design D12).
+            versions.Note(projectId, dashboardId, new DashboardChange(DashboardChangeKinds.WidgetMovedOut, Widget: title, Dashboard: move.To));
+            versions.Note(projectId, widget.DashboardId, new DashboardChange(DashboardChangeKinds.WidgetMovedIn, Widget: title, Dashboard: move.From));
+        }
+        else
+        {
+            versions.Note(projectId, dashboardId, widgetDiffers
+                ? new DashboardChange(DashboardChangeKinds.WidgetChanged, Widget: title)
+                : new DashboardChange(DashboardChangeKinds.LayoutChanged));
+        }
+
         return TypedResults.Ok(ToWidget(widget));
     }
 
+    /// <summary>Removes the widget, reading its title as it goes for what the dashboard's version says changed (design D12).</summary>
     internal static async Task<Results<NoContent, ProblemHttpResult>> DeleteWidgetAsync(
-        Guid projectId, Guid dashboardId, Guid widgetId, TamizaDbContext db, CancellationToken ct)
+        Guid projectId, Guid dashboardId, Guid widgetId, TamizaDbContext db, DashboardVersions versions, CancellationToken ct)
     {
-        var deleted = await db.DashboardWidgets
-            .Where(w => w.Id == widgetId && w.ProjectId == projectId && w.DashboardId == dashboardId)
-            .ExecuteDeleteAsync(ct);
-        return deleted == 0 ? await NotFoundAsync(db, projectId, dashboardId, ct) : TypedResults.NoContent();
+        // Run as written: PostgreSQL cannot read a DELETE ... RETURNING as a subquery, so nothing may be composed on it.
+        var titles = await db.Database.SqlQuery<string>($"""
+            DELETE FROM tamiza.dashboard_widgets
+            WHERE id = {widgetId} AND project_id = {projectId} AND dashboard_id = {dashboardId}
+            RETURNING title AS "Value"
+            """).ToListAsync(ct);
+        if (titles.Count == 0)
+        {
+            return await NotFoundAsync(db, projectId, dashboardId, ct);
+        }
+
+        versions.Note(projectId, dashboardId, new DashboardChange(DashboardChangeKinds.WidgetRemoved, Widget: titles[0]));
+        return TypedResults.NoContent();
+    }
+
+    /// <summary>
+    /// Saves the position and size of several widgets of the dashboard at once, as one drag that pushes other widgets leaves them (design
+    /// D8 of dashboard versions): one transaction and one version of the dashboard. Each layout is checked as the widget's PATCH checks
+    /// it, and only those that differ from what is stored are written, so a drag that ends where it began makes no version. A widget the
+    /// dashboard does not hold answers as its PATCH would, and nothing is saved. The widgets are answered in the order sent.
+    /// </summary>
+    internal static async Task<Results<Ok<List<Widget>>, ValidationProblem, ProblemHttpResult>> SaveLayoutAsync(
+        Guid projectId, Guid dashboardId, DashboardLayoutRequest? request, TamizaDbContext db, DashboardVersions versions, ICurrentUser user,
+        IOptions<IndicatorDashboardOptions> options, TimeProvider time, CancellationToken ct)
+    {
+        if (!await DashboardExistsAsync(db, projectId, dashboardId, ct))
+        {
+            return DashboardNotFound();
+        }
+
+        var max = options.Value.MaxWidgetsPerDashboard;
+        if (request?.Widgets is not { Count: > 0 } items || items.Count > max)
+        {
+            return Problems.Validation("widgets", $"Send the layout of 1 to {max} widgets.");
+        }
+
+        var errors = new FieldErrors();
+        var ids = new List<Guid>();
+        for (var i = 0; i < items.Count; i++)
+        {
+            var field = $"widgets[{i}]";
+            if (items[i] is not { } item)
+            {
+                errors.Add(field, "An entry needs a widget's id and its layout.");
+                continue;
+            }
+
+            if (item.Id is not { } id)
+            {
+                errors.Add(field + ".id", "The widget's id is required.");
+            }
+            else if (ids.Contains(id))
+            {
+                errors.Add(field + ".id", "The widget is listed more than once.");
+            }
+            else
+            {
+                ids.Add(id);
+            }
+
+            IndicatorValidation.CheckLayout(item.Layout, errors, field + ".");
+        }
+
+        if (errors.Any)
+        {
+            return Problems.Validation(errors.ToDictionary());
+        }
+
+        // Under the lock no widget can move to another dashboard between the read and the save, as a move reads its widget again under
+        // it (design D3); a widget removed meanwhile, which takes no lock, makes the save update no row.
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await LockProjectAsync(db, projectId, ct);
+        var widgets = await db.DashboardWidgets
+            .Where(w => w.ProjectId == projectId && w.DashboardId == dashboardId && ids.Contains(w.Id))
+            .ToDictionaryAsync(w => w.Id, ct);
+        if (widgets.Count < ids.Count)
+        {
+            return await NotFoundAsync(db, projectId, dashboardId, ct);
+        }
+
+        var now = Now(time);
+        var changed = false;
+        foreach (var item in items)
+        {
+            var widget = widgets[item!.Id!.Value];
+            // Compared as the API reads it, as the PATCH compares a layout (design D12 of dashboard versions).
+            var json = JsonSerializer.Serialize(item.Layout, Json);
+            if (json != JsonSerializer.Serialize(ReadLayout(widget.Layout), Json))
+            {
+                widget.Layout = json;
+                widget.UpdatedBy = user.Id;
+                widget.UpdatedAt = now;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return await NotFoundAsync(db, projectId, dashboardId, ct);
+            }
+
+            await transaction.CommitAsync(ct);
+            versions.Note(projectId, dashboardId, new DashboardChange(DashboardChangeKinds.LayoutChanged));
+        }
+
+        return TypedResults.Ok(items.Select(item => ToWidget(widgets[item!.Id!.Value])).ToList());
     }
 
     /// <summary>
     /// Serializes, until the transaction ends, every change to the project's set or order of dashboards and to the number of widgets
-    /// of one of them (design D3).
+    /// of one of them (design D3), and the recording of the versions of its dashboards (design D3 of dashboard versions).
     /// </summary>
-    private static async Task LockProjectAsync(TamizaDbContext db, Guid projectId, CancellationToken ct)
+    internal static async Task LockProjectAsync(TamizaDbContext db, Guid projectId, CancellationToken ct)
     {
         var lockKey = projectId.ToString();
         await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", ct);
     }
 
-    private static Task<bool> DashboardExistsAsync(TamizaDbContext db, Guid projectId, Guid dashboardId, CancellationToken ct) =>
+    internal static Task<bool> DashboardExistsAsync(TamizaDbContext db, Guid projectId, Guid dashboardId, CancellationToken ct) =>
         db.Dashboards.AnyAsync(d => d.Id == dashboardId && d.ProjectId == projectId, ct);
 
     /// <summary>The dashboard a new project starts with, first and with no widgets, saved together with the project (design D7).</summary>
@@ -630,7 +871,7 @@ public static class DashboardEndpoints
     /// The 400 on <c>name</c> when a dashboard of the project other than <paramref name="except"/> has the name, whatever its case;
     /// null when none has. The message names that dashboard as it was saved.
     /// </summary>
-    private static async Task<ValidationProblem?> NameTakenAsync(
+    internal static async Task<ValidationProblem?> NameTakenAsync(
         TamizaDbContext db, Guid projectId, string name, Guid except, CancellationToken ct)
     {
         var normalized = DashboardValidation.Normalize(name);
@@ -665,7 +906,7 @@ public static class DashboardEndpoints
     }
 
     /// <summary>The unique name index refused the write, whether EF wrapped the database's error or not.</summary>
-    private static bool IsNameTaken(Exception exception) =>
+    internal static bool IsNameTaken(Exception exception) =>
         (exception as PostgresException ?? exception.InnerException as PostgresException)
             is { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: NameIndex };
 
@@ -692,7 +933,7 @@ public static class DashboardEndpoints
         }
     }
 
-    private static string WidgetLimitMessage(int max) =>
+    internal static string WidgetLimitMessage(int max) =>
         $"A dashboard can have at most {max} widgets. Remove one or move it to another dashboard first.";
 
     /// <summary>The chart type's default size at the left edge, under the lowest widget.</summary>
@@ -707,7 +948,7 @@ public static class DashboardEndpoints
         new(0, existing.Select(l => l.Y + l.H).DefaultIfEmpty(0).Max(), w, h);
 
     /// <summary>The time to the microsecond, which is what PostgreSQL keeps, so the response says what was stored.</summary>
-    private static DateTimeOffset Now(TimeProvider time)
+    internal static DateTimeOffset Now(TimeProvider time)
     {
         var now = time.GetUtcNow();
         return now.AddTicks(-(now.Ticks % 10));
@@ -716,10 +957,13 @@ public static class DashboardEndpoints
     private static Widget ToWidget(DashboardWidget widget) =>
         new(widget.Id, widget.DashboardId, widget.Title, widget.ChartType, ReadConfig(widget), ReadLayout(widget.Layout), widget.UpdatedAt);
 
-    internal static WidgetConfig ReadConfig(DashboardWidget widget) =>
-        (JsonSerializer.Deserialize<WidgetConfigInput>(widget.Config, Json) ?? new WidgetConfigInput()).Normalize();
+    internal static WidgetConfig ReadConfig(DashboardWidget widget) => ReadConfig(widget.Config);
 
-    private static WidgetLayout ReadLayout(string json) => JsonSerializer.Deserialize<WidgetLayout>(json, Json) ?? new WidgetLayout(0, 0, 1, 1);
+    /// <summary>A stored config as the API reads it, with the defaults of the fields it was saved without; a version's too (design D9 of dashboard versions).</summary>
+    internal static WidgetConfig ReadConfig(string json) =>
+        (JsonSerializer.Deserialize<WidgetConfigInput>(json, Json) ?? new WidgetConfigInput()).Normalize();
+
+    internal static WidgetLayout ReadLayout(string json) => JsonSerializer.Deserialize<WidgetLayout>(json, Json) ?? new WidgetLayout(0, 0, 1, 1);
 
     /// <summary>The filters as <see cref="SaveFiltersAsync"/> stored them, which validated them first.</summary>
     internal static List<DashboardFilter> ReadFilters(string json) => JsonSerializer.Deserialize<List<DashboardFilter>>(json, Json) ?? [];
@@ -733,4 +977,11 @@ public static class DashboardEndpoints
             title: "Dashboard not found.",
             detail: "The project has no such dashboard. Another member may have removed it.",
             extensions: new Dictionary<string, object?> { ["code"] = NotFoundCode });
+
+    internal static ProblemHttpResult VersionNotFound() =>
+        TypedResults.Problem(
+            statusCode: StatusCodes.Status404NotFound,
+            title: "Version not found.",
+            detail: $"The dashboard does not keep that version: it keeps its {DashboardVersions.Kept} newest. List its versions to see which.",
+            extensions: new Dictionary<string, object?> { ["code"] = VersionNotFoundCode });
 }

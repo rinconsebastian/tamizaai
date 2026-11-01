@@ -5,10 +5,10 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import { vi } from 'vitest';
 import { Downloader } from '../../core/download.service';
 import { DataFilter } from '../../core/projects/data.service';
-import { DashboardFilter, Widget } from '../../core/projects/indicators.service';
+import { DashboardFilter, DashboardRestore, DashboardVersionDetails, DashboardVersionList, DashboardVersionSummary, Widget } from '../../core/projects/indicators.service';
 import { DashboardEntry, ProjectRole } from '../../core/projects/projects.service';
 import { SYSTEM_CONFIG_URL } from '../../core/system-config';
-import { ToastService } from '../../shared/ui';
+import { ToastService, dateText } from '../../shared/ui';
 import { pressKey } from '../../../testing/cdk';
 import { byTestId, configureApp, details, openProjectSection, projectId, settingsRequests, settle, typeInto } from '../../../testing/project-harness';
 import {
@@ -30,8 +30,12 @@ import {
   isDashboardOf,
   isDashboardValues,
   isOverview,
+  flushLayout,
+  isLayout,
   isPatch,
   isQuery,
+  layoutUrlOf,
+  layoutsOf,
   open,
   overlay,
   overview,
@@ -126,29 +130,52 @@ describe('ProjectIndicators', () => {
     it('saves a move made just before switching to the dashboard it was made on', async () => {
       const context = await open('analyst', [left], answer, {}, { dashboards: indicatorsAndField });
       await moveDown(context, 'w1');
-      expect(context.http.match(isPatch)).toHaveLength(0); // still waiting for the pause after the last key
+      expect(context.http.match(isLayout)).toHaveLength(0); // still waiting for the pause after the last key
 
       await go(context, 'd2');
 
-      const patches = context.http.match(isPatch);
-      expect(patches).toHaveLength(1);
-      expect(patches[0].request.url).toBe(widgetUrl('w1'));
-      expect(patches[0].request.body).toEqual({ layout: { x: 0, y: 1, w: 6, h: 4 } });
-      patches[0].flush(widget('w1', { layout: { x: 0, y: 1, w: 6, h: 4 } }));
+      const saves = context.http.match(isLayout);
+      expect(saves).toHaveLength(1);
+      expect(saves[0].request.url).toBe(layoutUrlOf('d1'));
+      expect(saves[0].request.body).toEqual({ widgets: [{ id: 'w1', layout: { x: 0, y: 1, w: 6, h: 4 } }] });
+      flushLayout(saves[0], [left]);
       await answerLoad(context, [fieldWidget], {}, 'd2');
       await wait(layoutSaveDelayMs + 100);
-      expect(context.http.match(isPatch)).toHaveLength(0); // sent once
+      expect(context.http.match(isLayout)).toHaveLength(0); // sent once
+      expect(context.http.match(isPatch)).toHaveLength(0);
+    }, 10000);
+
+    it('saves a move and the widget it pushed in one put when another dashboard opens before the pause', async () => {
+      const right = widget('w2', { title: 'Right', layout: { x: 6, y: 0, w: 6, h: 4 } });
+      const context = await open('analyst', [left, right], answer, {}, { dashboards: indicatorsAndField });
+      const grip = context.root.querySelector<HTMLElement>('[data-widget-id="w1"] [data-testid="widget-move"]')!;
+      for (let i = 0; i < 6; i++) {
+        grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+        await settle(context.harness);
+      }
+      expect(context.http.match(isLayout)).toHaveLength(0);
+
+      await go(context, 'd2');
+
+      const [save, ...more] = context.http.match(isLayout);
+      expect(more).toHaveLength(0);
+      expect(save.request.url).toBe(layoutUrlOf('d1'));
+      expect(layoutsOf(save)).toEqual({ w1: { x: 6, y: 0, w: 6, h: 4 }, w2: { x: 6, y: 4, w: 6, h: 4 } });
+      flushLayout(save, [left, right]);
+      await answerLoad(context, [fieldWidget], {}, 'd2');
+      await answerQueries(context, answer);
+      expect(titles(context.root)).toEqual(['Field progress']);
     }, 10000);
 
     it('reports a failed save of the dashboard left and keeps the open one\'s widgets', async () => {
       const context = await open('analyst', [left], answer, {}, { dashboards: indicatorsAndField });
       await moveDown(context, 'w1');
       await go(context, 'd2');
-      const [patch] = context.http.match(isPatch);
+      const [save] = context.http.match(isLayout);
       await answerLoad(context, [fieldWidget], {}, 'd2');
       await answerQueries(context, answer);
 
-      patch.flush({ title: 'The widget cannot be saved.' }, { status: 403, statusText: 'Forbidden' });
+      save.flush({ title: 'The widget cannot be saved.' }, { status: 403, statusText: 'Forbidden' });
       await settle(context.harness);
 
       expect(context.http.match((r) => r.method === 'GET' && (isOverview(r) || r.url.startsWith(`/api/v1/projects/${projectId}/dashboards/`)))).toHaveLength(0);
@@ -160,11 +187,11 @@ describe('ProjectIndicators', () => {
       const context = await open('analyst', [left], answer, {}, { dashboards: indicatorsAndField });
       await moveDown(context, 'w1');
       await go(context, 'd2');
-      const [patch] = context.http.match(isPatch);
+      const [save] = context.http.match(isLayout);
       await answerLoad(context, [fieldWidget], {}, 'd2');
       await answerQueries(context, answer);
 
-      patch.flush({ title: 'x', code: 'dashboards.notFound' }, { status: 404, statusText: 'Not Found' });
+      save.flush({ title: 'x', code: 'dashboards.notFound' }, { status: 404, statusText: 'Not Found' });
       await settle(context.harness);
 
       context.http.expectOne(`/api/v1/projects/${projectId}`).flush(details('analyst', { dashboards: [{ id: 'd2', name: 'Field' }] }));
@@ -859,6 +886,30 @@ describe('ProjectIndicators', () => {
       expect(all(context.root, 'widget-title')).toHaveLength(2);
     });
 
+    it('leaves a widget removed while its layout waited out of the layout save, which still saves the others', async () => {
+      const context = await openEditor();
+      for (const id of ['w1', 'w2']) {
+        const grip = context.root.querySelector<HTMLElement>(`[data-widget-id="${id}"] [data-testid="widget-move"]`)!;
+        grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+        await settle(context.harness);
+      }
+
+      await openDialog(context, 'widget-remove', 1);
+      (overlay().querySelector('[data-testid="confirm"]') as HTMLElement).click();
+      await settle(context.harness);
+      const removal = context.http.expectOne((r) => r.method === 'DELETE');
+      expect(removal.request.url).toBe(widgetUrl('w2'));
+      removal.flush(null, { status: 204, statusText: 'No Content' });
+      await settle(context.harness);
+      expect(context.http.match(isLayout)).toHaveLength(0); // the others still wait for the pause
+
+      await wait(layoutSaveDelayMs + 100);
+      const [save, ...more] = context.http.match(isLayout);
+      expect(more).toHaveLength(0);
+      expect(save.request.body).toEqual({ widgets: [{ id: 'w1', layout: { x: 0, y: 1, w: 6, h: 4 } }] });
+      flushLayout(save, two);
+    }, 10000);
+
     it('turns Add off, with a notice, when the widget limit is reached', async () => {
       const { root } = await open('analyst', two, answer, { limits: { maxWidgets: 2, maxQueryRows: 5000, maxDashboards: 7 } });
 
@@ -1014,15 +1065,16 @@ describe('ProjectIndicators', () => {
     it('opens the form once the widget\'s layout waiting for the pause is saved', async () => {
       const context = await open('analyst', [left], answer, {}, { dashboards: [health, field] });
       await moveDown(context, 'w1');
-      expect(context.http.match(isPatch)).toHaveLength(0);
+      expect(context.http.match(isLayout)).toHaveLength(0);
 
       await chooseEdit(context);
-      const [layout] = context.http.match(isPatch);
-      expect(layout.request.body).toEqual({ layout: { x: 0, y: 1, w: 6, h: 4 } });
+      const [layout] = context.http.match(isLayout);
+      expect(layout.request.url).toBe(layoutUrlOf('d1'));
+      expect(layout.request.body).toEqual({ widgets: [{ id: 'w1', layout: { x: 0, y: 1, w: 6, h: 4 } }] });
       expect(form()).toBeNull();
       context.http.expectNone(isColumns);
 
-      layout.flush(widget('w1', { title: 'Left', layout: { x: 0, y: 1, w: 6, h: 4 } }));
+      flushLayout(layout, [left]);
       await settle(context.harness);
       expect(form()).not.toBeNull();
       await answerForm(context);
@@ -1032,35 +1084,70 @@ describe('ProjectIndicators', () => {
       await settle(context.harness);
 
       await wait(layoutSaveDelayMs + 100);
-      expect(context.http.match(isPatch)).toHaveLength(0); // no layout follows the widget to Field
+      expect(context.http.match(isLayout)).toHaveLength(0); // no layout follows the widget to Field
+      expect(context.http.match(isPatch)).toHaveLength(0);
+    }, 10000);
+
+    it('sends the layouts waiting with the widget\'s in one put before the form opens', async () => {
+      const right = widget('w2', { title: 'Right', layout: { x: 6, y: 0, w: 6, h: 4 } });
+      const context = await open('analyst', [left, right], answer, {}, { dashboards: [health, field] });
+      await moveDown(context, 'w2');
+      await moveDown(context, 'w1');
+
+      await chooseEdit(context);
+      const [layout, ...more] = context.http.match(isLayout);
+      expect(more).toHaveLength(0);
+      expect(layoutsOf(layout)).toEqual({ w1: { x: 0, y: 1, w: 6, h: 4 }, w2: { x: 6, y: 1, w: 6, h: 4 } });
+      expect(form()).toBeNull();
+
+      flushLayout(layout, [left, right]);
+      await settle(context.harness);
+      expect(form()).not.toBeNull();
+      await answerForm(context);
+    }, 10000);
+
+    it('opens the form at once when only another widget\'s layout waits, which keeps waiting for the pause', async () => {
+      const right = widget('w2', { title: 'Right', layout: { x: 6, y: 0, w: 6, h: 4 } });
+      const context = await open('analyst', [left, right], answer, {}, { dashboards: [health, field] });
+      await moveDown(context, 'w2');
+
+      await chooseEdit(context); // Left, the first in reading order
+      expect(form()).not.toBeNull();
+      await answerForm(context);
+      expect(context.http.match(isLayout)).toHaveLength(0);
+
+      await wait(layoutSaveDelayMs + 100);
+      const [layout] = context.http.match(isLayout);
+      expect(layout.request.body).toEqual({ widgets: [{ id: 'w2', layout: { x: 6, y: 1, w: 6, h: 4 } }] });
+      flushLayout(layout, [left, right]);
     }, 10000);
 
     it('opens the form once the widget\'s layout save on its way is answered', async () => {
       const context = await open('analyst', [left], answer, {}, { dashboards: [health, field] });
       await moveDown(context, 'w1');
       await wait(layoutSaveDelayMs + 50);
-      const [layout] = context.http.match(isPatch);
+      const [layout] = context.http.match(isLayout);
 
       await chooseEdit(context);
       expect(form()).toBeNull();
       context.http.expectNone(isColumns);
 
-      layout.flush(widget('w1', { title: 'Left', layout: { x: 0, y: 1, w: 6, h: 4 } }));
+      flushLayout(layout, [left]);
       await settle(context.harness);
       expect(form()).not.toBeNull();
       await answerForm(context);
-      expect(context.http.match(isPatch)).toHaveLength(0); // sent once
+      expect(context.http.match(isLayout)).toHaveLength(0); // sent once
     }, 10000);
 
     it('opens one form when Edit is chosen again while the layout save is on its way', async () => {
       const context = await open('analyst', [left], answer, {}, { dashboards: [health, field] });
       await moveDown(context, 'w1');
       await wait(layoutSaveDelayMs + 50);
-      const [layout] = context.http.match(isPatch);
+      const [layout] = context.http.match(isLayout);
 
       await chooseEdit(context);
       await chooseEdit(context);
-      layout.flush(widget('w1', { title: 'Left', layout: { x: 0, y: 1, w: 6, h: 4 } }));
+      flushLayout(layout, [left]);
       await settle(context.harness);
 
       expect(overlay().querySelectorAll('[data-testid="widget-dialog"]')).toHaveLength(1);
@@ -1463,14 +1550,15 @@ describe('ProjectIndicators', () => {
       it('is sent at once when Duplicate is chosen before the pause, and the copy waits for its answer', async () => {
         const context = await open('analyst', [left], answer, {}, { dashboards: [housing, health] });
         await moveDown(context);
-        expect(context.http.match(isPatch)).toHaveLength(0);
+        expect(context.http.match(isLayout)).toHaveLength(0);
 
         await choose(context, 'dashboard-duplicate');
-        const [patch] = context.http.match(isPatch);
-        expect(patch.request.body).toEqual({ layout: { x: 0, y: 1, w: 6, h: 4 } });
+        const [save] = context.http.match(isLayout);
+        expect(save.request.url).toBe(layoutUrlOf('d1'));
+        expect(save.request.body).toEqual({ widgets: [{ id: 'w1', layout: { x: 0, y: 1, w: 6, h: 4 } }] });
         expect(nameDialog()).toBeNull();
 
-        patch.flush(widget('w1', { layout: { x: 0, y: 1, w: 6, h: 4 } }));
+        flushLayout(save, [left]);
         await settle(context.harness);
         expect(nameDialog()).not.toBeNull();
         context.http.expectNone(`${dashboardUrlOf('d1')}/copies`);
@@ -1482,13 +1570,13 @@ describe('ProjectIndicators', () => {
         const context = await open('analyst', [left], answer, {}, { dashboards: [housing, health] });
         await moveDown(context);
         await wait(layoutSaveDelayMs + 50);
-        const [patch] = context.http.match(isPatch);
+        const [save] = context.http.match(isLayout);
 
         await choose(context, 'dashboard-duplicate');
         expect(nameDialog()).toBeNull();
         context.http.expectNone(`${dashboardUrlOf('d1')}/copies`);
 
-        patch.flush(widget('w1', { layout: { x: 0, y: 1, w: 6, h: 4 } }));
+        flushLayout(save, [left]);
         await settle(context.harness);
         expect(nameDialog()).not.toBeNull();
         await nameAndSave(context, null);
@@ -1660,9 +1748,9 @@ describe('ProjectIndicators', () => {
         await settle(context.harness);
         await wait(layoutSaveDelayMs + 50);
 
-        const [patch] = context.http.match(isPatch);
-        expect(patch.request.url).toBe(`${dashboardUrlOf('d2')}/widgets/w1`);
-        patch.flush(...removedMeanwhile);
+        const [save] = context.http.match(isLayout);
+        expect(save.request.url).toBe(layoutUrlOf('d2'));
+        save.flush(...removedMeanwhile);
         await settle(context.harness);
         context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: [housing] }));
         await settle(context.harness);
@@ -1829,11 +1917,11 @@ describe('ProjectIndicators', () => {
         grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
         await settle(context.harness);
         await go(context, 'd2');
-        const [patch] = context.http.match(isPatch);
+        const [save] = context.http.match(isLayout);
         await answerLoad(context, [], {}, 'd2');
 
         // Housing, where the layout was saved, and Health, the one open, were both removed.
-        patch.flush(...removedMeanwhile);
+        save.flush(...removedMeanwhile);
         await settle(context.harness);
         context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: [field] }));
         await settle(context.harness);
@@ -1851,13 +1939,14 @@ describe('ProjectIndicators', () => {
         const grip = context.root.querySelector<HTMLElement>('[data-widget-id="w1"] [data-testid="widget-move"]')!;
         grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
         await settle(context.harness);
-        expect(context.http.match(isPatch)).toHaveLength(0); // still waiting for the pause
+        expect(context.http.match(isLayout)).toHaveLength(0); // still waiting for the pause
 
         await TestBed.inject(Router).navigateByUrl(`/projects/${projectId}/performance`);
         await settle(context.harness);
-        const [patch] = context.http.match(isPatch);
-        expect(patch.request.url).toBe(widgetUrl('w1')); // sent as the page went
-        patch.flush(...removedMeanwhile);
+        const [save] = context.http.match(isLayout);
+        expect(save.request.url).toBe(layoutUrlOf('d1')); // sent as the page went
+        expect(save.request.body).toEqual({ widgets: [{ id: 'w1', layout: { x: 0, y: 1, w: 6, h: 4 } }] });
+        save.flush(...removedMeanwhile);
         await settle(context.harness);
         // Only the project is read again, so the tab row drops the removed dashboard.
         context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: [health] }));
@@ -2453,6 +2542,7 @@ describe('ProjectIndicators scheduled email (dashboard reports, design D14)', ()
       'dashboard-move-right',
       'dashboard-filters',
       'dashboard-report',
+      'dashboard-versions',
       'dashboard-remove',
     ]);
     expect(text(item('dashboard-report'))).toBe('Scheduled email…');
@@ -2540,6 +2630,774 @@ describe('ProjectIndicators scheduled email (dashboard reports, design D14)', ()
     await openMenu(context);
 
     expect(item('dashboard-report')).not.toBeNull();
+  });
+});
+
+describe('ProjectIndicators version history (add-dashboard-versions, design D11)', () => {
+  beforeEach(() => downloader.start.mockClear());
+  afterEach(clearOverlay);
+
+  const versionsUrl = `${dashboardUrlOf('d1')}/versions`;
+  const projectUrl = `/api/v1/projects/${projectId}`;
+  const isVersions = (r: { method: string; url: string }) => r.method === 'GET' && r.url === versionsUrl;
+  const item = (testId: string) => document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  const history = () => document.querySelector<HTMLElement>('[data-testid="dashboard-versions-dialog"]');
+  const menuItems = () => Array.from(document.querySelectorAll<HTMLElement>('[cdkmenuitem]')).map((i) => i.dataset['testid']);
+  const removedMeanwhile = [{ title: 'x', code: 'dashboards.notFound' }, { status: 404, statusText: 'Not Found' }] as const;
+  const left = widget('w1', { title: 'Left', layout: { x: 0, y: 0, w: 6, h: 4 } });
+  /** "Indicators" keeps versions 1 and 2, the second current. */
+  const kept: DashboardVersionList = {
+    current: 2,
+    versions: [2, 1].map((number) => ({
+      number,
+      current: number === 2,
+      name: 'Indicators',
+      widgetCount: 1,
+      filterCount: 0,
+      changes: number === 2 ? [{ kind: 'layoutChanged' as const }] : [{ kind: 'initial' as const }],
+      moreChanges: 0,
+      restoredFrom: null,
+      origin: 'app' as const,
+      note: null,
+      author: { id: 'user-1', name: 'Ada Lovelace' },
+      createdAt: '2026-10-31T10:00:00Z',
+      savedAt: '2026-10-31T10:00:00Z',
+    })),
+  };
+
+  /** Opens the dashboard's actions with a click; returns its trigger. */
+  async function openMenu(context: Context): Promise<HTMLElement> {
+    const trigger = byTestId(context.root, 'dashboard-menu')!;
+    trigger.click();
+    await settle(context.harness);
+    return trigger;
+  }
+
+  /** Chooses Version history from the dashboard's actions; returns the actions button. */
+  async function chooseHistory(context: Context): Promise<HTMLElement> {
+    const trigger = await openMenu(context);
+    item('dashboard-versions')!.click();
+    await settle(context.harness);
+    return trigger;
+  }
+
+  /** Moves the widget `w1` one row down from the keyboard; its layout then waits for the pause. */
+  async function moveDown(context: Context): Promise<void> {
+    const grip = context.root.querySelector<HTMLElement>('[data-widget-id="w1"] [data-testid="widget-move"]')!;
+    grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    await settle(context.harness);
+  }
+
+  it.each<ProjectRole>(['analyst', 'admin'])('offers Version history among the dashboard\'s actions, before Remove, to an %s (Version history offered)', async (role) => {
+    const context = await open(role, two, answer, {}, { dashboards: indicatorsAndField });
+
+    await openMenu(context);
+
+    expect(menuItems()).toEqual(['dashboard-rename', 'dashboard-duplicate', 'dashboard-move-left', 'dashboard-move-right', 'dashboard-filters', 'dashboard-versions', 'dashboard-remove']);
+    expect(text(item('dashboard-versions'))).toBe('Version history');
+    expect(item('dashboard-versions')!.getAttribute('aria-disabled')).toBeNull();
+    // Nothing is read until it is chosen.
+    context.http.expectNone(isVersions);
+  });
+
+  it('names the action in Spanish', async () => {
+    const context = await open('analyst', two, answer, {}, { lang: 'es' });
+
+    await openMenu(context);
+
+    expect(text(item('dashboard-versions'))).toBe('Historial de versiones');
+  });
+
+  it('offers a viewer no version history and reads no versions (No actions for a viewer)', async () => {
+    const context = await open('viewer', two, answer);
+
+    expect(Array.from(byTestId(context.root, 'dashboard-actions')!.querySelectorAll('button')).map(text)).toEqual(['Print']);
+    expect(byTestId(context.root, 'dashboard-menu')).toBeNull();
+    expect(item('dashboard-versions')).toBeNull();
+    context.http.expectNone(isVersions);
+  });
+
+  it('opens the history of the open dashboard, as wide as a phone allows, and gives focus back to the actions when closed', async () => {
+    const context = await open('analyst', two, answer, {}, { dashboards: indicatorsAndField });
+
+    const trigger = await chooseHistory(context);
+    context.http.expectOne(isVersions).flush(kept);
+    await settle(context.harness);
+
+    expect(text(history()!.querySelector('h2'))).toBe('Version history of Indicators');
+    expect(Array.from(history()!.querySelectorAll('[data-testid="dashboard-version-number"]')).map(text)).toEqual(['Version 2', 'Version 1']);
+    // The pane may take the whole screen: its content keeps its own margin (History at phone width).
+    const pane = history()!.closest<HTMLElement>('.cdk-overlay-pane')!;
+    expect(pane.style.maxWidth).toBe('100vw');
+    expect(pane.style.maxHeight).toBe('100dvh');
+    expect(document.activeElement).toBe(byTestId(history()!, 'dashboard-versions-close'));
+
+    byTestId(history()!, 'dashboard-versions-close')!.click();
+    await settle(context.harness);
+    expect(history()).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    // Reading the history changes nothing.
+    expect(context.http.match((r) => r.method !== 'GET' && !isQuery(r))).toHaveLength(0);
+  });
+
+  it('saves a move made just before at once, and opens the history once it is answered (Move saved before the history opens)', async () => {
+    const context = await open('analyst', [left], answer);
+    await moveDown(context);
+    expect(context.http.match(isLayout)).toHaveLength(0); // still waiting for the pause
+
+    await chooseHistory(context);
+    const [save] = context.http.match(isLayout);
+    expect(save.request.url).toBe(layoutUrlOf('d1'));
+    expect(save.request.body).toEqual({ widgets: [{ id: 'w1', layout: { x: 0, y: 1, w: 6, h: 4 } }] });
+    expect(history()).toBeNull();
+    context.http.expectNone(isVersions);
+
+    flushLayout(save, [left]);
+    await settle(context.harness);
+    expect(history()).not.toBeNull();
+    context.http.expectOne(isVersions).flush(kept);
+    await settle(context.harness);
+    expect(text(history()!.querySelector('[data-testid="dashboard-version-change"]'))).toBe('Widgets moved or resized');
+  });
+
+  it('waits for a layout save already on its way before the history opens', async () => {
+    const context = await open('analyst', [left], answer);
+    await moveDown(context);
+    await wait(layoutSaveDelayMs + 50);
+    const [save] = context.http.match(isLayout);
+
+    await chooseHistory(context);
+    expect(history()).toBeNull();
+    context.http.expectNone(isVersions);
+    expect(context.http.match(isLayout)).toHaveLength(0); // nothing else waits
+
+    flushLayout(save, [left]);
+    await settle(context.harness);
+    expect(history()).not.toBeNull();
+    context.http.expectOne(isVersions);
+  }, 10000);
+
+  it('opens the history once when it is chosen again while the layout save is on its way', async () => {
+    const context = await open('analyst', [left], answer);
+    await moveDown(context);
+    await chooseHistory(context);
+    await chooseHistory(context);
+    const [save] = context.http.match(isLayout);
+
+    flushLayout(save, [left]);
+    await settle(context.harness);
+
+    expect(document.querySelectorAll('[data-testid="dashboard-versions-dialog"]')).toHaveLength(1);
+    context.http.expectOne(isVersions);
+  });
+
+  it('opens no history when the layout save finds the dashboard removed meanwhile, and opens the first dashboard', async () => {
+    const context = await open('analyst', [left], answer, {}, { dashboards: indicatorsAndField });
+    await moveDown(context);
+    await chooseHistory(context);
+
+    context.http.expectOne(isLayout).flush(...removedMeanwhile);
+    await settle(context.harness);
+    context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: [{ id: 'd2', name: 'Field' }] }));
+    await settle(context.harness);
+    await answerLoad(context, [], {}, 'd2');
+
+    expect(history()).toBeNull();
+    context.http.expectNone(isVersions);
+    expect(TestBed.inject(Router).url).toBe(`/projects/${projectId}/dashboards/d2`);
+    expect(text(byTestId(context.root, 'dashboard-notice'))).toContain('"Indicators" no longer exists');
+  });
+
+  it('takes the member to the first dashboard when the history finds the dashboard removed meanwhile', async () => {
+    const context = await open('analyst', two, answer, {}, { dashboards: indicatorsAndField });
+    await chooseHistory(context);
+
+    context.http.expectOne(isVersions).flush(...removedMeanwhile);
+    await settle(context.harness);
+    context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: [{ id: 'd2', name: 'Field' }] }));
+    await settle(context.harness);
+    await answerLoad(context, [], {}, 'd2');
+
+    expect(history()).toBeNull();
+    expect(TestBed.inject(Router).url).toBe(`/projects/${projectId}/dashboards/d2`);
+    expect(text(byTestId(context.root, 'dashboard-notice'))).toContain('"Indicators" no longer exists');
+    expect(document.activeElement).toBe(byTestId(context.root, 'dashboard-heading'));
+  });
+
+  // Viewing and restoring a version (design D11, "Viewing" and "Restoring").
+
+  const ana = { id: 'u2', name: 'Ana Pérez' };
+  const coverage = widget('w1', { title: 'Coverage by municipality' });
+  /** Removed from "Indicators" since version 9. */
+  const water = widget('w5', { title: 'Water source', config: config({ indicator: 'piped_water_rate' }), layout: { x: 6, y: 0, w: 6, h: 4 } });
+  const municipality: DashboardFilter = { column: 'municipality', label: 'Municipality', kind: 'text', default: null };
+  const round: DashboardFilter = { column: 'round', label: 'Round', kind: 'number', default: { min: '3', max: '3' } };
+  const isVersion = (n: number) => (r: { method: string; url: string }) => r.method === 'GET' && r.url === `${versionsUrl}/${n}`;
+  const isRestore = (n: number) => (r: { method: string; url: string }) => r.method === 'POST' && r.url === `${versionsUrl}/${n}/restore`;
+  /** Version `n` was saved on Oct 31, 2026, `n` minutes past 10:00 UTC. */
+  const savedAt = (n: number) => `2026-10-31T10:${String(n).padStart(2, '0')}:00Z`;
+  /** ICU versions differ in which space they put before "AM"; compare with plain spaces. */
+  const plain = (value: string) => value.replace(/[  ]/g, ' ');
+  /** A time as the shared `dateTime` pipe writes it in this browser's zone. */
+  const when = (value: string, locale = 'en-US') => plain(dateText(value, locale)!);
+  const titles = (root: HTMLElement) => all(root, 'widget-title').map(text);
+  const pills = (root: HTMLElement) => all(root, 'dashboard-filter').map(text);
+  const notice = (root: HTMLElement) => byTestId(root, 'dashboard-version-notice');
+  const toasts = () => TestBed.inject(ToastService).toasts().map((t) => ({ tone: t.tone, message: plain(t.message) }));
+  const confirmation = () => overlay().querySelector<HTMLElement>('tmz-confirm-dialog');
+  const addressHasF = () => new URL(`http://tamiza${TestBed.inject(Router).url}`).searchParams.has('f');
+  const versionNotFound = [{ title: 'x', code: 'dashboards.versionNotFound' }, { status: 404, statusText: 'Not Found' }] as const;
+
+  /** Version `n` of "Indicators" as the history lists it: saved by Ana, saying one widget was changed. */
+  function summary(n: number, overrides: Partial<DashboardVersionSummary> = {}): DashboardVersionSummary {
+    return {
+      number: n,
+      current: false,
+      name: 'Indicators',
+      widgetCount: 1,
+      filterCount: 0,
+      changes: [{ kind: 'widgetChanged', widget: 'Coverage by municipality' }],
+      moreChanges: 0,
+      restoredFrom: null,
+      origin: 'app',
+      note: null,
+      author: ana,
+      createdAt: savedAt(n),
+      savedAt: savedAt(n),
+      ...overrides,
+    };
+  }
+
+  /** The kept versions with these numbers, newest first, the first current; `named` gives a version another name. */
+  function historyOf(numbers: number[], named: Record<number, string> = {}): DashboardVersionList {
+    return { current: numbers[0], versions: numbers.map((n, i) => summary(n, { current: i === 0, name: named[n] ?? 'Indicators' })) };
+  }
+
+  /** Version `n` with what it holds, as the API reads it: these widgets, and no filters unless `overrides` says so. */
+  function versionOf(n: number, widgets: Widget[], overrides: Partial<DashboardVersionDetails> = {}): DashboardVersionDetails {
+    const { widgetCount, filterCount, ...rest } = summary(n);
+    void widgetCount;
+    void filterCount;
+    return { ...rest, filters: [], widgets: widgets.map(({ id, title, chartType, config, layout }) => ({ id, title, chartType, config, layout })), ...overrides };
+  }
+
+  /** What the API answers a restore of version `from` that made version `to`, the dashboard then holding these widgets. */
+  function restoreOf(to: number, from: number, widgets: Widget[], overrides: Partial<DashboardRestore> = {}): DashboardRestore {
+    return {
+      restored: true,
+      version: summary(to, { current: true, changes: [{ kind: 'restored', version: from }], restoredFrom: from, savedAt: '2026-10-31T11:00:00Z' }),
+      nameKept: false,
+      copies: [],
+      dashboard: dashboard(widgets, { version: to }),
+      ...overrides,
+    };
+  }
+
+  /** Opens the history, answers it with these versions, and chooses View or Restore on version `n`. */
+  async function choose(context: Context, list: DashboardVersionList, n: number, action: 'view' | 'restore'): Promise<void> {
+    await chooseHistory(context);
+    context.http.expectOne(isVersions).flush(list);
+    await settle(context.harness);
+    history()!.querySelector<HTMLElement>(`[data-testid="dashboard-version"][data-number="${n}"] [data-testid="dashboard-version-${action}"]`)!.click();
+    await settle(context.harness);
+  }
+
+  /** Views a version from the history and answers its read. */
+  async function view(context: Context, list: DashboardVersionList, version: DashboardVersionDetails): Promise<void> {
+    await choose(context, list, version.number, 'view');
+    context.http.expectOne(isVersion(version.number)).flush(version);
+    await settle(context.harness);
+  }
+
+  /** Confirms the restore the page asks about. */
+  async function confirmRestore(context: Context): Promise<void> {
+    confirmation()!.querySelector<HTMLElement>('[data-testid="confirm"]')!.click();
+    await settle(context.harness);
+  }
+
+  /** Restores version `from` from the history once confirmed, and answers with what the restore did. */
+  async function restore(context: Context, list: DashboardVersionList, from: number, answered: DashboardRestore): Promise<void> {
+    await choose(context, list, from, 'restore');
+    await confirmRestore(context);
+    context.http.expectOne(isRestore(from)).flush(answered, answered.restored ? { status: 201, statusText: 'Created' } : {});
+    await settle(context.harness);
+  }
+
+  describe('viewing a version', () => {
+    it('shows the version in place of the dashboard, read-only, its widgets querying by their configs, with nothing to add, edit, move, remove or print (Viewing an older version)', async () => {
+      const context = await open('analyst', [coverage], answer, {}, { dashboards: indicatorsAndField });
+
+      await view(context, historyOf([12, 9]), versionOf(9, [coverage, water], { name: 'Water' }));
+      const requests = await answerQueries(context, answer);
+
+      expect(context.http.match(isVersion(9))).toHaveLength(0); // read once
+      expect(titles(context.root)).toEqual(['Coverage by municipality', 'Water source']);
+      expect(requests.map((r) => r.request.body.config.indicator)).toContain('piped_water_rate');
+      expect(text(byTestId(context.root, 'dashboard-heading'))).toBe('Water');
+      expect(plain(text(byTestId(context.root, 'dashboard-version-notice-text')))).toBe(`Viewing version 9, saved by Ana Pérez on ${when(savedAt(9))}. It is read-only.`);
+      expect(text(byTestId(context.root, 'dashboard-version-back'))).toBe('Back to the current version');
+      expect(text(byTestId(context.root, 'dashboard-version-restore-shown'))).toBe('Restore version 9');
+      // Neither the header's actions, Print included, nor the widgets' own.
+      expect(byTestId(context.root, 'dashboard-actions')).toBeNull();
+      expect(byTestId(context.root, 'dashboard-print')).toBeNull();
+      expect(byTestId(context.root, 'dashboard-menu')).toBeNull();
+      expect(byTestId(context.root, 'widget-add')).toBeNull();
+      expect(byTestId(context.root, 'indicators-count')).toBeNull();
+      expect(all(context.root, 'widget-move')).toHaveLength(0);
+      expect(all(context.root, 'widget-resize')).toHaveLength(0);
+      expect(all(byTestId(context.root, 'widget-grid')!, 'menu-trigger')).toHaveLength(0);
+      // The switch to tables saves nothing, so it stays.
+      expect(byTestId(context.root, 'tables-toggle')).not.toBeNull();
+      expect(document.activeElement).toBe(notice(context.root));
+      expect(context.http.match((r) => r.method !== 'GET' && !isQuery(r))).toHaveLength(0);
+    });
+
+    it('writes the notice in Spanish, in the interface\'s regional format', async () => {
+      const context = await open('analyst', [coverage], answer, {}, { lang: 'es' });
+
+      await view(context, historyOf([12, 9]), versionOf(9, [coverage]));
+      await answerQueries(context, answer);
+
+      expect(plain(text(byTestId(context.root, 'dashboard-version-notice-text')))).toBe(`Estás viendo la versión 9, guardada por Ana Pérez el ${when(savedAt(9), 'es-CO')}. Es de solo lectura.`);
+      expect(text(byTestId(context.root, 'dashboard-version-back'))).toBe('Volver a la versión actual');
+      expect(text(byTestId(context.root, 'dashboard-version-restore-shown'))).toBe('Restaurar la versión 9');
+    });
+
+    it('goes back to the dashboard as it is now, with its actions, and focus on its heading (Back to the current version)', async () => {
+      const context = await open('analyst', [coverage], answer);
+      await view(context, historyOf([12, 9]), versionOf(9, [coverage, water], { name: 'Water' }));
+      await answerQueries(context, answer);
+
+      byTestId(context.root, 'dashboard-version-back')!.click();
+      await settle(context.harness);
+      await answerQueries(context, answer);
+
+      expect(notice(context.root)).toBeNull();
+      expect(titles(context.root)).toEqual(['Coverage by municipality']);
+      expect(text(byTestId(context.root, 'dashboard-heading'))).toBe('Indicators');
+      expect(byTestId(context.root, 'dashboard-menu')).not.toBeNull();
+      expect(byTestId(context.root, 'dashboard-print')).not.toBeNull();
+      expect(all(context.root, 'widget-move')).toHaveLength(1);
+      expect(document.activeElement).toBe(byTestId(context.root, 'dashboard-heading'));
+      // What the page has is the dashboard as it is: nothing is read again.
+      context.http.expectNone(isDashboard);
+    });
+
+    it('starts the version\'s filters at their defaults, and changes their values on screen only, the address keeping the dashboard\'s own', async () => {
+      const query = `f=${encodeFilters([{ column: 'municipality', op: 'in', values: ['Cali'] }])}`;
+      const context = await open('analyst', [coverage], answer, {}, { filters: [municipality], query });
+      const address = TestBed.inject(Router).url;
+
+      await view(context, historyOf([12, 9]), versionOf(9, [coverage], { filters: [round] }));
+      const requests = await answerQueries(context, answer);
+
+      expect(pills(context.root)).toEqual(['Round: 3']);
+      expect(requests.length).toBeGreaterThan(0);
+      requests.forEach((r) => expect(r.request.body.dashboardFilters).toEqual([{ column: 'round', kind: 'number', min: '3', max: '3' }]));
+      expect(TestBed.inject(Router).url).toBe(address);
+
+      byTestId(context.root, 'dashboard-filters-clear')!.click();
+      await settle(context.harness);
+      const cleared = await answerQueries(context, answer);
+
+      expect(pills(context.root)).toEqual(['Round: All']);
+      expect(cleared.map((r) => r.request.body.dashboardFilters ?? null)).toEqual([null]);
+      expect(TestBed.inject(Router).url).toBe(address);
+      expect(text(byTestId(context.root, 'dashboard-status'))).toContain('Dashboard filters cleared.');
+
+      byTestId(context.root, 'dashboard-version-back')!.click();
+      await settle(context.harness);
+      await answerQueries(context, answer);
+      expect(pills(context.root)).toEqual(['Municipality: Cali']);
+    });
+
+    it('offers a text filter\'s values from the indicators of the version\'s widgets, each named once, and the dashboard\'s own once back', async () => {
+      const values = (r: { request: { params: { getAll(name: string): string[] | null } } }) => r.request.params.getAll('indicator');
+      const again = widget('w6', { title: 'Coverage by round', layout: { x: 0, y: 4, w: 6, h: 4 } });
+      const context = await open('analyst', [coverage], answer, {}, { filters: [municipality] });
+      await view(context, historyOf([12, 9]), versionOf(9, [coverage, water, again], { filters: [municipality] }));
+      await answerQueries(context, answer);
+
+      all(context.root, 'dashboard-filter')[0].click();
+      await settle(context.harness);
+      const [shown] = context.http.match(isDashboardValues);
+      expect(shown.request.url).toBe(`${dashboardUrlOf('d1')}/values`);
+      expect(shown.request.params.get('column')).toBe('municipality');
+      expect(values(shown)).toEqual(['coverage', 'piped_water_rate']);
+      shown.flush({ values: [{ value: 'Cali', count: 3 }] });
+      await settle(context.harness);
+      overlay().querySelector<HTMLInputElement>('[data-testid="filter-option"]')!.click();
+      overlay().querySelector<HTMLElement>('[data-testid="filter-apply"]')!.click();
+      await settle(context.harness);
+      await answerQueries(context, answer);
+
+      byTestId(context.root, 'dashboard-version-back')!.click();
+      await settle(context.harness);
+      await answerQueries(context, answer);
+      all(context.root, 'dashboard-filter')[0].click();
+      await settle(context.harness);
+      const [current] = context.http.match(isDashboardValues);
+      expect(values(current)).toBeNull(); // the API reads those of the dashboard's widgets
+      current.flush({ values: [] });
+    });
+
+    it('names the version on the sheet and in the page\'s title when the browser\'s menu prints it, and nothing of it once back (Printing from the browser\'s menu)', async () => {
+      document.title = 'Tamiza';
+      // `piped_water_rate`, which only the version's widget shows, was published last.
+      const indicators = defaultIndicators.map((i) => indicator(i.name, { publishedAt: i.name === 'piped_water_rate' ? '2026-10-28T14:00:00Z' : '2026-10-28T09:00:00Z' }));
+      const context = await open('analyst', [coverage], answer, { indicators }, { project: { timeZone: 'America/Bogota' } });
+      await view(context, historyOf([12, 9]), versionOf(9, [coverage, water], { name: 'Water' }));
+      await answerQueries(context, answer);
+
+      window.dispatchEvent(new Event('beforeprint'));
+      await settle(context.harness);
+
+      const header = byTestId(context.root, 'print-header')!;
+      expect(header.classList).toContain('paper:block');
+      // In the project's time zone, as the other lines of the header: 10:09 UTC is 5:09 AM in Bogota.
+      expect(plain(text(byTestId(header, 'print-version')))).toBe(`Version 9, saved by Ana Pérez on ${plain(dateText(savedAt(9), 'en-US', 'dateTime', 'America/Bogota')!)}`);
+      expect(text(byTestId(header, 'print-version'))).toMatch(/5:09\sAM$/);
+      expect(text(byTestId(header, 'print-published'))).toMatch(/^Data published Oct 28, 2026, 9:00\sAM$/);
+      expect(header.querySelector('button')).toBeNull();
+      expect(notice(context.root)!.classList).toContain('paper:hidden');
+      expect(text(byTestId(context.root, 'dashboard-heading'))).toBe('Water');
+      expect(document.title).toMatch(/^Household survey 2026 – Water \(version 9\) – \d{4}-\d{2}-\d{2}$/);
+
+      window.dispatchEvent(new Event('afterprint'));
+      await settle(context.harness);
+      expect(document.title).toBe('Tamiza');
+      expect(byTestId(context.root, 'print-header')).toBeNull();
+
+      byTestId(context.root, 'dashboard-version-back')!.click();
+      await settle(context.harness);
+      await answerQueries(context, answer);
+      window.dispatchEvent(new Event('beforeprint'));
+      await settle(context.harness);
+
+      expect(byTestId(context.root, 'print-version')).toBeNull();
+      expect(text(byTestId(context.root, 'print-published'))).toMatch(/^Data published Oct 28, 2026, 4:00\sAM$/);
+      expect(document.title).toMatch(/^Household survey 2026 – Indicators – \d{4}-\d{2}-\d{2}$/);
+      window.dispatchEvent(new Event('afterprint'));
+      await settle(context.harness);
+    });
+
+    it('names the version on the sheet and in the page\'s title in Spanish', async () => {
+      const context = await open('analyst', [coverage], answer, {}, { lang: 'es' });
+      await view(context, historyOf([12, 9]), versionOf(9, [coverage], { name: 'Agua' }));
+      await answerQueries(context, answer);
+
+      window.dispatchEvent(new Event('beforeprint'));
+      await settle(context.harness);
+
+      expect(plain(text(byTestId(context.root, 'print-version')))).toBe(`Versión 9, guardada por Ana Pérez el ${when(savedAt(9), 'es-CO')}`);
+      expect(document.title).toMatch(/^Household survey 2026 – Agua \(versión 9\) – \d{4}-\d{2}-\d{2}$/);
+      window.dispatchEvent(new Event('afterprint'));
+      await settle(context.harness);
+    });
+
+    it('leaves the view when another dashboard opens, which shows as it is', async () => {
+      const fieldWidget = widget('w9', { dashboardId: 'd2', title: 'Field progress' });
+      const context = await open('analyst', [coverage], answer, {}, { dashboards: indicatorsAndField });
+      await view(context, historyOf([12, 9]), versionOf(9, [coverage, water]));
+      await answerQueries(context, answer);
+
+      await go(context, 'd2');
+      await answerLoad(context, [fieldWidget], {}, 'd2');
+      await answerQueries(context, answer);
+
+      expect(notice(context.root)).toBeNull();
+      expect(titles(context.root)).toEqual(['Field progress']);
+      expect(text(byTestId(context.root, 'dashboard-heading'))).toBe('Field');
+      expect(byTestId(context.root, 'dashboard-menu')).not.toBeNull();
+
+      await go(context, 'd1');
+      await answerLoad(context, [coverage]);
+      await answerQueries(context, answer);
+      expect(notice(context.root)).toBeNull();
+      expect(titles(context.root)).toEqual(['Coverage by municipality']);
+    });
+
+    it('drops the version read when another dashboard opens before it is answered', async () => {
+      const context = await open('analyst', [coverage], answer, {}, { dashboards: indicatorsAndField });
+      await choose(context, historyOf([12, 9]), 9, 'view');
+      const read = context.http.expectOne(isVersion(9));
+
+      await go(context, 'd2');
+      await answerLoad(context, [], {}, 'd2');
+
+      expect(read.cancelled).toBe(true);
+      expect(notice(context.root)).toBeNull();
+      expect(text(byTestId(context.root, 'dashboard-heading'))).toBe('Field');
+    });
+
+    it('offers no Add widget in a version without widgets, saying it has none', async () => {
+      const context = await open('analyst', [coverage], answer);
+
+      await view(context, historyOf([12, 9]), versionOf(9, []));
+
+      expect(text(byTestId(context.root, 'no-widgets'))).toBe('No widgets in this version');
+      expect(byTestId(context.root, 'widget-add')).toBeNull();
+      expect(byTestId(context.root, 'widget-grid')).toBeNull();
+    });
+
+    it('offers no Add widget in a version shown before any indicator has published, and counts its widgets', async () => {
+      const context = await open('analyst', [coverage], null, unpublished);
+
+      await view(context, historyOf([12, 9]), versionOf(9, [coverage, water]));
+
+      expect(byTestId(context.root, 'indicators-empty')).not.toBeNull();
+      expect(byTestId(context.root, 'widget-add')).toBeNull();
+      expect(text(byTestId(context.root, 'indicators-empty-widgets'))).toBe('2 widgets are already configured; they draw once their indicators are published.');
+      expect(titles(context.root)).toEqual(['Coverage by municipality', 'Water source']);
+    });
+
+    it('says a version no longer kept and lists the versions kept again', async () => {
+      const context = await open('analyst', [coverage], answer);
+      await choose(context, historyOf([12, 3]), 3, 'view');
+
+      context.http.expectOne(isVersion(3)).flush(...versionNotFound);
+      await settle(context.harness);
+
+      expect(toasts()).toEqual([{ tone: 'danger', message: 'That version is no longer kept.' }]);
+      expect(notice(context.root)).toBeNull();
+      expect(history()).not.toBeNull();
+      context.http.expectOne(isVersions);
+    });
+
+    it('takes the member to the first dashboard when the version finds the dashboard removed meanwhile', async () => {
+      const context = await open('analyst', [coverage], answer, {}, { dashboards: indicatorsAndField });
+      await choose(context, historyOf([12, 9]), 9, 'view');
+
+      context.http.expectOne(isVersion(9)).flush(...removedMeanwhile);
+      await settle(context.harness);
+      context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: [{ id: 'd2', name: 'Field' }] }));
+      await settle(context.harness);
+      await answerLoad(context, [], {}, 'd2');
+
+      expect(notice(context.root)).toBeNull();
+      expect(TestBed.inject(Router).url).toBe(`/projects/${projectId}/dashboards/d2`);
+      expect(text(byTestId(context.root, 'dashboard-notice'))).toContain('"Indicators" no longer exists');
+    });
+  });
+
+  describe('restoring a version', () => {
+    it('asks first, then restores, reads the dashboard again and says so in one message, with focus on the heading (Removed widget brought back)', async () => {
+      const context = await open('analyst', [coverage], answer);
+      await choose(context, historyOf([8, 7]), 7, 'restore');
+
+      expect(history()).toBeNull();
+      expect(text(confirmation()!.querySelector('h2'))).toBe('Restore version 7?');
+      expect(plain(text(confirmation()!.querySelector('#tmz-confirm-message')))).toBe(
+        `The name, filters and widgets of “Indicators” go back to how they were on ${when(savedAt(7))}. The current state stays in the history.`,
+      );
+      expect(text(confirmation()!.querySelector('[data-testid="confirm"]'))).toBe('Restore');
+      context.http.expectNone(isRestore(7));
+
+      await confirmRestore(context);
+      const request = context.http.expectOne(isRestore(7));
+      expect(request.request.body).toBeNull();
+      request.flush(restoreOf(9, 7, [coverage, water]), { status: 201, statusText: 'Created' });
+      await settle(context.harness);
+      await answerLoad(context, [coverage, water]);
+      await answerQueries(context, answer);
+
+      expect(titles(context.root)).toEqual(['Coverage by municipality', 'Water source']);
+      expect(toasts()).toEqual([{ tone: 'success', message: 'Restored version 7 as version 9.' }]);
+      expect(document.activeElement).toBe(byTestId(context.root, 'dashboard-heading'));
+    });
+
+    it('restores nothing when the confirmation is cancelled', async () => {
+      const context = await open('analyst', [coverage], answer);
+      await choose(context, historyOf([8, 7]), 7, 'restore');
+
+      Array.from(confirmation()!.querySelectorAll<HTMLElement>('button')).find((b) => text(b) === 'Cancel')!.click();
+      await settle(context.harness);
+
+      expect(confirmation()).toBeNull();
+      context.http.expectNone(isRestore(7));
+      context.http.expectNone(isDashboard);
+      expect(toasts()).toEqual([]);
+    });
+
+    it('restores the version shown from its notice, leaving the view, and focus on the heading (Restore undone)', async () => {
+      const context = await open('analyst', [coverage, water], answer);
+      await view(context, historyOf([9, 8, 7]), versionOf(8, [coverage]));
+      await answerQueries(context, answer);
+
+      byTestId(context.root, 'dashboard-version-restore-shown')!.click();
+      await settle(context.harness);
+      expect(text(confirmation()!.querySelector('h2'))).toBe('Restore version 8?');
+      await confirmRestore(context);
+      context.http.expectOne(isRestore(8)).flush(restoreOf(10, 8, [coverage]), { status: 201, statusText: 'Created' });
+      await settle(context.harness);
+      await answerLoad(context, [coverage]);
+      await answerQueries(context, answer);
+
+      expect(notice(context.root)).toBeNull();
+      expect(titles(context.root)).toEqual(['Coverage by municipality']);
+      expect(byTestId(context.root, 'dashboard-menu')).not.toBeNull();
+      expect(toasts()).toEqual([{ tone: 'success', message: 'Restored version 8 as version 10.' }]);
+      expect(document.activeElement).toBe(byTestId(context.root, 'dashboard-heading'));
+    });
+
+    it('restores once when the version shown is restored again while its restore is on its way', async () => {
+      const context = await open('analyst', [coverage, water], answer);
+      await view(context, historyOf([9, 8]), versionOf(8, [coverage]));
+      await answerQueries(context, answer);
+      const button = byTestId(context.root, 'dashboard-version-restore-shown')!;
+      button.click();
+      await settle(context.harness);
+      await confirmRestore(context);
+
+      expect(button.getAttribute('aria-busy')).toBe('true');
+      expect(button.getAttribute('aria-disabled')).toBe('true');
+      button.click();
+      await settle(context.harness);
+
+      expect(confirmation()).toBeNull();
+      expect(context.http.match(isRestore(8))).toHaveLength(1);
+    });
+
+    it('says the name was kept, and why, when another dashboard has the version\'s name (Name taken)', async () => {
+      const context = await open('analyst', [coverage], answer, {}, { dashboards: [{ id: 'd1', name: 'Agua' }, { id: 'd2', name: 'Water' }] });
+
+      await restore(context, historyOf([5, 4], { 4: 'Water' }), 4, restoreOf(6, 4, [coverage], { nameKept: true, dashboard: dashboard([coverage], { name: 'Agua', version: 6 }) }));
+      await answerLoad(context, [coverage]);
+      await answerQueries(context, answer);
+
+      expect(toasts()).toEqual([{ tone: 'success', message: 'Restored version 4 as version 6. It keeps the name “Agua”, since another dashboard is named “Water”.' }]);
+      expect(text(byTestId(context.root, 'dashboard-heading'))).toBe('Agua');
+    });
+
+    it('gives the tab and the heading the name the restore brought back', async () => {
+      const context = await open('analyst', [coverage], answer, {}, { dashboards: [{ id: 'd1', name: 'Agua' }, { id: 'd2', name: 'Field' }] });
+
+      await restore(context, historyOf([5, 4], { 4: 'Water' }), 4, restoreOf(6, 4, [coverage], { dashboard: dashboard([coverage], { name: 'Water', version: 6 }) }));
+      await answerLoad(context, [coverage]);
+      await answerQueries(context, answer);
+
+      expect(text(byTestId(context.root, 'dashboard-heading'))).toBe('Water');
+      expect(Array.from(context.root.querySelectorAll('nav a')).map(text)).toContain('Water');
+      expect(Array.from(context.root.querySelectorAll('nav a')).map(text)).not.toContain('Agua');
+      expect(toasts()).toEqual([{ tone: 'success', message: 'Restored version 4 as version 6.' }]);
+    });
+
+    it('names each widget that came back as a copy and the dashboard that still holds it (Widget since moved to another dashboard)', async () => {
+      const copy = widget('w8', { title: 'Coverage' });
+      const context = await open('analyst', [], answer, {}, { dashboards: indicatorsAndField });
+
+      await restore(
+        context,
+        historyOf([8, 7]),
+        7,
+        restoreOf(9, 7, [copy], { copies: [{ originalId: 'w7', copyId: 'w8', title: 'Coverage', dashboardId: 'd2', dashboardName: 'Field' }] }),
+      );
+      await answerLoad(context, [copy]);
+      await answerQueries(context, answer);
+
+      expect(titles(context.root)).toEqual(['Coverage']);
+      expect(toasts()).toEqual([{ tone: 'success', message: 'Restored version 7 as version 9. “Coverage” came back as a copy: the original is still on “Field”.' }]);
+    });
+
+    it('says the dashboard already is as in the version, and changes nothing on the page (Version equal to the current one)', async () => {
+      const context = await open('analyst', [coverage], answer);
+
+      await restore(context, historyOf([10, 9, 8]), 8, restoreOf(10, 8, [coverage], { restored: false, version: summary(10, { current: true }) }));
+
+      expect(toasts()).toEqual([{ tone: 'success', message: '“Indicators” already is as in version 8.' }]);
+      context.http.expectNone(isDashboard);
+      context.http.expectNone(isOverview);
+      expect(titles(context.root)).toEqual(['Coverage by municipality']);
+      expect(document.activeElement).toBe(byTestId(context.root, 'dashboard-menu'));
+    });
+
+    it('drops from the address the values of filters the restored version does not define, with the notice for them (Filter values in the address)', async () => {
+      const query = `f=${encodeFilters([{ column: 'municipality', op: 'in', values: ['Cali'] }])}`;
+      const context = await open('analyst', [coverage], answer, {}, { filters: [municipality], query });
+
+      await restore(context, historyOf([8, 7]), 7, restoreOf(9, 7, [coverage]));
+      // Version 7 defines no filter.
+      await answerLoad(context, [coverage]);
+      await answerQueries(context, answer);
+
+      expect(text(byTestId(context.root, 'dashboard-filters-dropped'))).toContain('The filter "municipality" was removed.');
+      expect(addressHasF()).toBe(false);
+      expect(byTestId(context.root, 'dashboard-filter-bar')).toBeNull();
+    });
+
+    it('says the version is no longer kept, changes nothing and lists the versions kept again (Version deleted meanwhile)', async () => {
+      const context = await open('analyst', [coverage], answer);
+      await choose(context, historyOf([12, 11, 10, 9, 8, 7, 6, 5, 4, 3]), 3, 'restore');
+      await confirmRestore(context);
+
+      context.http.expectOne(isRestore(3)).flush(...versionNotFound);
+      await settle(context.harness);
+
+      expect(toasts()).toEqual([{ tone: 'danger', message: 'That version is no longer kept.' }]);
+      context.http.expectNone(isDashboard);
+      expect(titles(context.root)).toEqual(['Coverage by municipality']);
+      expect(history()).not.toBeNull();
+      context.http.expectOne(isVersions).flush(historyOf([13, 12, 11, 10, 9, 8, 7, 6, 5, 4]));
+      await settle(context.harness);
+      expect(all(history()!, 'dashboard-version-number').map(text)).toContain('Version 4');
+    });
+
+    it('leaves the view of a version no longer kept, lists the versions kept again and gives focus to the heading once closed', async () => {
+      const context = await open('analyst', [coverage], answer);
+      await view(context, historyOf([12, 3]), versionOf(3, [coverage, water]));
+      await answerQueries(context, answer);
+      byTestId(context.root, 'dashboard-version-restore-shown')!.click();
+      await settle(context.harness);
+      await confirmRestore(context);
+
+      context.http.expectOne(isRestore(3)).flush(...versionNotFound);
+      await settle(context.harness);
+      await answerQueries(context, answer);
+
+      expect(notice(context.root)).toBeNull();
+      expect(titles(context.root)).toEqual(['Coverage by municipality']);
+      context.http.expectOne(isVersions).flush(historyOf([13, 12]));
+      await settle(context.harness);
+      byTestId(history()!, 'dashboard-versions-close')!.click();
+      await settle(context.harness);
+      expect(document.activeElement).toBe(byTestId(context.root, 'dashboard-heading'));
+    });
+
+    it('takes the member to the first dashboard when the restore finds the dashboard removed meanwhile (Dashboard removed meanwhile)', async () => {
+      const context = await open('analyst', [coverage], answer, {}, { dashboards: indicatorsAndField });
+      await choose(context, historyOf([8, 7]), 7, 'restore');
+      await confirmRestore(context);
+
+      context.http.expectOne(isRestore(7)).flush(...removedMeanwhile);
+      await settle(context.harness);
+      context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: [{ id: 'd2', name: 'Field' }] }));
+      await settle(context.harness);
+      await answerLoad(context, [], {}, 'd2');
+
+      expect(TestBed.inject(Router).url).toBe(`/projects/${projectId}/dashboards/d2`);
+      expect(text(byTestId(context.root, 'dashboard-notice'))).toContain('"Indicators" no longer exists');
+      expect(toasts()).toEqual([]);
+    });
+
+    it('says why a version over the widget limit cannot be restored, and changes nothing (Limit lowered)', async () => {
+      const limit = 'A dashboard can have at most 20 widgets. Remove one or move it to another dashboard first.';
+      const context = await open('analyst', [coverage], answer);
+      await view(context, historyOf([12, 7]), versionOf(7, [coverage, water]));
+      await answerQueries(context, answer);
+      byTestId(context.root, 'dashboard-version-restore-shown')!.click();
+      await settle(context.harness);
+      await confirmRestore(context);
+
+      context.http
+        .expectOne(isRestore(7))
+        .flush({ title: 'One or more validation errors occurred.', status: 400, errors: { widgets: [limit] } }, { status: 400, statusText: 'Bad Request' });
+      await settle(context.harness);
+
+      expect(toasts()).toEqual([{ tone: 'danger', message: limit }]);
+      context.http.expectNone(isDashboard);
+      expect(notice(context.root)).not.toBeNull();
+      expect(byTestId(context.root, 'dashboard-version-restore-shown')!.getAttribute('aria-busy')).toBeNull();
+    });
   });
 });
 
@@ -2644,6 +3502,7 @@ describe('ProjectIndicators printing (dashboard printing)', () => {
 
       expect(url()).toBe(before);
       expect(context.http.match(isPatch)).toHaveLength(0);
+      expect(context.http.match(isLayout)).toHaveLength(0);
       expect(context.http.match(isQuery)).toHaveLength(0); // nothing is read again for the paper
       expect(all(context.root, 'widget')).toHaveLength(2);
     });

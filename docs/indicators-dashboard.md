@@ -10,7 +10,7 @@ The tab row of a project reads **Performance**, **Clean data**, the project's ow
 
 A dashboard's name is shown exactly as it was saved: never translated, and always as text, never as markup. From 768 pixels wide, tabs that do not fit scroll sideways inside the row, never the page: each side that hides tabs shows an arrow that scrolls the row, Settings (for analysts and admins) stays visible at its end, and the open tab is brought into view. A name too long for its tab is cut with an ellipsis; pointing at the tab or reaching it with the keyboard shows the whole name, and screen readers read it whole. Below 768 pixels one select lists Performance, Clean data and the project's dashboards in the same order, then, for analysts and admins, the Settings group.
 
-Each dashboard shows its name as a heading above its widgets. For analysts and admins the heading is followed by the **New dashboard** button and the **Dashboard actions** menu (the button with three dots), with **Rename**, **Duplicate**, **Move left**, **Move right**, **Filters** (see [Defining a dashboard's filters](#defining-a-dashboards-filters)) and **Remove**; on a narrow screen they wrap under the name. An item that is unavailable stays in the menu, dimmed, with a second line saying why (for example "It is already the first dashboard."); the arrow keys still reach it, so a screen reader reads the reason too, but it cannot be chosen. Viewers see the heading only.
+Each dashboard shows its name as a heading above its widgets. For analysts and admins the heading is followed by the **New dashboard** button and the **Dashboard actions** menu (the button with three dots), with **Rename**, **Duplicate**, **Move left**, **Move right**, **Filters** (see [Defining a dashboard's filters](#defining-a-dashboards-filters)), **Version history** (see [Version history](#version-history)) and **Remove**; on a narrow screen they wrap under the name. An item that is unavailable stays in the menu, dimmed, with a second line saying why (for example "It is already the first dashboard."); the arrow keys still reach it, so a screen reader reads the reason too, but it cannot be chosen. Viewers see the heading only.
 
 **New dashboard**, **Rename** and **Duplicate** open the same name form: one **Name** field, of up to 40 characters and different from the names of the project's other dashboards, then **Add dashboard**, **Rename** or **Duplicate** to save, or **Cancel** (or Escape) to close it without a change. A name that is refused (empty, too long, taken, the name of a permanent tab, or holding a control character) is explained under the field, and what you typed is kept.
 
@@ -18,13 +18,13 @@ Each dashboard shows its name as a heading above its widgets. For analysts and a
 - **Rename** changes only the name: the dashboard keeps its widgets, its place and its address. A message confirms the new name (`Renamed to "Coverage".`), and the focus returns to the actions button.
 - **Move left** and **Move right** move the dashboard one place among the project's dashboards, for every member. The first dashboard cannot move left and the last cannot move right. Screen readers are told the dashboard's new position ("Health moved to position 3 of 4"), and the focus returns to the actions button, so a dashboard can be moved several places in a row. While a move is being saved, both items are unavailable.
 - **Duplicate** asks for the copy's name, proposed as the original's name followed by " (copy)", the original's name cut where needed so the whole fits in 40 characters (to its first 33 before " (copy)"); when the project already has that name, in any case, it proposes " (copy 2)", " (copy 3)" and so on, cut the same way. The copy is placed right after the original and holds a copy of each of its widgets, with the same title, type, query, ignored filters, position and size, and of its filters, in the same order with the same defaults, and it opens with the focus on its heading. A widget you moved or resized a moment before is saved first, so the copy has it in its new place. From then on the two are independent: changing or removing a widget of one leaves the other as it is. A dashboard that holds more widgets than the [limit](#limits) allows, which happens only after an operator lowered it, cannot be duplicated: the name form says so ("A dashboard can have at most 50 widgets. Remove one or move it to another dashboard first.") and nothing is added.
-- **Remove** asks for confirmation, saying how many widgets go with the dashboard, counted on the server when you ask ("Remove Health and its 5 widgets? This cannot be undone."), then, on **Remove dashboard**, removes the dashboard and all its widgets for every member. It cannot be undone. The dashboard now in its place opens, or the new last one when the removed dashboard was last, with the focus on its heading, and a message says what was removed (`"Health" and its 5 widgets were removed.`).
+- **Remove** asks for confirmation, saying how many widgets go with the dashboard, counted on the server when you ask ("Remove Health and its 5 widgets? This cannot be undone."), then, on **Remove dashboard**, removes the dashboard and all its widgets for every member. It cannot be undone: a removed dashboard cannot be brought back, and its versions go with it. A widget removed from a dashboard can be brought back while a kept version of that dashboard holds it (see [Restoring a version](#restoring-a-version)). The dashboard now in its place opens, or the new last one when the removed dashboard was last, with the focus on its heading, and a message says what was removed (`"Health" and its 5 widgets were removed.`).
 
 The rules:
 
 - **1 to 7 dashboards.** A project always keeps one: on its only dashboard **Remove** is unavailable ("A project needs at least one dashboard."). At 7, **New dashboard** is unavailable, with a line below it that says why ("The project has the most dashboards it can hold (7)."), and so is **Duplicate** ("A project can have at most 7 dashboards."). Both can still be reached with the keyboard, so a screen reader reads why. The 7 is a rule of the product, not a setting.
 - **Names** are 1 to 40 characters once leading and trailing spaces are removed (`  Salud  ` is saved as `Salud`), with no control characters such as tabs or line breaks. Two dashboards of a project cannot have names that differ only in case (`Salud` and `SALUD`), and no dashboard can be named Performance, Clean data or Settings, in any case. Another project can use the same names.
-- **Who.** Analysts and admins add, rename, move, duplicate and remove dashboards, and define their filters. Viewers see every dashboard and its widgets but none of these actions, and the API refuses their requests (403). Someone who is not a member of the project gets the same answer as for a project that does not exist.
+- **Who.** Analysts and admins add, rename, move, duplicate and remove dashboards, define their filters, and read, view and restore their versions. Viewers see every dashboard and its widgets but none of these actions, and the API refuses their requests (403). Someone who is not a member of the project gets the same answer as for a project that does not exist.
 
 ### Dashboard addresses
 
@@ -360,7 +360,7 @@ The **Add widget** button opens the widget form, and the widget is added to the 
 
 - **A dashboard holds at most 50 widgets** by default. The limit counts the widgets of one dashboard, so a full dashboard does not stop another from getting more. The page shows how many are used ("12 of 50 widgets on this dashboard") and, at the limit, says so ("This dashboard has the most widgets it can hold (50). Remove one or move it to another dashboard to add another.") and disables **Add widget**. An operator can change the limit; see [operations.md](operations.md#common-changes).
 - Every member sees the same dashboards: they are saved with the project, not per person. If two members change the same widget at the same time, the last change is kept.
-- Removing a widget asks for confirmation and removes it for everyone.
+- Removing a widget asks for confirmation and removes it for everyone. The dashboard's kept versions still hold it: restoring one of them brings it back, and also undoes the changes made after that version (see [Restoring a version](#restoring-a-version)).
 
 ### Ignoring dashboard filters
 
@@ -407,6 +407,61 @@ Every widget except the stat tile has a table button in its header (shown once t
 - **The browser's options.** Paper size, orientation and scale stay yours to choose; a smaller scale fits more rows on a sheet. Colors print without turning on **Background graphics**. The browser offers the project, the dashboard and the date as the PDF's file name, and prints the same in its own header when **Headers and footers** is on.
 - **Browsers.** Printing is made for Chrome, Edge and Firefox on a computer. Other browsers print the same content but may not scale the dashboard to a portrait sheet or keep every widget whole.
 
+## Version history
+
+Tamiza keeps a history of each of a project's own dashboards. Every change saved to a dashboard records a new **version**: the dashboard as it is after the change, with its name, its filters with their defaults, and its widgets with their title, type, query, the dashboard filters they ignore, position and size. The newest version is the dashboard as it is. Analysts and admins open the history from **Dashboard actions** with **Version history**; viewers are not offered it, and the API refuses their requests (403). Performance and Clean data have no history.
+
+### What makes a version
+
+- **Every change, however small:** adding the dashboard, renaming or duplicating it, saving its filters, and adding, editing, removing, moving or resizing a widget, or moving one to or from another dashboard. Adding a full stop to a widget's title is a version.
+- **One action, one version.** A drag is one version, with the widgets it pushed down, and so is a run of arrow presses on a widget's handle: the page saves them together once the dragging has been still for a moment (see [The grid](#the-grid)). Two drags with a pause between them are two versions. A widget moved to another dashboard makes one version on each: one says the widget went to the other dashboard, the other that it came from it.
+- **No change, no version.** Saving the filters or a widget's form without changing anything makes none.
+- **A copy starts its own history.** **Duplicate** gives the copy a version 1 that says which dashboard it was duplicated from, and the original keeps its versions. A move or resize made on the original a moment before is saved first, as the original's own version.
+- **Removing a dashboard removes its versions with it.**
+
+These are not changes to the dashboard, and never make a version: runs and the data they publish (the widgets show the new data), synchronizations, the filter values a member picks, a member's basemap and map view, **Show as table**, printing, the order of the project's dashboards (**Move left** and **Move right**) and the scheduled email.
+
+A dashboard that existed before version history began has a version 1, **State before version history**, that holds it as it was then. It is attributed to the last person who changed the dashboard or one of its widgets, at that time.
+
+### Requests from AI clients
+
+Changes that Claude or another AI client makes through the [MCP server](mcp.md) make versions too, attributed to the person it acts for and marked **via MCP**, with the request the client gave in quotes ("Add five water indicators"). The client gives that request with every change it makes for it, so all the changes of one request make one version of each dashboard they change, however many widgets it adds. A new version starts with the next request, when you or another member change the dashboard in between, or when 30 minutes pass between two of its changes. To undo a request, ask the client: it restores, on each dashboard the request changed, the version before it, which is a version of its own, marked **via MCP**, as any restore.
+
+### Ten versions kept
+
+Each dashboard keeps its 10 newest versions, the current one included: the change that makes the eleventh deletes the oldest. Numbers keep counting up and are never reused, so a dashboard that keeps versions 3 to 12 makes version 13 next. The 10 is a rule of the product, not a setting.
+
+### The history
+
+**Version history** first saves a move or resize still waiting for its pause, so the newest version holds the widgets where you left them, then lists the kept versions, newest first. Each shows:
+
+- its number, with **Current** on the newest;
+- what changed, up to three lines ("Widget “Water source” added", "Renamed to “Agua”", "Widgets moved or resized"), then how many more ("and 2 more");
+- for a version an AI client made, the request in quotes;
+- who made it and when its last change was saved ("Ana Pérez · Oct 31, 2026, 10:32 AM"), followed by **via MCP** for a version an AI client made.
+
+Names and titles are shown as they were at the time, as text. Every version but the current one has **View** (see [Viewing a version](#viewing-a-version)) and **Restore** (see [Restoring a version](#restoring-a-version)). **Close**, or Escape, closes the history and returns the focus to the actions button. On a phone the history fits the screen's width, and the list scrolls.
+
+### Viewing a version
+
+**View** shows the version on the dashboard page, in place of the dashboard as it is: its name as the heading, its filters at their defaults, and its widgets with today's data. Each widget is drawn from the settings the version holds, so a widget removed since shows again, and one whose indicator or columns are gone since says so, as a [stale widget](#when-a-table-changes) does. A notice above it says which version it is, who saved it and when ("Viewing version 9, saved by Ana Pérez on Oct 31, 2026, 10:32 AM. It is read-only."); the focus moves to it, so screen readers read it.
+
+- **Read-only.** While a version is shown, the heading has no actions, **Print** included, and there is no **Add widget**, no count of widgets, no handles to move or resize a widget and no widget menu. **Show all as tables**, the widgets' table buttons and the exports in the list of indicators stay: they change nothing. Printing from the browser's menu (Ctrl+P) while a version is shown prints the version, and the sheet names it under the heading ("Version 9, saved by Ana Pérez on Oct 31, 2026, 10:32 AM"), as the PDF's file name does.
+- **Filters.** Change the version's filter values as on any dashboard; they change only your screen. The page address keeps the values of the dashboard as it is, so a link copied meanwhile opens the dashboard as it is, not the version. The values a text filter offers come from the indicators of the version's widgets, not of the dashboard's.
+- **Back to the current version** shows the dashboard as it is again, with the focus on its heading. Opening another dashboard, or reloading the page, also leaves the version.
+- **Restore version 9**, in the notice, restores the version shown, as **Restore** in the history does.
+
+### Restoring a version
+
+**Restore**, in the history or in the notice of a version shown, asks first ("Restore version 9?": "The name, filters and widgets of “Housing” go back to how they were on Oct 31, 2026, 10:32 AM. The current state stays in the history."). On **Restore**, a move or resize still waiting for its pause is saved first, then the dashboard's name, its filters with their defaults and its widgets become those of the version, for every member. The restore is a new version that says which version it restored ("Version 9 restored"), so the state it replaced stays in the history, and a restore can itself be undone by restoring the version before it. The dashboard keeps its address, its place among the dashboards and its [scheduled email](operations.md#email-optional), whose recipients, days and time stay as they were and whose next email shows the restored widgets.
+
+The page then shows the dashboard as restored, with the focus on its heading, and one message says what was done ("Restored version 9 as version 13."). Values in the page address for filters the restored version does not define are dropped, with the notice for them (see [Filtered views in the address](#filtered-views-in-the-address)). A version that holds the dashboard exactly as it is changes nothing and makes no version, and the message says so ("“Housing” already is as in version 9.").
+
+- **Names.** When another dashboard of the project now has the version's name, in any case, the dashboard keeps its current name, and the message says why ("It keeps the name “Agua”, since another dashboard is named “Water”."). The version's widgets and filters are restored all the same.
+- **Widgets moved since.** A widget of the version that is now on another dashboard comes back as a copy, and the other dashboard keeps it as it is. The message names each copy and the dashboard that still has the original ("“Coverage” came back as a copy: the original is still on “Field”."). A widget whose indicator or columns are gone since comes back as it was, and says what is missing (see [When a table changes](#when-a-table-changes)).
+- **The limit.** A version that holds more widgets than a dashboard may now hold, which happens only after an operator lowered the [limit](#limits), cannot be restored: the message says so ("A dashboard can have at most 20 widgets. Remove one or move it to another dashboard first."), and nothing changes.
+- **Two members at the same time.** A restore replaces the dashboard as it is when it is saved, even when another member changed it after you opened the history; their change stays in the history as a version of its own. A change saved at the very moment of the restore, not yet in a version, is kept as a version before the restore ("Changes kept before a restore"). A version deleted meanwhile, by ten newer ones, is not restored: a message says it is no longer kept, the dashboard is unchanged, and the history opens again with the versions kept. A dashboard another member removed meanwhile is handled as any change to it (see [Two members at the same time](#two-members-at-the-same-time)).
+
 ## When a table changes
 
 A run replaces each indicator's table on its own. The page shows when each indicator published and by which run; reload the page to see a newer one.
@@ -437,6 +492,7 @@ The other widgets keep working. A dashboard filter on a column the new table no 
 | Length of a text in a tooltip | 200 characters (cut with an ellipsis) |
 | Indicators in a project | 100 |
 | Length of a title | 200 characters |
+| Versions a dashboard keeps | 10, the current one included |
 
 An operator can change the first two; the others are fixed. See [operations.md](operations.md#common-changes). A widget whose query matches more rows than the limit shows the first ones and says so ("Only the first 5,000 rows are shown"); add a filter or group by a coarser column. A query that takes longer than the dashboard time limit (25 seconds by default, shared with the clean data dashboard) is stopped with a message.
 
@@ -450,6 +506,7 @@ An operator can change the first two; the others are fixed. See [operations.md](
 - Your filter values are not remembered between visits, except in the page address.
 - Every member sees every dashboard: there are no dashboards for some members only, and no dashboards of one's own.
 - It does not copy a dashboard or a widget to another project, and a removed dashboard cannot be brought back.
+- It does not compare two versions side by side, name or pin a version, or keep more than the 10 newest.
 - Tabs cannot be dragged: a dashboard moves with **Move left** and **Move right**, which also work from the keyboard and on a phone.
 - It does not save a chart or a map as an image.
 - It does not make a PDF on the server, and a scheduled email attaches no PDF: printing goes through the browser's dialog, which can save as PDF.

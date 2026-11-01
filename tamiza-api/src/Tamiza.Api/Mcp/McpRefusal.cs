@@ -15,6 +15,7 @@ public sealed class McpRefusal(string code, string message, IReadOnlyDictionary<
     public const string ProjectOffCode = "mcp.projectOff";
     public const string RowsNotAllowedCode = "mcp.rowsNotAllowed";
     public const string ScriptChangedCode = "mcp.scriptChanged";
+    public const string DashboardChangedCode = "mcp.dashboardChanged";
     public const string NameMismatchCode = "mcp.nameMismatch";
     public const string UnsafeCodeCode = "mcp.unsafeCode";
     public const string RateLimitedCode = "mcp.rateLimited";
@@ -25,7 +26,7 @@ public sealed class McpRefusal(string code, string message, IReadOnlyDictionary<
 
     public string Code { get; } = code;
 
-    /// <summary>Further machine-readable facts: the field errors of a validation, the current version of a script, the seconds to wait.</summary>
+    /// <summary>Further machine-readable facts: the field errors of a validation, the current version of a script or a dashboard, the seconds to wait.</summary>
     public IReadOnlyDictionary<string, object?> Details { get; } = details ?? new Dictionary<string, object?>();
 
     /// <summary>The same answer as for a project that does not exist, so a client learns nothing about projects of others.</summary>

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -11,7 +12,7 @@ namespace Tamiza.Api.Mcp;
 /// Wraps every tool call (design D12): the person's limits, an error result for whatever the tool did not catch, and the record of the
 /// call. Tools report refusals through <see cref="McpCallScope"/>; whatever else goes wrong is a failure.
 /// </summary>
-public static class McpCallFilter
+public static partial class McpCallFilter
 {
     public static McpRequestHandler<CallToolRequestParams, CallToolResult> Create(McpRequestHandler<CallToolRequestParams, CallToolResult> next) =>
         async (context, ct) =>
@@ -94,7 +95,21 @@ public static class McpCallFilter
         McpProtocolException { Message: var message } when message.StartsWith("Unknown tool", StringComparison.Ordinal) =>
             McpRefusal.NotFound("The tool", "Call tools/list for the tools that exist."),
         ArgumentException or System.Text.Json.JsonException or FormatException =>
-            McpRefusal.Validation(new Dictionary<string, string[]> { ["arguments"] = [exception.Message] }),
+            McpRefusal.Validation(new Dictionary<string, string[]> { [ArgumentKey(exception)] = [exception.Message] }),
         _ => null,
     };
+
+    /// <summary>
+    /// The key a refused argument is reported under: a required one left out under its own name, as a tool reports a value it refuses
+    /// (a dashboard write's <c>change</c>, design D10 of dashboard versions), so a client reads one key whatever refused it. Anything
+    /// else, such as a value of the wrong type, under <c>arguments</c>. The name comes from the SDK's message, the only place it gives it.
+    /// </summary>
+    private static string ArgumentKey(Exception exception) =>
+        exception is ArgumentException && MissingParameter().Match(exception.Message) is { Success: true } missing
+            ? missing.Groups["name"].Value
+            : "arguments";
+
+    /// <summary>The message of Microsoft.Extensions.AI for a required parameter left out: "... missing a value for the required parameter 'change'."</summary>
+    [GeneratedRegex("required parameter '(?<name>[^']+)'")]
+    private static partial Regex MissingParameter();
 }

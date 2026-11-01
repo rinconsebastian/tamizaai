@@ -530,6 +530,160 @@ public sealed class DashboardWidgetTests(PostgresFixture postgres)
         Assert.Equal(JsonValueKind.Null, moved.GetProperty("config").GetProperty("groupBy").ValueKind);
     }
 
+    // Layout of several widgets (design D8 of dashboard versions)
+
+    private static string LayoutUrl(IndicatorsHarness h, Guid? dashboardId = null) => h.DashboardUrl(dashboardId) + "/layout";
+
+    private static object Place(Guid id, int x, int y, int w = 6, int height = 4) => new { id, layout = new { x, y, w, h = height } };
+
+    private static Task<HttpResponseMessage> PutLayoutAsync(IndicatorsHarness h, object[] widgets, HttpClient? client = null, Guid? dashboardId = null) =>
+        (client ?? h.Analyst).PutAsJsonAsync(LayoutUrl(h, dashboardId), new { widgets });
+
+    private static async Task<Guid> AddAsync(IndicatorsHarness h, string title, int x, int y, Guid? dashboardId = null) =>
+        (await h.AddWidgetAsync(Column(title, new { x, y, w = 6, h = 4 }), dashboardId: dashboardId)).GetProperty("id").GetGuid();
+
+    /// <summary>The dashboard's versions as <c>number changes</c>, oldest first.</summary>
+    private static async Task<string[]> VersionsAsync(IndicatorsHarness h, Guid? dashboardId = null) =>
+        (await TestData.ScalarAsync<string>(h.Db,
+            """
+            SELECT coalesce(string_agg(format('%s %s', number, changes), E'\n' ORDER BY number), '')
+            FROM tamiza.dashboard_versions WHERE project_id = @project AND dashboard_id = @dashboard
+            """,
+            ("project", h.ProjectId), ("dashboard", dashboardId ?? h.DashboardId)))!.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+    [Fact]
+    public async Task Drag_that_pushes_other_widgets_saves_the_four_new_places_in_one_request_and_one_version()
+    {
+        await using var h = await PublishedAsync();
+        var first = await AddAsync(h, "First", 0, 0);
+        var second = await AddAsync(h, "Second", 6, 0);
+        var third = await AddAsync(h, "Third", 0, 4);
+        var dragged = await AddAsync(h, "Dragged", 6, 4);
+        var versions = await VersionsAsync(h);
+
+        // "Dragged" goes to the top left and pushes the three others down.
+        var response = await PutLayoutAsync(h, [Place(dragged, 0, 0), Place(first, 0, 4), Place(second, 6, 4), Place(third, 0, 8)]);
+        var saved = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(["Dragged", "First", "Second", "Third"], Titles(saved)); // in the order sent
+        Assert.Equal([(0, 0, 6, 4), (0, 4, 6, 4), (6, 4, 6, 4), (0, 8, 6, 4)], saved.EnumerateArray().Select(Layout));
+        Assert.All(saved.EnumerateArray(), w => Assert.Equal(h.DashboardId, w.GetProperty("dashboardId").GetGuid()));
+        Assert.Equal(["Dragged", "First", "Second", "Third"], Titles(await h.GetWidgetsAsync()));
+        Assert.Equal(versions.Append("""5 [{"kind": "layoutChanged"}]"""), await VersionsAsync(h));
+        var places = await TestData.ScalarAsync<string>(h.Db,
+            """
+            SELECT string_agg(format('%s %s', widget ->> 'title', widget -> 'layout'), ', ' ORDER BY place)
+            FROM tamiza.dashboard_versions, jsonb_array_elements(content -> 'widgets') WITH ORDINALITY AS w (widget, place)
+            WHERE dashboard_id = @id AND number = 5
+            """,
+            ("id", h.DashboardId));
+        Assert.Equal(
+            """Dragged {"h": 4, "w": 6, "x": 0, "y": 0}, First {"h": 4, "w": 6, "x": 0, "y": 4}, Second {"h": 4, "w": 6, "x": 6, "y": 4}, Third {"h": 4, "w": 6, "x": 0, "y": 8}""",
+            places);
+    }
+
+    [Fact]
+    public async Task A_layout_that_leaves_every_widget_where_it_is_writes_nothing_and_makes_no_version()
+    {
+        await using var h = await PublishedAsync();
+        var first = await AddAsync(h, "First", 0, 0);
+        var second = await AddAsync(h, "Second", 6, 0);
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await VersionsAsync(h);
+
+        var response = await PutLayoutAsync(h, [Place(second, 6, 0), Place(first, 0, 0)]);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(["Second", "First"], Titles(await ReadAsync(response)));
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await VersionsAsync(h));
+    }
+
+    [Fact]
+    public async Task A_layout_naming_a_widget_that_is_not_on_the_dashboard_answers_as_its_patch_does_and_saves_nothing()
+    {
+        await using var h = await PublishedAsync();
+        var health = await h.InsertDashboardAsync("Health");
+        var mine = await AddAsync(h, "Mine", 0, 0);
+        var theirs = await AddAsync(h, "Theirs", 0, 0, health);
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await VersionsAsync(h);
+
+        var elsewhere = await PutLayoutAsync(h, [Place(mine, 6, 0), Place(theirs, 0, 4)]);
+        var unknown = await PutLayoutAsync(h, [Place(mine, 6, 0), Place(Guid.NewGuid(), 0, 4)]);
+        var patch = await h.Analyst.PatchJsonAsync(h.WidgetUrl(theirs), new { layout = new { x = 0, y = 4, w = 6, h = 4 } });
+
+        foreach (var response in new[] { elsewhere, unknown, patch })
+        {
+            var problem = await ReadAsync(response);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Equal("Widget not found.", problem.GetProperty("title").GetString());
+            Assert.Null(Code(problem));
+        }
+
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await VersionsAsync(h));
+
+        await h.RemoveDashboardAsync(health);
+        var removed = await PutLayoutAsync(h, [Place(theirs, 6, 0)], dashboardId: health);
+
+        Assert.Equal(HttpStatusCode.NotFound, removed.StatusCode);
+        Assert.Equal(NotFoundCode, Code(await ReadAsync(removed)));
+    }
+
+    [Fact]
+    public async Task Duplicate_ids_more_entries_than_the_widget_limit_and_a_layout_the_patch_refuses_answer_400_and_save_nothing()
+    {
+        await using var h = await PublishedAsync(new() { ["IndicatorDashboard:MaxWidgetsPerDashboard"] = "2" });
+        var first = await AddAsync(h, "First", 0, 0);
+        var second = await AddAsync(h, "Second", 6, 0);
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await VersionsAsync(h);
+
+        var duplicate = await PutLayoutAsync(h, [Place(first, 6, 4), Place(first, 0, 8)]);
+        var tooMany = await PutLayoutAsync(h, [Place(first, 0, 4), Place(second, 6, 4), Place(Guid.NewGuid(), 0, 8)]);
+        var none = await PutLayoutAsync(h, []);
+        var missing = await h.Analyst.PutAsJsonAsync(LayoutUrl(h), new { });
+        var invalid = await PutLayoutAsync(h, [Place(first, 8, 0), new { id = second }]);
+        var anonymous = await PutLayoutAsync(h, [new { layout = new { x = 0, y = 0, w = 6, h = 4 } }]);
+        var patch = await h.Analyst.PatchJsonAsync(h.WidgetUrl(first), new { layout = new { x = 8, y = 0, w = 6, h = 4 } });
+
+        foreach (var response in new[] { duplicate, tooMany, none, missing, invalid, anonymous, patch })
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        Assert.Equal(["The widget is listed more than once."], IndicatorsHarness.Errors(await ReadAsync(duplicate), "widgets[1].id"));
+        Assert.Equal(["Send the layout of 1 to 2 widgets."], IndicatorsHarness.Errors(await ReadAsync(tooMany), "widgets"));
+        Assert.Equal(["Send the layout of 1 to 2 widgets."], IndicatorsHarness.Errors(await ReadAsync(none), "widgets"));
+        Assert.Equal(["Send the layout of 1 to 2 widgets."], IndicatorsHarness.Errors(await ReadAsync(missing), "widgets"));
+        var errors = await ReadAsync(invalid);
+        // Each entry's layout is refused as the PATCH refuses it, under the entry's key.
+        Assert.Equal(IndicatorsHarness.Errors(await ReadAsync(patch), "layout.w"), IndicatorsHarness.Errors(errors, "widgets[0].layout.w"));
+        Assert.Equal(["The layout is required."], IndicatorsHarness.Errors(errors, "widgets[1].layout"));
+        Assert.Equal(["The widget's id is required."], IndicatorsHarness.Errors(await ReadAsync(anonymous), "widgets[0].id"));
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await VersionsAsync(h));
+    }
+
+    [Theory]
+    [InlineData("viewer", HttpStatusCode.Forbidden)]
+    [InlineData("outsider", HttpStatusCode.NotFound)]
+    public async Task A_viewer_gets_403_for_a_layout_and_a_user_who_is_not_a_member_404_and_nothing_is_saved(string role, HttpStatusCode expected)
+    {
+        await using var h = await PublishedAsync();
+        var first = await AddAsync(h, "First", 0, 0);
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await VersionsAsync(h);
+
+        var response = await PutLayoutAsync(h, [Place(first, 6, 0)], role == "viewer" ? h.Viewer : h.Outsider);
+
+        Assert.Equal(expected, response.StatusCode);
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await VersionsAsync(h));
+    }
+
     /// <summary>
     /// Moves the widget, as the analyst, to <paramref name="target"/> while another session holds the project's lock, and runs
     /// <paramref name="meanwhile"/> in that session once the move waits for it: another member's change landing between the move's

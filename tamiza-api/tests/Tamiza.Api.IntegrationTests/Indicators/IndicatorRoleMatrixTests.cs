@@ -6,8 +6,8 @@ using Tamiza.Api.IntegrationTests.Infrastructure;
 namespace Tamiza.Api.IntegrationTests.Indicators;
 
 /// <summary>
-/// Who may call what: reading and exporting is open to every member, changing widgets and dashboards needs analyst or admin, and a
-/// user who is not a member gets the 404 of a project that does not exist.
+/// Who may call what: reading and exporting is open to every member, changing widgets and dashboards and reading or restoring their
+/// versions needs analyst or admin, and a user who is not a member gets the 404 of a project that does not exist.
 /// </summary>
 [Collection(PostgresCollection.Name)]
 public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
@@ -36,6 +36,11 @@ public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
             data.Add(role, "duplicate dashboard", Write(HttpStatusCode.Created));
             data.Add(role, "save filters", Write(HttpStatusCode.OK));
             data.Add(role, "values", read);
+            data.Add(role, "save layout", Write(HttpStatusCode.OK));
+            // Versions hold no rows, but only those who change a dashboard read them (custom-dashboards "Roles for dashboards").
+            data.Add(role, "list versions", Write(HttpStatusCode.OK));
+            data.Add(role, "read version", Write(HttpStatusCode.OK));
+            data.Add(role, "restore version", Write(HttpStatusCode.Created));
         }
 
         return data;
@@ -69,6 +74,10 @@ public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
             "duplicate dashboard" => await client.PostAsJsonAsync(h.DashboardUrl() + "/copies", new { name = "Copy" }),
             "save filters" => await client.PutAsJsonAsync(h.FiltersUrl(), new { filters = new[] { new { label = "Municipality", column = "municipality", kind = "text" } } }),
             "values" => await client.GetAsync(h.DashboardUrl() + "/values?column=municipality"),
+            "save layout" => await client.PutAsJsonAsync(h.DashboardUrl() + "/layout", new { widgets = new[] { new { id = widgetId, layout = new { x = 6, y = 0, w = 3, h = 2 } } } }),
+            "list versions" => await client.GetAsync(h.DashboardUrl() + "/versions"),
+            "read version" => await client.GetAsync(h.DashboardUrl() + "/versions/1"),
+            "restore version" => await RestoreAsync(h, client, widgetId),
             _ => throw new ArgumentOutOfRangeException(nameof(action)),
         };
 
@@ -84,10 +93,12 @@ public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
     {
         await using var h = await IndicatorsHarness.CreateAsync(postgres);
         await h.PublishAsync("coverage", IndicatorsHarness.StandardColumns, "('Cali', 1, 1, 1)");
-        await h.AddWidgetAsync(new { title = "W", chartType = "stat", config = new { indicator = "coverage" } });
+        var widgetId = (await h.AddWidgetAsync(new { title = "W", chartType = "stat", config = new { indicator = "coverage" } })).GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(widgetId), new { title = "Renamed" })).StatusCode);
         var second = await h.InsertDashboardAsync("Second");
         var dashboards = await h.StoredDashboardsAsync();
         var widgets = await h.StoredWidgetsAsync();
+        var versions = await VersionsAsync(h);
         var client = role == "viewer" ? h.Viewer : h.Outsider;
 
         HttpResponseMessage[] responses =
@@ -98,11 +109,36 @@ public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
             await client.PutAsJsonAsync(h.DashboardsUrl + "/order", new { expectedIds = new[] { h.DashboardId, second }, dashboardIds = new[] { second, h.DashboardId } }),
             await client.PostAsJsonAsync(h.DashboardUrl() + "/copies", new { name = "Copy" }),
             await client.PutAsJsonAsync(h.FiltersUrl(), new { filters = new[] { new { label = "Municipality", column = "municipality", kind = "text" } } }),
+            await client.PutAsJsonAsync(h.DashboardUrl() + "/layout", new { widgets = new[] { new { id = widgetId, layout = new { x = 6, y = 0, w = 3, h = 2 } } } }),
+            await client.PostAsync(h.DashboardUrl() + "/versions/1/restore", null),
         ];
 
         Assert.All(responses, response => Assert.Equal(expected, response.StatusCode));
         Assert.Equal(dashboards, await h.StoredDashboardsAsync());
         Assert.Equal(widgets, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await VersionsAsync(h));
+    }
+
+    // Not a member (custom-dashboards): a dashboard's versions are those of a project that does not exist
+
+    [Fact]
+    public async Task A_user_who_is_not_a_member_gets_404_for_the_versions_of_a_dashboard_whose_versions_exist()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("coverage", IndicatorsHarness.StandardColumns, "('Cali', 1, 1, 1)");
+        await h.AddWidgetAsync(new { title = "W", chartType = "stat", config = new { indicator = "coverage" } });
+        var missing = $"/api/v1/projects/{Guid.NewGuid()}/dashboards/{h.DashboardId}/versions";
+
+        HttpResponseMessage[] responses =
+        [
+            await h.Outsider.GetAsync(h.DashboardUrl() + "/versions"),
+            await h.Outsider.GetAsync(h.DashboardUrl() + "/versions/1"),
+            await h.Outsider.PostAsync(h.DashboardUrl() + "/versions/1/restore", null),
+        ];
+        var unknownProject = await h.Analyst.GetAsync(missing);
+
+        Assert.All(responses, response => Assert.Equal(HttpStatusCode.NotFound, response.StatusCode));
+        Assert.Equal(HttpStatusCode.NotFound, unknownProject.StatusCode);
     }
 
     // A widget of each kind with a series
@@ -217,6 +253,22 @@ public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
 
         Assert.Equal(before, await h.StoredWidgetsAsync());
     }
+
+    /// <summary>
+    /// Restores version 1 of the first dashboard, the widget added as the test began, after the analyst renamed that widget, so a restore
+    /// allowed has something to restore.
+    /// </summary>
+    private static async Task<HttpResponseMessage> RestoreAsync(IndicatorsHarness h, HttpClient client, Guid widgetId)
+    {
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(widgetId), new { title = "Renamed" })).StatusCode);
+        return await client.PostAsync(h.DashboardUrl() + "/versions/1/restore", null);
+    }
+
+    /// <summary>Every version of the project as <c>dashboard number changes saved_at</c>, to check that a refused request recorded nothing.</summary>
+    private static async Task<string?> VersionsAsync(IndicatorsHarness h) =>
+        await TestData.ScalarAsync<string>(h.Db,
+            "SELECT string_agg(format('%s %s %s %s', dashboard_id, number, changes, saved_at), E'\n' ORDER BY dashboard_id, number) FROM tamiza.dashboard_versions WHERE project_id = @id",
+            ("id", h.ProjectId));
 
     /// <summary>Swaps the project's dashboards, after adding a second one, from the order they are in.</summary>
     private static async Task<HttpResponseMessage> ReorderAsync(IndicatorsHarness h, HttpClient client)

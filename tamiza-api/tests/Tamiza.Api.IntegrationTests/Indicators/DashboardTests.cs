@@ -910,9 +910,13 @@ public sealed class DashboardTests(PostgresFixture postgres)
                 "/dashboards/{dashboardId} delete get patch",
                 "/dashboards/{dashboardId}/copies post",
                 "/dashboards/{dashboardId}/filters put",
+                "/dashboards/{dashboardId}/layout put",
                 "/dashboards/{dashboardId}/report delete get put",
                 "/dashboards/{dashboardId}/report/send post",
                 "/dashboards/{dashboardId}/values get",
+                "/dashboards/{dashboardId}/versions get",
+                "/dashboards/{dashboardId}/versions/{number} get",
+                "/dashboards/{dashboardId}/versions/{number}/restore post",
                 "/dashboards/{dashboardId}/widgets post",
                 "/dashboards/{dashboardId}/widgets/{widgetId} delete patch",
             ],
@@ -922,7 +926,7 @@ public sealed class DashboardTests(PostgresFixture postgres)
         var order = paths.GetProperty(project + "/dashboards/order");
         var dashboard = paths.GetProperty(project + "/dashboards/{dashboardId}");
         var filters = paths.GetProperty(project + "/dashboards/{dashboardId}/filters");
-        Assert.Equal(["filters", "id", "name", "widgets"], Properties(Component(document, Answer(dashboard.GetProperty("get"), "200"))));
+        Assert.Equal(["filters", "id", "name", "version", "widgets"], Properties(Component(document, Answer(dashboard.GetProperty("get"), "200"))));
         Assert.Equal(["filters"], Properties(Component(document, Body(filters.GetProperty("put")))));
         Assert.Equal(["filters"], Properties(Component(document, Answer(filters.GetProperty("put"), "200"))));
         Assert.Contains("dashboardId", Properties(Component(document, Answer(widgets.GetProperty("post"), "201"))));
@@ -930,6 +934,49 @@ public sealed class DashboardTests(PostgresFixture postgres)
         Assert.Contains("dashboardId", Properties(Component(document, Body(widget.GetProperty("patch")))));
         Assert.Equal(["dashboardIds", "expectedIds"], Properties(Component(document, Body(order.GetProperty("put")))));
         Assert.Contains("dashboards", Properties(document.GetProperty("components").GetProperty("schemas").GetProperty("ProjectDetails")));
+    }
+
+    [Fact]
+    public async Task The_openapi_document_describes_the_layout_and_version_routes_with_their_bodies_and_answers()
+    {
+        await using var h = await CreateAsync();
+        using var anonymous = h.Factory.CreateClient();
+
+        var document = await anonymous.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        const string dashboard = "/api/v1/projects/{projectId}/dashboards/{dashboardId}";
+        var paths = document.GetProperty("paths");
+        var layout = paths.GetProperty(dashboard + "/layout").GetProperty("put");
+        var list = paths.GetProperty(dashboard + "/versions").GetProperty("get");
+        var details = paths.GetProperty(dashboard + "/versions/{number}").GetProperty("get");
+        var restore = paths.GetProperty(dashboard + "/versions/{number}/restore").GetProperty("post");
+        var request = Component(document, Body(layout));
+        Assert.Equal(["widgets"], Properties(request));
+        Assert.Equal(["id", "layout"], Properties(Component(document, Items(request.GetProperty("properties").GetProperty("widgets")))));
+        Assert.Contains("dashboardId", Properties(Component(document, Items(Answer(layout, "200")))));
+        var versions = Component(document, Answer(list, "200"));
+        Assert.Equal(["current", "versions"], Properties(versions));
+        // What the history shows of a version, and the details' name, filters and widgets with it.
+        string[] shown = ["author", "changes", "createdAt", "current", "moreChanges", "name", "note", "number", "origin", "restoredFrom", "savedAt"];
+        Assert.Equal(shown.Append("filterCount").Append("widgetCount").Order(StringComparer.Ordinal),
+            Properties(Component(document, Items(versions.GetProperty("properties").GetProperty("versions")))));
+        var versionDetails = Component(document, Answer(details, "200"));
+        Assert.Equal(shown.Append("filters").Append("widgets").Order(StringComparer.Ordinal), Properties(versionDetails));
+        var origin = versionDetails.GetProperty("properties").GetProperty("origin");
+        origin = origin.TryGetProperty("$ref", out _) ? Component(document, origin) : origin;
+        Assert.Equal(["app", "mcp"], origin.GetProperty("enum").EnumerateArray().Select(value => value.GetString()));
+        Assert.Equal(["chartType", "config", "id", "layout", "title"], Properties(Component(document, Items(versionDetails.GetProperty("properties").GetProperty("widgets")))));
+        foreach (var status in new[] { "200", "201" })
+        {
+            var answer = Component(document, Answer(restore, status));
+            Assert.Equal(["copies", "dashboard", "nameKept", "restored", "version"], Properties(answer));
+            Assert.Equal(["copyId", "dashboardId", "dashboardName", "originalId", "title"], Properties(Component(document, Items(answer.GetProperty("properties").GetProperty("copies")))));
+        }
+
+        Assert.False(restore.TryGetProperty("requestBody", out _));
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        Assert.Equal(["dashboard", "kind", "version", "widget"], Properties(schemas.GetProperty("DashboardChange")));
+        Assert.Equal(["id", "name"], Properties(schemas.GetProperty("Person")));
     }
 
     private static string[] Verbs(JsonElement path) =>
@@ -940,6 +987,9 @@ public sealed class DashboardTests(PostgresFixture postgres)
 
     private static JsonElement Answer(JsonElement operation, string status) =>
         operation.GetProperty("responses").GetProperty(status).GetProperty("content").GetProperty("application/json").GetProperty("schema");
+
+    /// <summary>The schema of the items of an array schema.</summary>
+    private static JsonElement Items(JsonElement schema) => schema.GetProperty("items");
 
     private static string[] Properties(JsonElement schema) =>
         schema.GetProperty("properties").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).ToArray();

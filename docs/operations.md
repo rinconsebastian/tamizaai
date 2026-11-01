@@ -113,6 +113,24 @@ Replace `tamiza` after `-U` with your `POSTGRES_USER` if you changed it. What th
 - The dashboards' names and order are lost.
 - The older `api` reads only `IndicatorDashboard__MaxWidgetsPerProject`: if you renamed it to `IndicatorDashboard__MaxWidgetsPerDashboard`, rename it back.
 
+### Rolling back the dashboard versions upgrade
+
+The script `0018_add_dashboard_versions.sql` adds the table `tamiza.dashboard_versions`, where each dashboard keeps its last 10 versions. It runs at `api` startup in one transaction and records version 1 of every existing dashboard: its name, filters and widgets as they are, attributed to the last person who changed the dashboard or one of its widgets. It changes no dashboard and no widget, and needs no configuration.
+
+Go back to the previous images with `docker compose up -d` and the earlier `TAMIZA_VERSION`. An `api` older than this change does not know the table, records no versions and is not affected by it; removing a dashboard still removes its versions. Upgrading again later keeps the versions recorded before, and the next change of each dashboard records it as it then is, with what was changed under the previous images.
+
+To also remove the versions after going back to the previous images, drop the table and remove the record of its script from DbUp's journal, in one transaction:
+
+```sh
+docker compose exec db psql -U tamiza -d tamiza -c "
+BEGIN;
+DROP TABLE tamiza.dashboard_versions;
+DELETE FROM tamiza.schema_versions WHERE scriptname = '0018_add_dashboard_versions.sql';
+COMMIT;"
+```
+
+Replace `tamiza` after `-U` with your `POSTGRES_USER` if you changed it. Every version is lost; the dashboards and their widgets stay as they are. DbUp runs a script only when `tamiza.schema_versions` does not list it, so with the record removed a later upgrade creates the table again, with version 1 of every dashboard as it then is. Without the `DELETE`, a newer `api` would take the script as applied and fail on the missing table. Run this only under the previous images, never while a newer `api` runs.
+
 ## Health and logs
 
 | Service | Healthy when |
@@ -458,7 +476,7 @@ Replace `tamiza` after `-U` with your `POSTGRES_USER` if you changed it. A `refu
 
 ### Rolling back
 
-Turning the server off hides it; nothing else needs undoing. The migration adds `projects.mcp_access` (every project `off`), `script_versions.origin` (`app` for every existing version, `mcp` for the ones an AI client saved) and `tamiza.mcp_calls`. Going back to an earlier Tamiza version ignores them. Scripts and dashboards an AI client changed stay as they are: the scripts keep every earlier version, which can be restored from the Versions tab, while a dashboard or a widget changed wrongly is not versioned and must be fixed by hand.
+Turning the server off hides it; nothing else needs undoing. The migration adds `projects.mcp_access` (every project `off`), `script_versions.origin` (`app` for every existing version, `mcp` for the ones an AI client saved) and `tamiza.mcp_calls`. Going back to an earlier Tamiza version ignores them. Scripts and dashboards an AI client changed stay as they are: the scripts keep every earlier version, which can be restored from the Versions tab, and each dashboard keeps its last 10 versions, which an analyst restores from its **Version history** or asks Claude to restore ([indicators-dashboard.md](indicators-dashboard.md#version-history)). A dashboard removed by an AI client cannot be brought back.
 
 ## Map basemaps (optional)
 

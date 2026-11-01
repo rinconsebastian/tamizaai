@@ -1,4 +1,12 @@
+using System.Data.Common;
+using System.Globalization;
+using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
+using ModelContextProtocol.Protocol;
 using Tamiza.Api.Data;
 using Tamiza.Api.IntegrationTests.Infrastructure;
 
@@ -8,6 +16,9 @@ namespace Tamiza.Api.IntegrationTests.Mcp;
 public sealed class McpDashboardToolsTests(PostgresFixture postgres)
 {
     private const string Columns = "municipality text, value numeric, numerator numeric, denominator numeric";
+
+    /// <summary>The request every write of a test is made for, as Claude passes it with each dashboard write.</summary>
+    private const string Request = "Build the water dashboard";
 
     private Task<McpProjectHarness> CreateAsync(IReadOnlyDictionary<string, string?>? settings = null) =>
         McpProjectHarness.CreateAsync(postgres, McpAccess.Aggregates, settings: settings);
@@ -25,13 +36,13 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
 
     private static async Task<Guid> AddDashboardAsync(McpProjectHarness h, string name, string person = "analyst")
     {
-        using var body = (await h.CallAsync(person, "create_dashboard", new { name })).Json();
+        using var body = (await h.CallAsync(person, "create_dashboard", new { name, change = Request })).Json();
         return Guid.Parse(body.RootElement.GetProperty("id").GetString()!);
     }
 
     private static async Task<Guid> AddWidgetAsync(McpProjectHarness h, Guid dashboard, string title, string chartType, object config, string person = "analyst")
     {
-        var result = await h.CallAsync(person, "create_widget", new { dashboardId = dashboard, title, chartType, config });
+        var result = await h.CallAsync(person, "create_widget", new { dashboardId = dashboard, title, chartType, config, change = Request });
         Assert.Null(result.Code());
         using var body = result.Json();
         return Guid.Parse(body.RootElement.GetProperty("id").GetString()!);
@@ -118,6 +129,7 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         {
             dashboardId = dashboard,
             filters = new[] { new { column = "municipality", label = "Municipality", kind = "text" } },
+            change = Request,
         });
 
         Assert.Null(filters.Code());
@@ -137,7 +149,7 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         await SeedAsync(h);
         var dashboard = await FirstDashboardAsync(h);
 
-        var result = await h.CallAsync("analyst", "create_widget", new { dashboardId = dashboard, title = "Bad", chartType = "bar", config = BarConfig(groupBy: null) });
+        var result = await h.CallAsync("analyst", "create_widget", new { dashboardId = dashboard, title = "Bad", chartType = "bar", config = BarConfig(groupBy: null), change = Request });
 
         Assert.Equal("mcp.validation", result.Code());
         Assert.Contains("config.groupBy", result.Text());
@@ -154,9 +166,9 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
             await AddDashboardAsync(h, $"Dashboard {i}");
         }
 
-        var eighth = await h.CallAsync("analyst", "create_dashboard", new { name = "Eighth" });
-        var taken = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = await FirstDashboardAsync(h), name = "DASHBOARD 3" });
-        var reserved = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = await FirstDashboardAsync(h), name = "Performance" });
+        var eighth = await h.CallAsync("analyst", "create_dashboard", new { name = "Eighth", change = Request });
+        var taken = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = await FirstDashboardAsync(h), name = "DASHBOARD 3", change = Request });
+        var reserved = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = await FirstDashboardAsync(h), name = "Performance", change = Request });
 
         Assert.Equal("dashboards.limit", eighth.Code());
         Assert.Equal("mcp.validation", taken.Code());
@@ -171,7 +183,7 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         var second = await AddDashboardAsync(h, "Second");
         var third = await AddDashboardAsync(h, "Third");
 
-        var moved = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = third, position = 1, name = "Third renamed" });
+        var moved = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = third, position = 1, name = "Third renamed", change = Request });
         using var list = (await h.CallAsync("viewer", "list_dashboards")).Json();
 
         Assert.Null(moved.Code());
@@ -189,8 +201,8 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         var c = await AddDashboardAsync(h, "C");
 
         var results = await Task.WhenAll(
-            h.CallAsync("analyst", "update_dashboard", new { dashboardId = c, position = 1 }),
-            h.CallAsync("admin", "update_dashboard", new { dashboardId = a, position = 4 }));
+            h.CallAsync("analyst", "update_dashboard", new { dashboardId = c, position = 1, change = Request }),
+            h.CallAsync("admin", "update_dashboard", new { dashboardId = a, position = 4, change = Request }));
 
         Assert.All(results, r => Assert.True(r.Code() is null or "dashboards.orderChanged", r.Text()));
         var positions = new List<int>();
@@ -210,10 +222,10 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         await SeedAsync(h);
         var original = await FirstDashboardAsync(h);
         await AddWidgetAsync(h, original, "By municipality", "bar", BarConfig());
-        await h.CallAsync("analyst", "update_dashboard", new { dashboardId = original, filters = new[] { new { column = "municipality", label = "Municipality", kind = "text" } } });
+        await h.CallAsync("analyst", "update_dashboard", new { dashboardId = original, filters = new[] { new { column = "municipality", label = "Municipality", kind = "text" } }, change = Request });
         await AddDashboardAsync(h, "Later");
 
-        using var copy = (await h.CallAsync("analyst", "duplicate_dashboard", new { dashboardId = original, name = "Copy" })).Json();
+        using var copy = (await h.CallAsync("analyst", "duplicate_dashboard", new { dashboardId = original, name = "Copy", change = Request })).Json();
         using var list = (await h.CallAsync("viewer", "list_dashboards")).Json();
 
         Assert.Equal(2, copy.RootElement.GetProperty("position").GetInt32());
@@ -275,10 +287,10 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         var second = await AddDashboardAsync(h, "Second");
         var widget = await AddWidgetAsync(h, first, "By municipality", "bar", BarConfig());
 
-        var renamed = await h.CallAsync("analyst", "update_widget", new { dashboardId = first, widgetId = widget, title = "Rate by municipality" });
-        var moved = await h.CallAsync("analyst", "update_widget", new { dashboardId = first, widgetId = widget, moveToDashboardId = second });
-        var wrong = await h.CallAsync("analyst", "remove_widget", new { dashboardId = second, widgetId = widget, expectedTitle = "By municipality" });
-        var right = await h.CallAsync("analyst", "remove_widget", new { dashboardId = second, widgetId = widget, expectedTitle = "rate by municipality" });
+        var renamed = await h.CallAsync("analyst", "update_widget", new { dashboardId = first, widgetId = widget, title = "Rate by municipality", change = Request });
+        var moved = await h.CallAsync("analyst", "update_widget", new { dashboardId = first, widgetId = widget, moveToDashboardId = second, change = Request });
+        var wrong = await h.CallAsync("analyst", "remove_widget", new { dashboardId = second, widgetId = widget, expectedTitle = "By municipality", change = Request });
+        var right = await h.CallAsync("analyst", "remove_widget", new { dashboardId = second, widgetId = widget, expectedTitle = "rate by municipality", change = Request });
 
         Assert.Null(renamed.Code());
         Assert.Null(moved.Code());
@@ -324,6 +336,7 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         {
             dashboardId = dashboard,
             filters = new[] { new { column = "municipality", label = "Municipality", kind = "text", @default = new { values = new[] { "Santa Ana" } } } },
+            change = Request,
         });
 
         using var byDefault = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard, widgetId = bar })).Json();
@@ -365,13 +378,13 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         Assert.Null((await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard })).Code());
         foreach (var (tool, args) in new (string, object)[]
                  {
-                     ("create_dashboard", new { name = "X" }),
-                     ("update_dashboard", new { dashboardId = dashboard, name = "X" }),
-                     ("duplicate_dashboard", new { dashboardId = dashboard, name = "X" }),
+                     ("create_dashboard", new { name = "X", change = Request }),
+                     ("update_dashboard", new { dashboardId = dashboard, name = "X", change = Request }),
+                     ("duplicate_dashboard", new { dashboardId = dashboard, name = "X", change = Request }),
                      ("remove_dashboard", new { dashboardId = dashboard, expectedName = "Indicators" }),
-                     ("create_widget", new { dashboardId = dashboard, title = "X", chartType = "stat", config = new { indicator = "piped_water_rate" } }),
-                     ("update_widget", new { dashboardId = dashboard, widgetId = widget, title = "X" }),
-                     ("remove_widget", new { dashboardId = dashboard, widgetId = widget, expectedTitle = "By municipality" }),
+                     ("create_widget", new { dashboardId = dashboard, title = "X", chartType = "stat", config = new { indicator = "piped_water_rate" }, change = Request }),
+                     ("update_widget", new { dashboardId = dashboard, widgetId = widget, title = "X", change = Request }),
+                     ("remove_widget", new { dashboardId = dashboard, widgetId = widget, expectedTitle = "By municipality", change = Request }),
                  })
         {
             Assert.Equal("mcp.forbidden", (await h.CallAsync("viewer", tool, args)).Code());
@@ -479,6 +492,7 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
                 indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source",
                 scale = new object[] { new { value = "Well", side = "positive" }, new { value = "Piped", side = "negative" } },
             },
+            change = Request,
         });
 
         Assert.Equal("mcp.validation", result.Code());
@@ -497,6 +511,7 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         {
             dashboardId = dashboard, title = "Bad", chartType = "column",
             config = new { indicator = "piped_water_rate", ratio = new { numerator = "numerator", denominator = "denominator" }, groupBy = "municipality", seriesBy = "value", layout = "stacked" },
+            change = Request,
         });
 
         Assert.Equal("mcp.validation", result.Code());
@@ -538,5 +553,482 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         }
 
         Assert.Contains("series", tools["get_widget_data"].Description, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Versions of the dashboards a request changes (mcp-server "Request given with dashboard changes", "One version per request")
+
+    private const string AddWaterWidgets = "Add water widgets";
+
+    private static HttpClient Rest(McpProjectHarness h, string person) =>
+        h.Factory.CreateClient().WithToken(TestTokens.Create(person, person, $"{person}@example.org"));
+
+    /// <summary>Adds a dashboard in the page, as the analyst: its version 1 is made in Tamiza.</summary>
+    private static async Task<Guid> AddDashboardInTamizaAsync(McpProjectHarness h, string name)
+    {
+        var response = await Rest(h, "analyst").PostAsJsonAsync($"/api/v1/projects/{h.ProjectId}/dashboards", new { name });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return body.RootElement.GetProperty("id").GetGuid();
+    }
+
+    private static Task<CallToolResult> AddWidgetForAsync(McpProjectHarness h, Guid dashboard, string title, string change, string person = "analyst") =>
+        h.CallAsync(person, "create_widget", new { dashboardId = dashboard, title, chartType = "bar", config = BarConfig(), change });
+
+    /// <summary>A dashboard's versions, oldest first, as <c>number | author | origin | note | changes</c>, the changes as PostgreSQL prints them.</summary>
+    private static async Task<string[]> VersionsAsync(McpProjectHarness h, Guid dashboardId)
+    {
+        var rows = await TestData.ScalarAsync<string>(h.Db,
+            """
+            SELECT coalesce(string_agg(format('%s | %s | %s | %s | %s', v.number, u.keycloak_sub, v.origin, coalesce(v.note, '-'), v.changes), E'\n' ORDER BY v.number), '')
+            FROM tamiza.dashboard_versions AS v JOIN tamiza.users AS u ON u.id = v.author_id
+            WHERE v.project_id = @project AND v.dashboard_id = @dashboard
+            """,
+            ("project", h.ProjectId), ("dashboard", dashboardId));
+        return rows!.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    private static async Task<int[]> NumbersAsync(McpProjectHarness h, Guid dashboardId) =>
+        (await VersionsAsync(h, dashboardId)).Select(row => int.Parse(row.Split(" | ")[0], CultureInfo.InvariantCulture)).ToArray();
+
+    private static Task<long> AllVersionsAsync(McpProjectHarness h) =>
+        TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_versions WHERE project_id = @project", ("project", h.ProjectId));
+
+    /// <summary>The widget titles a version holds, in reading order.</summary>
+    private static async Task<string[]> TitlesAsync(McpProjectHarness h, Guid dashboardId, int number)
+    {
+        using var content = JsonDocument.Parse((await TestData.ScalarAsync<string>(h.Db,
+            "SELECT content::text FROM tamiza.dashboard_versions WHERE project_id = @project AND dashboard_id = @dashboard AND number = @number",
+            ("project", h.ProjectId), ("dashboard", dashboardId), ("number", number)))!);
+        return content.RootElement.GetProperty("widgets").EnumerateArray().Select(w => w.GetProperty("title").GetString()!).ToArray();
+    }
+
+    /// <summary>The <c>dashboardVersions</c> of a write's result, as <c>(dashboard, version)</c>.</summary>
+    private static (Guid Dashboard, int Version)[] DashboardVersionsOf(CallToolResult result)
+    {
+        Assert.Null(result.Code());
+        using var body = result.Json();
+        return body.RootElement.GetProperty("dashboardVersions").EnumerateArray()
+            .Select(v => (v.GetProperty("dashboardId").GetGuid(), v.GetProperty("version").GetInt32()))
+            .ToArray();
+    }
+
+    private static string Changes(params string[] entries) => "[" + string.Join(", ", entries) + "]";
+
+    private static string Added(string title) => $$"""{"kind": "widgetAdded", "widget": "{{title}}"}""";
+
+    [Fact]
+    public async Task Request_missing_blank_or_too_long_on_every_dashboard_write_is_refused_naming_change_and_saves_nothing()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+        await TestData.ExecuteAsync(h.Db,
+            "INSERT INTO tamiza.dashboard_widgets (id, project_id, dashboard_id, chart_type, title, config, layout, created_by, updated_by) VALUES (gen_random_uuid(), @p, @d, 'stat', 'Rate', '{\"indicator\":\"piped_water_rate\",\"measure\":\"value\",\"filters\":[]}'::jsonb, '{\"x\":0,\"y\":0,\"w\":3,\"h\":2}'::jsonb, @a, @a)",
+            ("p", h.ProjectId), ("d", dashboard), ("a", h.Users["analyst"]));
+        var widget = await TestData.ScalarAsync<Guid>(h.Db, "SELECT id FROM tamiza.dashboard_widgets");
+        var before = await TestData.ScalarAsync<string>(h.Db,
+            "SELECT string_agg(format('%s %s %s', d.name, d.filters, w.title), ',') FROM tamiza.dashboards d LEFT JOIN tamiza.dashboard_widgets w ON w.dashboard_id = d.id");
+        var calls = new (string Tool, Dictionary<string, object?> Args)[]
+        {
+            ("create_dashboard", new() { ["name"] = "Water access" }),
+            ("update_dashboard", new() { ["dashboardId"] = dashboard, ["name"] = "Agua" }),
+            ("duplicate_dashboard", new() { ["dashboardId"] = dashboard, ["name"] = "Copy" }),
+            ("create_widget", new() { ["dashboardId"] = dashboard, ["title"] = "By municipality", ["chartType"] = "bar", ["config"] = BarConfig() }),
+            ("update_widget", new() { ["dashboardId"] = dashboard, ["widgetId"] = widget, ["title"] = "Renamed" }),
+            ("remove_widget", new() { ["dashboardId"] = dashboard, ["widgetId"] = widget, ["expectedTitle"] = "Rate" }),
+        };
+
+        foreach (var (tool, args) in calls)
+        {
+            var missing = await h.CallAsync("analyst", tool, args);
+            Assert.True(missing.Code() == "mcp.validation", $"{tool}: {missing.Text()}");
+            Assert.Contains("change", missing.Text());
+            // Under the same key as a blank one, although the SDK refuses it before the tool runs.
+            using (var left = missing.Json())
+            {
+                Assert.True(left.RootElement.GetProperty("fields").TryGetProperty("change", out _), $"{tool}: {missing.Text()}");
+            }
+
+            foreach (var change in new[] { "   ", new string('x', 121) })
+            {
+                var refused = await h.CallAsync("analyst", tool, new Dictionary<string, object?>(args) { ["change"] = change });
+                Assert.Equal("mcp.validation", refused.Code());
+                using var body = refused.Json();
+                Assert.True(body.RootElement.GetProperty("fields").TryGetProperty("change", out _), $"{tool}: {refused.Text()}");
+            }
+        }
+
+        Assert.Equal(before, await TestData.ScalarAsync<string>(h.Db,
+            "SELECT string_agg(format('%s %s %s', d.name, d.filters, w.title), ',') FROM tamiza.dashboards d LEFT JOIN tamiza.dashboard_widgets w ON w.dashboard_id = d.id"));
+        Assert.Equal(0, await AllVersionsAsync(h));
+        // 120 characters, surrounding spaces aside, are enough.
+        Assert.Null((await AddWidgetForAsync(h, dashboard, "By municipality", "  " + new string('x', 120) + "  ")).Code());
+    }
+
+    [Fact]
+    public async Task Version_returned_a_widget_added_to_water_access_whose_current_version_is_4_gives_version_5_as_get_dashboard_and_list_dashboards_do()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var water = await AddDashboardInTamizaAsync(h, "Water");
+        var rest = Rest(h, "analyst");
+        foreach (var name in new[] { "Water 2", "Water 3", "Water access" })
+        {
+            Assert.Equal(HttpStatusCode.OK, (await rest.PatchAsJsonAsync($"/api/v1/projects/{h.ProjectId}/dashboards/{water}", new { name })).StatusCode);
+        }
+
+        using var read = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = water })).Json();
+        var result = await AddWidgetForAsync(h, water, "By municipality", AddWaterWidgets);
+
+        Assert.Equal(4, read.RootElement.GetProperty("version").GetInt32());
+        Assert.Equal([(water, 5)], DashboardVersionsOf(result));
+        using var body = result.Json();
+        Assert.Equal("By municipality", body.RootElement.GetProperty("title").GetString());
+        Assert.Equal(water, body.RootElement.GetProperty("dashboardId").GetGuid());
+        using var viewed = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = water })).Json();
+        Assert.Equal(5, viewed.RootElement.GetProperty("version").GetInt32());
+        using var list = (await h.CallAsync("viewer", "list_dashboards")).Json();
+        var entries = list.RootElement.GetProperty("dashboards").EnumerateArray().ToDictionary(d => d.GetProperty("name").GetString()!);
+        Assert.Equal(5, entries["Water access"].GetProperty("version").GetInt32());
+        // The project's first dashboard was seeded with no version: its entry has none.
+        Assert.False(entries["Indicators"].TryGetProperty("version", out _));
+    }
+
+    [Fact]
+    public async Task Only_the_order_changed_moves_the_dashboard_makes_no_version_and_gives_the_current_version_of_water_access()
+    {
+        await using var h = await CreateAsync();
+        var water = await AddDashboardInTamizaAsync(h, "Water access");
+
+        var moved = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, position = 1, change = "Put Water access first" });
+
+        Assert.Equal([(water, 1)], DashboardVersionsOf(moved));
+        using var list = (await h.CallAsync("viewer", "list_dashboards")).Json();
+        Assert.Equal(["Water access", "Indicators"], list.RootElement.GetProperty("dashboards").EnumerateArray().Select(d => d.GetProperty("name").GetString()!).ToArray());
+        Assert.Equal(["""1 | analyst | app | - | [{"kind": "created"}]"""], await VersionsAsync(h, water));
+        Assert.Equal(1, await AllVersionsAsync(h));
+    }
+
+    [Fact]
+    public async Task Five_widgets_one_version_by_the_analyst_via_mcp_holding_the_five_and_showing_the_request()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var water = await AddDashboardInTamizaAsync(h, "Water access");
+        string[] titles = ["Rate", "By municipality", "Santa Ana", "San Luis", "Trend"];
+
+        var results = new List<(Guid, int)[]>();
+        foreach (var title in titles)
+        {
+            results.Add(DashboardVersionsOf(await AddWidgetForAsync(h, water, title, "Add five water indicators")));
+        }
+
+        Assert.All(results, r => Assert.Equal([(water, 2)], r));
+        Assert.Equal(
+            [
+                """1 | analyst | app | - | [{"kind": "created"}]""",
+                "2 | analyst | mcp | Add five water indicators | " + Changes(titles.Select(Added).ToArray()),
+            ],
+            await VersionsAsync(h, water));
+        Assert.Equal(titles.Order().ToArray(), (await TitlesAsync(h, water, 2)).Order().ToArray());
+        Assert.Equal(1, await TestData.ScalarAsync<long>(h.Db,
+            "SELECT count(*) FROM tamiza.dashboard_versions WHERE dashboard_id = @d AND number = 2 AND author_id = @a AND created_at <= saved_at",
+            ("d", water), ("a", h.Users["analyst"])));
+    }
+
+    [Fact]
+    public async Task New_dashboard_with_its_widgets_has_only_version_1_holding_the_three_widgets()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        const string build = "Build the water dashboard";
+
+        var created = await h.CallAsync("analyst", "create_dashboard", new { name = "Water access", change = build });
+        using var body = created.Json();
+        var water = body.RootElement.GetProperty("id").GetGuid();
+        foreach (var title in new[] { "Rate", "By municipality", "Trend" })
+        {
+            Assert.Equal([(water, 1)], DashboardVersionsOf(await AddWidgetForAsync(h, water, title, build)));
+        }
+
+        Assert.Equal([(water, 1)], DashboardVersionsOf(created));
+        Assert.Equal(
+            ["1 | analyst | mcp | Build the water dashboard | " + Changes("""{"kind": "created"}""", Added("Rate"), Added("By municipality"), Added("Trend"))],
+            await VersionsAsync(h, water));
+        Assert.Equal(["Rate", "By municipality", "Trend"], await TitlesAsync(h, water, 1));
+    }
+
+    [Fact]
+    public async Task Two_dashboards_in_one_request_make_one_new_version_of_each_and_the_next_request_another()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var water = await AddDashboardInTamizaAsync(h, "Water");
+        var health = await AddDashboardInTamizaAsync(h, "Health");
+        const string request = "Add the coverage widgets";
+
+        await AddWidgetForAsync(h, water, "Rate", request);
+        await AddWidgetForAsync(h, health, "Coverage", request);
+        await AddWidgetForAsync(h, water, "By municipality", request);
+
+        Assert.Equal(Enumerable.Range(1, 2), await NumbersAsync(h, water));
+        Assert.Equal(Enumerable.Range(1, 2), await NumbersAsync(h, health));
+        Assert.Equal("2 | analyst | mcp | Add the coverage widgets | " + Changes(Added("Rate"), Added("By municipality")), (await VersionsAsync(h, water))[^1]);
+
+        // Next request.
+        var renamed = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, name = "Agua", change = "Rename Water to Agua" });
+
+        Assert.Equal([(water, 3)], DashboardVersionsOf(renamed));
+        Assert.Equal("""3 | analyst | mcp | Rename Water to Agua | [{"kind": "renamed", "dashboard": "Agua"}]""", (await VersionsAsync(h, water))[^1]);
+        Assert.Equal(2, (await VersionsAsync(h, health)).Length);
+    }
+
+    [Fact]
+    public async Task Member_changes_in_between_make_three_versions_the_two_widgets_the_drag_and_the_third_widget()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var water = await AddDashboardInTamizaAsync(h, "Water");
+        await AddWidgetForAsync(h, water, "Rate", AddWaterWidgets);
+        using var second = (await AddWidgetForAsync(h, water, "By municipality", AddWaterWidgets)).Json();
+
+        // The analyst drags a widget of "Water" in the page, which saves its layout in one request.
+        var dragged = await Rest(h, "analyst").PutAsJsonAsync($"/api/v1/projects/{h.ProjectId}/dashboards/{water}/layout",
+            new { widgets = new[] { new { id = second.RootElement.GetProperty("id").GetGuid(), layout = new { x = 6, y = 0, w = 6, h = 4 } } } });
+        var third = await AddWidgetForAsync(h, water, "Trend", AddWaterWidgets);
+
+        Assert.Equal(HttpStatusCode.OK, dragged.StatusCode);
+        Assert.Equal([(water, 4)], DashboardVersionsOf(third));
+        Assert.Equal(
+            [
+                """1 | analyst | app | - | [{"kind": "created"}]""",
+                "2 | analyst | mcp | Add water widgets | " + Changes(Added("Rate"), Added("By municipality")),
+                """3 | analyst | app | - | [{"kind": "layoutChanged"}]""",
+                "4 | analyst | mcp | Add water widgets | " + Changes(Added("Trend")),
+            ],
+            await VersionsAsync(h, water));
+    }
+
+    [Fact]
+    public async Task Long_pause_of_40_minutes_between_two_widgets_of_one_request_makes_two_versions()
+    {
+        var clock = new AdjustableTimeProvider();
+        await using var h = await McpProjectHarness.CreateAsync(postgres, McpAccess.Aggregates,
+            configureServices: services => services.AddSingleton<TimeProvider>(clock));
+        await SeedAsync(h);
+        var water = await AddDashboardInTamizaAsync(h, "Water");
+
+        await AddWidgetForAsync(h, water, "Rate", AddWaterWidgets);
+        clock.Advance(TimeSpan.FromMinutes(40));
+        var later = await AddWidgetForAsync(h, water, "By municipality", AddWaterWidgets);
+
+        Assert.Equal([(water, 3)], DashboardVersionsOf(later));
+        Assert.Equal(
+            [
+                """1 | analyst | app | - | [{"kind": "created"}]""",
+                "2 | analyst | mcp | Add water widgets | " + Changes(Added("Rate")),
+                "3 | analyst | mcp | Add water widgets | " + Changes(Added("By municipality")),
+            ],
+            await VersionsAsync(h, water));
+        Assert.True(await TestData.ScalarAsync<bool>(h.Db,
+            "SELECT (SELECT created_at FROM tamiza.dashboard_versions WHERE dashboard_id = @d AND number = 3) - (SELECT saved_at FROM tamiza.dashboard_versions WHERE dashboard_id = @d AND number = 2) >= interval '40 minutes'",
+            ("d", water)));
+    }
+
+    [Fact]
+    public async Task Calls_at_the_same_time_make_one_version_that_holds_both_widgets_and_lists_both_as_added()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var water = await AddDashboardInTamizaAsync(h, "Water");
+
+        var results = await Task.WhenAll(
+            AddWidgetForAsync(h, water, "Rate", AddWaterWidgets),
+            AddWidgetForAsync(h, water, "By municipality", AddWaterWidgets));
+
+        Assert.All(results, r => Assert.Equal([(water, 2)], DashboardVersionsOf(r)));
+        var versions = await VersionsAsync(h, water);
+        Assert.Equal(2, versions.Length);
+        Assert.StartsWith("2 | analyst | mcp | Add water widgets | [", versions[1]);
+        Assert.Contains(Added("Rate"), versions[1]);
+        Assert.Contains(Added("By municipality"), versions[1]);
+        Assert.Equal(["By municipality", "Rate"], (await TitlesAsync(h, water, 2)).Order().ToArray());
+    }
+
+    [Fact]
+    public async Task Part_of_a_call_refused_the_rename_saved_before_filters_that_are_not_valid_is_a_version_with_the_filters_it_had()
+    {
+        await using var h = await CreateAsync();
+        var water = await AddDashboardInTamizaAsync(h, "Water");
+        Assert.Equal(HttpStatusCode.OK, (await Rest(h, "analyst").PutAsJsonAsync($"/api/v1/projects/{h.ProjectId}/dashboards/{water}/filters",
+            new { filters = new[] { new { column = "municipality", label = "Municipality", kind = "text" } } })).StatusCode);
+
+        var result = await h.CallAsync("analyst", "update_dashboard", new
+        {
+            dashboardId = water,
+            name = "Agua",
+            filters = new[] { new { column = "municipality", label = "Municipality", kind = "colour" } },
+            change = "Rename Water and filter by municipality",
+        });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("filters[0].kind", result.Text());
+        Assert.Equal("""3 | analyst | mcp | Rename Water and filter by municipality | [{"kind": "renamed", "dashboard": "Agua"}]""", (await VersionsAsync(h, water))[^1]);
+        Assert.Equal("""{"name": "Agua", "filters": [{"kind": "text", "label": "Municipality", "column": "municipality", "default": null}], "widgets": []}""",
+            await TestData.ScalarAsync<string>(h.Db, "SELECT content::text FROM tamiza.dashboard_versions WHERE dashboard_id = @d AND number = 3", ("d", water)));
+    }
+
+    [Fact]
+    public async Task The_name_it_has_given_with_new_filters_is_no_rename_and_the_version_lists_only_the_filters()
+    {
+        await using var h = await CreateAsync();
+        var water = await AddDashboardInTamizaAsync(h, "Water");
+
+        var result = await h.CallAsync("analyst", "update_dashboard", new
+        {
+            dashboardId = water,
+            name = "Water",
+            filters = new[] { new { column = "municipality", label = "Municipality", kind = "text" } },
+            change = "Add a municipality filter",
+        });
+
+        Assert.Equal([(water, 2)], DashboardVersionsOf(result));
+        Assert.Equal(
+            [
+                """1 | analyst | app | - | [{"kind": "created"}]""",
+                """2 | analyst | mcp | Add a municipality filter | [{"kind": "filtersChanged"}]""",
+            ],
+            await VersionsAsync(h, water));
+    }
+
+    [Fact]
+    public async Task The_name_it_has_alone_in_a_request_that_grows_a_version_leaves_its_changes_and_its_time_as_they_were()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var water = await AddDashboardInTamizaAsync(h, "Water");
+        Assert.Null((await AddWidgetForAsync(h, water, "Rate", AddWaterWidgets)).Code());
+        const string version = "SELECT format('%s %s', changes, saved_at) FROM tamiza.dashboard_versions WHERE dashboard_id = @d AND number = 2";
+        const string dashboard = "SELECT format('%s %s %s', name, updated_by, updated_at) FROM tamiza.dashboards WHERE id = @d";
+        var before = await TestData.ScalarAsync<string>(h.Db, version, ("d", water));
+        var stored = await TestData.ScalarAsync<string>(h.Db, dashboard, ("d", water));
+
+        // The same request, which would grow version 2, gives the name the dashboard has.
+        var result = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, name = "Water", change = AddWaterWidgets });
+
+        Assert.Equal([(water, 2)], DashboardVersionsOf(result));
+        Assert.Equal(Enumerable.Range(1, 2), await NumbersAsync(h, water));
+        Assert.Equal(before, await TestData.ScalarAsync<string>(h.Db, version, ("d", water)));
+        Assert.Equal(stored, await TestData.ScalarAsync<string>(h.Db, dashboard, ("d", water)));
+    }
+
+    [Fact]
+    public async Task A_create_dashboard_whose_move_is_refused_with_order_changed_still_has_its_version_1()
+    {
+        var removal = new RemovalAfterOrderRead();
+        await using var h = await McpProjectHarness.CreateAsync(postgres, McpAccess.Aggregates,
+            configureServices: services => services.ConfigureDbContext<TamizaDbContext>(options => options.AddInterceptors(removal)));
+        var field = await AddDashboardInTamizaAsync(h, "Field");
+        removal.Arm(h.Db, field);
+
+        var result = await h.CallAsync("analyst", "create_dashboard", new { name = "Water access", position = 1, change = "Add a water dashboard first" });
+
+        Assert.Equal(1, removal.Runs);
+        Assert.Equal("dashboards.orderChanged", result.Code());
+        var water = await TestData.ScalarAsync<Guid>(h.Db, "SELECT id FROM tamiza.dashboards WHERE name = 'Water access'");
+        Assert.Equal(["""1 | analyst | mcp | Add a water dashboard first | [{"kind": "created"}]"""], await VersionsAsync(h, water));
+    }
+
+    /// <summary>
+    /// Another member's removal of a dashboard between the order a move read and its reorder: once armed, it removes a dashboard on a
+    /// connection of its own just after the next read of the project's order, once.
+    /// </summary>
+    private sealed class RemovalAfterOrderRead : DbCommandInterceptor
+    {
+        private (string Db, Guid DashboardId)? _armed;
+
+        public int Runs { get; private set; }
+
+        public void Arm(string db, Guid dashboardId) => _armed = (db, dashboardId);
+
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(
+            DbCommand command, CommandExecutedEventData eventData, DbDataReader result, CancellationToken cancellationToken = default)
+        {
+            // The move's read of the order: the ids alone, in their order.
+            var sql = command.CommandText.ReplaceLineEndings(" ");
+            if (_armed is { } armed && sql.StartsWith("SELECT d.id FROM tamiza.dashboards AS d ", StringComparison.Ordinal)
+                && sql.Contains("ORDER BY d.position", StringComparison.Ordinal))
+            {
+                _armed = null;
+                Runs++;
+                await TestData.ExecuteAsync(armed.Db, "DELETE FROM tamiza.dashboards WHERE id = @id", ("id", armed.DashboardId));
+            }
+
+            return await base.ReaderExecutedAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task A_flush_that_fails_leaves_the_widget_added_and_its_dashboard_out_of_dashboard_versions()
+    {
+        await using var h = await McpProjectHarness.CreateAsync(postgres, McpAccess.Aggregates,
+            configureServices: services => services.ConfigureDbContext<TamizaDbContext>(options => options.AddInterceptors(new UnavailableVersions())));
+        await SeedAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+
+        var result = await AddWidgetForAsync(h, dashboard, "By municipality", AddWaterWidgets);
+
+        // The widget is saved and the call succeeds; no version holds it, so none is named.
+        Assert.Empty(DashboardVersionsOf(result));
+        Assert.Equal(1, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_widgets WHERE title = 'By municipality'"));
+        Assert.Equal(0, await AllVersionsAsync(h));
+    }
+
+    /// <summary>A database that refuses every new dashboard version, as one that fails during the flush would.</summary>
+    private sealed class UnavailableVersions : DbCommandInterceptor
+    {
+        private static void Refuse(DbCommand command)
+        {
+            if (command.CommandText.Contains("INSERT INTO tamiza.dashboard_versions", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The dashboard versions are unavailable.");
+            }
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            Refuse(command);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            Refuse(command);
+            return base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task A_widget_moved_to_another_dashboard_gives_the_version_of_both_and_a_copy_the_version_1_of_the_copy()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var health = await AddDashboardInTamizaAsync(h, "Health");
+        var field = await AddDashboardInTamizaAsync(h, "Field");
+        using var added = (await AddWidgetForAsync(h, health, "Coverage", "Add coverage")).Json();
+
+        var moved = await h.CallAsync("analyst", "update_widget",
+            new { dashboardId = health, widgetId = added.RootElement.GetProperty("id").GetGuid(), moveToDashboardId = field, change = "Move coverage to Field" });
+        var copy = await h.CallAsync("analyst", "duplicate_dashboard", new { dashboardId = field, name = "Field copy", change = "Copy Field" });
+
+        Assert.Equal([(health, 3), (field, 2)], DashboardVersionsOf(moved));
+        Assert.Equal("""3 | analyst | mcp | Move coverage to Field | [{"kind": "widgetMovedOut", "widget": "Coverage", "dashboard": "Field"}]""", (await VersionsAsync(h, health))[^1]);
+        Assert.Equal("""2 | analyst | mcp | Move coverage to Field | [{"kind": "widgetMovedIn", "widget": "Coverage", "dashboard": "Health"}]""", (await VersionsAsync(h, field))[^1]);
+        using var copyBody = copy.Json();
+        var copyId = copyBody.RootElement.GetProperty("id").GetGuid();
+        Assert.Equal([(copyId, 1)], DashboardVersionsOf(copy));
+        Assert.Equal(2, (await VersionsAsync(h, field)).Length);
     }
 }

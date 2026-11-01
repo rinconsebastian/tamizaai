@@ -260,7 +260,11 @@ public sealed record IndicatorOverview(IReadOnlyList<IndicatorEntry> Indicators,
 /// <summary>One of the project's own dashboards with its filters and widgets.</summary>
 /// <param name="Filters">The dashboard's filters, in order; none for a dashboard that has not defined any.</param>
 /// <param name="Widgets">Ordered by <c>layout.y</c>, <c>layout.x</c>, then creation; listed whether or not their indicator is published.</param>
-public sealed record DashboardView(Guid Id, string Name, IReadOnlyList<DashboardFilter> Filters, IReadOnlyList<Widget> Widgets);
+/// <param name="Version">
+/// The number of the dashboard's current version, its newest (design D9 of dashboard versions); null while it has none, which only a
+/// version that could not be recorded leaves.
+/// </param>
+public sealed record DashboardView(Guid Id, string Name, IReadOnlyList<DashboardFilter> Filters, IReadOnlyList<Widget> Widgets, int? Version);
 
 /// <summary>One of the project's own dashboards, without its widgets.</summary>
 public sealed record DashboardEntry(Guid Id, string Name);
@@ -349,6 +353,16 @@ public sealed record CreateWidgetRequest(string? Title, string? ChartType, Widge
 /// </param>
 public sealed record UpdateWidgetRequest(
     string? Title = null, string? ChartType = null, WidgetConfigInput? Config = null, WidgetLayout? Layout = null, Guid? DashboardId = null);
+
+/// <summary>
+/// The position and size of several widgets of one dashboard, saved at once: what one drag that pushes other widgets leaves (design D8
+/// of dashboard versions).
+/// </summary>
+/// <param name="Widgets">1 to the widget limit of entries, each naming a different widget of the dashboard.</param>
+public sealed record DashboardLayoutRequest(IReadOnlyList<WidgetLayoutItem?>? Widgets);
+
+/// <summary>One widget's new position and size, checked as the widget's <c>PATCH</c> checks its <c>layout</c>.</summary>
+public sealed record WidgetLayoutItem(Guid? Id, WidgetLayout? Layout);
 
 /// <param name="Format"><c>csv</c> or <c>xlsx</c>.</param>
 public sealed record IndicatorExportRequest(string? Format);

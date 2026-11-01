@@ -37,13 +37,16 @@ public sealed class McpRoleMatrixTests(PostgresFixture postgres)
         ("list_dashboards", Needs.Viewer, new { }),
         ("get_dashboard", Needs.Viewer, new { dashboardId = Nobody }),
         ("get_widget_data", Needs.Viewer, new { dashboardId = Nobody }),
-        ("create_dashboard", Needs.Analyst, new { name = "" }),
-        ("update_dashboard", Needs.Analyst, new { dashboardId = Nobody, name = "x" }),
-        ("duplicate_dashboard", Needs.Analyst, new { dashboardId = Nobody, name = "x" }),
+        ("create_dashboard", Needs.Analyst, new { name = "", change = "x" }),
+        ("update_dashboard", Needs.Analyst, new { dashboardId = Nobody, name = "x", change = "x" }),
+        ("duplicate_dashboard", Needs.Analyst, new { dashboardId = Nobody, name = "x", change = "x" }),
         ("remove_dashboard", Needs.Analyst, new { dashboardId = Nobody, expectedName = "x" }),
-        ("create_widget", Needs.Analyst, new { dashboardId = Nobody, title = "x", chartType = "stat", config = new { indicator = "nothing" } }),
-        ("update_widget", Needs.Analyst, new { dashboardId = Nobody, widgetId = Nobody, title = "x" }),
-        ("remove_widget", Needs.Analyst, new { dashboardId = Nobody, widgetId = Nobody, expectedTitle = "x" }),
+        ("create_widget", Needs.Analyst, new { dashboardId = Nobody, title = "x", chartType = "stat", config = new { indicator = "nothing" }, change = "x" }),
+        ("update_widget", Needs.Analyst, new { dashboardId = Nobody, widgetId = Nobody, title = "x", change = "x" }),
+        ("remove_widget", Needs.Analyst, new { dashboardId = Nobody, widgetId = Nobody, expectedTitle = "x", change = "x" }),
+        ("list_dashboard_versions", Needs.Analyst, new { dashboardId = Nobody }),
+        ("get_dashboard_version", Needs.Analyst, new { dashboardId = Nobody, version = 1 }),
+        ("restore_dashboard_version", Needs.Analyst, new { dashboardId = Nobody, version = 1, baseVersion = 1, change = "x" }),
     ];
 
     [Fact]
@@ -99,14 +102,18 @@ public sealed class McpRoleMatrixTests(PostgresFixture postgres)
     public async Task A_viewer_who_calls_every_changing_tool_changes_nothing()
     {
         await using var h = await McpProjectHarness.CreateAsync(postgres, McpAccess.Rows);
-        string[] changing = ["save_script", "remove_script", "restore_script_version", "test_script", "start_run", "create_dashboard", "update_dashboard", "duplicate_dashboard", "remove_dashboard", "create_widget", "update_widget", "remove_widget"];
+        string[] changing =
+        [
+            "save_script", "remove_script", "restore_script_version", "test_script", "start_run", "create_dashboard", "update_dashboard", "duplicate_dashboard", "remove_dashboard",
+            "create_widget", "update_widget", "remove_widget", "restore_dashboard_version",
+        ];
 
         foreach (var (tool, _, args) in Matrix().Where(m => changing.Contains(m.Tool)))
         {
             Assert.Equal("mcp.forbidden", (await h.CallAsync("viewer", tool, args)).Code());
         }
 
-        foreach (var table in new[] { "script_versions", "script_tests", "runs", "dashboard_widgets" })
+        foreach (var table in new[] { "script_versions", "script_tests", "runs", "dashboard_widgets", "dashboard_versions" })
         {
             Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, $"SELECT count(*) FROM tamiza.{table}"));
         }

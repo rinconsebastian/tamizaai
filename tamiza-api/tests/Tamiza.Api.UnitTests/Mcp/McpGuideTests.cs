@@ -99,6 +99,22 @@ public sealed class McpGuideTests
     }
 
     [Fact]
+    public void Versions_explained_one_change_for_every_write_of_a_request_and_an_undo_by_restoring_every_dashboard_it_changed()
+    {
+        var text = McpGuide.Instructions;
+
+        Assert.Contains("`change`", text);
+        Assert.Contains("the same on every write you make for that request and a new one for their next request", text);
+        Assert.Contains("`dashboardVersions`", text);
+        Assert.Contains("every dashboard", text);
+        Assert.Contains("`restore_dashboard_version`", text);
+        Assert.Contains("`baseVersion`", text);
+        // The undo takes the version before the request's on each dashboard, the one a widget moved to first.
+        Assert.Contains("the version before the request's", text);
+        Assert.Contains("restore the dashboard it moved to first", text);
+    }
+
+    [Fact]
     public void The_instructions_name_every_kind_of_widget_and_say_when_each_fits()
     {
         var text = McpGuide.Instructions;

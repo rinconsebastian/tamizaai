@@ -163,7 +163,8 @@
         "notFound": "El tablero ya no existe.",
         "limit": "Un proyecto puede tener como máximo 7 tableros. Elimina uno antes de agregar otro.",
         "lastOne": "Un proyecto necesita al menos un tablero.",
-        "orderChanged": "Los tableros del proyecto han cambiado. Recarga e intenta de nuevo."
+        "orderChanged": "Los tableros del proyecto han cambiado. Recarga e intenta de nuevo.",
+        "versionNotFound": "Esa versión ya no se conserva."
       },
       "accountEmail": {
         "disabled": "Los correos de cuenta no están disponibles en esta instalación.",
@@ -1836,7 +1837,8 @@
       "moveRight": "Mover a la derecha",
       "remove": "Eliminar",
       "filters": "Filtros",
-      "report": "Envío programado…"
+      "report": "Envío programado…",
+      "versions": "Historial de versiones"
     },
     "unavailable": {
       "limit": "Un proyecto puede tener como máximo {{ max }} tableros.",
@@ -1929,8 +1931,53 @@
       "printedAt": "Impreso el {{ time }} ({{ zone }})",
       "publishedAt": "Datos publicados el {{ time }}",
       "notPublished": "Los datos aún no se han publicado.",
+      "version": "Versión {{ number }}, guardada por {{ author }} el {{ time }}",
+      "versionTitle": "{{ name }} (versión {{ number }})",
       "columnsLeftOut": "{{ count }} columnas no se imprimieron.",
       "columnsLeftOutOne": "1 columna no se imprimió."
+    },
+    "versions": {
+      "title": "Historial de versiones de {{ name }}",
+      "intro": "Cada cambio que se guarda en este tablero crea una versión. Se conservan las {{ count }} más recientes, incluida la actual.",
+      "close": "Cerrar",
+      "loading": "Leyendo las versiones…",
+      "empty": "Aún no hay versiones registradas. El próximo cambio que se guarde en este tablero creará la primera.",
+      "number": "Versión {{ number }}",
+      "current": "Actual",
+      "note": "“{{ note }}”",
+      "viaMcp": "vía MCP",
+      "more": "y {{ count }} más",
+      "view": "Ver",
+      "viewLabel": "Ver la versión {{ number }}",
+      "restore": "Restaurar",
+      "restoreLabel": "Restaurar la versión {{ number }}",
+      "changes": {
+        "initial": "Estado antes del historial de versiones",
+        "created": "Se agregó el tablero",
+        "duplicated": "Se creó como copia de “{{ dashboard }}”",
+        "renamed": "Se cambió el nombre a “{{ dashboard }}”",
+        "filtersChanged": "Se cambiaron los filtros",
+        "widgetAdded": "Se agregó el widget “{{ widget }}”",
+        "widgetChanged": "Se modificó el widget “{{ widget }}”",
+        "widgetRemoved": "Se eliminó el widget “{{ widget }}”",
+        "widgetMovedOut": "El widget “{{ widget }}” pasó a “{{ dashboard }}”",
+        "widgetMovedIn": "El widget “{{ widget }}” llegó de “{{ dashboard }}”",
+        "layoutChanged": "Se cambió la posición o el tamaño de los widgets",
+        "restored": "Se restauró la versión {{ number }}",
+        "unrecorded": "Cambios conservados antes de una restauración"
+      },
+      "viewing": "Estás viendo la versión {{ number }}, guardada por {{ author }} el {{ time }}. Es de solo lectura.",
+      "backToCurrent": "Volver a la versión actual",
+      "noWidgets": "Esta versión no tiene widgets",
+      "confirm": {
+        "title": "¿Restaurar la versión {{ number }}?",
+        "message": "El nombre, los filtros y los widgets de “{{ name }}” vuelven a como estaban el {{ time }}. El estado actual queda en el historial.",
+        "action": "Restaurar"
+      },
+      "restored": "Se restauró la versión {{ number }} como versión {{ version }}.",
+      "nameKept": "Conserva el nombre “{{ current }}”, porque otro tablero se llama “{{ name }}”.",
+      "copy": "“{{ title }}” volvió como copia: el original sigue en “{{ dashboard }}”.",
+      "unchanged": "“{{ name }}” ya está como en la versión {{ number }}."
     }
   },
   "dashboardFilters": {

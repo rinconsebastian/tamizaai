@@ -73,6 +73,11 @@ export class DashboardFilterBar {
   /** The value in force of each filter, by column. */
   readonly values = input.required<FilterValues>();
   readonly timeZone = input('UTC');
+  /**
+   * The indicators whose tables a text filter offers values from; none, those of the dashboard's widgets. A version shown names its
+   * own widgets' indicators, which the dashboard may no longer have (add-dashboard-versions, design D11).
+   */
+  readonly indicators = input<readonly string[] | undefined>(undefined);
 
   readonly changed = output<FilterChange>();
   /** Every filter to "All". */
@@ -103,8 +108,13 @@ export class DashboardFilterBar {
       filter: current ? toDataFilter(filter.column, filter.kind, current) : null,
       timeZone: this.timeZone(),
       // A row of an indicator table is a group, not a submission: its count would mislead, so none is shown.
+      // A version shown without widgets has no indicator to offer values from; asking with none would read the dashboard's own widgets.
       loadValues: (search) =>
-        this.service.dashboardValues(this.projectId(), this.dashboardId(), filter.column, search).pipe(map((r) => r.values.map((v) => ({ value: v.value, count: null })))),
+        this.indicators()?.length === 0
+          ? of([])
+          : this.service
+              .dashboardValues(this.projectId(), this.dashboardId(), filter.column, search, this.indicators())
+              .pipe(map((r) => r.values.map((v) => ({ value: v.value, count: null })))),
       // The widgets' queries check the value; the dialog already took one of the filter's kind.
       check: () => of(null),
       allowTypedValues: true,

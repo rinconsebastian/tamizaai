@@ -2,7 +2,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
 import { DataColumn, DataColumnType, DataExport, DataFilter, DataValue, DataValueCount, ExportFormat } from './data.service';
-import { IndicatorFormat } from './pipeline.service';
+import { IndicatorFormat, Person } from './pipeline.service';
 import { DashboardEntry } from './projects.service';
 
 // Mirrors Tamiza.Api/Indicators/*. A widget is one row of tamiza.dashboard_widgets: a title, a chart type, a query over the
@@ -220,6 +220,136 @@ export interface IndicatorsOverview {
 export interface Dashboard extends DashboardEntry {
   filters: DashboardFilter[];
   widgets: Widget[];
+  /** The number of its newest version, null while it has none (add-dashboard-versions, design D9). */
+  version: number | null;
+}
+
+// Mirrors the version routes of Tamiza.Api/Indicators/DashboardEndpoints.cs (add-dashboard-versions, design D2, D9): every change saved to a dashboard
+// records it as it is after the change (tamiza.dashboard_versions), and a dashboard keeps its 10 newest versions, the current one
+// included (`DashboardVersions.Kept`).
+
+/**
+ * What a change to a dashboard was (design D2): `initial` holds the state before version history, `unrecorded` a state a restore
+ * found that no version held, `restored` a restore of the version it names.
+ */
+export type DashboardChangeKind =
+  | 'initial'
+  | 'created'
+  | 'duplicated'
+  | 'renamed'
+  | 'filtersChanged'
+  | 'widgetAdded'
+  | 'widgetChanged'
+  | 'widgetRemoved'
+  | 'widgetMovedOut'
+  | 'widgetMovedIn'
+  | 'layoutChanged'
+  | 'restored'
+  | 'unrecorded';
+
+export const dashboardChangeKinds: readonly DashboardChangeKind[] = [
+  'initial',
+  'created',
+  'duplicated',
+  'renamed',
+  'filtersChanged',
+  'widgetAdded',
+  'widgetChanged',
+  'widgetRemoved',
+  'widgetMovedOut',
+  'widgetMovedIn',
+  'layoutChanged',
+  'restored',
+  'unrecorded',
+];
+
+/**
+ * One thing a version changed. Names and titles are as they were at the time, and are member text, shown as text: `widget` the
+ * widget's title (before a removal, after any other change), `dashboard` the other dashboard of a move, the original of a duplicate
+ * or the new name of a rename, `version` the number a restore brought back. A field the kind has not is left out.
+ */
+export interface DashboardChange {
+  kind: DashboardChangeKind;
+  widget?: string;
+  dashboard?: string;
+  version?: number;
+}
+
+/** Where a version was made: in Tamiza (`app`, restoring from the page included) or by an AI client through MCP. */
+export type DashboardVersionOrigin = 'app' | 'mcp';
+
+/** A kept version of a dashboard, as the version history lists it. */
+export interface DashboardVersionSummary {
+  number: number;
+  /** The newest version: the dashboard as it is. */
+  current: boolean;
+  name: string;
+  widgetCount: number;
+  filterCount: number;
+  /** At most 20, in the order they were made; `moreChanges` counts the ones left out. */
+  changes: DashboardChange[];
+  moreChanges: number;
+  /** The version a restore brought back, null for any other version. */
+  restoredFrom: number | null;
+  origin: DashboardVersionOrigin;
+  /** The request the AI client gave (its `change`); null for `app`. */
+  note: string | null;
+  author: Person;
+  /** The first change the version holds. */
+  createdAt: string;
+  /** The last change the version holds: the time the page shows for a version (design D11). */
+  savedAt: string;
+}
+
+/** The versions a dashboard keeps, newest first, and the number of the current one. */
+export interface DashboardVersionList {
+  current: number;
+  versions: DashboardVersionSummary[];
+}
+
+/** A widget as a version holds it: the widget's id when the version was made, and its settings then. */
+export interface VersionWidget {
+  id: string;
+  title: string;
+  chartType: ChartType;
+  /** Read as a saved widget's config is, so a widget view draws it unchanged. */
+  config: WidgetConfig;
+  layout: Layout;
+}
+
+/** A kept version with what it holds: its name, its filters as a dashboard returns them and its widgets in reading order. */
+export interface DashboardVersionDetails extends Omit<DashboardVersionSummary, 'widgetCount' | 'filterCount'> {
+  filters: DashboardFilter[];
+  widgets: VersionWidget[];
+}
+
+/** A widget of the version restored that was on another dashboard by then: it came back as a copy, and that dashboard keeps it. */
+export interface RestoredCopy {
+  originalId: string;
+  copyId: string;
+  title: string;
+  /** The dashboard that still holds the original. */
+  dashboardId: string;
+  dashboardName: string;
+}
+
+/**
+ * What a restore did (design D7). `restored` is false when the dashboard already was as in the version: nothing changed, and
+ * `version` is the current one. Otherwise `version` is the new version the restore made. `nameKept` says another dashboard has the
+ * version's name, so the dashboard kept its own; `dashboard` is the dashboard as `dashboard()` reads it.
+ */
+export interface DashboardRestore {
+  restored: boolean;
+  version: DashboardVersionSummary;
+  nameKept: boolean;
+  copies: RestoredCopy[];
+  dashboard: Dashboard;
+}
+
+/** A widget's new place, as one entry of a dashboard's layout save (design D8). */
+export interface WidgetLayoutItem {
+  id: string;
+  layout: Layout;
 }
 
 /** The columns of an indicator's published table; `published` is false (and `columns` empty) while it has none. */
@@ -426,14 +556,50 @@ export class IndicatorsService {
 
   /**
    * The most frequent values of a text column across the indicator tables of the dashboard's widgets, optionally only those that
-   * contain `search`. Empty when no table has the column as text.
+   * contain `search`. Empty when no table has the column as text. `indicators`, when there are some, are the tables read instead:
+   * a version shown names those of its own widgets, which the dashboard may no longer have (add-dashboard-versions, design D11).
    */
-  dashboardValues(projectId: string, dashboardId: string, column: string, search?: string): Observable<{ values: DataValueCount[] }> {
+  dashboardValues(
+    projectId: string,
+    dashboardId: string,
+    column: string,
+    search?: string,
+    indicators?: readonly string[],
+  ): Observable<{ values: DataValueCount[] }> {
     let params = new HttpParams().set('column', column);
     if (search) {
       params = params.set('search', search);
     }
+    for (const indicator of indicators ?? []) {
+      params = params.append('indicator', indicator);
+    }
     return this.http.get<{ values: DataValueCount[] }>(`${this.dashboardUrl(projectId, dashboardId)}/values`, { params });
+  }
+
+  /**
+   * Saves the places of several widgets of the dashboard in one request, so a drag and the widgets it pushed are one change (design
+   * D8), and answers the widgets as saved. A widget that is not on the dashboard saves none of them.
+   */
+  saveLayout(projectId: string, dashboardId: string, widgets: WidgetLayoutItem[]): Observable<Widget[]> {
+    return this.http.put<Widget[]>(`${this.dashboardUrl(projectId, dashboardId)}/layout`, { widgets });
+  }
+
+  // A dashboard's versions, for analysts and admins (design D9). A version no longer kept is a 404 `dashboards.versionNotFound`.
+
+  listVersions(projectId: string, dashboardId: string): Observable<DashboardVersionList> {
+    return this.http.get<DashboardVersionList>(this.versionsUrl(projectId, dashboardId));
+  }
+
+  getVersion(projectId: string, dashboardId: string, number: number): Observable<DashboardVersionDetails> {
+    return this.http.get<DashboardVersionDetails>(`${this.versionsUrl(projectId, dashboardId)}/${number}`);
+  }
+
+  /**
+   * Makes the dashboard's name, filters and widgets those of the version, as a new version (201), or changes nothing when it already
+   * is so (200, `restored` false). A version over the widget limit is refused as a duplicate is (400).
+   */
+  restoreVersion(projectId: string, dashboardId: string, number: number): Observable<DashboardRestore> {
+    return this.http.post<DashboardRestore>(`${this.versionsUrl(projectId, dashboardId)}/${number}/restore`, null);
   }
 
   // A dashboard's scheduled email, for analysts and admins. Saving or sending it while email is off is a 503 `reports.unavailable`.
@@ -465,7 +631,7 @@ export class IndicatorsService {
     return this.http.post<Widget>(this.widgetsUrl(projectId, dashboardId), draft);
   }
 
-  /** Partial: a drag sends only the layout. */
+  /** Partial: only what changed. The page saves a drag's layouts with `saveLayout`; a layout here stays for other clients. */
   update(projectId: string, dashboardId: string, widgetId: string, patch: WidgetPatch): Observable<Widget> {
     return this.http.patch<Widget>(`${this.widgetsUrl(projectId, dashboardId)}/${widgetId}`, patch);
   }
@@ -484,6 +650,10 @@ export class IndicatorsService {
 
   private dashboardUrl(projectId: string, dashboardId: string): string {
     return `${this.dashboardsUrl(projectId)}/${dashboardId}`;
+  }
+
+  private versionsUrl(projectId: string, dashboardId: string): string {
+    return `${this.dashboardUrl(projectId, dashboardId)}/versions`;
   }
 
   private reportUrl(projectId: string, dashboardId: string): string {

@@ -18,7 +18,7 @@ namespace Tamiza.Api.Mcp;
 [McpServerToolType]
 public sealed class McpDashboardTools(
     McpAccessGate gate, McpCallScope call, IOptions<McpOptions> options, TamizaDbContext db, ICurrentUser user, TimeProvider time,
-    IndicatorDashboard indicators, IOptions<IndicatorDashboardOptions> dashboardOptions) : McpToolBase(gate, call, options)
+    IndicatorDashboard indicators, IOptions<IndicatorDashboardOptions> dashboardOptions, DashboardVersions versions) : McpToolBase(gate, call, options)
 {
     private const string ProjectHelp = "The project's id, from list_projects.";
 
@@ -33,6 +33,14 @@ public sealed class McpDashboardTools(
         "A likert needs scale = 2 to 11 values of the series column in order, each with a side of negative, neutral or positive (negatives first, at most one neutral, at most 5 per side) and a measure, not a ratio. " +
         "With a series the result lists series, cells ({ group, series, value, formatted, share? }), totals of every group, series and all rows, and notes; rows are not sent.";
     private const string DashboardHelp = "The dashboard's id, from list_dashboards.";
+
+    /// <summary>The most characters of a request's <c>change</c>, as <c>dashboard_versions.note</c> keeps it (design D1, D10 of dashboard versions).</summary>
+    internal const int MaxChangeLength = 120;
+
+    /// <summary>What every dashboard write says of <c>change</c>, the request its versions are grouped by (design D4, D10 of dashboard versions).</summary>
+    internal const string ChangeHelp =
+        "What the person asked for, in a few words (1 to 120 characters), the same on every write you make for that request, for example \"Add five water indicators\". " +
+        "Writes with the same change on a dashboard make one version of it.";
 
     // Indicators
 
@@ -93,23 +101,35 @@ public sealed class McpDashboardTools(
     // Dashboards, read
 
     [McpServerTool(Name = "list_dashboards", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "List the dashboards"),
-     Description("The project's own dashboards in their order (1 to 7), with how many widgets and filters each has. Performance and Clean data are permanent and not listed.")]
+     Description("The project's own dashboards in their order (1 to 7), with how many widgets and filters each has and the number of its current version. Performance and Clean data are permanent and not listed.")]
     public Task<CallToolResult> ListDashboards([Description(ProjectHelp)] Guid projectId, CancellationToken ct = default) =>
         RunAsync(async () =>
         {
             await Gate.RequireAsync(projectId, ProjectRole.Viewer, McpNeeds.Summaries, ct);
             var rows = await db.Dashboards.AsNoTracking().Where(d => d.ProjectId == projectId).OrderBy(d => d.Position)
-                .Select(d => new { d.Id, d.Name, d.Position, d.Filters, Widgets = db.DashboardWidgets.Count(w => w.DashboardId == d.Id) }).ToListAsync(ct);
+                .Select(d => new
+                {
+                    d.Id,
+                    d.Name,
+                    d.Position,
+                    d.Filters,
+                    Widgets = db.DashboardWidgets.Count(w => w.DashboardId == d.Id),
+                    Version = db.DashboardVersions.Where(v => v.ProjectId == projectId && v.DashboardId == d.Id).Max(v => (int?)v.Number),
+                })
+                .ToListAsync(ct);
             return new
             {
                 maxDashboards = IndicatorDashboardOptions.MaxDashboards,
                 maxWidgetsPerDashboard = dashboardOptions.Value.MaxWidgetsPerDashboard,
-                dashboards = rows.Select(d => new { id = d.Id, name = d.Name, position = d.Position + 1, widgets = d.Widgets, filters = DashboardEndpoints.ReadFilters(d.Filters).Count }).ToList(),
+                dashboards = rows.Select(d => new
+                {
+                    id = d.Id, name = d.Name, position = d.Position + 1, widgets = d.Widgets, filters = DashboardEndpoints.ReadFilters(d.Filters).Count, version = d.Version,
+                }).ToList(),
             };
         });
 
     [McpServerTool(Name = "get_dashboard", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Get a dashboard"),
-     Description("One dashboard with its filters and its widgets in reading order: each widget's id, title, chart type, query (config) and layout on the 12-column grid. Use get_widget_data for what the widgets show.")]
+     Description("One dashboard with its filters, its widgets in reading order (each widget's id, title, chart type, query (config) and layout on the 12-column grid) and the number of its current version, which restore_dashboard_version needs as baseVersion. Use get_widget_data for what the widgets show.")]
     public Task<CallToolResult> GetDashboard(
         [Description(ProjectHelp)] Guid projectId, [Description(DashboardHelp)] Guid dashboardId, CancellationToken ct = default) =>
         RunAsync(async () =>
@@ -161,18 +181,31 @@ public sealed class McpDashboardTools(
     public Task<CallToolResult> CreateDashboard(
         [Description(ProjectHelp)] Guid projectId,
         [Description("The dashboard's name.")] string name,
+        [Description(ChangeHelp)] string change,
         [Description("Optional. Where to put it, 1 for the first place.")] int? position = null,
         CancellationToken ct = default) =>
         RunAsync(async () =>
         {
+            var request = RequireChange(change);
             await Gate.RequireAsync(projectId, ProjectRole.Analyst, McpNeeds.Summaries, ct);
-            var created = McpResults.Unwrap<DashboardEntry>(await DashboardEndpoints.AddAsync(projectId, new DashboardNameRequest(name), db, user, time, ct));
-            if (position is { } place)
+            // A move refused after the add, such as dashboards.orderChanged, still leaves the dashboard its version 1 (design D3).
+            var (created, recorded) = await RecordAsync(request, async () =>
             {
-                await MoveAsync(projectId, created.Id, place, ct);
-            }
+                var entry = McpResults.Unwrap<DashboardEntry>(await DashboardEndpoints.AddAsync(projectId, new DashboardNameRequest(name), db, versions, user, time, ct));
+                if (position is { } place)
+                {
+                    await MoveAsync(projectId, entry.Id, place, ct);
+                }
 
-            return new { created.Id, created.Name, position = await PositionOfAsync(projectId, created.Id, ct) };
+                return entry;
+            });
+            return new
+            {
+                created.Id,
+                created.Name,
+                position = await PositionOfAsync(projectId, created.Id, ct),
+                dashboardVersions = await VersionsOfAsync(projectId, recorded, [created.Id], ct),
+            };
         });
 
     [McpServerTool(Name = "update_dashboard", Title = "Rename, move or set the filters of a dashboard", Idempotent = true, OpenWorld = false, Destructive = false),
@@ -181,35 +214,48 @@ public sealed class McpDashboardTools(
     public Task<CallToolResult> UpdateDashboard(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
+        [Description(ChangeHelp)] string change,
         [Description("Optional. The new name.")] string? name = null,
         [Description("Optional. The new place, 1 for the first.")] int? position = null,
         [Description("Optional. The whole list of filters, replacing the current one; an empty list removes them all.")] DashboardFilterInput[]? filters = null,
         CancellationToken ct = default) =>
         RunAsync(async () =>
         {
+            var request = RequireChange(change);
             await Gate.RequireAsync(projectId, ProjectRole.Analyst, McpNeeds.Summaries, ct);
             if (name is null && position is null && filters is null)
             {
                 throw McpRefusal.Validation(new Dictionary<string, string[]> { ["name"] = ["Give a name, a position or filters to change."] });
             }
 
-            if (name is not null)
+            // Up to three commits: a rename that is saved before the filters are refused is still recorded (design D3).
+            var recorded = await RecordAsync(request, async () =>
             {
-                McpResults.Unwrap(await DashboardEndpoints.RenameAsync(projectId, dashboardId, new DashboardNameRequest(name), db, user, time, ct));
-            }
+                if (name is not null)
+                {
+                    McpResults.Unwrap(await DashboardEndpoints.RenameAsync(projectId, dashboardId, new DashboardNameRequest(name), db, versions, user, time, ct));
+                }
 
-            if (filters is not null)
-            {
-                McpResults.Unwrap(await DashboardEndpoints.SaveFiltersAsync(projectId, dashboardId, new DashboardFiltersRequest(filters), db, user, time, ct));
-            }
+                if (filters is not null)
+                {
+                    McpResults.Unwrap(await DashboardEndpoints.SaveFiltersAsync(projectId, dashboardId, new DashboardFiltersRequest(filters), db, versions, user, time, ct));
+                }
 
-            if (position is { } place)
-            {
-                await MoveAsync(projectId, dashboardId, place, ct);
-            }
+                if (position is { } place)
+                {
+                    await MoveAsync(projectId, dashboardId, place, ct);
+                }
+            });
 
             var current = await db.Dashboards.AsNoTracking().Where(d => d.Id == dashboardId && d.ProjectId == projectId).Select(d => new { d.Name, d.Filters }).SingleOrDefaultAsync(ct);
-            return new { id = dashboardId, name = current?.Name, position = await PositionOfAsync(projectId, dashboardId, ct), filters = current is null ? null : DashboardEndpoints.ReadFilters(current.Filters) };
+            return new
+            {
+                id = dashboardId,
+                name = current?.Name,
+                position = await PositionOfAsync(projectId, dashboardId, ct),
+                filters = current is null ? null : DashboardEndpoints.ReadFilters(current.Filters),
+                dashboardVersions = await VersionsOfAsync(projectId, recorded, [dashboardId], ct),
+            };
         });
 
     [McpServerTool(Name = "duplicate_dashboard", Title = "Duplicate a dashboard", Idempotent = false, OpenWorld = false, Destructive = false),
@@ -218,17 +264,25 @@ public sealed class McpDashboardTools(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
         [Description("The copy's name.")] string name,
+        [Description(ChangeHelp)] string change,
         CancellationToken ct = default) =>
         RunAsync(async () =>
         {
+            var request = RequireChange(change);
             await Gate.RequireAsync(projectId, ProjectRole.Analyst, McpNeeds.Summaries, ct);
-            var copy = McpResults.Unwrap<DashboardEntry>(
-                await DashboardEndpoints.DuplicateAsync(projectId, dashboardId, new DashboardNameRequest(name), db, user, dashboardOptions, time, ct));
-            return new { copy.Id, copy.Name, position = await PositionOfAsync(projectId, copy.Id, ct) };
+            var (copy, recorded) = await RecordAsync(request, async () => McpResults.Unwrap<DashboardEntry>(
+                await DashboardEndpoints.DuplicateAsync(projectId, dashboardId, new DashboardNameRequest(name), db, versions, user, dashboardOptions, time, ct)));
+            return new
+            {
+                copy.Id,
+                copy.Name,
+                position = await PositionOfAsync(projectId, copy.Id, ct),
+                dashboardVersions = await VersionsOfAsync(projectId, recorded, [copy.Id], ct),
+            };
         });
 
     [McpServerTool(Name = "remove_dashboard", Title = "Remove a dashboard", Idempotent = false, OpenWorld = false, Destructive = true),
-     Description("Removes a dashboard and all its widgets. This cannot be undone. Pass the dashboard's current name as expectedName so a wrong id cannot remove the wrong dashboard. A project keeps at least one dashboard.")]
+     Description("Removes a dashboard and all its widgets. This cannot be undone, and its versions are removed with it. Pass the dashboard's current name as expectedName so a wrong id cannot remove the wrong dashboard. A project keeps at least one dashboard.")]
     public Task<CallToolResult> RemoveDashboard(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
@@ -260,13 +314,16 @@ public sealed class McpDashboardTools(
         [Description("The widget's title, up to 200 characters.")] string title,
         [Description(ChartTypeHelp)] string chartType,
         [Description("The widget's query.")] WidgetConfigInput config,
+        [Description(ChangeHelp)] string change,
         [Description("Optional. Position and size on the grid.")] WidgetLayout? layout = null,
         CancellationToken ct = default) =>
         RunAsync(async () =>
         {
+            var request = RequireChange(change);
             await Gate.RequireAsync(projectId, ProjectRole.Analyst, McpNeeds.Summaries, ct);
-            return McpResults.Unwrap<Widget>(await DashboardEndpoints.CreateWidgetAsync(
-                projectId, dashboardId, new CreateWidgetRequest(title, chartType, config, layout), indicators, db, user, dashboardOptions, time, ct));
+            var (widget, recorded) = await RecordAsync(request, async () => McpResults.Unwrap<Widget>(await DashboardEndpoints.CreateWidgetAsync(
+                projectId, dashboardId, new CreateWidgetRequest(title, chartType, config, layout), indicators, db, versions, user, dashboardOptions, time, ct)));
+            return WithVersions(widget, await VersionsOfAsync(projectId, recorded, [dashboardId], ct));
         });
 
     [McpServerTool(Name = "update_widget", Title = "Change or move a widget", Idempotent = true, OpenWorld = false, Destructive = false),
@@ -275,6 +332,7 @@ public sealed class McpDashboardTools(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
         [Description("The widget's id, from get_dashboard.")] Guid widgetId,
+        [Description(ChangeHelp)] string change,
         [Description("Optional. The new title.")] string? title = null,
         [Description("Optional. The new chart type: " + ChartTypeHelp)] string? chartType = null,
         [Description("Optional. The new query, replacing the old one.")] WidgetConfigInput? config = null,
@@ -283,21 +341,28 @@ public sealed class McpDashboardTools(
         CancellationToken ct = default) =>
         RunAsync(async () =>
         {
+            var request = RequireChange(change);
             await Gate.RequireAsync(projectId, ProjectRole.Analyst, McpNeeds.Summaries, ct);
-            return McpResults.Unwrap<Widget>(await DashboardEndpoints.UpdateWidgetAsync(
-                projectId, dashboardId, widgetId, new UpdateWidgetRequest(title, chartType, config, layout, moveToDashboardId), indicators, db, user, dashboardOptions, time, ct));
+            var (widget, recorded) = await RecordAsync(request, async () => McpResults.Unwrap<Widget>(await DashboardEndpoints.UpdateWidgetAsync(
+                projectId, dashboardId, widgetId, new UpdateWidgetRequest(title, chartType, config, layout, moveToDashboardId), indicators, db, versions, user, dashboardOptions, time, ct)));
+            // A move names both dashboards: the one it left and the one it is on now.
+            return WithVersions(widget, await VersionsOfAsync(projectId, recorded, [dashboardId, widget.DashboardId], ct));
         });
 
     [McpServerTool(Name = "remove_widget", Title = "Remove a widget", Idempotent = false, OpenWorld = false, Destructive = true),
-     Description("Removes a widget. This cannot be undone. Pass the widget's current title as expectedTitle so a wrong id cannot remove the wrong widget.")]
+     Description("Removes a widget. Pass the widget's current title as expectedTitle so a wrong id cannot remove the wrong widget. " +
+                 "The dashboard's kept versions still hold it. To bring back only this widget, read it with get_dashboard_version and add it again with create_widget; " +
+                 "restore_dashboard_version brings back the whole dashboard and also undoes every later change.")]
     public Task<CallToolResult> RemoveWidget(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
         [Description("The widget's id, from get_dashboard.")] Guid widgetId,
         [Description("The widget's current title (case and surrounding spaces are ignored).")] string expectedTitle,
+        [Description(ChangeHelp)] string change,
         CancellationToken ct = default) =>
         RunAsync(async () =>
         {
+            var request = RequireChange(change);
             await Gate.RequireAsync(projectId, ProjectRole.Analyst, McpNeeds.Summaries, ct);
             var current = await db.DashboardWidgets.AsNoTracking().Where(w => w.Id == widgetId && w.DashboardId == dashboardId && w.ProjectId == projectId).Select(w => w.Title).SingleOrDefaultAsync(ct);
             if (current is not null)
@@ -305,9 +370,104 @@ public sealed class McpDashboardTools(
                 RequireName(current, expectedTitle);
             }
 
-            McpResults.Unwrap(await DashboardEndpoints.DeleteWidgetAsync(projectId, dashboardId, widgetId, db, ct));
-            return new { removed = true, title = current };
+            var recorded = await RecordAsync(request, async () =>
+            {
+                McpResults.Unwrap(await DashboardEndpoints.DeleteWidgetAsync(projectId, dashboardId, widgetId, db, versions, ct));
+            });
+            return new { removed = true, title = current, dashboardVersions = await VersionsOfAsync(projectId, recorded, [dashboardId], ct) };
         });
+
+    // Versions (design D3, D10 of dashboard versions)
+
+    /// <summary>
+    /// The request a dashboard write is made for, trimmed: 1 to <see cref="MaxChangeLength"/> characters (design D10). It is checked before
+    /// anything else runs, so a call refused for it changes nothing.
+    /// </summary>
+    internal static string RequireChange(string? change)
+    {
+        var request = change?.Trim();
+        if (string.IsNullOrEmpty(request) || request.Length > MaxChangeLength)
+        {
+            throw McpRefusal.Validation(new Dictionary<string, string[]>
+            {
+                ["change"] = [$"Say in 1 to {MaxChangeLength} characters what the person asked for, the same on every write you make for that request, for example \"Add five water indicators\"."],
+            });
+        }
+
+        return request;
+    }
+
+    /// <summary>What the flush after a write recorded: the version it answered for each dashboard, and the dashboards the write noted.</summary>
+    private sealed record RecordedVersions(IReadOnlyList<DashboardVersionNumber> Numbers, IReadOnlyCollection<Guid> Noted);
+
+    /// <summary>
+    /// Runs a write's handler calls and then, in a <c>finally</c>, records one version of each dashboard they changed, made through MCP
+    /// by the person for the request <paramref name="change"/> (design D3). So a call refused after part of it was saved, such as a
+    /// rename followed by filters that are not valid, still records what was saved, as a call that succeeded would. The flush never
+    /// throws and never changes the call's answer.
+    /// </summary>
+    private async Task<(T Value, RecordedVersions Recorded)> RecordAsync<T>(string change, Func<Task<T>> write)
+    {
+        IReadOnlyCollection<Guid> noted;
+        IReadOnlyList<DashboardVersionNumber> numbers;
+        T value;
+        try
+        {
+            value = await write();
+        }
+        finally
+        {
+            noted = versions.Noted;
+            numbers = await versions.FlushAsync(DashboardVersionOrigin.Mcp, user.Id, change);
+        }
+
+        return (value, new RecordedVersions(numbers, noted));
+    }
+
+    private async Task<RecordedVersions> RecordAsync(string change, Func<Task> write) =>
+        (await RecordAsync(change, async () =>
+        {
+            await write();
+            return true;
+        })).Recorded;
+
+    /// <summary>
+    /// The current version of each of <paramref name="dashboards"/>, as a write's result gives them in <c>dashboardVersions</c> (design
+    /// D10): the version the flush recorded for a dashboard the write changed, and the newest of one it left as it was, such as a move
+    /// that only changed the order. A dashboard that is gone, has no version, or whose version could not be recorded is left out, so a
+    /// number given always holds the write.
+    /// </summary>
+    private async Task<List<DashboardVersionNumber>> VersionsOfAsync(
+        Guid projectId, RecordedVersions recorded, IEnumerable<Guid> dashboards, CancellationToken ct)
+    {
+        var numbers = new List<DashboardVersionNumber>();
+        foreach (var dashboardId in dashboards.Distinct())
+        {
+            if (recorded.Numbers.FirstOrDefault(n => n.DashboardId == dashboardId) is { } number)
+            {
+                numbers.Add(number);
+            }
+            else if (!recorded.Noted.Contains(dashboardId) && await DashboardVersions.CurrentAsync(db, projectId, dashboardId, ct) is { } current)
+            {
+                numbers.Add(new DashboardVersionNumber(dashboardId, current));
+            }
+        }
+
+        return numbers;
+    }
+
+    /// <summary>A widget as the REST API answers it, with the current version of each dashboard the write changed.</summary>
+    private static object WithVersions(Widget widget, IReadOnlyList<DashboardVersionNumber> dashboardVersions) => new
+    {
+        widget.Id,
+        widget.DashboardId,
+        widget.Title,
+        widget.ChartType,
+        widget.Config,
+        widget.Layout,
+        widget.UpdatedAt,
+        dashboardVersions,
+    };
 
     // Helpers
 
