@@ -463,9 +463,9 @@ export interface QueryResult {
   /** A widget with a series only (design D12): the series in display order, the totals, and for a pyramid or a Likert widget the rows left out. */
   series?: QuerySeries[];
   /**
-   * A pie only (add-dashboard-palettes, design D8): the group values of the widget's own rows, not the dashboard filters', largest total
-   * first, then `none`, then `other` when some were folded. It decides each slice's color and which slices fold into "Other". Absent from
-   * an API that predates it.
+   * A pie only (add-dashboard-palettes, design D8): the groups of the widget's own rows, not the dashboard filters', that have a total above
+   * zero, largest total first with the missing group (`none`) in its place; at most 8 entries, so with more groups the largest 7 and then
+   * `other`. It decides each slice's color and which slices fold into "Other". Absent from an API that predates it.
    */
   domain?: QuerySeries[];
   totals?: QueryTotals;

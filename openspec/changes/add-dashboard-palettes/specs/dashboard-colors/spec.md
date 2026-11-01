@@ -16,17 +16,26 @@ Tamiza SHALL offer a fixed set of palettes: *Tamiza*, *Institutional*, *Earth* a
 - **THEN** the API responds 400 with an error on the palette
 
 ### Requirement: Palette checks
-In both themes, every palette's eight colors SHALL pass four checks:
-- adjacent colors in its order stay apart for readers with each common color-vision deficiency;
+In both themes, every palette's eight colors SHALL pass four checks, and the eighth color SHALL pass the first two against the first color too, because a pie of eight values draws them side by side:
+- adjacent colors in its order stay apart for readers with each common color-vision deficiency (protan and deutan);
 - adjacent colors stay clearly apart for full-color readers;
 - each color is inside the lightness band;
 - each color is above the chroma floor.
 
-Every sequential scale SHALL keep one hue and step its lightness one way. Each step's label color SHALL read at 4.5:1 or more on it.
-
 #### Scenario: Checks on every palette
 - **WHEN** the project's color checks run
 - **THEN** they check each palette and each sequential scale in both themes, and fail when any color breaks a check
+
+#### Scenario: Eighth color beside the first
+- **WHEN** the eighth color of a palette is too close to its first color for a reader with protan or deutan, or for a full-color reader, though it is far from the seventh
+- **THEN** the project's color checks fail
+
+### Requirement: Scale checks
+Every sequential scale SHALL keep one hue and step its lightness one way, in both themes. Each step's label color SHALL read at 4.5:1 or more on it.
+
+#### Scenario: Scale out of order
+- **WHEN** a sequential scale has a second hue, a step that breaks the order of lightness, or a label under 4.5:1 on its step
+- **THEN** the project's color checks fail
 
 ### Requirement: Dashboard palette
 An `analyst` or `admin` SHALL be able to choose the palette of a dashboard. Every member who opens the dashboard SHALL see its widgets in that palette. A `viewer` SHALL NOT be able to change it. A dashboard SHALL have the palette *Tamiza* until one is chosen.
@@ -85,7 +94,7 @@ A widget's color SHALL be its number in the palette, not a color of its own. Whe
 - **THEN** on "Field" it is drawn in the third color of *Institutional*
 
 ### Requirement: Colors kept by value
-An `analyst` or `admin` SHALL be able to keep a color for a value of a column on a dashboard. Each entry names a column, a value as text, and one of the palette's colors by its number. A dashboard SHALL hold at most 64 entries. Within one column, a value and a color SHALL each appear at most once. Saving entries that break these rules SHALL be refused with an error on the entry.
+An `analyst` or `admin` SHALL be able to keep a color for a value of a column on a dashboard. Each entry names a column, a value as text with no NUL character, and one of the palette's colors by its number. A dashboard SHALL hold at most 64 entries. Within one column, a value and a color SHALL each appear at most once. Saving entries that break these rules SHALL be refused, with an error on the entry, or on the list for the limit.
 
 #### Scenario: Color kept for a value
 - **WHEN** an `analyst` keeps color 5 for the value `Female` of the column `sex` on "Housing"
@@ -147,15 +156,19 @@ A color kept by value SHALL match a value when the value's text equals the entry
 - **THEN** `Piped` takes no color kept by value
 
 ### Requirement: Colors of a dashboard
-The dashboard's actions menu SHALL offer **Colors** to an `analyst` or `admin`. It opens a form with:
+The dashboard's actions menu SHALL offer **Colors** to an `analyst` or `admin`. It opens a form, with the keyboard focus on the palette in use, that holds:
 - the palettes, each shown with its eight colors and its scale;
 - the colors kept by value, each with its column, its value and its color.
 
-The columns offered SHALL be the text columns of the dashboard's indicators. The values offered SHALL be those columns' values. Saving SHALL apply the colors to the dashboard and change nothing when nothing changed.
+The columns offered SHALL be the text columns of the dashboard's indicators, and the values those columns' values. Saving SHALL apply the colors and change nothing when nothing changed.
 
 #### Scenario: Palette previewed
 - **WHEN** an `analyst` opens **Colors** on "Housing"
 - **THEN** each palette shows its eight colors and its scale, and the current one is selected
+
+#### Scenario: Opens on the palette in use
+- **WHEN** an `analyst` opens **Colors** on "Housing", which has the palette *Earth*
+- **THEN** the keyboard focus is on *Earth*, the selected palette, and the arrow keys move from it to the next palette
 
 #### Scenario: Value picked from the data
 - **WHEN** an `analyst` adds a color kept by value in **Colors**, picks the column `water_source` and searches for "pip"

@@ -55,10 +55,11 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 5. A pie's domain (api)
 
-- [x] 5.1 Add the domain statement to `Plan` for a pie (design D8), over the group column and the widget's own filters only, capped at 9. Verify `IndicatorQueryBuilderTests`: the pie's domain has no dashboard filter parameter, and every other kind's SQL is unchanged.
-- [x] 5.2 Read the domain with `ReadDomainAsync` and `SeriesDomain.Fold(…, 8)`, and return `domain` on a pie's response only. Verify `IndicatorQueryTests`:
+- [x] 5.1 Add `IndicatorQueryBuilder.PieDomain` to `Plan` for a pie (design D8): one statement that ranks every group with a total above zero, the missing group in its place, over the group column and the widget's own filters only, capped at 9. Verify `IndicatorQueryBuilderTests`: the pie's domain has no dashboard filter parameter, and every other kind's SQL is unchanged.
+- [x] 5.2 Read the domain before the rows (`ReadPieDomainAsync`) and make it with `SeriesDomain.BySize(…, 8)`: all the groups when there are at most 8, otherwise the 7 largest and "Other", the missing group ranked and foldable like any group. Return `domain` on a pie's response only. Verify `IndicatorQueryTests`:
   - `Colors kept under a dashboard filter` and `Other kept under a dashboard filter` (API parts: the same `domain` with and without the filter);
-  - a pie with no filter has its domain in today's size order;
+  - a pie with no filter has its domain in today's size order, the missing group in its place;
+  - a group whose total is zero, negative or not a finite number (a ratio over a zero denominator) is not in the domain;
   - every other kind's response is byte-for-byte as before.
 
 ## 6. MCP (api)
@@ -75,9 +76,11 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 - [x] 7.2 Add `--tmz-pal-{palette}-{1..8}` and `--tmz-ramp-{scale}-{1..7}`, `--tmz-ramp-{scale}-ink-{1..7}` to `:root` and `.dark` in `styles.css` (design D1). `tamiza` and `blue` hold today's values. Remove `--tmz-series-1..8`, keep `--tmz-series-other`, and define `--tmz-seq-n` and `--tmz-seq-ink-n` as `var(--tmz-ramp-blue-n)`. Update the comment above the tokens.
 - [x] 7.3 Extend `chart-tokens.spec.ts` (design D2) to cover every palette and scale in both themes. Verify `Checks on every palette`:
   - the validated values are pinned;
-  - the band, the chroma floor and the adjacent normal-vision floor hold for each palette;
+  - the band, the chroma floor and the adjacent normal-vision floor hold for each palette, and so does the adjacent color-vision floor of 8 under protan and under deutan, simulated as the validator does and cross-checked against the numbers it printed;
+  - the eighth color is held to the same floors against the first (a pie of eight wraps), and every color stays 10 from the neutral of "Other";
   - the sequential checks hold for each scale;
-  - `tamiza` and `blue` equal the values validated before.
+  - `tamiza` and `blue` equal the values validated before;
+  - the checks fail on a missing or repeated color, a color off the band or dull, neighbors too close for full-color readers or under protan or deutan, and an eighth color too close to the first.
 
 ## 8. Types and service (ui)
 
@@ -89,20 +92,20 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 9. Resolving colors (ui)
 
-- [x] 9.1 Add `indicators/chart-colors.ts` (design D7): `chartColors`, `accent`, `forValues`, `ramp` and `rampStyle`. Verify `chart-colors.spec.ts`:
+- [x] 9.1 Add `indicators/chart-colors.ts` (design D7): `chartColors`, `accent`, `forValues`, `kept`, `ramp` and `rampStyle`. Verify `chart-colors.spec.ts`:
   - `Colors set aside`;
   - `Other stays neutral`;
   - `Same value, same color`;
   - `Value not in the data`;
   - `Case differs`;
   - `"(none)"` never takes a kept color;
-  - a chart with no series uses only kept colors and `accent` (`One bar highlighted`);
+  - a chart with no series uses only kept colors (`kept`) and `accent` (`One bar highlighted`);
   - the palette's scale is used when `display.ramp` is unset (`Palette's scale`).
 - [x] 9.2 Pass `DashboardColors` from `project-indicators.ts` through `widget-grid` to each `widget-view` (`colors` input), and into `WidgetDialogData`. The current dashboard or the version shown gives them. Verify a `widget-grid.spec.ts` case that a dashboard with `earth` draws a widget with `var(--tmz-pal-earth-1)`.
 
 ## 10. Charts read their colors (ui)
 
-- [x] 10.1 Move `axis-chart`, `series-plot` and `series-legend` to `accent` and `forValues`, and remove `seriesColor` from `chart-scales.ts`. Verify `chart-widgets.spec.ts` and `series-widgets.spec.ts`:
+- [x] 10.1 Move `axis-chart` to `accent`, `kept` and `forValues`, give `series-legend` the colors it is handed, and remove `seriesColor` from `chart-scales.ts`. Verify `chart-widgets.spec.ts` and `series-widgets.spec.ts`:
   - `Column chart in color 3`;
   - `Widget saved before colors`;
   - `One bar highlighted`;
@@ -143,14 +146,14 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 14. Verification
 
-- [ ] 14.1 Real stack: a dashboard with a stacked column chart by `water_source`, a pie by `sex`, a pyramid by `sex`, a bar chart by `municipality`, a map and a heat map. Then:
+- [x] 14.1 Real stack: a dashboard with a stacked column chart by `water_source`, a pie by `sex`, a pyramid by `sex`, a bar chart by `municipality`, a map and a heat map. Then:
   - switch through the four palettes;
   - keep colors for `Female`, `Male` and one municipality;
   - give the map the green scale;
   - set a dashboard filter that reorders the pie.
 
   Check it at 390 and 1,280 pixels with a keyboard pass, and record the results in the design.
-- [ ] 14.2 Print the dashboard on A4 with background graphics off: every palette color, kept color and scale on paper.
-- [ ] 14.3 From an MCP client, set a palette and a kept color with `update_dashboard`, create a map with a scale, and read them back with `get_dashboard`.
+- [x] 14.2 Print the dashboard on A4 with background graphics off: every palette color, kept color and scale on paper.
+- [x] 14.3 From an MCP client, set a palette and a kept color with `update_dashboard`, create a map with a scale, and read them back with `get_dashboard`.
 - [ ] 14.4 Run `npm run check:safety` in `tamiza-ui/` and both full suites.
-- [ ] 14.5 Write "Deviations from the plan" and "Verification Results" in the design, update `docs/tamiza-brief.md` (data model and roadmap: `add-widget-display-options` next), and run `openspec validate add-dashboard-palettes --strict`.
+- [x] 14.5 Write "Deviations from the plan" and "Verification Results" in the design, update `docs/tamiza-brief.md` (data model and roadmap: `add-widget-display-options` next), and run `openspec validate add-dashboard-palettes --strict`.

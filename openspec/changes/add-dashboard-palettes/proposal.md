@@ -45,7 +45,7 @@ Not in this change:
 - `custom-dashboards`: duplicating a dashboard copies its palette and its colors kept by value.
 - `dashboard-printing`: a printed dashboard uses its palette.
 - `mcp-server`:
-  - `update_dashboard` sets the palette and the colors kept by value, and `get_dashboard` returns them;
+  - `update_dashboard` sets the palette and the colors kept by value, and `get_dashboard` and `get_dashboard_version` return them;
   - `create_widget` and `update_widget` take a widget's color and scale.
 
 ## Impact
@@ -58,20 +58,20 @@ Not in this change:
     - `IndicatorQueryResponse` gains a pie's `domain`.
   - New `Indicators/Palettes.cs`: palette and scale ids, limits.
   - `Indicators/IndicatorValidation.cs` and `DashboardValidation`: rules for `display`, the palette and the colors kept by value.
-  - `Indicators/IndicatorQueryBuilder.cs`: a pie's domain over its own rows.
+  - `Indicators/IndicatorQueryBuilder.cs`, `IndicatorSeries.cs` and `SeriesQueryBuilder.cs`: a pie's domain over its own rows.
   - `Indicators/DashboardEndpoints.cs`: `PUT /dashboards/{id}/colors`, and duplicate copies the colors.
-  - `Indicators/DashboardVersions.cs`: the version content holds the colors, and the new change kind `colorsChanged`.
-  - `Mcp/McpDashboardTools.cs`, `Mcp/Instructions.md` and `McpGuide.cs`: the new settings.
+  - `Indicators/DashboardVersions.cs` and `DashboardVersionEndpoints.cs`: the version content and the version details hold the colors, and the new change kind `colorsChanged`.
+  - `Mcp/McpDashboardTools.cs`, `Mcp/McpDashboardVersionTools.cs`, `Mcp/Instructions.md` and `McpGuide.cs`: the new settings.
   - OpenAPI, unit and integration tests.
 - **ui** (`tamiza-ui`):
   - `styles.css`: one token set per palette and per sequential scale, light and dark, and `chart-tokens.spec.ts` checks every set.
-  - New `indicators/chart-colors.ts`: the colors of one widget, from the palette, the colors kept by value and the widget's own setting. `chart-scales.ts`, `axis-chart.ts`, `series-plot.ts`, `series-legend.ts`, `pie-widget.ts`, `pyramid-chart.ts`, `heatmap-chart.ts` and `map-widget.ts` read their colors from it.
+  - New `indicators/chart-colors.ts`: the colors of one widget, from the palette, the colors kept by value and the widget's own setting. `chart-scales.ts` loses `seriesColor` and `sequentialColor`; `axis-chart.ts`, `series-legend.ts`, `pie-widget.ts`, `pyramid-chart.ts`, `heatmap-chart.ts` and `map-widget.ts` take their colors from it, and `script-editor/indicator-view.ts` gives its preview chart the default palette's.
   - New `indicators/dashboard-colors-dialog.ts`, and the **Colors** action in `project-indicators.ts`.
   - `indicators/widget-dialog.ts`: the color or scale field and its preview.
   - `indicators/widget-view.ts`: `display` kept by `savedConfig` and left out of `queryFor`.
   - `core/projects/indicators.service.ts`: the new endpoint, fields and change kind.
   - `en.json` and `es.json` strings, and the specs.
-- **Database:** `0019_add_dashboard_palettes.sql` adds the two columns with their defaults and a CHECK on the palette id. `TamizaDbContext` mirrors them.
+- **Database:** `0019_add_dashboard_palettes.sql` adds the two columns with their defaults and a CHECK on the palette id. `TamizaDbContext` mirrors them, and the rule in `dbUp/README.md` about scripts that rewrite `dashboard_versions.content` names the palette.
 - **Analytics:** none.
 - **Docs:**
   - `docs/indicators-dashboard.md`: palettes, widget colors, colors kept by value, and how to pick them.
