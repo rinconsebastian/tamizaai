@@ -195,7 +195,8 @@ public sealed record WidgetConfigInput(
     string? Layout = null,
     WidgetPyramid? Pyramid = null,
     IReadOnlyList<LikertStep>? Scale = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WidgetDisplay? Display = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("How the widget is drawn: its color or its scale. It never changes the rows.")] WidgetDisplay? Display = null)
 {
     public WidgetConfig Normalize() => new(
         Indicator ?? "",

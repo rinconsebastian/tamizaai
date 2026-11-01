@@ -409,6 +409,30 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Reading_a_dashboard_the_project_does_not_have_gives_the_pages_code_and_the_http_status_whichever_tool_reads_it()
+    {
+        await using var h = await CreateAsync();
+        var missing = Guid.NewGuid();
+
+        var refusals = new[]
+        {
+            await h.CallAsync("viewer", "get_widget_data", new { dashboardId = missing }),
+            await h.CallAsync("viewer", "get_dashboard", new { dashboardId = missing }),
+        };
+
+        // The page's code, not an mcp. one, and the HTTP status next to it (docs/mcp.md, Troubleshooting).
+        foreach (var refused in refusals)
+        {
+            Assert.Equal("dashboards.notFound", refused.Code());
+            using var body = refused.Json();
+            Assert.Equal(404, body.RootElement.GetProperty("status").GetInt32());
+        }
+
+        using var widgetData = refusals[0].Json();
+        Assert.Equal("The project has no such dashboard. Call list_dashboards.", widgetData.RootElement.GetProperty("message").GetString());
+    }
+
+    [Fact]
     public async Task A_widget_of_an_indicator_that_has_not_published_says_so()
     {
         await using var h = await CreateAsync();
@@ -1273,6 +1297,31 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
             Assert.Equal("sex already keeps a color for Female.", fields.GetProperty("valueColors[3]")[0].GetString());
         }
 
+        Assert.Equal("tamiza []", await ColorsOfAsync(h, water));
+        Assert.Equal(Enumerable.Range(1, 1), await NumbersAsync(h, water));
+    }
+
+    [Fact]
+    public async Task A_value_with_a_NUL_character_through_mcp_is_refused_on_the_value_and_nothing_is_saved()
+    {
+        await using var h = await CreateAsync();
+        var water = await AddDashboardInTamizaAsync(h, "Water access");
+
+        // PostgreSQL's jsonb cannot hold a NUL, so a value that got through would end as mcp.failed when it is stored.
+        var result = await h.CallAsync("analyst", "update_dashboard", new
+        {
+            dashboardId = water, palette = "earth", change = ColorsRequest,
+            valueColors = new[] { Kept("sex", "Male", 2), Kept("sex", "Fe\0male", 5) },
+        });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("valueColors[1].value: The value cannot contain a NUL character.", result.Text());
+        using (var body = result.Json())
+        {
+            Assert.Equal(["valueColors[1].value"], body.RootElement.GetProperty("fields").EnumerateObject().Select(f => f.Name).ToArray());
+        }
+
+        Assert.Equal("tamiza", await StoredPaletteAsync(h, water));
         Assert.Equal("tamiza []", await ColorsOfAsync(h, water));
         Assert.Equal(Enumerable.Range(1, 1), await NumbersAsync(h, water));
     }

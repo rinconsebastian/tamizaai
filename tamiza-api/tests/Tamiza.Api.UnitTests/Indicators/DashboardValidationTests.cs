@@ -264,6 +264,16 @@ public sealed class DashboardValidationTests
         Assert.Equal(["The value is longer than 500 characters."], ColorErrorsOn("valueColors[0].value", "earth", Kept("sex", new string('v', 501), 1)));
     }
 
+    [Fact]
+    public void A_value_cannot_contain_a_NUL_character_but_keeps_any_other_control_character()
+    {
+        Assert.Equal(["The value cannot contain a NUL character."], ColorErrorsOn("valueColors[0].value", "earth", Kept("sex", "Fe\0male", 5)));
+        Assert.Equal(["The value cannot contain a NUL character."], ColorErrorsOn("valueColors[0].value", "earth", Kept("sex", "\0", 5)));
+        // An entry refused for its value is not kept, so it takes nothing from the entries after it.
+        Assert.Equal(["valueColors[0].value"], Colors("earth", Kept("sex", "Fe\0male", 5), Kept("sex", "Male", 5)).Errors.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(["Fe\nmale", "Ma\tle"], Colors("earth", Kept("sex", "Fe\nmale", 5), Kept("sex", "Ma\tle", 2)).Colors!.ValueColors.Select(c => c.Value));
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(9)]

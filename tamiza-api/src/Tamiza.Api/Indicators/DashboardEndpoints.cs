@@ -574,10 +574,10 @@ public static class DashboardEndpoints
     }
 
     /// <summary>
-    /// Changes any of a widget's title, chart type, query and layout, or moves it to another dashboard of the project. A move or a
-    /// rename leaves the query as it is, even if the table no longer has what it names. Only what differs from what is stored, as the
-    /// API reads it, is written: a form saved unchanged writes nothing, and a config saved before later fields existed does not gain
-    /// them, so the dashboard makes no version (design D2, D12).
+    /// Changes any of a widget's title, chart type, query (display included) and layout, or moves it to another dashboard of the
+    /// project. A move or a rename leaves the query as it is, even if the table no longer has what it names. Only what differs from
+    /// what is stored, as the API reads it, is written: a form saved unchanged writes nothing, and a config saved before later fields
+    /// existed does not gain them, so the dashboard makes no version (design D2, D12).
     /// </summary>
     internal static async Task<Results<Ok<Widget>, ValidationProblem, ProblemHttpResult>> UpdateWidgetAsync(
         Guid projectId, Guid dashboardId, Guid widgetId, UpdateWidgetRequest? request, IndicatorDashboard indicators, TamizaDbContext db,

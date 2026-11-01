@@ -283,6 +283,22 @@ public sealed class DashboardColorsTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_value_with_a_NUL_character_is_refused_on_the_value_and_nothing_is_saved()
+    {
+        await using var h = await CreateAsync();
+        var before = await h.StoredDashboardsAsync();
+
+        // PostgreSQL's jsonb cannot hold a NUL, so a value that got through would end as a 500 when it is stored.
+        var response = await h.PutColorsAsync("earth", new[] { Kept("sex", "Male", 2), Kept("sex", "Fe\0male", 5) });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await ReadAsync(response);
+        Assert.Equal(["valueColors[1].value"], problem.GetProperty("errors").EnumerateObject().Select(e => e.Name).ToArray());
+        Assert.Equal(["The value cannot contain a NUL character."], IndicatorsHarness.Errors(problem, "valueColors[1].value"));
+        Assert.Equal(before, await h.StoredDashboardsAsync());
+    }
+
+    [Fact]
     public async Task A_dashboard_keeps_64_colors_and_not_65()
     {
         await using var h = await CreateAsync();

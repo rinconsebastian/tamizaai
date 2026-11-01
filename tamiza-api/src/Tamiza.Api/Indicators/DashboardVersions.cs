@@ -33,7 +33,7 @@ public static class DashboardChangeKinds
 
     public const string WidgetAdded = "widgetAdded";
 
-    /// <summary>A widget's title, chart type or query changed, with or without its layout.</summary>
+    /// <summary>A widget's title, chart type, query or display (color or scale) changed, with or without its layout.</summary>
     public const string WidgetChanged = "widgetChanged";
 
     public const string WidgetRemoved = "widgetRemoved";

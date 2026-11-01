@@ -2343,7 +2343,7 @@ describe('the widget dialog\'s color and scale', () => {
         'Color 5, moss',
         'Color 6, brown',
         'Color 7, plum',
-        'Color 8, olive',
+        'Color 8, teal',
       ]);
     });
 
@@ -2369,7 +2369,7 @@ describe('the widget dialog\'s color and scale', () => {
 
       await click(context, colorNamed(3));
 
-      expect(text(field('dialog-color-chosen'))).toBe('Color 3, aqua');
+      expect(text(field('dialog-color-chosen'))).toBe('Color 3, jade');
     });
 
     it('is a group of native radio inputs under one legend, reachable from the keyboard', async () => {

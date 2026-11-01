@@ -59,7 +59,7 @@ public sealed record ValueColor(string Column, string Value, int Color);
 /// and range on the fields are what the MCP tools' input schema shows of them, and validate nothing.
 /// </summary>
 public sealed record ValueColorInput(
-    [property: Description("A column's name, in lower case: letters, digits and underscores.")] string? Column,
+    [property: Description("A column's name: lowercase letters, digits and underscores, not starting with a digit, at most 63 characters.")] string? Column,
     [property: Description("The value's text, matched exactly, case and spaces included; an empty text is a value too.")] string? Value,
     [property: Description("A place in the dashboard's palette, 1 to 8, never a color code."), Range(1, Palettes.ColorCount)] int? Color);
 

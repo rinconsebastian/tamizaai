@@ -6,7 +6,8 @@ import styles from '../../../../styles.css';
 // the palette validator (commands and results in the Verification Results of each design); these checks keep the tokens at the values
 // that were validated and keep the properties the validator checks: for a palette, the lightness band, the chroma floor and
 // neighbors that readers tell apart, with full color vision and with each common color-vision deficiency (the validator's simulation,
-// below, checked against the numbers it printed); for a scale, one hue, lightness stepping the same way, steps apart, labels that read.
+// below, checked against the numbers it printed), the eighth color counting as the first one's neighbor because a pie of eight wraps;
+// for a scale, one hue, lightness stepping the same way, steps apart, labels that read.
 
 /** The declarations of the first rule whose selector is exactly `selector`, as a map of custom properties. */
 function tokens(selector: string): Record<string, string> {
@@ -133,8 +134,8 @@ const validatedPalettes = {
     dark: ['#3f6cbb', '#00a5b6', '#a94d58', '#26a0ca', '#a98900', '#6473bd', '#cf785c', '#516f0a'],
   },
   earth: {
-    light: ['#af4a1b', '#345895', '#b88a01', '#82344e', '#669929', '#7e4701', '#934791', '#676e02'],
-    dark: ['#b34027', '#506cad', '#988904', '#984e6b', '#65a84b', '#8e5a01', '#a860b0', '#677401'],
+    light: ['#af4a1b', '#345895', '#b88a01', '#82344e', '#669929', '#7e4701', '#934791', '#09a3a0'],
+    dark: ['#b34027', '#506cad', '#988904', '#984e6b', '#65a84b', '#8e5a01', '#a860b0', '#2da9a0'],
   },
   vivid: {
     light: ['#9d32e5', '#00c5ec', '#95c500', '#f22dbd', '#009d1f', '#5485ff', '#c4134d', '#ff8210'],
@@ -201,8 +202,8 @@ const neighborFloor = 15;
 const gatedDeficiencies: readonly Deficiency[] = ['protan', 'deutan'];
 const cvdFloor = 8;
 /**
- * How far (OKLab x 100) a palette's colors must stay from the neutral of "Other". The palettes were built to be at least 11.8 from it
- * (institutional's salmon, dark), so 10 is a tripwire for a color drifting toward gray rather than the validated margin.
+ * How far (OKLab x 100) a palette's colors must stay from the neutral of "Other". The palettes were built to be at least 11.4 from it
+ * (earth's teal, light), so 10 is a tripwire for a color drifting toward gray rather than the validated margin.
  */
 const otherFloor = 10;
 
@@ -213,7 +214,10 @@ function deltaE(x: string, y: string, deficiency?: Deficiency): number {
   return 100 * Math.hypot(p.lightness - q.lightness, p.a - q.a, p.b - q.b);
 }
 
-/** What is wrong with the eight colors of a palette in `theme` (design D2): count, distinct, band, chroma floor, neighbors (also under protan and deutan), "Other". */
+/**
+ * What is wrong with the eight colors of a palette in `theme` (design D2): count, distinct, band, chroma floor, neighbors (also under
+ * protan and deutan), the eighth against the first (a pie of eight wraps), "Other".
+ */
 function paletteProblems(colors: readonly string[], theme: Theme, other: string): string[] {
   const found: string[] = [];
   if (colors.length !== 8) {
@@ -243,6 +247,20 @@ function paletteProblems(colors: readonly string[], theme: Theme, other: string)
       found.push(`${name}: only ${deltaE(hex, other).toFixed(1)} from the neutral of "Other"`);
     }
   });
+
+  // A pie of exactly eight slices wraps: slice 8 sits beside slice 1. The validator gates neighbors in the order and does not see
+  // that pair, so the last color is held to the neighbor floors against the first (add-dashboard-palettes, design, Repairs).
+  if (colors.length === 8) {
+    const name = `color 8 (${colors[7]})`;
+    if (deltaE(colors[7], colors[0]) < neighborFloor) {
+      found.push(`${name}: only ${deltaE(colors[7], colors[0]).toFixed(1)} from color 1 (a pie of eight wraps)`);
+    }
+    for (const deficiency of gatedDeficiencies) {
+      if (deltaE(colors[7], colors[0], deficiency) < cvdFloor) {
+        found.push(`${name}: only ${deltaE(colors[7], colors[0], deficiency).toFixed(1)} from color 1 under ${deficiency} (a pie of eight wraps)`);
+      }
+    }
+  }
   return found;
 }
 
@@ -329,7 +347,7 @@ function scaleProblems(id: string, steps: readonly string[], inks: readonly stri
 const validatorWorstAdjacent = {
   tamiza: { light: { gated: 9.1, tritan: 5.8 }, dark: { gated: 8.4, tritan: 8.7 } },
   institutional: { light: { gated: 15.5, tritan: 20.6 }, dark: { gated: 11.0, tritan: 13.9 } },
-  earth: { light: { gated: 16.6, tritan: 7.3 }, dark: { gated: 14.8, tritan: 9.3 } },
+  earth: { light: { gated: 12.8, tritan: 7.3 }, dark: { gated: 8.6, tritan: 9.3 } },
   vivid: { light: { gated: 17.4, tritan: 7.2 }, dark: { gated: 13.1, tritan: 9.1 } },
 } as const;
 
@@ -379,7 +397,7 @@ describe('Checks on every palette', () => {
       expect(ramp(tokensOf(theme), `pal-${id}`, 8)).toEqual(validatedPalettes[id][theme]);
     });
 
-    it.each(themes)('has eight distinct colors, each inside the lightness band and above the chroma floor, neighbors apart (with full color vision, protan and deutan) and clear of "Other", in the %s theme', (theme) => {
+    it.each(themes)('has eight distinct colors, each inside the lightness band and above the chroma floor, neighbors apart (with full color vision, protan and deutan), the eighth apart from the first as a neighbor is (a pie of eight wraps) and clear of "Other", in the %s theme', (theme) => {
       const colors = ramp(tokensOf(theme), `pal-${id}`, 8);
 
       expect(paletteProblems(colors, theme, tokensOf(theme)['--tmz-series-other'] ?? other)).toEqual([]);
@@ -463,6 +481,24 @@ describe('Checks on every palette', () => {
       expect(deltaE(good[0], '#4c6118')).toBeGreaterThanOrEqual(neighborFloor);
       expect(deltaE(good[0], '#4c6118', 'protan')).toBeLessThan(cvdFloor);
       expect(paletteProblems(confusable, 'light', other)).toEqual([expect.stringMatching(/^color 2 \(#4c6118\): only [\d.]+ from color 1 under protan$/)]);
+    });
+
+    it('report an eighth color too close to the first, which a pie of eight puts beside it, though it is far from its own neighbor', () => {
+      // Olive, as earth once had its eighth: 15.5 from terracotta with full color vision, 5.1 under protan and 2.8 under deutan, and 24 from plum.
+      const olive = withColor(good, 7, '#676e02');
+
+      expect(deltaE('#676e02', good[0])).toBeGreaterThanOrEqual(neighborFloor);
+      expect(deltaE('#676e02', good[6])).toBeGreaterThanOrEqual(neighborFloor);
+      expect(paletteProblems(olive, 'light', other)).toEqual([
+        expect.stringMatching(/^color 8 \(#676e02\): only [\d.]+ from color 1 under protan \(a pie of eight wraps\)$/),
+        expect.stringMatching(/^color 8 \(#676e02\): only [\d.]+ from color 1 under deutan \(a pie of eight wraps\)$/),
+      ]);
+    });
+
+    it('report an eighth color that full-color readers already take for the first', () => {
+      const twin = paletteProblems(withColor(good, 7, '#b74e20'), 'light', other);
+
+      expect(twin).toContainEqual(expect.stringMatching(/^color 8 \(#b74e20\): only [\d.]+ from color 1 \(a pie of eight wraps\)$/));
     });
 
     it('report the band of the theme: a color that is in the light band but too light for the dark one', () => {

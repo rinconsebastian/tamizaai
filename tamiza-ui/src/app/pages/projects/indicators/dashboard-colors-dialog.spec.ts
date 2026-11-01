@@ -145,6 +145,21 @@ describe('DashboardColorsDialog', () => {
       expect(dialog.palettes().map((p) => p.checked)).toEqual([false, false, true, false]);
     });
 
+    it.each(['en', 'es'] as const)('stacks the name of a palette\'s scale above its gradient, so the gradient has the card\'s width in any language (%s)', async (lang) => {
+      const dialog = await open(tamiza, {}, lang);
+      await dialog.answerColumns();
+
+      // jsdom has no layout. Side by side, the gradient has only what the caption leaves: 2 px of a card for "Escala de mapas y mapas de
+      // calor: Verde azulado". Stacked, it has the card's width; the widths themselves are measured in a real browser.
+      for (const card of dialog.getAll('dashboard-colors-palette-card')) {
+        const caption = card.querySelector('[data-testid="dashboard-colors-palette-scale"]')!;
+        const gradient = card.querySelector('[data-scale]')!;
+        expect(gradient.parentElement).toBe(caption.parentElement);
+        expect(gradient.parentElement!.classList.contains('flex-col')).toBe(true);
+        expect(gradient.getAttribute('aria-hidden')).toBe('true');
+      }
+    });
+
     it('names each palette to a screen reader and describes its colors by number and hue', async () => {
       const dialog = await open();
       await dialog.answerColumns();
@@ -415,6 +430,19 @@ describe('DashboardColorsDialog', () => {
       ]);
     });
 
+    it('adds an entry on another column when the one before already uses all eight colors, which the API would refuse', async () => {
+      const full = Array.from({ length: 8 }, (_, i) => kept('sex', `Value ${i + 1}`, i + 1));
+      const dialog = await open({ palette: 'tamiza', valueColors: [kept('municipality', 'Rionegro', 1), ...full] });
+      await dialog.answerColumns();
+
+      await dialog.click(dialog.get('dashboard-colors-add')!);
+
+      // `municipality` is the first column offered with a color left, and its first free color is 2.
+      expect(dialog.rows()).toHaveLength(10);
+      expect(dialog.inRow<HTMLSelectElement>(9, 'dashboard-colors-column').value).toBe('municipality');
+      expect(dialog.checkedColor(9)).toBe('2');
+    });
+
     it('starts the first entry on the first column offered, in color 1', async () => {
       const dialog = await open();
       await dialog.answerColumns();
@@ -526,9 +554,9 @@ describe('DashboardColorsDialog', () => {
       expect(radios.map((r) => r.getAttribute('aria-label'))).toEqual([
         'Color 1, blue',
         'Color 2, orange',
-        'Color 3, aqua',
-        'Color 4, yellow',
-        'Color 5, magenta',
+        'Color 3, jade',
+        'Color 4, amber',
+        'Color 5, pink',
         'Color 6, green',
         'Color 7, violet',
         'Color 8, red',
@@ -555,7 +583,7 @@ describe('DashboardColorsDialog', () => {
       const dialog = await open({ palette: 'tamiza', valueColors: [kept('sex', 'Female', 3)] }, {}, 'es');
       await dialog.answerColumns();
 
-      expect(dialog.colorRadios(0)[2].getAttribute('aria-label')).toBe('Color 3, aguamarina');
+      expect(dialog.colorRadios(0)[2].getAttribute('aria-label')).toBe('Color 3, jade');
       expect(dialog.getAll('dashboard-colors-palette-name').map(text)).toEqual(['Tamiza', 'Institucional', 'Tierra', 'Vívido']);
       expect(text(dialog.get('dashboard-colors-save'))).toBe('Guardar colores');
     });
@@ -684,9 +712,11 @@ describe('DashboardColorsDialog', () => {
       await dialog.answerColumns();
       const controls = Array.from(dialog.root()!.querySelectorAll<HTMLElement>('input, select, button, textarea, [tabindex]'));
 
-      // Nothing is taken out of the tab order and nothing is positioned ahead of the others.
-      expect(controls.every((c) => c.tabIndex === 0 && !c.hasAttribute('disabled'))).toBe(true);
-      expect(controls.every((c) => !c.hasAttribute('tabindex'))).toBe(true);
+      // Nothing is taken out of the tab order and nothing is positioned ahead of the others, but for the palettes not in use: they
+      // leave the tab order so the group is one stop (the focus trap does not know radio groups).
+      const others = controls.filter((c) => c.dataset['testid'] !== 'dashboard-colors-palette');
+      expect(others.every((c) => c.tabIndex === 0 && !c.hasAttribute('disabled'))).toBe(true);
+      expect(others.every((c) => !c.hasAttribute('tabindex'))).toBe(true);
       // The palettes are one radio group (the browser moves between them with the arrow keys), the colors of each entry another.
       const groups = new Map<string, number>();
       for (const radio of controls.filter((c): c is HTMLInputElement => c instanceof HTMLInputElement && c.type === 'radio')) {
@@ -722,6 +752,27 @@ describe('DashboardColorsDialog', () => {
       const checked = dialog.palettes().filter((p) => p.checked);
       expect(checked.map((p) => p.value)).toEqual([palette]);
       expect(document.activeElement).toBe(checked[0]);
+    });
+
+    it('makes the palettes one tab stop for the focus trap too: only the one in use is tabbable, and picking another moves the stop', async () => {
+      const dialog = await open({ palette: 'earth', valueColors: [] });
+      await dialog.answerColumns();
+      // The CDK trap wraps from the last control to the first tabbable one in DOM order and knows nothing of radio groups: an unchecked
+      // palette left tabbable would be a second stop, and the arrow keys from it would move from Tamiza, not from the palette in use.
+      const [start, end] = Array.from(document.querySelectorAll<HTMLElement>('.cdk-focus-trap-anchor'));
+      const wrapForward = () => {
+        end.dispatchEvent(new Event('focus'));
+        return document.activeElement;
+      };
+
+      expect(dialog.palettes().map((p) => p.tabIndex)).toEqual([-1, -1, 0, -1]);
+      expect(wrapForward()).toBe(dialog.palettes()[2]);
+      start.dispatchEvent(new Event('focus'));
+      expect(document.activeElement).toBe(dialog.get('dashboard-colors-save'));
+
+      await dialog.click(dialog.palettes()[3]);
+      expect(dialog.palettes().map((p) => p.tabIndex)).toEqual([-1, -1, -1, 0]);
+      expect(wrapForward()).toBe(dialog.palettes()[3]);
     });
 
     it('moves focus to the next entry\'s Remove button when one is removed, and to "Add" when none is left', async () => {

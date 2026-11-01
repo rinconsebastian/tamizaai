@@ -179,6 +179,12 @@ public static class DashboardValidation
                 errors.Add(field + ".value", $"The value is longer than {DataQueryBuilder.MaxTextLength} characters.");
                 value = null;
             }
+            else if (value.Contains('\0'))
+            {
+                // Any other character is a value as it is, but jsonb cannot hold NUL, so saving it would end as a 500.
+                errors.Add(field + ".value", "The value cannot contain a NUL character.");
+                value = null;
+            }
 
             var color = entry.Color;
             if (!Palettes.IsColor(color))

@@ -92,13 +92,16 @@ export function sameColors(a: DashboardColors, b: DashboardColors): boolean {
               [attr.data-palette]="id"
             >
               <span class="flex items-center gap-2">
-                <!-- The dialog opens on the palette in use: it is the radio group's one tab stop and the one the arrow keys move from. -->
+                <!-- The dialog opens on the palette in use: it is the radio group's one tab stop and the one the arrow keys move from. The
+                     others leave the tab order (roving tabindex) because the focus trap wraps to the first tabbable element in DOM order and
+                     knows nothing of radio groups: it would land on the first palette, unchecked, as a second stop. -->
                 <input
                   type="radio"
                   name="dashboardPalette"
                   class="size-4 shrink-0"
                   [value]="id"
                   [checked]="palette() === id"
+                  [attr.tabindex]="palette() === id ? 0 : -1"
                   [attr.cdkFocusInitial]="palette() === id ? '' : null"
                   [attr.aria-labelledby]="'dashboard-colors-palette-' + id + '-name'"
                   [attr.aria-describedby]="'dashboard-colors-palette-' + id + '-info'"
@@ -113,9 +116,11 @@ export function sameColors(a: DashboardColors, b: DashboardColors): boolean {
                   <span class="h-6 min-w-0 flex-1 rounded-sm border border-default" [style.background-color]="swatch(id, n)" [attr.data-color]="n"></span>
                 }
               </span>
-              <span [id]="'dashboard-colors-palette-' + id + '-info'" class="flex items-center gap-2 text-xs text-body">
-                <span class="shrink-0" data-testid="dashboard-colors-palette-scale">{{ t('dashboardColors.palette.scale', { scale: t('colors.scales.' + scaleOf(id)) }) }}</span>
-                <span class="h-3 min-w-0 flex-1 rounded-sm" aria-hidden="true" [style.background-image]="gradient(id)" [attr.data-scale]="scaleOf(id)"></span>
+              <!-- The caption above its gradient: side by side, a long one (Spanish: "Escala de mapas y mapas de calor: Verde azulado")
+                   takes the whole card and leaves the gradient no width. -->
+              <span [id]="'dashboard-colors-palette-' + id + '-info'" class="flex flex-col gap-1 text-xs text-body">
+                <span data-testid="dashboard-colors-palette-scale">{{ t('dashboardColors.palette.scale', { scale: t('colors.scales.' + scaleOf(id)) }) }}</span>
+                <span class="h-3 rounded-sm" aria-hidden="true" [style.background-image]="gradient(id)" [attr.data-scale]="scaleOf(id)"></span>
                 <span class="sr-only">{{ t('dashboardColors.palette.colors', { colors: hueList(id, t) }) }}</span>
               </span>
             </label>
@@ -458,14 +463,22 @@ export class DashboardColorsDialog {
       return;
     }
     // The column of the row before, since entries often share one (`sex`: Female, Male). A saved entry can be on a column that is no
-    // longer offered; the new row then starts on the first one offered, and its color is the first that column does not use yet.
+    // longer offered, and a column can use all eight colors, which the API refuses a ninth of: the new row then starts on the first
+    // column offered that has a color left, in the first one it does not use yet. With none left it starts on the column before in
+    // color 1, and the API says so on save.
     const before = this.rows().at(-1)?.column;
-    const column = before !== undefined && choices.includes(before) ? before : choices[0];
-    const used = new Set(this.rows().filter((r) => r.column === column).map((r) => r.color));
-    const color = places.find((n) => !used.has(n)) ?? 1;
+    const candidates = before !== undefined && choices.includes(before) ? [before, ...choices] : choices;
+    const column = candidates.find((c) => this.freeColor(c) !== undefined) ?? candidates[0];
+    const color = this.freeColor(column) ?? 1;
     this.rows.update((rows) => [...rows, { key: this.nextKey++, column, value: '', color, savedBlank: false }]);
     // The new entry's column, ready to be changed.
     afterNextRender(() => this.columnSelects().at(-1)?.nativeElement.focus(), { injector: this.injector });
+  }
+
+  /** The first color of the palette that no entry on the column uses; undefined when it uses all eight. */
+  private freeColor(column: string): number | undefined {
+    const used = new Set(this.rows().filter((r) => r.column === column).map((r) => r.color));
+    return places.find((n) => !used.has(n));
   }
 
   protected remove(index: number): void {

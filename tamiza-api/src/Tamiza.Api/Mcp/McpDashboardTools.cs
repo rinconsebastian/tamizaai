@@ -44,7 +44,10 @@ public sealed class McpDashboardTools(
         "config.display = { color, ramp } sets how the widget is drawn, both optional. color is a place in the dashboard's palette, 1 to 8 (not a color code; 1 when left out), " +
         "for a bar, column or line chart with no seriesBy and for a histogram. ramp is a sequential scale, one of blue, teal, green, orange, red, purple or gray, " +
         "for a map or heatmap only; left out, the palette's own scale. The scale is matched exactly, in lower case: Green is refused. " +
-        "A widget with a series takes its colors from its series, and no other kind has a color of its own. " +
+        "A widget with a series takes its colors from its series, and no other kind has a color of its own.";
+
+    /// <summary>What only a change of an existing widget needs: a new chart type alone keeps the old config, display included.</summary>
+    private const string ChartTypeChangeHelp =
         "To change the chart type of a widget that has a color or a scale, also send a config without the display fields the new type does not take: " +
         "a new chartType alone keeps the old config, so it is refused, with an error on config.display.color or config.display.ramp, when the new type does not take them.";
 
@@ -166,7 +169,7 @@ public sealed class McpDashboardTools(
         {
             await Gate.RequireAsync(projectId, ProjectRole.Viewer, McpNeeds.Summaries, ct);
             var dashboard = await db.Dashboards.AsNoTracking().Where(d => d.Id == dashboardId && d.ProjectId == projectId).Select(d => new { d.Name, d.Filters }).SingleOrDefaultAsync(ct)
-                ?? throw new McpRefusal(DashboardEndpoints.NotFoundCode, "The project has no such dashboard. Call list_dashboards.");
+                ?? throw McpRefusal.Failed("The project has no such dashboard. Call list_dashboards.", StatusCodes.Status404NotFound, DashboardEndpoints.NotFoundCode);
             var filters = DashboardEndpoints.ReadFilters(dashboard.Filters);
             var widgets = await DashboardEndpoints.ReadWidgetsAsync(db, dashboardId, ct);
             if (widgetId is { } only)
@@ -352,7 +355,7 @@ public sealed class McpDashboardTools(
         });
 
     [McpServerTool(Name = "update_widget", Title = "Change or move a widget", Idempotent = true, OpenWorld = false, Destructive = false),
-     Description("Changes a widget's title, chart type, query or layout, or moves it to another dashboard of the project with moveToDashboardId (it lands under that dashboard's widgets). What you leave out keeps its value; a new config replaces the old one whole, including its series settings and its display. " + DisplayHelp)]
+     Description("Changes a widget's title, chart type, query or layout, or moves it to another dashboard of the project with moveToDashboardId (it lands under that dashboard's widgets). What you leave out keeps its value; a new config replaces the old one whole, including its series settings and its display. " + DisplayHelp + " " + ChartTypeChangeHelp)]
     public Task<CallToolResult> UpdateWidget(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,

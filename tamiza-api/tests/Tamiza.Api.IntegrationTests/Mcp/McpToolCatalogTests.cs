@@ -4,6 +4,7 @@ using ModelContextProtocol.Client;
 using Tamiza.Api.Data;
 using Tamiza.Api.Indicators;
 using Tamiza.Api.IntegrationTests.Infrastructure;
+using Tamiza.Api.Pipeline;
 
 namespace Tamiza.Api.IntegrationTests.Mcp;
 
@@ -76,21 +77,27 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task The_widget_tools_warn_that_a_new_chart_type_alone_keeps_the_config_and_so_the_color_or_scale()
+    public async Task Only_update_widget_warns_that_a_new_chart_type_alone_keeps_the_config_and_so_the_color_or_scale()
     {
         await using var h = await McpProjectHarness.CreateAsync(postgres);
         var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
 
-        foreach (var name in new[] { "create_widget", "update_widget" })
-        {
-            Assert.Contains(
-                "To change the chart type of a widget that has a color or a scale, also send a config without the display fields the new type does not take: a new chartType alone keeps the old config",
-                tools[name].Description);
-            Assert.Contains("config.display.color or config.display.ramp", tools[name].Description);
-        }
-
+        const string warning = "To change the chart type of a widget that has a color or a scale, also send a config without the display fields the new type does not take: a new chartType alone keeps the old config";
+        var update = tools["update_widget"].Description;
+        Assert.Contains(warning, update);
+        Assert.Contains("config.display.color or config.display.ramp", update);
         // update_widget says what a new config replaces, which is why the chart type alone is not enough.
-        Assert.Contains("What you leave out keeps its value; a new config replaces the old one whole", tools["update_widget"].Description);
+        Assert.Contains("What you leave out keeps its value; a new config replaces the old one whole", update);
+
+        // A new widget has no old config to keep, so the warning would only mislead there; what both need is still said.
+        var create = tools["create_widget"].Description;
+        Assert.DoesNotContain("To change the chart type", create);
+        Assert.DoesNotContain("a new chartType alone keeps the old config", create);
+        foreach (var description in new[] { create, update })
+        {
+            Assert.Contains("config.display = { color, ramp } sets how the widget is drawn", description);
+            Assert.Contains("ramp is a sequential scale", description);
+        }
     }
 
     [Fact]
@@ -139,9 +146,17 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
             AssertDescribed(kept.GetProperty(field));
         }
 
+        // The column's description says all that the validation refuses, not only the letters: a client reads nothing else of the rule.
+        var column = kept.GetProperty("column").GetProperty("description").GetString()!;
+        Assert.Contains("lowercase letters, digits and underscores", column);
+        Assert.Contains("not starting with a digit", column);
+        Assert.Contains($"at most {ColumnNames.MaxLength} characters", column);
+
         foreach (var name in new[] { "create_widget", "update_widget" })
         {
-            var display = tools[name].JsonSchema.GetProperty("properties").GetProperty("config").GetProperty("properties").GetProperty("display").GetProperty("properties");
+            var displayField = tools[name].JsonSchema.GetProperty("properties").GetProperty("config").GetProperty("properties").GetProperty("display");
+            Assert.Contains("How the widget is drawn", displayField.GetProperty("description").GetString());
+            var display = displayField.GetProperty("properties");
             AssertColor(display.GetProperty("color"));
             AssertNamed(display.GetProperty("ramp"), Palettes.Scales);
         }
