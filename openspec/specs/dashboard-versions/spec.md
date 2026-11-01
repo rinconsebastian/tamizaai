@@ -6,7 +6,7 @@ Keep a short history of each of a project's own dashboards, recorded automatical
 ## Requirements
 
 ### Requirement: Dashboard versions
-Each of a project's own dashboards SHALL have a history of versions. A version SHALL hold the dashboard's name, its filters with their defaults, and its widgets with their title, chart type, query, the dashboard filters they ignore, position and size. It SHALL record its number, who made it, when its last change was saved, whether it was made in Tamiza or through an AI client, and what changed. The newest version SHALL be the dashboard as it is.
+Each of a project's own dashboards SHALL have a history of versions. A version SHALL hold the dashboard's name, its filters with their defaults, its palette and colors kept by value, and its widgets with their title, chart type, query, color or scale, the dashboard filters they ignore, position and size. It SHALL record its number, who made it, when its last change was saved, where it was made (Tamiza or an AI client), and what changed. The newest version SHALL be the dashboard as it is.
 
 #### Scenario: Widget added
 - **WHEN** an `analyst` adds the widget "Water source" to "Housing", whose newest version is 4
@@ -17,7 +17,7 @@ Each of a project's own dashboards SHALL have a history of versions. A version S
 - **THEN** the restore is version 13
 
 ### Requirement: Changes that make a version
-Every change a person saves to a dashboard in Tamiza SHALL make a new version, however small: adding, renaming or duplicating the dashboard, saving its filters, and adding, editing, removing, moving or resizing a widget, or moving one between dashboards. One action SHALL make one version of each dashboard it changes. A save that leaves a dashboard as its newest version holds SHALL make none. An AI client's changes follow `mcp-server` "One version per request".
+Every change a person saves to a dashboard in Tamiza SHALL make a new version, however small: adding, renaming or duplicating the dashboard, saving its filters, saving its colors, and adding, editing, removing, moving or resizing a widget, or moving one between dashboards. One action SHALL make one version of each dashboard it changes. A save that leaves a dashboard as its newest version holds SHALL make none. An AI client's changes follow `mcp-server` "One version per request".
 
 #### Scenario: One character
 - **WHEN** an `analyst` changes the title of a widget on "Housing" from "Coverage" to "Coverage."
@@ -46,6 +46,22 @@ Every change a person saves to a dashboard in Tamiza SHALL make a new version, h
 #### Scenario: New dashboard
 - **WHEN** an `analyst` adds the dashboard "Field"
 - **THEN** "Field" has version 1, with no widgets, saying the dashboard was added
+
+#### Scenario: Palette changed
+- **WHEN** an `analyst` changes the palette of "Housing" from *Tamiza* to *Earth*
+- **THEN** "Housing" has a new version with the palette *Earth*, saying its colors changed
+
+#### Scenario: Colors saved unchanged
+- **WHEN** an `analyst` opens **Colors** on "Housing" and saves without changing anything
+- **THEN** "Housing" has no new version
+
+#### Scenario: Widget color changed
+- **WHEN** an `analyst` changes a column chart of "Housing" from color 1 to color 3
+- **THEN** "Housing" has a new version saying the widget changed
+
+#### Scenario: Dashboard saved before palettes
+- **WHEN** a dashboard's newest version was recorded before palettes existed, and an `analyst` opens **Colors** and saves the palette *Tamiza* with no colors kept by value
+- **THEN** the dashboard has no new version
 
 ### Requirement: Changes that are not dashboard changes
 Runs and the data they publish, synchronizations, the filter values a member picks, a member's basemap or map view, showing widgets as tables, printing, the order of the project's dashboards and the dashboard's scheduled email SHALL NOT make versions, and a restore SHALL NOT change them.
@@ -108,7 +124,7 @@ For an `analyst` or `admin`, the dashboard's actions SHALL include **Version his
 - **THEN** the current version holds the widget in its new place
 
 ### Requirement: Viewing a version
-From the version history, an `analyst` or `admin` SHALL be able to view a version on the dashboard page: its name, filters and widgets with the current data, read-only, with a notice naming the version, its author and time, and actions to go back to the current version and to restore an older one. Its filters SHALL offer its widgets' values. While it is shown, the page SHALL offer no other action that changes or prints the dashboard, and a sheet printed from the browser SHALL name the version.
+From the version history, an `analyst` or `admin` SHALL be able to view a version on the dashboard page: its name, filters, colors and widgets with the current data, read-only, with a notice naming the version, its author and time, and actions to return to the current version or restore an older one. Its filters SHALL offer its widgets' values. While it is shown, the page SHALL offer no other action that changes or prints the dashboard, and a browser-printed sheet SHALL name the version.
 
 #### Scenario: Viewing an older version
 - **WHEN** an `analyst` views version 9 of "Housing", which had a widget since removed
@@ -126,8 +142,12 @@ From the version history, an `analyst` or `admin` SHALL be able to view a versio
 - **WHEN** an `analyst` prints from the browser's menu while version 9 of "Housing" is shown
 - **THEN** the sheet says it is version 9, with its author and time, and shows no button or notice
 
+#### Scenario: Colors of a version
+- **WHEN** "Housing" now has the palette *Earth* and an `analyst` views its version 4, which had the palette *Tamiza*
+- **THEN** the page shows version 4's widgets in the colors of *Tamiza*, with version 4's colors kept by value
+
 ### Requirement: Restoring a version
-An `analyst` or `admin` SHALL be able to restore a kept version after confirming. The dashboard's name, filters and widgets SHALL become those of that version, recorded as a new version that names the version restored, so the state it replaced stays in the history. The dashboard SHALL keep its address, its place and its scheduled email. A restore that would leave the dashboard as it is SHALL change nothing and say so.
+An `analyst` or `admin` SHALL be able to restore a kept version after confirming. The dashboard's name, filters, colors and widgets SHALL become those of that version, recorded as a new version that names the version restored, so the state it replaced stays in the history. The dashboard SHALL keep its address, its place and its scheduled email. A restore that would leave the dashboard as it is SHALL change nothing and say so.
 
 #### Scenario: Removed widget brought back
 - **WHEN** an `analyst` removed the widget "Water source" from "Housing" in version 8 and restores version 7
@@ -148,6 +168,14 @@ An `analyst` or `admin` SHALL be able to restore a kept version after confirming
 #### Scenario: Filter values in the address
 - **WHEN** the restoring member's page address holds a value for a filter that the restored version does not define
 - **THEN** that value is dropped from the address with the notice for filters no longer defined
+
+#### Scenario: Colors restored
+- **WHEN** an `analyst` changed the palette of "Housing" to *Earth* and kept color 5 for `Female` in version 6, and restores version 5
+- **THEN** "Housing" has version 5's palette and colors kept by value again
+
+#### Scenario: Version recorded before palettes
+- **WHEN** an `analyst` restores a version of "Housing" recorded before palettes existed, while "Housing" has the palette *Earth*
+- **THEN** "Housing" has the palette *Tamiza* and no colors kept by value
 
 ### Requirement: Restored name
 A restore SHALL keep the dashboard's current name when another dashboard of the project now has the version's name, ignoring case, and the message after the restore SHALL say that the name was kept and why.
