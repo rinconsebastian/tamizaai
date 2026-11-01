@@ -428,3 +428,96 @@ The records, serialized in camelCase as every answer of the API:
 ## Open Questions
 
 None that change the specs, the approach or the task breakdown.
+
+## Deviations from the plan
+
+Found while implementing, or fixed after an adversarial review of the implementation and a verification of each fix.
+
+**Data and recording (D1 to D6, D12)**
+- `origin` is a new enum `DashboardVersionOrigin { App, Mcp }`, not the scripts' `ScriptOrigin`, whose name and comments are about scripts. It serializes as `"app"` and `"mcp"`, as D9 asks.
+- `Note` takes the project too, `Note(projectId, dashboardId, change)`, and `FlushAsync(origin, authorId, note)` takes the author explicitly: the flush needs the project for the lock and to scope its reads.
+- Before each dashboard, the flush clears the change tracker, so it never saves entities a refused handler left behind.
+- *Review fix.* A rename to the name the dashboard has wrote the row again and noted `renamed`. Inside a growing MCP request that listed a false change and moved `saved_at`. The update now compares the name in its `WHERE` (ordinal, so a change of case is still a rename) and notes nothing when no row changed, as D12 asks of the filters and the widget form.
+- *Review fix.* A widget `PATCH` that sent the chart type or the query wrote only the column that differed. A restore running meanwhile could then pair the restored chart type with a query checked against another one. The update now writes both, as the pair that was checked.
+
+**Restore (D7)**
+- *Review fix.* Renames, filter saves, widget edits and widget deletes take no lock. One that committed while a restore ran was overwritten, or mixed into the restored version, without any version holding it. Right after the project lock, the restore now also takes `FOR UPDATE` on the dashboard row and its widget rows. Such a write therefore either commits before the restore reads, and step 2 records it as `unrecorded`, or waits and lands after the restore with a version of its own. No writer takes the two locks in the other order, so this cannot deadlock.
+- *Review fix.* Restoring again a version whose widget came back as a copy was never "nothing to do": each repeat made a new copy, a new version and pushed one out. Steps 4 and 7 now share one matching: a widget of the version that is on another dashboard is matched, one to one, to a widget of this dashboard that the version does not hold and that has the same title, chart type, config and layout. Step 4 compares with those ids, and step 7 keeps the matched copies. Spec scenario "Copy restored again".
+- A name taken at the commit, or a widget removed concurrently, rolls back and runs the restore again, at most three times. With the row locks, only the name case can still happen.
+- The restore's core is `DashboardVersions.RestoreAsync`, shared by REST and MCP.
+- `DashboardVersionList.Current` is `0` for a dashboard with no versions, since D9 types it `int`; `GET .../dashboards/{id}` gives `version: null` then. Only dashboards inserted outside the API (test fixtures) have none.
+- A version recorded for an `unrecorded` state takes the time and author of the latest edit recorded on the dashboard or its widgets, as D5 does. A widget delete records no edit time, so such a version can show a time earlier than the version before it.
+
+**Layout (D8)**
+- The layout save also takes the project lock, so no widget can move to another dashboard between its read and its save, and it cannot deadlock with a restore.
+- The page does not wait for one layout save to be answered before it sends the next, as before. Two saves of one dashboard can therefore be on their way at once, and nothing guarantees their order on the server. A failed save reads the dashboard again but keeps the layouts made after it queued.
+
+**REST (D9)**
+- *Review fix.* D11 said viewing needs no new API, but a viewed version's filters offered the values of the dashboard's current widgets. `GET .../dashboards/{id}/values` gained an optional repeated `indicator` parameter: when present, those indicators replace the dashboard's widgets. Each name must be a valid table name, appear once, and be at most `MaxWidgetsPerDashboard` in number, or the answer is 400 on `indicator`. The lookup stays in the project's schema and the route stays `viewer`, who can already query every published indicator. A version shown without widgets asks for no values. A version holding more distinct indicators than the widget limit, which an operator lowered since, has its values request refused with 400; a value can still be typed. Spec scenario "Filter values of a version".
+
+**MCP (D10)**
+- `change` stays required in the schemas, so the SDK refuses a call that leaves it out before the tool runs. *Review fix:* that refusal named the field `arguments`. The call filter now takes the parameter's name from the SDK's message, so a missing `change` is refused on `change`, as a blank or too long one is, and every other missing required argument on its own name. A malformed argument stays on `arguments`.
+- `change` is checked before the access gate, as `kind` is for scripts. A viewer who leaves it out gets `mcp.validation`, not `mcp.forbidden`. Such refusals happen before the project is known, so they are recorded without a project and do not appear in the project's list of MCP calls, as for the other arguments checked first.
+- `restoredFrom` is left out of the restore result when `restored` is false.
+- `DashboardVersions.Noted` lets a write result leave out a dashboard whose flush failed, instead of naming an older version.
+
+**Page (D11)**
+- The history's restore result carries the version's name and time (`VersionToRestore`), which the confirmation and the "name kept" message need.
+- **Version history** sits after **Scheduled email…** and before **Remove** in the dashboard's menu.
+- The history offers Close but no retry when the versions cannot be read, as the scheduled email dialog does. It says that the 10 newest versions are kept, and has an empty state. `unrecorded` reads "Changes kept before a restore".
+- While a version is shown, the heading shows the version's name; the tab keeps the current one.
+- The notice takes focus (`tabindex="-1"`) when the view starts instead of being a live region, so it is read once.
+- A 200 answer with `nameKept` adds the "name kept" sentence to the "already is as" message.
+- `dashboards.versionNotFound` during a view leaves the view, then lists the versions again. Reading a version to view fails the same three ways a restore does.
+- *Review fix.* Print is hidden while a version is shown, but the browser's own menu still prints it, and the notice is left off paper. The print header now has a paper-only line naming the version, its author and time, in the project's zone as the other lines of the header. The page's title names the version too, and "Data published" follows the widgets shown. Spec scenario "Printed from the browser".
+- On screen, the history and the notice give times in the browser's zone, as the shared `dateTime` pipe does for script versions and runs. Paper gives them in the project's zone and names it.
+
+## Verification Results
+
+Checked in the development sandbox: 4 cores, 15 GB, .NET SDK 10.0.114 from the Ubuntu package, since the host of Microsoft's installer is blocked there (`global.json`'s `rollForward: latestFeature` accepts it), PostgreSQL 17 with PostGIS in a container, Node 22.23.4.
+
+**Tests**
+
+| Suite | Result |
+|---|---|
+| API unit, on the starting commit | 1,560 passed, 3 failed: `ReportFormatTests.Dates_and_timestamps_of_tooltip_columns`, `ReportHtmlTests.Header` and `Text_reader`. The environment's ICU writes a narrow no-break space before `AM`, as in earlier changes |
+| API integration, on the starting commit | The baseline run was disturbed by a rebuild during it (285 failed for missing build outputs). The first full run after the schema, which adds one test, passed 1,620 of 1,620 |
+| API unit, final (`29721de`) | 1,579 passed, the same 3 failed |
+| API integration, final (`29721de`) | 1,729 passed, 0 failed, 40 minutes |
+| UI (`ng test`), on the starting commit | 98 files, 2,190 tests passed. One unhandled error, `Cannot read properties of undefined (reading 'total')` in `ProjectPerformance` during `project-indicators.spec.ts`, as in earlier changes |
+| UI, final | 99 files, 2,256 tests passed, the same unhandled error |
+| UI build, `npm run check:safety`, `tsc` for app and specs | pass; the build's one warning, NG8113 in `project-reference.ts`, was already there |
+| `ScriptConventionTests`, `SchemaDriftTests`, `SchemaMigratorTests`, the analytics template database test | pass |
+
+Each review fix has a test that was run without the fix and failed: 11 for the rename, the restore's row locks, the missing argument's key and the values endpoint, 2 for the repeated copy restore, and 1 for the chart type and query pair (3 runs).
+
+**Review of the implementation.** Four reviewers (recording, restore, MCP, page), each followed by a verifier who tried to refute every finding, found 7 findings: 6 confirmed and 1 rejected. The 6 were fixed and the fixes reviewed again. That second review found 4 small follow-ups, all fixed: the time zone of the printed version line, a version without widgets asking for the dashboard's values, a stale comment, and the chart type and query pair. All are listed in Deviations from the plan.
+
+**Real stack** (Compose project `tamizaverify`: images built from the branch, a fake KoboToolbox port of `KoboStub` with 60 submissions, Keycloak 26.4 from Docker Hub because quay.io is blocked, Mailpit). The sandbox's proxy needed two build-only workarounds in a separate compose override, with no change to the repository's Dockerfiles: base images carrying the proxy's CA certificate, and uv taken from its PyPI wheel because `ghcr.io` is blocked.
+
+- *Upgrade (11.3).* The stack was first built from `e31b6e0` (schema at 0017) and filled through the UI and the API: a project, 5 published indicators, "Housing" (4 widgets, 2 filters, one with a default, an active scheduled email), "Health" (2 widgets, last edited by another analyst) and "Field" (1 widget). The images were then rebuilt from the branch on the same volumes.
+  - The api log shows `0018_add_dashboard_versions.sql` applied and "Upgrade successful".
+  - Each dashboard lists exactly version 1, "State before version history", attributed to its last editor ("Health" to the other analyst) at the time of the last edit. `GET .../dashboards/{id}` gives version 1, and version 1 equals the dashboard: name, filters, and each widget's id, title, chart type, query and layout.
+  - The first change after the upgrade, removing a widget of "Health", was undone by restoring version 1: the widget came back with its id and settings, and the history reads 3 restored 1, 2 removed, 1.
+  - The scheduled email's row is equal in every column before and after.
+- *Page (11.1),* with Playwright in headless Chromium, signed in through Keycloak's login form:
+  - Ten edits on a new dashboard. The unchanged filter save made no version. Five mouse drags in a row made five versions, each one `PUT .../layout`; the drag that pushed two widgets sent one request with three layouts. The eleventh version pruned version 1, which then answered 404 `dashboards.versionNotFound`.
+  - The history at 360, 768 and 1,280 pixels, light and dark: no horizontal scroll, and every version's number, changes, author, time and actions inside the viewport. The app has no theme switch, so dark was set with its `.dark` class.
+  - A version was viewed (notice, no add, edit, drag, resize, print or header actions, Back), restored ("Restored version 4 as version 12.") and the restore undone.
+  - A restore whose name another dashboard had taken kept the current name and said why. A restore holding a widget moved since brought it back as a copy, said so, and left the other dashboard unchanged. Restoring that version again answered "already is as in version 15" and added no version.
+  - The scheduled email's settings stayed equal through a restore of "Housing". A send now and a send by the scheduler, forced by moving the schedule to the next minute and back, both reached Mailpit with the restored widget's title.
+  - Printing while a version is shown names the version on the sheet, with no button and no notice.
+  - The address dropped a filter value the restored version does not define, with the existing notice. A drag followed at once by the history showed the new place in the current version.
+  - A keyboard-only pass found focus where D11 says, in 25 of 25 checks: the notice on view, the heading on Back and after a restore, the actions button after the history closes.
+  - A viewer has no Version history action and gets 403 from `GET .../versions`.
+- *MCP (11.2).* No Claude client can reach the sandbox's stack: the Tamiza connector of this session points at a server without this change, and was not called. The steps therefore ran through a real MCP client, the official Python SDK `mcp` 2.3.0, over Streamable HTTP at `http://localhost:8098/mcp` through the UI's nginx. It used tokens of the `tamiza-mcp` client from the documented flow: PKCE S256, the `resource` parameter, and Keycloak's login and consent pages driven by Playwright.
+  - `tools/list` gave 34 tools with the three version tools, `change` required on the seven writes, `baseVersion` on the restore, and the annotations of "Restore marked".
+  - Five `create_widget` calls on the existing "Field" with one `change` gave one version, number 2, via MCP, by the analyst. The page's history shows it with "Add five water indicators to Field", the first three widgets and "and 2 more". The undo the instructions describe (`list_dashboard_versions`, `get_dashboard_version` of version 1, `restore_dashboard_version` with `baseVersion` 2) made version 3, via MCP, "Version 1 restored", with "Field" as before, widget ids included.
+  - The same on a dashboard created in the request: one version holding the dashboard and the five widgets. A next request was a new version.
+  - A call without `change` was refused with `mcp.validation` on `change` and saved nothing.
+  - After another analyst retitled a widget in the page, a restore with the old base was refused with `mcp.dashboardChanged`, naming version 4, that analyst, the time and origin `app`. The dashboard was unchanged.
+  - Two `create_widget` calls at the same moment with one `change` made one version listing both. A viewer was refused the version tools with `mcp.forbidden`. The project's MCP calls list the calls with their tools and outcomes.
+- *Not covered on the stack, covered by integration tests:* the widget limit on a restore, a dashboard removed or a version pruned during a restore, a write saved as a restore runs, a duplicate's version 1, the 30-minute pause, a member's change between two writes of a request, part of a call refused, and an order-only `update_dashboard`.
+- *Seen on the stack, outside this change:* a stat tile of three columns breaks its value inside a word on paper ("60 househo / lds"), and the app ignores the system's dark mode.
+
+**Screen reader (11.4).** Not done in the sandbox; left for a person with NVDA or VoiceOver.

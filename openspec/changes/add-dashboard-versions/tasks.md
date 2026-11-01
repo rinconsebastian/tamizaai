@@ -186,22 +186,22 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 11. Verification
 
-- [ ] 11.1 On a real stack in a separate Compose project (`tamizaverify`), with the user's stack untouched:
+- [x] 11.1 On a real stack in a separate Compose project (`tamizaverify`), with the user's stack untouched:
   - build a dashboard with ten edits, including five drags in a row, and check that they make five versions;
   - open the history at 360, 768 and 1,280 pixels, light and dark;
   - view a version, restore it, and undo the restore;
   - restore a version whose name another dashboard took, and one holding a widget since moved;
   - check that the scheduled email is unchanged and its next send shows the restored widgets (Mailpit);
   - do a keyboard pass.
-- [ ] 11.2 From Claude connected to that stack:
+- [x] 11.2 From Claude connected to that stack:
   - ask for five widgets on one dashboard and check that the history shows one version "via MCP" with the request;
   - ask Claude to undo it;
   - change the dashboard in the UI, then ask Claude to restore with its old base, and check the refusal with `mcp.dashboardChanged`.
 
   If no Claude client can reach the stack, run the same steps through an MCP client in tests, and say so in Verification Results.
-- [ ] 11.3 Upgrade a copy of a database at `0017` with dashboards to this version. Check that every dashboard lists version 1, "State before version history", and that the first change after the upgrade can be undone.
+- [x] 11.3 Upgrade a copy of a database at `0017` with dashboards to this version. Check that every dashboard lists version 1, "State before version history", and that the first change after the upgrade can be undone.
 - [ ] 11.4 Screen reader pass on the history dialog, the view notice and the restore confirmation (NVDA or VoiceOver). Left for the user.
-- [ ] 11.5 Write "Deviations from the plan" and "Verification Results" in the design, and run `openspec validate add-dashboard-versions --strict`.
+- [x] 11.5 Write "Deviations from the plan" and "Verification Results" in the design, and run `openspec validate add-dashboard-versions --strict`.
 
 ## Workflow follow-up
 
