@@ -21,6 +21,7 @@ The per-project schemas (`p_<id>_raw`, `p_<id>_clean`, ...) are not managed here
 
 - **Never edit, rename or delete a script once it is merged.** DbUp tracks scripts by name only, so a changed script never reaches databases that already ran it. Fix mistakes with a new script.
 - There are no down scripts. To undo a change, write a new script that reverses it.
+- **A script that rewrites widget configs or layouts, dashboard filter lists, or the check on `chart_type` also rewrites `tamiza.dashboard_versions.content`.** Each dashboard version holds a full copy of its dashboard: the name, `filters` as stored, and each widget's `id`, `title`, `chartType`, `config` and `layout` as stored. A restore writes them back as they are, so a version left in the old shape would bring that shape back, or fail the new check.
 
 ## Running the scripts by hand
 

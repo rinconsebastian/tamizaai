@@ -267,4 +267,38 @@ public sealed class ScriptConventionTests
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"\bCHECK\b"));
         Assert.Empty(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|INDEX|CREATE TABLE)\b"));
     }
+
+    [Fact]
+    public void The_dashboard_versions_script_names_every_constraint_and_index()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0018_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0018_add_dashboard_versions.sql", resource);
+        foreach (var constraint in new[]
+                 {
+                     "pk_dashboard_versions PRIMARY KEY", "fk_dashboard_versions_projects_project_id FOREIGN KEY",
+                     "fk_dashboard_versions_dashboards_dashboard_id FOREIGN KEY", "fk_dashboard_versions_users_author_id FOREIGN KEY",
+                     "ck_dashboard_versions_number CHECK", "ck_dashboard_versions_more_changes CHECK", "ck_dashboard_versions_origin CHECK",
+                     "ck_dashboard_versions_note CHECK",
+                 })
+        {
+            Assert.Contains($"CONSTRAINT {constraint}", sql);
+        }
+
+        // Every key, check and foreign key is introduced by a CONSTRAINT name; every index has an ix_ name.
+        Assert.Equal(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count,
+            System.Text.RegularExpressions.Regex.Matches(sql, @"CONSTRAINT (?:pk|fk|ck)_\w+ (?:PRIMARY KEY|FOREIGN KEY|CHECK)\b").Count);
+        Assert.Equal(
+            new[] { "ix_dashboard_versions_dashboard_id_number", "ix_dashboard_versions_project_id", "ix_dashboard_versions_author_id" },
+            System.Text.RegularExpressions.Regex.Matches(sql, @"CREATE (?:UNIQUE )?INDEX (\w+)").Select(m => m.Groups[1].Value));
+        Assert.Contains("CREATE UNIQUE INDEX ix_dashboard_versions_dashboard_id_number ON tamiza.dashboard_versions (dashboard_id, number)", sql);
+        Assert.Contains("CREATE INDEX ix_dashboard_versions_project_id ON tamiza.dashboard_versions (project_id)", sql);
+        Assert.Contains("CREATE INDEX ix_dashboard_versions_author_id ON tamiza.dashboard_versions (author_id)", sql);
+        // The versions go with their dashboard and their project; a person who made one cannot be removed.
+        Assert.Contains("REFERENCES tamiza.dashboards (id) ON DELETE CASCADE", sql);
+        Assert.Contains("REFERENCES tamiza.projects (id) ON DELETE CASCADE", sql);
+        Assert.Contains("REFERENCES tamiza.users (id) ON DELETE RESTRICT", sql);
+    }
 }

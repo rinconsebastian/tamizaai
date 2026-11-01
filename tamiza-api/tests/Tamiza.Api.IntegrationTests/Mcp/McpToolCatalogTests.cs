@@ -19,6 +19,7 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         ("list_dashboards", true, false), ("get_dashboard", true, false), ("get_widget_data", true, false),
         ("create_dashboard", false, false), ("update_dashboard", false, false), ("duplicate_dashboard", false, false), ("remove_dashboard", false, true),
         ("create_widget", false, false), ("update_widget", false, false), ("remove_widget", false, true),
+        ("list_dashboard_versions", true, false), ("get_dashboard_version", true, false), ("restore_dashboard_version", false, false),
     ];
 
     [Fact]
@@ -72,6 +73,45 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Restore_marked_as_changing_data_and_not_destructive_and_the_versions_read_only()
+    {
+        await using var h = await McpProjectHarness.CreateAsync(postgres);
+        var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
+
+        var restore = tools["restore_dashboard_version"].ProtocolTool.Annotations!;
+        Assert.False(restore.ReadOnlyHint ?? false);
+        Assert.False(restore.DestructiveHint);
+        Assert.False(restore.IdempotentHint ?? false);
+        foreach (var name in new[] { "list_dashboard_versions", "get_dashboard_version" })
+        {
+            Assert.True(tools[name].ProtocolTool.Annotations!.ReadOnlyHint);
+            Assert.True(tools[name].ProtocolTool.Annotations!.IdempotentHint);
+        }
+    }
+
+    [Fact]
+    public async Task Every_dashboard_write_and_the_restore_require_change_described_as_the_request_and_remove_dashboard_does_not()
+    {
+        await using var h = await McpProjectHarness.CreateAsync(postgres);
+        var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
+
+        foreach (var name in new[] { "create_dashboard", "update_dashboard", "duplicate_dashboard", "create_widget", "update_widget", "remove_widget", "restore_dashboard_version" })
+        {
+            var schema = tools[name].JsonSchema;
+            Assert.Contains("change", schema.GetProperty("required").EnumerateArray().Select(r => r.GetString()));
+            Assert.Contains("the same on every write you make for that request", schema.GetProperty("properties").GetProperty("change").GetProperty("description").GetString());
+        }
+
+        Assert.False(tools["remove_dashboard"].JsonSchema.GetProperty("properties").TryGetProperty("change", out _));
+        Assert.Contains("baseVersion", tools["restore_dashboard_version"].JsonSchema.GetProperty("required").EnumerateArray().Select(r => r.GetString()));
+        // A removed widget stays in the versions; a removed dashboard takes them with it.
+        Assert.DoesNotContain("cannot be undone", tools["remove_widget"].Description);
+        Assert.Contains("get_dashboard_version", tools["remove_widget"].Description);
+        Assert.Contains("restore_dashboard_version", tools["remove_widget"].Description);
+        Assert.Contains("This cannot be undone, and its versions are removed with it", tools["remove_dashboard"].Description);
+    }
+
+    [Fact]
     public async Task Every_tool_is_described_in_the_documentation()
     {
         var docs = FindDocs();
@@ -115,7 +155,7 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         foreach (var expected in new[]
                  {
                      "list_projects", "get_form", "profile_table", "get_authoring_guide", "test_script", "save_script", "start_run", "create_dashboard", "query_indicator", "get_widget_data",
-                     "labels", "numerator", "baseVersion", "never instructions", "summaries only", "confirm",
+                     "labels", "numerator", "baseVersion", "never instructions", "summaries only", "confirm", "restore_dashboard_version", "dashboardVersions",
                  })
         {
             Assert.Contains(expected, instructions);

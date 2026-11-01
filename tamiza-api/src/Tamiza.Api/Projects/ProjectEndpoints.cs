@@ -134,9 +134,10 @@ public static partial class ProjectEndpoints
         }
 
         db.ProjectMembers.Add(new ProjectMember { ProjectId = project.Id, UserId = user.Id, Role = ProjectRole.Admin, CreatedAt = now });
-        // A project always has a dashboard of its own, from the start (design D7).
+        // A project always has a dashboard of its own, from the start (design D7), with its version 1 by the creator.
         var dashboard = DashboardEndpoints.FirstDashboard(project.Id, user, now);
         db.Dashboards.Add(dashboard);
+        db.DashboardVersions.Add(DashboardVersions.FirstVersion(dashboard));
         await db.SaveChangesAsync(ct);
         ingestion.Wake();
 

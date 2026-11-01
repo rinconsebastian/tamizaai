@@ -5,11 +5,21 @@ import { Component, DestroyRef, ElementRef, Injector, LOCALE_ID, afterNextRender
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
-import { EMPTY, Observable, Subject, catchError, forkJoin, switchMap } from 'rxjs';
+import { EMPTY, Observable, Subject, Subscription, catchError, forkJoin, switchMap } from 'rxjs';
 import { ApiErrors } from '../../core/api-error';
 import { Downloader } from '../../core/download.service';
 import { ExportFormat } from '../../core/projects/data.service';
-import { DashboardFilter, IndicatorEntry, IndicatorsOverview, IndicatorsService, Layout, Widget, maxDashboards } from '../../core/projects/indicators.service';
+import {
+  DashboardFilter,
+  DashboardRestore,
+  DashboardVersionDetails,
+  IndicatorEntry,
+  IndicatorsOverview,
+  IndicatorsService,
+  Layout,
+  Widget,
+  maxDashboards,
+} from '../../core/projects/indicators.service';
 import { DashboardEntry } from '../../core/projects/projects.service';
 import { SystemConfigService } from '../../core/system-config';
 import { Alert, ApiLang, Badge, Button, Card, ConfirmDialog, Disclosure, DropdownMenu, MenuItem, Skeleton, ToastService, DateTimePipe, NumberPipe, dateText, numberText } from '../../shared/ui';
@@ -19,6 +29,7 @@ import { DashboardFiltersData, DashboardFiltersDialog, DashboardFiltersResult } 
 import { DashboardNameAction, DashboardNameData, DashboardNameDialog, DashboardNameResult } from './indicators/dashboard-name-dialog';
 import { DashboardPrint, printTitle } from './indicators/dashboard-print';
 import { DashboardReportData, DashboardReportDialog, DashboardReportResult } from './indicators/dashboard-report-dialog';
+import { DashboardVersionsData, DashboardVersionsDialog, DashboardVersionsResult, VersionToRestore } from './indicators/dashboard-versions-dialog';
 import { Placed } from './indicators/grid-layout';
 import { WidgetDialog, WidgetDialogData, WidgetDialogResult } from './indicators/widget-dialog';
 import { WidgetGrid } from './indicators/widget-grid';
@@ -34,8 +45,9 @@ export const layoutSaveDelayMs = 400;
  * admins add, edit, arrange and remove widgets (design D5, D6 of add-indicators-dashboard). While no indicator has published, it
  * says so, shows the indicators as part of that message and still lists the widgets already configured. The router reuses the
  * page from one dashboard to the next, so it shows one dashboard at a time; from its header, analysts and admins add, rename,
- * duplicate, move and remove the project's dashboards (design D10, D12 of add-multiple-dashboards). Every member prints it from
- * its header, laid out as on a wide screen (add-dashboard-printing).
+ * duplicate, move and remove the project's dashboards (design D10, D12 of add-multiple-dashboards), and open its version history,
+ * from which they view a version read-only in place of the dashboard and restore it (design D11 of add-dashboard-versions). Every
+ * member prints it from its header, laid out as on a wide screen (add-dashboard-printing).
  */
 @Component({
   selector: 'app-project-indicators',
@@ -66,8 +78,9 @@ export const layoutSaveDelayMs = 400;
     <div class="flex flex-col gap-6 paper:w-[980px]" *transloco="let t" data-testid="dashboard-canvas">
       <!-- Outside the loading and overview branches, so the heading and the live region exist from the first render. -->
       <div class="flex flex-wrap items-center gap-2" data-testid="dashboard-header">
-        <h2 #heading tabindex="-1" class="min-w-0 flex-1 break-words text-lg font-semibold text-heading [overflow-wrap:anywhere] focus:outline-none" data-testid="dashboard-heading">{{ name() }}</h2>
-        @if (canPrint() || context.can('analyst')) {
+        <h2 #heading tabindex="-1" class="min-w-0 flex-1 break-words text-lg font-semibold text-heading [overflow-wrap:anywhere] focus:outline-none" data-testid="dashboard-heading">{{ shownName() }}</h2>
+        <!-- None of them while a version is shown, Print included: a printout leaves notices out, so it would not say which (design D11). -->
+        @if (canPrint() || editing()) {
           <!-- Under the name on a phone. At the limit "New dashboard" stays focusable, so the hint saying why it is unavailable can be read. -->
           <div class="ms-auto flex w-full items-center justify-end gap-2 sm:w-auto print:hidden" data-testid="dashboard-actions">
             @if (canPrint()) {
@@ -90,7 +103,7 @@ export const layoutSaveDelayMs = 400;
                 {{ t('dashboards.print.action') }}
               </button>
             }
-            @if (context.can('analyst')) {
+            @if (editing()) {
               <button
                 tmzButton
                 variant="secondary"
@@ -107,7 +120,7 @@ export const layoutSaveDelayMs = 400;
               <tmz-dropdown-menu [label]="t('dashboards.actions')" [items]="actions()" triggerTestId="dashboard-menu" (selected)="act($event)" />
             }
           </div>
-          @if (context.can('analyst') && atLimit()) {
+          @if (editing() && atLimit()) {
             <p id="dashboard-limit-hint" class="w-full text-sm text-body print:hidden" data-testid="dashboard-limit-hint">{{ t('dashboards.limitHint', { max: dashboardLimit() }) }}</p>
           }
         }
@@ -125,6 +138,37 @@ export const layoutSaveDelayMs = 400;
         <!-- Rendered empty: a live region added with its text already in it would not be read. -->
         <p class="sr-only" role="status" data-testid="dashboard-status">{{ announcement() }}</p>
       </div>
+
+      @if (viewing(); as version) {
+        <!-- Focus moves here when the view starts, so screen readers read it then; it is not a live region besides (design D11). -->
+        <tmz-alert #versionNotice tabindex="-1" tone="brand" class="focus:outline-none paper:hidden" data-testid="dashboard-version-notice">
+          <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <p class="min-w-0 break-words" data-testid="dashboard-version-notice-text">
+              {{ t('dashboards.versions.viewing', { number: version.number, author: version.author.name, time: (version.savedAt | dateTime) }) }}
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <button tmzButton variant="secondary" size="sm" type="button" (click)="backToCurrent()" data-testid="dashboard-version-back">
+                {{ t('dashboards.versions.backToCurrent') }}
+              </button>
+              @if (!version.current) {
+                <!-- It stays focusable while the restore is on its way, so its busy state can be read. -->
+                <button
+                  tmzButton
+                  size="sm"
+                  type="button"
+                  class="aria-disabled:cursor-not-allowed"
+                  [attr.aria-disabled]="restoring() ? 'true' : null"
+                  [attr.aria-busy]="restoring() ? 'true' : null"
+                  (click)="restoreShown(version)"
+                  data-testid="dashboard-version-restore-shown"
+                >
+                  {{ t('dashboards.versions.restoreLabel', { number: version.number }) }}
+                </button>
+              }
+            </div>
+          </div>
+        </tmz-alert>
+      }
 
       @if (notice(); as notice) {
         <!-- Not itself a live region: the header's announces the same text once. -->
@@ -151,7 +195,7 @@ export const layoutSaveDelayMs = 400;
         <app-dashboard-filter-bar
           [projectId]="projectId"
           [dashboardId]="dashboardId()"
-          [filters]="filters()"
+          [filters]="shownFilters()"
           [values]="filterValues()"
           [timeZone]="context.project()?.timeZone ?? 'UTC'"
           (changed)="filterChanged($event)"
@@ -221,13 +265,15 @@ export const layoutSaveDelayMs = 400;
               <p class="mt-2 text-sm text-body">{{ t('indicators.empty.editor') }}</p>
               <div class="mt-4 flex flex-wrap gap-2">
                 <a tmzButton variant="secondary" [routerLink]="['/projects', projectId, 'scripts']" data-testid="indicators-empty-link">{{ t('indicators.empty.editorLink') }}</a>
-                <button tmzButton type="button" [disabled]="!overview.indicators.length" (click)="addWidget()" data-testid="widget-add">{{ t('indicators.add') }}</button>
+                @if (!viewing()) {
+                  <button tmzButton type="button" [disabled]="!overview.indicators.length" (click)="addWidget()" data-testid="widget-add">{{ t('indicators.add') }}</button>
+                }
               </div>
             } @else {
               <p class="mt-2 text-sm text-body" data-testid="indicators-empty-viewer">{{ t('indicators.empty.viewer') }}</p>
             }
-            @if (widgets().length) {
-              <p class="mt-4 text-sm text-body" data-testid="indicators-empty-widgets">{{ t(key('indicators.empty.widgets', widgets().length), { count: widgets().length }) }}</p>
+            @if (shownWidgets().length) {
+              <p class="mt-4 text-sm text-body" data-testid="indicators-empty-widgets">{{ t(key('indicators.empty.widgets', shownWidgets().length), { count: shownWidgets().length }) }}</p>
             }
             @if (overview.indicators.length) {
               <div class="mt-4 border-t border-default pt-2" data-testid="indicator-table-card">
@@ -249,10 +295,10 @@ export const layoutSaveDelayMs = 400;
           </div>
         </ng-template>
 
-        @if (widgets().length) {
-          <!-- Editors see how many widgets there are (and the limit); everyone gets the switch to tables. -->
+        @if (shownWidgets().length) {
+          <!-- Editors see how many widgets there are (and the limit), except in a version shown; everyone gets the switch to tables. -->
           <div class="flex flex-wrap items-center justify-between gap-3 paper:hidden" data-testid="indicators-toolbar">
-            @if (context.can('analyst')) {
+            @if (editing()) {
               @if (limitReached()) {
                 <p class="text-sm text-fg-warning" data-testid="widget-limit">{{ t('indicators.limit', { count: overview.limits.maxWidgets }) }}</p>
               } @else {
@@ -265,7 +311,7 @@ export const layoutSaveDelayMs = 400;
                   {{ allTables() ? t('indicators.showCharts') : t('indicators.showTables') }}
                 </button>
               }
-              @if (context.can('analyst')) {
+              @if (editing()) {
                 <button tmzButton size="sm" type="button" [disabled]="limitReached() || !overview.indicators.length" (click)="addWidget()" data-testid="widget-add">
                   {{ t('indicators.add') }}
                 </button>
@@ -274,9 +320,9 @@ export const layoutSaveDelayMs = 400;
           </div>
 
           <app-widget-grid
-            [widgets]="widgets()"
+            [widgets]="shownWidgets()"
             [projectId]="projectId"
-            [editable]="context.can('analyst')"
+            [editable]="editing()"
             [indicators]="overview.indicators"
             [allTables]="allTables()"
             [dashboardFilters]="active()"
@@ -285,12 +331,16 @@ export const layoutSaveDelayMs = 400;
             (remove)="removeWidget($event)"
           />
         } @else if (anyPublished()) {
-          <tmz-card [heading]="t('indicators.noWidgets.title')" data-testid="no-widgets">
-            <p class="text-sm text-body">{{ context.can('analyst') ? t('indicators.noWidgets.editor') : t('indicators.noWidgets.viewer') }}</p>
-            @if (context.can('analyst')) {
-              <button tmzButton type="button" class="mt-4" (click)="addWidget()" data-testid="widget-add">{{ t('indicators.add') }}</button>
-            }
-          </tmz-card>
+          @if (viewing()) {
+            <tmz-card [heading]="t('dashboards.versions.noWidgets')" data-testid="no-widgets" />
+          } @else {
+            <tmz-card [heading]="t('indicators.noWidgets.title')" data-testid="no-widgets">
+              <p class="text-sm text-body">{{ context.can('analyst') ? t('indicators.noWidgets.editor') : t('indicators.noWidgets.viewer') }}</p>
+              @if (context.can('analyst')) {
+                <button tmzButton type="button" class="mt-4" (click)="addWidget()" data-testid="widget-add">{{ t('indicators.add') }}</button>
+              }
+            </tmz-card>
+          }
         }
 
         @if (anyPublished() && overview.indicators.length) {
@@ -341,6 +391,10 @@ export class ProjectIndicators {
   /** The open dashboard, from the project's list of dashboards, so a rename shows at once; null once it has left the list. */
   private readonly current = computed(() => this.context.dashboards().find((d) => d.id === this.dashboardId()) ?? null);
   protected readonly name = computed(() => this.current()?.name ?? '');
+  /** The heading: the name of the version shown, or the dashboard's own. */
+  protected readonly shownName = computed(() => this.viewing()?.name ?? this.name());
+  /** Analysts and admins add, edit, arrange and remove widgets and change the dashboard, except while a version is shown (design D11). */
+  protected readonly editing = computed(() => this.context.can('analyst') && !this.viewing());
   /** The most dashboards the project can hold; the overview says, and it is the same for every project. */
   protected readonly dashboardLimit = computed(() => this.overview()?.limits.maxDashboards ?? maxDashboards);
   protected readonly atLimit = computed(() => this.context.dashboards().length >= this.dashboardLimit());
@@ -370,6 +424,7 @@ export class ProjectIndicators {
       { id: 'moveRight', label: t('dashboards.menu.moveRight'), disabled: moving || last, description: moveHint(last, 'last'), testId: 'dashboard-move-right' },
       { id: 'filters', label: t('dashboards.menu.filters'), testId: 'dashboard-filters' },
       ...(this.emailEnabled() ? [{ id: 'report', label: t('dashboards.menu.report'), testId: 'dashboard-report' }] : []),
+      { id: 'versions', label: t('dashboards.menu.versions'), testId: 'dashboard-versions' },
       {
         id: 'remove',
         label: t('dashboards.menu.remove'),
@@ -414,11 +469,14 @@ export class ProjectIndicators {
   protected readonly filters = signal<DashboardFilter[]>([]);
   /** The open dashboard has been read, so an entry of the address for a filter it lacks is known to be stale. */
   private readonly filtersRead = signal(false);
+  /** The values of the open dashboard's own filters, from the address, which a version shown leaves as it is. */
   private readonly address = computed(() => readAddress(this.f(), this.filters()));
+  /** The filters the bar shows: the version's while one is shown, the dashboard's otherwise. */
+  protected readonly shownFilters = computed(() => this.viewing()?.filters ?? this.filters());
   /** The value in force of each filter on the member's screen, never saved. */
-  protected readonly filterValues = computed(() => this.address().values);
+  protected readonly filterValues = computed(() => (this.viewing() ? this.viewValues() : this.address().values));
   /** The filters with a value, in the bar's order, for the widgets. */
-  protected readonly active = computed(() => activeFilters(this.filters(), this.filterValues()));
+  protected readonly active = computed(() => activeFilters(this.shownFilters(), this.filterValues()));
   /** The filters of an address that no longer apply, named, until the member changes a value or another dashboard opens. */
   protected readonly dropped = signal<string[]>([]);
 
@@ -429,12 +487,31 @@ export class ProjectIndicators {
   protected readonly limitReached = computed(() => this.widgets().length >= (this.overview()?.limits.maxWidgets ?? Infinity));
 
   /** Some widget has a chart or map whose table can be shown. */
-  protected readonly hasTables = computed(() => this.anyPublished() && this.widgets().some((w) => w.chartType !== 'stat'));
+  protected readonly hasTables = computed(() => this.anyPublished() && this.shownWidgets().some((w) => w.chartType !== 'stat'));
+
+  // Viewing a version (add-dashboard-versions, design D11): its name, filters and widgets in place of the dashboard's, read-only and
+  // with today's data, until the member goes back to the current version, restores one or opens another dashboard.
+
+  /** The version shown in place of the dashboard as it is; null while the dashboard itself is shown. */
+  protected readonly viewing = signal<DashboardVersionDetails | null>(null);
+  /** The value in force of each filter of the version shown, from their defaults; only on screen, never in the address. */
+  private readonly viewValues = signal<FilterValues>({});
+  /** The read of the version to show, dropped when another dashboard opens or the page goes. */
+  private versionRead: Subscription | null = null;
+  /** The widgets the grid draws: the version's while one is shown, each drawn from its config as a saved widget is. */
+  protected readonly shownWidgets = computed<Widget[]>(() => {
+    const version = this.viewing();
+    return version ? version.widgets.map((w) => ({ ...w, dashboardId: this.dashboardId(), updatedAt: version.savedAt })) : this.widgets();
+  });
+  /** A restore is on its way, from its confirmation to its answer: another one waits for it. */
+  protected readonly restoring = signal(false);
+  /** The notice of the version shown, a component's element: focus moves to it when the view starts. */
+  private readonly versionNotice = viewChild<unknown, ElementRef<HTMLElement>>('versionNotice', { read: ElementRef });
 
   // Printing (dashboard printing, design D7, D11).
 
-  /** Every member may print a dashboard once its widgets are read, when it has any. */
-  protected readonly canPrint = computed(() => !this.loading() && !this.error() && this.widgets().length > 0);
+  /** Every member may print a dashboard once its widgets are read, when it has any; no version shown is printed (design D11). */
+  protected readonly canPrint = computed(() => !this.viewing() && !this.loading() && !this.error() && this.widgets().length > 0);
   /** The Print action is getting the dashboard ready: it is busy until the browser's dialog opens. */
   protected readonly preparing = signal(false);
   protected readonly printedAt = this.printer.printedAt;
@@ -450,10 +527,13 @@ export class ProjectIndicators {
   });
   private readonly printButton = viewChild<ElementRef<HTMLElement>>('printButton');
 
-  /** Layouts waiting for the pause after the last drag before they are saved, by widget, with the dashboard they were made on. */
-  private readonly pending = new Map<string, { dashboardId: string; layout: Layout; timer: ReturnType<typeof setTimeout> }>();
-  /** Layout saves sent and not answered yet, by widget. */
-  private readonly inFlight = new Map<string, Promise<void>>();
+  /**
+   * Layouts waiting for the pause after the last drag before they are saved, by the dashboard they were made on, then by widget: one
+   * timer per dashboard, so a drag and the widgets it pushed, or a run of drags, are one request (add-dashboard-versions, design D8).
+   */
+  private readonly pending = new Map<string, { layouts: Map<string, Layout>; timer: ReturnType<typeof setTimeout> }>();
+  /** Layout saves sent and not answered yet, each with its dashboard and the widgets it holds. */
+  private readonly inFlight = new Set<{ dashboardId: string; widgetIds: ReadonlySet<string>; answered: Promise<void> }>();
   /**
    * The removed dashboard the page is leaving for the first one, until another dashboard opens: a second refusal or reload that
    * finds it gone brings no news, so the page leaves it once and says so once.
@@ -468,6 +548,7 @@ export class ProjectIndicators {
     this.destroyRef.onDestroy(() => {
       // Answered once the page is gone: the answers are handled as for a dashboard left (`saveFailed`).
       void this.flushSaves();
+      this.versionRead?.unsubscribe();
       // Leaving the dashboards opens another page: the notice has done its job.
       this.context.notice.set(null);
     });
@@ -555,6 +636,8 @@ export class ProjectIndicators {
     this.printer.restore();
     // The previous dashboard's layouts go out now, each to its own dashboard; the new one does not wait for them.
     void this.flushSaves();
+    // A version shown, or on its way, was one of the dashboard left (design D11).
+    this.leaveView();
     this.widgets.set([]);
     this.filters.set([]);
     this.filtersRead.set(false);
@@ -626,18 +709,26 @@ export class ProjectIndicators {
   }
 
   protected clearFilters(): void {
-    this.setFilterValues(Object.fromEntries(this.filters().map((f) => [f.column, null])));
+    this.setFilterValues(Object.fromEntries(this.shownFilters().map((f) => [f.column, null])));
   }
 
   protected resetFilters(): void {
-    this.setFilterValues(defaultsOf(this.filters()));
+    this.setFilterValues(defaultsOf(this.shownFilters()));
   }
 
-  /** Writes the values to the address, which every widget follows, and says what the dashboard is filtered by; focus stays put. */
+  /**
+   * Writes the values to the address, which every widget follows, and says what the dashboard is filtered by; focus stays put. The
+   * values of a version shown stay on screen: the address keeps those of the dashboard as it is (add-dashboard-versions, design D11).
+   */
   private setFilterValues(values: FilterValues): void {
-    this.dropped.set([]);
-    void this.router.navigate([], { relativeTo: this.route, queryParams: { f: writeAddress(this.filters(), values) } });
-    const names = activeFilters(this.filters(), values).map((a) => a.filter.label);
+    const filters = this.shownFilters();
+    if (this.viewing()) {
+      this.viewValues.set(values);
+    } else {
+      this.dropped.set([]);
+      void this.router.navigate([], { relativeTo: this.route, queryParams: { f: writeAddress(filters, values) } });
+    }
+    const names = activeFilters(filters, values).map((a) => a.filter.label);
     this.announce(
       names.length
         ? this.transloco.translate('dashboardFilters.announce.filtered', { names: names.join(', ') })
@@ -645,34 +736,49 @@ export class ProjectIndicators {
     );
   }
 
-  // Layout: applied at once, saved once the drag has been still for a moment.
+  // Layout: applied at once, saved once the dragging on the dashboard has been still for a moment (add-dashboard-versions, design D8).
 
   protected layoutsChanged(changes: Placed[]): void {
     const dashboardId = this.dashboardId();
     this.widgets.update((list) => list.map((w) => ({ ...w, layout: changes.find((c) => c.id === w.id)?.layout ?? w.layout })));
-    for (const change of changes) {
-      const waiting = this.pending.get(change.id);
-      if (waiting) {
-        clearTimeout(waiting.timer);
-      }
-      this.pending.set(change.id, { dashboardId, layout: change.layout, timer: setTimeout(() => void this.save(change.id), layoutSaveDelayMs) });
+    // Every change restarts the dashboard's one timer; a widget moved again keeps only its latest place.
+    const waiting = this.pending.get(dashboardId);
+    if (waiting) {
+      clearTimeout(waiting.timer);
     }
+    const layouts = waiting?.layouts ?? new Map<string, Layout>();
+    changes.forEach((change) => layouts.set(change.id, change.layout));
+    this.pending.set(dashboardId, { layouts, timer: setTimeout(() => void this.saveLayouts(dashboardId), layoutSaveDelayMs) });
   }
 
   /**
-   * Sends the widget's waiting layout to the dashboard it was made on. The promise settles once every save of the widget sent so
-   * far is answered, whatever the answer, so a step that must follow them can wait (design D12).
+   * Sends the dashboard's waiting layouts now, all in one request, to the dashboard they were made on. The promise settles once
+   * every layout save of that dashboard sent so far is answered, whatever the answer, so a step that must follow them can wait:
+   * editing a widget and duplicating (design D12 of add-multiple-dashboards), and opening the version history, viewing a version and
+   * restoring one (design D8).
    */
-  private save(id: string): Promise<void> {
-    const waiting = this.pending.get(id);
+  private saveLayouts(dashboardId: string): Promise<void> {
+    this.send(dashboardId);
+    return this.answered((save) => save.dashboardId === dashboardId);
+  }
+
+  /** Sends every dashboard's waiting layouts now; settles once every layout save sent so far is answered. */
+  private flushSaves(): Promise<void> {
+    [...this.pending.keys()].forEach((dashboardId) => this.send(dashboardId));
+    return this.answered(() => true);
+  }
+
+  /** Sends the dashboard's waiting layouts, if it has any, as one save. A failed save shows what the server has (`saveFailed`). */
+  private send(dashboardId: string): void {
+    const waiting = this.pending.get(dashboardId);
     if (!waiting) {
-      return this.inFlight.get(id) ?? Promise.resolve();
+      return;
     }
     clearTimeout(waiting.timer);
-    this.pending.delete(id);
-    const { dashboardId, layout } = waiting;
+    this.pending.delete(dashboardId);
+    const widgets = [...waiting.layouts].map(([id, layout]) => ({ id, layout }));
     const answered = new Promise<void>((resolve) =>
-      this.service.update(this.projectId, dashboardId, id, { layout }).subscribe({
+      this.service.saveLayout(this.projectId, dashboardId, widgets).subscribe({
         next: () => resolve(),
         error: (failure) => {
           this.saveFailed(dashboardId, failure);
@@ -680,20 +786,20 @@ export class ProjectIndicators {
         },
       }),
     );
-    // An earlier save of the same widget may still be on its way: waiting for this one waits for both.
-    const done: Promise<void> = Promise.all([this.inFlight.get(id), answered]).then(() => {
-      if (this.inFlight.get(id) === done) {
-        this.inFlight.delete(id);
-      }
-    });
-    this.inFlight.set(id, done);
-    return done;
+    const save = { dashboardId, widgetIds: new Set(waiting.layouts.keys()), answered };
+    this.inFlight.add(save);
+    void answered.then(() => this.inFlight.delete(save));
   }
 
-  /** Sends every waiting layout now; settles once every layout save sent so far is answered. */
-  private flushSaves(): Promise<void> {
-    [...this.pending.keys()].forEach((id) => void this.save(id));
-    return Promise.all([...this.inFlight.values()]).then(() => undefined);
+  /** Settles once every layout save on its way that `which` picks is answered: one sent before the latest drags included. */
+  private answered(which: (save: { dashboardId: string; widgetIds: ReadonlySet<string> }) => boolean): Promise<void> {
+    return Promise.all([...this.inFlight].filter(which).map((save) => save.answered)).then(() => undefined);
+  }
+
+  /** The widget's layout on the dashboard waits for the pause, or is on its way. */
+  private layoutUnsaved(dashboardId: string, widgetId: string): boolean {
+    const sending = [...this.inFlight].some((save) => save.dashboardId === dashboardId && save.widgetIds.has(widgetId));
+    return sending || !!this.pending.get(dashboardId)?.layouts.has(widgetId);
   }
 
   /**
@@ -730,20 +836,20 @@ export class ProjectIndicators {
   }
 
   /**
-   * The form can move the widget to another dashboard, so its layout still waiting or on its way is saved first: sent later, it
-   * would land on the dashboard the widget left (design D9).
+   * The form can move the widget to another dashboard, so its layout still waiting or on its way is saved first, with the others of
+   * the dashboard waiting with it: sent later, it would land on the dashboard the widget left (design D9).
    */
   protected async editWidget(widget: Widget): Promise<void> {
-    if (!this.pending.has(widget.id) && !this.inFlight.has(widget.id)) {
+    const dashboardId = this.dashboardId();
+    if (!this.layoutUnsaved(dashboardId, widget.id)) {
       this.openDialog(widget);
       return;
     }
-    const dashboardId = this.dashboardId();
-    await this.save(widget.id);
+    await this.saveLayouts(dashboardId);
     const latest = this.widgets().find((w) => w.id === widget.id);
     // Another dashboard or page opened meanwhile, or the save found the widget's dashboard removed: there is nothing left to edit
-    // here. A form opened while waiting (Edit chosen again, or another action) stays the only one.
-    if (latest && this.showing(dashboardId) && this.current() && !this.dialog.openDialogs.length) {
+    // here. A form opened while waiting (Edit chosen again, or another action) stays the only one, and a version shown is read-only.
+    if (latest && this.showing(dashboardId) && this.current() && !this.dialog.openDialogs.length && !this.viewing()) {
       this.openDialog(latest);
     }
   }
@@ -817,11 +923,8 @@ export class ProjectIndicators {
     if (!confirmed || !dashboard) {
       return;
     }
-    const waiting = this.pending.get(widget.id);
-    if (waiting) {
-      clearTimeout(waiting.timer);
-      this.pending.delete(widget.id);
-    }
+    // Its own waiting layout goes with it; the other widgets' still wait for the pause.
+    this.dropLayout(dashboard.id, widget.id);
     this.service.remove(this.projectId, dashboard.id, widget.id).subscribe({
       next: () => {
         this.widgets.update((list) => list.filter((w) => w.id !== widget.id));
@@ -843,6 +946,9 @@ export class ProjectIndicators {
         break;
       case 'report':
         this.editReport();
+        break;
+      case 'versions':
+        void this.openVersions();
         break;
       case 'duplicate':
         void this.duplicate();
@@ -966,13 +1072,191 @@ export class ProjectIndicators {
       });
   }
 
+  /**
+   * The dashboard's version history (add-dashboard-versions, design D11). The layouts still waiting for their pause, or on their
+   * way, are saved first, so the current version holds the widgets where the member left them (design D8). The member then views
+   * or restores a version, or the dialog finds the dashboard removed meanwhile; closed, it gives focus back to the actions button.
+   */
+  private async openVersions(): Promise<void> {
+    const dashboard = this.current();
+    if (!dashboard) {
+      return;
+    }
+    await this.saveLayouts(dashboard.id);
+    // Removed or left meanwhile, or the history (or another form) was opened while the layouts were saved: it stays the only one.
+    if (!this.showing(dashboard.id) || !this.current() || this.dialog.openDialogs.length) {
+      return;
+    }
+    this.dialog
+      .open<DashboardVersionsResult, DashboardVersionsData>(DashboardVersionsDialog, {
+        data: { projectId: this.projectId, dashboard },
+        ariaLabelledBy: 'dashboard-versions-title',
+        autoFocus: 'first-tabbable',
+        restoreFocus: true,
+        backdropClass: ['cdk-overlay-dark-backdrop'],
+        maxWidth: '100vw',
+        maxHeight: '100dvh',
+      })
+      .closed.subscribe((result) => {
+        if (!result) {
+          return;
+        }
+        if ('gone' in result) {
+          this.gone(dashboard);
+        } else if ('view' in result) {
+          void this.viewVersion(dashboard, result.view);
+        } else {
+          void this.restoreVersion(dashboard, result.restore);
+        }
+      });
+  }
+
+  /**
+   * Shows version `number` of the dashboard in its place, read-only, with today's data (design D11, "Viewing"): its name, its widgets
+   * drawn from their configs and its filters from their defaults. The layouts still waiting are saved first (design D8). Focus moves
+   * to the notice naming the version, which screen readers then read, and which offers to go back or to restore it.
+   */
+  private async viewVersion(dashboard: DashboardEntry, number: number): Promise<void> {
+    await this.saveLayouts(dashboard.id);
+    if (!this.showing(dashboard.id) || !this.current()) {
+      return; // removed or left meanwhile
+    }
+    this.versionRead?.unsubscribe();
+    this.versionRead = this.service.getVersion(this.projectId, dashboard.id, number).subscribe({
+      next: (version) => {
+        this.versionRead = null;
+        this.viewValues.set(defaultsOf(version.filters));
+        this.viewing.set(version);
+        afterNextRender(
+          () => {
+            if (!this.dialog.openDialogs.length) {
+              this.versionNotice()?.nativeElement.focus();
+            }
+          },
+          { injector: this.injector },
+        );
+      },
+      error: (failure) => {
+        this.versionRead = null;
+        this.versionRefused(failure, dashboard);
+      },
+    });
+  }
+
+  /** Shows the dashboard as it is again, with focus on its heading (design D11). */
+  protected backToCurrent(): void {
+    this.leaveView();
+    this.focusHeading();
+  }
+
+  /** Restores the version shown, from its notice. */
+  protected restoreShown(version: DashboardVersionDetails): void {
+    const dashboard = this.current();
+    if (dashboard) {
+      void this.restoreVersion(dashboard, version);
+    }
+  }
+
+  private leaveView(): void {
+    this.versionRead?.unsubscribe();
+    this.versionRead = null;
+    this.viewing.set(null);
+  }
+
+  /**
+   * Restores a version of the dashboard, from the history or from its view, once the member confirms (design D11, "Restoring"). The
+   * layouts still waiting are saved first (design D8), so the state the restore replaces is a version of its own. The member who
+   * opened another dashboard meanwhile restores nothing; one already restoring waits for that restore.
+   */
+  private async restoreVersion(dashboard: DashboardEntry, version: VersionToRestore): Promise<void> {
+    if (this.restoring()) {
+      return;
+    }
+    const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
+    const confirmed = await this.confirm.confirm({
+      title: t('dashboards.versions.confirm.title', { number: version.number }),
+      message: t('dashboards.versions.confirm.message', { name: dashboard.name, time: dateText(version.savedAt, this.locale, 'dateTime') }),
+      confirmLabel: t('dashboards.versions.confirm.action'),
+      cancelLabel: t('common.cancel'),
+    });
+    if (!confirmed || !this.showing(dashboard.id) || this.restoring()) {
+      return;
+    }
+    this.restoring.set(true);
+    await this.saveLayouts(dashboard.id);
+    if (!this.showing(dashboard.id) || !this.current()) {
+      this.restoring.set(false);
+      return; // the save found the dashboard removed, or the member left
+    }
+    this.service.restoreVersion(this.projectId, dashboard.id, version.number).subscribe({
+      next: (restore) => {
+        this.restoring.set(false);
+        this.restored(dashboard, version, restore);
+      },
+      error: (failure) => {
+        this.restoring.set(false);
+        this.versionRefused(failure, dashboard);
+      },
+    });
+  }
+
+  /**
+   * After a restore (design D11): the page leaves the view and reads the dashboard again, which drops from the address the values of
+   * filters the version does not define, the tab follows a name the restore changed, one message says what was done (the name kept
+   * and why, each widget that came back as a copy and the dashboard that still holds it), and focus moves to the heading. A restore
+   * that found the dashboard already as in the version changed nothing, and nothing on the page changes either.
+   */
+  private restored(dashboard: DashboardEntry, version: VersionToRestore, restore: DashboardRestore): void {
+    const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
+    const name = restore.dashboard.name;
+    const nameKept = restore.nameKept ? [t('dashboards.versions.nameKept', { current: name, name: version.name })] : [];
+    if (!restore.restored) {
+      this.toasts.success([t('dashboards.versions.unchanged', { name, number: version.number }), ...nameKept].join(' '));
+      return;
+    }
+    const list = this.context.dashboards();
+    if (list.some((d) => d.id === dashboard.id && d.name !== name)) {
+      this.context.setDashboards(list.map((d) => (d.id === dashboard.id ? { id: d.id, name } : d)));
+    }
+    if (this.showing(dashboard.id)) {
+      this.leaveView();
+      this.loads.next(dashboard.id);
+      this.focusHeading();
+    }
+    const copies = restore.copies.map((copy) => t('dashboards.versions.copy', { title: copy.title, dashboard: copy.dashboardName }));
+    this.toasts.success([t('dashboards.versions.restored', { number: version.number, version: restore.version.number }), ...nameKept, ...copies].join(' '));
+  }
+
+  /**
+   * A version that could not be read or restored (design D11). One no longer kept is said in a toast, and the history lists the
+   * versions kept again, in place of a view of it; a dashboard removed meanwhile is handled as any change to it (`gone`); a refusal
+   * with a field message, such as a version over the widget limit, says that message; any other failure is reported.
+   */
+  private versionRefused(failure: unknown, dashboard: DashboardEntry): void {
+    const parsed = this.errors.parse(failure);
+    if (parsed.code === 'dashboards.notFound') {
+      this.gone(dashboard);
+      return;
+    }
+    this.toasts.error(Object.values(parsed.fieldErrors)[0] ?? parsed.message);
+    if (parsed.code === 'dashboards.versionNotFound' && this.showing(dashboard.id)) {
+      if (this.viewing()) {
+        // Now, before the history opens: it gives focus back to the heading when it closes.
+        this.leaveView();
+        this.heading().nativeElement.focus();
+      }
+      void this.openVersions();
+    }
+  }
+
   private async duplicate(): Promise<void> {
     const dashboard = this.current();
     if (!dashboard) {
       return;
     }
-    // The copy is made from what the server has: a layout still waiting for its pause, or on its way, is saved first.
-    await this.flushSaves();
+    // The copy is made from what the server has: the layouts still waiting for their pause, or on their way, are saved first, as
+    // the original's own version (add-dashboard-versions, design D12).
+    await this.saveLayouts(dashboard.id);
     if (!this.showing(dashboard.id) || !this.current()) {
       return; // removed or left meanwhile
     }
@@ -1211,11 +1495,18 @@ export class ProjectIndicators {
 
   /** Forgets the layouts waiting to be saved on a dashboard that is gone: there is nothing left to save them to. */
   private dropSaves(dashboardId: string): void {
-    for (const [id, waiting] of this.pending) {
-      if (waiting.dashboardId === dashboardId) {
-        clearTimeout(waiting.timer);
-        this.pending.delete(id);
-      }
+    const waiting = this.pending.get(dashboardId);
+    if (waiting) {
+      clearTimeout(waiting.timer);
+      this.pending.delete(dashboardId);
+    }
+  }
+
+  /** Forgets the waiting layout of a widget being removed; the dashboard's timer goes when it waits for no other. */
+  private dropLayout(dashboardId: string, widgetId: string): void {
+    const waiting = this.pending.get(dashboardId);
+    if (waiting?.layouts.delete(widgetId) && !waiting.layouts.size) {
+      this.dropSaves(dashboardId);
     }
   }
 

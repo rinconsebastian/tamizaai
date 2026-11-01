@@ -287,6 +287,17 @@ public sealed class IndicatorValidationTests
         Assert.Contains("layout.w", CheckLayout(new WidgetLayout(int.MaxValue, 0, int.MaxValue, 1)).Keys);
 
     [Fact]
+    public void A_layout_of_several_widgets_names_the_entry_of_each_error()
+    {
+        var errors = new FieldErrors();
+        IndicatorValidation.CheckLayout(new WidgetLayout(-1, 0, 1, 41), errors, "widgets[2].");
+        IndicatorValidation.CheckLayout(null, errors, "widgets[3].");
+
+        Assert.Equal(["widgets[2].layout.x", "widgets[2].layout.h", "widgets[3].layout"], errors.ToDictionary().Keys);
+        Assert.Equal(CheckLayout(new WidgetLayout(-1, 0, 1, 41))["layout.h"], errors.ToDictionary()["widgets[2].layout.h"]);
+    }
+
+    [Fact]
     public void The_title_is_required_and_at_most_200_characters()
     {
         string[] Title(string? title)

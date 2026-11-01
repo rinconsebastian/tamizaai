@@ -135,6 +135,77 @@ describe('IndicatorsService', () => {
     expect(patch.request.body).toEqual({ dashboardId: 'd2' });
   });
 
+  it('saves the places of several widgets of a dashboard in one put, and answers the widgets as saved', () => {
+    const layouts = [
+      { id: 'w1', layout: { x: 6, y: 0, w: 6, h: 4 } },
+      { id: 'w2', layout: { x: 6, y: 4, w: 6, h: 4 } },
+    ];
+    const saved = layouts.map(({ id, layout }) => ({ id, dashboardId: 'd1', title: id, chartType: 'column', config, layout, updatedAt: '2026-10-31T10:00:00Z' }));
+    let answer: unknown;
+    service.saveLayout('p1', 'd1', layouts).subscribe((widgets) => (answer = widgets));
+
+    const request = http.expectOne(`${dashboards}/d1/layout`);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.body).toEqual({ widgets: layouts });
+    request.flush(saved);
+    expect(answer).toEqual(saved);
+  });
+
+  describe('versions', () => {
+    const summary = {
+      number: 12,
+      current: true,
+      name: 'Housing',
+      widgetCount: 3,
+      filterCount: 1,
+      changes: [{ kind: 'widgetAdded', widget: 'Water source' }],
+      moreChanges: 0,
+      restoredFrom: null,
+      origin: 'mcp',
+      note: 'Add five water indicators',
+      author: { id: 'u1', name: 'Ana Pérez' },
+      createdAt: '2026-10-31T10:30:00Z',
+      savedAt: '2026-10-31T10:32:00Z',
+    };
+
+    it('lists a dashboard\'s kept versions', () => {
+      let list: unknown;
+      service.listVersions('p1', 'd2').subscribe((answer) => (list = answer));
+
+      const request = http.expectOne(`${dashboards}/d2/versions`);
+      expect(request.request.method).toBe('GET');
+      expect(request.request.body).toBeNull();
+      request.flush({ current: 12, versions: [summary] });
+      expect(list).toEqual({ current: 12, versions: [summary] });
+    });
+
+    it('reads one version by its number', () => {
+      service.getVersion('p1', 'd2', 9).subscribe();
+
+      const request = http.expectOne(`${dashboards}/d2/versions/9`);
+      expect(request.request.method).toBe('GET');
+      expect(request.request.body).toBeNull();
+    });
+
+    it('restores a version with a post and no body, and answers what the restore did', () => {
+      const restore = {
+        restored: true,
+        version: { ...summary, number: 13, changes: [{ kind: 'restored', version: 9 }], restoredFrom: 9, origin: 'app', note: null },
+        nameKept: false,
+        copies: [{ originalId: 'w4', copyId: 'w7', title: 'Coverage', dashboardId: 'd3', dashboardName: 'Field' }],
+        dashboard: { id: 'd2', name: 'Housing', filters: [], widgets: [], version: 13 },
+      };
+      let answer: unknown;
+      service.restoreVersion('p1', 'd2', 9).subscribe((restored) => (answer = restored));
+
+      const request = http.expectOne(`${dashboards}/d2/versions/9/restore`);
+      expect(request.request.method).toBe('POST');
+      expect(request.request.body).toBeNull();
+      request.flush(restore, { status: 201, statusText: 'Created' });
+      expect(answer).toEqual(restore);
+    });
+  });
+
   it('reads one dashboard with its widgets', () => {
     service.dashboard('p1', 'd2').subscribe();
 

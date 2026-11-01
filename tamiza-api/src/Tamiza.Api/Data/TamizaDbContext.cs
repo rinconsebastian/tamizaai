@@ -53,6 +53,8 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
 
     public DbSet<DashboardReport> DashboardReports => Set<DashboardReport>();
 
+    public DbSet<DashboardVersion> DashboardVersions => Set<DashboardVersion>();
+
     public DbSet<McpCall> McpCalls => Set<McpCall>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -468,6 +470,32 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             // Removing a dashboard, or its project, removes its scheduled email.
             report.HasOne<Dashboard>().WithOne().HasForeignKey<DashboardReport>(r => r.DashboardId).OnDelete(DeleteBehavior.Cascade);
             report.HasOne<User>().WithMany().HasForeignKey(r => r.UpdatedBy).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<DashboardVersion>(version =>
+        {
+            version.ToTable("dashboard_versions", table =>
+            {
+                table.HasCheckConstraint("ck_dashboard_versions_number", "number >= 1");
+                table.HasCheckConstraint("ck_dashboard_versions_more_changes", "more_changes >= 0");
+                table.HasCheckConstraint("ck_dashboard_versions_origin", "origin IN ('app', 'mcp')");
+                table.HasCheckConstraint("ck_dashboard_versions_note", "note IS NULL OR origin = 'mcp'");
+            });
+            version.HasKey(v => v.Id);
+            version.Property(v => v.Id).ValueGeneratedNever();
+            version.Property(v => v.Content).HasColumnType("jsonb");
+            version.Property(v => v.Changes).HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb");
+            version.Property(v => v.MoreChanges).HasDefaultValue(0);
+            version.Property(v => v.Origin).HasConversion(LowercaseEnum<DashboardVersionOrigin>()).HasMaxLength(8).HasDefaultValue(DashboardVersionOrigin.App);
+            version.Property(v => v.Note).HasMaxLength(120);
+            // Versions are numbered per dashboard; the index also serves "newest first" and the pruning, so the dashboard has no index of its own.
+            version.HasIndex(v => new { v.DashboardId, v.Number }).IsUnique();
+            version.HasIndex(v => v.ProjectId);
+            version.HasIndex(v => v.AuthorId);
+            version.HasOne<Project>().WithMany().HasForeignKey(v => v.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            // Removing a dashboard removes its versions; a project's deletion cascades to both tables in one statement.
+            version.HasOne<Dashboard>().WithMany().HasForeignKey(v => v.DashboardId).OnDelete(DeleteBehavior.Cascade);
+            version.HasOne(v => v.Author).WithMany().HasForeignKey(v => v.AuthorId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 

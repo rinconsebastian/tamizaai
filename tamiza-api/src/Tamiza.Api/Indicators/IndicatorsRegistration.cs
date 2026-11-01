@@ -14,6 +14,8 @@ public static class IndicatorsRegistration
             .ValidateOnStart();
         // It reads through the clean data dashboard's connections, query slots and time limits (AddTamizaCleanData).
         services.AddSingleton<IndicatorDashboard>();
+        // One per request: what the request's dashboard handlers changed, recorded as versions once they have run (design D3).
+        services.AddScoped<DashboardVersions>();
         services.AddHostedService<IndicatorDashboardStartupCheck>();
         return services;
     }

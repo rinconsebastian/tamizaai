@@ -2,10 +2,10 @@ import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { vi } from 'vitest';
 import { configureApp, projectId, settle } from '../../../../testing/project-harness';
-import { DashboardFilter, Layout } from '../../../core/projects/indicators.service';
+import { DashboardFilter } from '../../../core/projects/indicators.service';
 import { ChartTooltips } from '../../../shared/ui';
 import { encodeFilters } from '../data-view';
-import { Context, all, answerLoad, answerQueries, clearOverlay, config, isPatch, isQuery, open, paperOn, result, row, text, wait, widget, widgetUrl } from './indicators-testing';
+import { Context, all, answerLoad, answerQueries, clearOverlay, config, flushLayout, isLayout, isQuery, layoutUrlOf, layoutsOf, open, paperOn, result, row, text, wait, widget } from './indicators-testing';
 import { layoutSaveDelayMs } from '../project-indicators';
 import { WidgetGrid } from './widget-grid';
 
@@ -29,7 +29,8 @@ async function pressAndSettle(context: Context, target: HTMLElement, key: string
   await settle(context.harness);
 }
 
-const patches = (context: Context) => context.http.match(isPatch);
+/** The layout saves sent so far (add-dashboard-versions, design D8): one per pause, whatever the widgets it holds. */
+const layoutSaves = (context: Context) => context.http.match(isLayout);
 
 describe('the widget grid', () => {
   afterEach(clearOverlay);
@@ -72,7 +73,7 @@ describe('the widget grid', () => {
       await pressAndSettle(context, handle(context, 'w1', 'move'), 'ArrowUp');
       expect(place(context, 'w1')).toEqual({ column: '1 / span 6', row: '2 / span 4' });
       expect(text(context.root.querySelector('[data-testid="grid-status"]'))).toBe('Left: column 1, row 2, 6 wide, 4 high.');
-      patches(context); // drain
+      layoutSaves(context); // drain
     });
 
     it('keeps the widget inside the grid', async () => {
@@ -81,7 +82,7 @@ describe('the widget grid', () => {
       await pressAndSettle(context, handle(context, 'w1', 'move'), 'ArrowLeft');
       await pressAndSettle(context, handle(context, 'w1', 'move'), 'ArrowUp');
       expect(place(context, 'w1')).toEqual({ column: '1 / span 6', row: '1 / span 4' });
-      expect(patches(context)).toHaveLength(0); // nothing moved, so nothing to save
+      expect(layoutSaves(context)).toHaveLength(0); // nothing moved, so nothing to save
     });
 
     it('moves the widgets it lands on downward', async () => {
@@ -95,7 +96,7 @@ describe('the widget grid', () => {
       expect(place(context, 'w2')).toEqual({ column: '7 / span 6', row: '5 / span 4' });
       // Reading order follows: the pushed widget is now below.
       expect(all(context.root, 'widget-title').map(text)).toEqual(['Left', 'Right']);
-      patches(context);
+      layoutSaves(context);
     });
 
     it('resizes with shift and the arrows, and with the corner handle', async () => {
@@ -107,7 +108,7 @@ describe('the widget grid', () => {
       expect(place(context, 'w1')).toEqual({ column: '1 / span 5', row: '1 / span 5' });
       await pressAndSettle(context, handle(context, 'w1', 'resize'), 'ArrowUp');
       expect(place(context, 'w1')).toEqual({ column: '1 / span 5', row: '1 / span 4' });
-      patches(context);
+      layoutSaves(context);
     });
 
     it('does not resize below one cell, or past the grid', async () => {
@@ -117,7 +118,7 @@ describe('the widget grid', () => {
       await pressAndSettle(context, handle(context, 'w1', 'resize'), 'ArrowRight');
       await pressAndSettle(context, handle(context, 'w1', 'resize'), 'ArrowUp');
       expect(place(context, 'w1')).toEqual({ column: '12 / span 1', row: '1 / span 1' });
-      expect(patches(context)).toHaveLength(0);
+      expect(layoutSaves(context)).toHaveLength(0);
     });
 
     it('ignores other keys', async () => {
@@ -131,40 +132,41 @@ describe('the widget grid', () => {
   });
 
   describe('saving', () => {
-    it('saves a move with one patch of the layout, 400 ms after the last key', async () => {
+    it('saves three arrow presses with one put of the layout, 400 ms after the last key', async () => {
       const context = await open('analyst', [left, right], rows);
 
       await pressAndSettle(context, handle(context, 'w1', 'move'), 'ArrowDown');
       await pressAndSettle(context, handle(context, 'w1', 'move'), 'ArrowDown');
       await pressAndSettle(context, handle(context, 'w1', 'move'), 'ArrowDown');
-      expect(patches(context)).toHaveLength(0); // still waiting
+      expect(layoutSaves(context)).toHaveLength(0); // still waiting
 
       await wait(layoutSaveDelayMs + 100);
-      const requests = patches(context);
+      const requests = layoutSaves(context);
       expect(requests).toHaveLength(1);
-      expect(requests[0].request.url).toBe(widgetUrl('w1'));
-      expect(requests[0].request.body).toEqual({ layout: { x: 0, y: 3, w: 6, h: 4 } });
-      requests[0].flush(widget('w1', { layout: { x: 0, y: 3, w: 6, h: 4 } }));
+      expect(requests[0].request.url).toBe(layoutUrlOf('d1'));
+      expect(requests[0].request.body).toEqual({ widgets: [{ id: 'w1', layout: { x: 0, y: 3, w: 6, h: 4 } }] });
+      flushLayout(requests[0], [left, right]);
       await settle(context.harness);
 
       await wait(layoutSaveDelayMs + 100);
-      expect(patches(context)).toHaveLength(0);
+      expect(layoutSaves(context)).toHaveLength(0);
+      expect(context.http.match((r) => r.method === 'PATCH')).toHaveLength(0); // no widget is patched for a drag
     }, 10000);
 
-    it('saves a resize with one patch of the layout', async () => {
+    it('saves a resize with one put of the layout', async () => {
       const context = await open('analyst', [left], rows);
 
       await pressAndSettle(context, handle(context, 'w1', 'resize'), 'ArrowDown');
       await pressAndSettle(context, handle(context, 'w1', 'resize'), 'ArrowRight');
       await wait(layoutSaveDelayMs + 100);
 
-      const requests = patches(context);
+      const requests = layoutSaves(context);
       expect(requests).toHaveLength(1);
-      expect(requests[0].request.body).toEqual({ layout: { x: 0, y: 0, w: 7, h: 5 } });
-      requests[0].flush(left);
+      expect(requests[0].request.body).toEqual({ widgets: [{ id: 'w1', layout: { x: 0, y: 0, w: 7, h: 5 } }] });
+      flushLayout(requests[0], [left]);
     }, 10000);
 
-    it('saves the widgets a move pushed down too, each once', async () => {
+    it('saves a move and the widget it pushed down in one put (Drag that pushes other widgets)', async () => {
       const context = await open('analyst', [left, right], rows);
 
       for (let i = 0; i < 6; i++) {
@@ -172,12 +174,43 @@ describe('the widget grid', () => {
       }
       await wait(layoutSaveDelayMs + 100);
 
-      const requests = patches(context);
-      const byWidget = Object.fromEntries(requests.map((r) => [r.request.url.split('/').pop(), r.request.body.layout as Layout]));
-      expect(requests).toHaveLength(2);
-      expect(byWidget['w1']).toEqual({ x: 6, y: 0, w: 6, h: 4 });
-      expect(byWidget['w2']).toEqual({ x: 6, y: 4, w: 6, h: 4 });
-      requests.forEach((r) => r.flush(left));
+      const requests = layoutSaves(context);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].request.body.widgets).toHaveLength(2);
+      expect(layoutsOf(requests[0])).toEqual({ w1: { x: 6, y: 0, w: 6, h: 4 }, w2: { x: 6, y: 4, w: 6, h: 4 } });
+      flushLayout(requests[0], [left, right]);
+    }, 10000);
+
+    it('saves the moves of several widgets made within the pause in one put, each with its latest place', async () => {
+      const context = await open('analyst', [left, right], rows);
+
+      await pressAndSettle(context, handle(context, 'w1', 'move'), 'ArrowDown');
+      await pressAndSettle(context, handle(context, 'w2', 'move'), 'ArrowDown');
+      await pressAndSettle(context, handle(context, 'w1', 'move'), 'ArrowDown');
+      await wait(layoutSaveDelayMs + 100);
+
+      const requests = layoutSaves(context);
+      expect(requests).toHaveLength(1);
+      expect(layoutsOf(requests[0])).toEqual({ w1: { x: 0, y: 2, w: 6, h: 4 }, w2: { x: 6, y: 1, w: 6, h: 4 } });
+      flushLayout(requests[0], [left, right]);
+    }, 10000);
+
+    it('saves two moves apart by more than the pause in two puts, each with the widgets it moved (Two drags)', async () => {
+      const context = await open('analyst', [left, right], rows);
+
+      await pressAndSettle(context, handle(context, 'w1', 'move'), 'ArrowDown');
+      await wait(layoutSaveDelayMs + 100);
+      const [first] = layoutSaves(context);
+      expect(first.request.body).toEqual({ widgets: [{ id: 'w1', layout: { x: 0, y: 1, w: 6, h: 4 } }] });
+      flushLayout(first, [left, right]);
+      await settle(context.harness);
+
+      await pressAndSettle(context, handle(context, 'w2', 'move'), 'ArrowDown');
+      await wait(layoutSaveDelayMs + 100);
+      const [second, ...more] = layoutSaves(context);
+      expect(more).toHaveLength(0);
+      expect(second.request.body).toEqual({ widgets: [{ id: 'w2', layout: { x: 6, y: 1, w: 6, h: 4 } }] });
+      flushLayout(second, [left, right]);
     }, 10000);
 
     it('does not ask for the widget\'s rows again after a move', async () => {
@@ -187,20 +220,23 @@ describe('the widget grid', () => {
       await wait(layoutSaveDelayMs + 100);
 
       expect(context.http.match((r) => r.method === 'POST' && r.url.endsWith('/query'))).toHaveLength(0);
-      patches(context).forEach((r) => r.flush(left));
+      layoutSaves(context).forEach((r) => flushLayout(r, [left, right]));
     }, 10000);
 
-    it('shows what the server has when a save fails', async () => {
+    it('shows what the server has when a save fails, reading the dashboard again', async () => {
       const context = await open('analyst', [left, right], rows);
 
-      await pressAndSettle(context, handle(context, 'w1', 'move'), 'ArrowDown');
+      for (let i = 0; i < 6; i++) {
+        await pressAndSettle(context, handle(context, 'w1', 'move'), 'ArrowRight');
+      }
       await wait(layoutSaveDelayMs + 100);
-      patches(context)[0].flush({ title: 'x' }, { status: 403, statusText: 'Forbidden' });
+      layoutSaves(context)[0].flush({ title: 'x' }, { status: 403, statusText: 'Forbidden' });
       await settle(context.harness);
 
       await answerLoad(context, [left, right]); // the overview and the dashboard, read again
       await answerQueries(context, rows);
       expect(place(context, 'w1')).toEqual({ column: '1 / span 6', row: '1 / span 4' });
+      expect(place(context, 'w2')).toEqual({ column: '7 / span 6', row: '1 / span 4' });
     }, 10000);
   });
 
@@ -225,10 +261,10 @@ describe('the widget grid', () => {
       expect(context.root.querySelector('[data-testid="widget-ghost"]')).toBeNull();
       expect(place(context, 'w1')).toEqual({ column: '1 / span 6', row: '5 / span 4' });
       await wait(layoutSaveDelayMs + 100);
-      const requests = patches(context);
+      const requests = layoutSaves(context);
       expect(requests).toHaveLength(1);
-      expect(requests[0].request.body).toEqual({ layout: { x: 0, y: 4, w: 6, h: 4 } });
-      requests[0].flush(left);
+      expect(requests[0].request.body).toEqual({ widgets: [{ id: 'w1', layout: { x: 0, y: 4, w: 6, h: 4 } }] });
+      flushLayout(requests[0], [left, right]);
     }, 10000);
 
     it('closes the tooltips of the page when a tile starts to move, and when it is resized', async () => {
@@ -249,7 +285,7 @@ describe('the widget grid', () => {
       await settle(context.harness);
       expect(closeAll).toHaveBeenCalledTimes(2);
       await wait(layoutSaveDelayMs + 100);
-      patches(context).forEach((request) => request.flush(left));
+      layoutSaves(context).forEach((request) => flushLayout(request, [left]));
     }, 10000);
 
     it('resizes the widget by the cells the corner handle travelled', async () => {
@@ -264,10 +300,10 @@ describe('the widget grid', () => {
 
       expect(place(context, 'w1')).toEqual({ column: '1 / span 8', row: '1 / span 5' });
       await wait(layoutSaveDelayMs + 100);
-      const requests = patches(context);
+      const requests = layoutSaves(context);
       expect(requests).toHaveLength(1);
-      expect(requests[0].request.body).toEqual({ layout: { x: 0, y: 0, w: 8, h: 5 } });
-      requests[0].flush(left);
+      expect(requests[0].request.body).toEqual({ widgets: [{ id: 'w1', layout: { x: 0, y: 0, w: 8, h: 5 } }] });
+      flushLayout(requests[0], [left]);
     }, 10000);
   });
 });

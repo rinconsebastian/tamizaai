@@ -39,6 +39,7 @@ const apiErrorCodes = [
   'dashboards.limit',
   'dashboards.lastOne',
   'dashboards.orderChanged',
+  'dashboards.versionNotFound',
   'data.timeout',
   'data.tableNotFound',
   'data.columnNotFound',

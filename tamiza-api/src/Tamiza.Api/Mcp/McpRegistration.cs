@@ -44,6 +44,7 @@ public static class McpRegistration
             .WithTools<McpScriptTools>()
             .WithTools<McpPipelineTools>()
             .WithTools<McpDashboardTools>()
+            .WithTools<McpDashboardVersionTools>()
             .WithPrompts<McpPrompts>();
 
         services.AddMcpTools();

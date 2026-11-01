@@ -46,37 +46,41 @@ public static class IndicatorValidation
         }
     }
 
-    public static void CheckLayout(WidgetLayout? layout, FieldErrors errors)
+    /// <summary>
+    /// The checks of a widget's position and size on the grid. <paramref name="prefix"/> is <c>widgets[i].</c> for one entry of the layout
+    /// of several widgets (design D8 of dashboard versions), so its errors name the entry.
+    /// </summary>
+    public static void CheckLayout(WidgetLayout? layout, FieldErrors errors, string prefix = "")
     {
         if (layout is null)
         {
-            errors.Add("layout", "The layout is required.");
+            errors.Add(prefix + "layout", "The layout is required.");
             return;
         }
 
         if (layout.X < 0)
         {
-            errors.Add("layout.x", "x must be 0 or more.");
+            errors.Add(prefix + "layout.x", "x must be 0 or more.");
         }
 
         if (layout.Y < 0)
         {
-            errors.Add("layout.y", "y must be 0 or more.");
+            errors.Add(prefix + "layout.y", "y must be 0 or more.");
         }
 
         if (layout.W < 1)
         {
-            errors.Add("layout.w", "w must be 1 or more.");
+            errors.Add(prefix + "layout.w", "w must be 1 or more.");
         }
 
         if (layout.H is < 1 or > MaxHeight)
         {
-            errors.Add("layout.h", $"h must be between 1 and {MaxHeight}.");
+            errors.Add(prefix + "layout.h", $"h must be between 1 and {MaxHeight}.");
         }
 
         if (layout.X >= 0 && layout.W >= 1 && (long)layout.X + layout.W > GridColumns)
         {
-            errors.Add("layout.w", $"x + w must not pass the {GridColumns} columns of the grid.");
+            errors.Add(prefix + "layout.w", $"x + w must not pass the {GridColumns} columns of the grid.");
         }
     }
 
