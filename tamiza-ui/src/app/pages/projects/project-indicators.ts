@@ -79,7 +79,7 @@ export const layoutSaveDelayMs = 400;
       <!-- Outside the loading and overview branches, so the heading and the live region exist from the first render. -->
       <div class="flex flex-wrap items-center gap-2" data-testid="dashboard-header">
         <h2 #heading tabindex="-1" class="min-w-0 flex-1 break-words text-lg font-semibold text-heading [overflow-wrap:anywhere] focus:outline-none" data-testid="dashboard-heading">{{ shownName() }}</h2>
-        <!-- None of them while a version is shown, Print included: a printout leaves notices out, so it would not say which (design D11). -->
+        <!-- None of them while a version is shown, Print included: the page offers no action that changes or prints it (dashboard-versions "Viewing a version"). -->
         @if (canPrint() || editing()) {
           <!-- Under the name on a phone. At the limit "New dashboard" stays focusable, so the hint saying why it is unavailable can be read. -->
           <div class="ms-auto flex w-full items-center justify-end gap-2 sm:w-auto print:hidden" data-testid="dashboard-actions">
@@ -128,8 +128,8 @@ export const layoutSaveDelayMs = 400;
         @if (printedAt(); as printedAt) {
           <div class="hidden w-full text-sm text-body paper:block" data-testid="print-header">
             @if (viewing(); as version) {
-              <!-- The browser's own menu still prints a version shown, whose notice paper leaves out: the sheet says which version it is. -->
-              <p data-testid="print-version">{{ t('dashboards.print.version', { number: version.number, author: version.author.name, time: (version.savedAt | dateTime) }) }}</p>
+              <!-- The browser's own menu still prints a version shown, whose notice paper leaves out: the sheet says which version it is, in the project's time zone as the lines below. -->
+              <p data-testid="print-version">{{ t('dashboards.print.version', { number: version.number, author: version.author.name, time: when(version.savedAt) }) }}</p>
             }
             <p data-testid="print-time">{{ t('dashboards.print.printedAt', { time: when(printedAt), zone: timeZone() }) }}</p>
             @if (publishedAt(); as publishedAt) {
@@ -699,7 +699,7 @@ export class ProjectIndicators {
   }
 
   /** A time on the print header: the shared format, in the project's time zone. */
-  protected when(value: Date): string {
+  protected when(value: Date | string): string {
     return dateText(value, this.locale, 'dateTime', this.timeZone()) ?? '';
   }
 

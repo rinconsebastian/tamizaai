@@ -3054,7 +3054,9 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
 
       const header = byTestId(context.root, 'print-header')!;
       expect(header.classList).toContain('paper:block');
-      expect(plain(text(byTestId(header, 'print-version')))).toBe(`Version 9, saved by Ana Pérez on ${when(savedAt(9))}`);
+      // In the project's time zone, as the other lines of the header: 10:09 UTC is 5:09 AM in Bogota.
+      expect(plain(text(byTestId(header, 'print-version')))).toBe(`Version 9, saved by Ana Pérez on ${plain(dateText(savedAt(9), 'en-US', 'dateTime', 'America/Bogota')!)}`);
+      expect(text(byTestId(header, 'print-version'))).toMatch(/5:09\sAM$/);
       expect(text(byTestId(header, 'print-published'))).toMatch(/^Data published Oct 28, 2026, 9:00\sAM$/);
       expect(header.querySelector('button')).toBeNull();
       expect(notice(context.root)!.classList).toContain('paper:hidden');

@@ -207,6 +207,19 @@ describe('DashboardFilterBar', () => {
     expect(Array.from(bar.dialog()!.querySelectorAll('[data-testid="filter-option"]')).map((o) => text(o.closest('label')))).toEqual(['Cali']);
   });
 
+  it('offers no values and asks nothing for the filter of a version shown without widgets, whose dashboard may have some', async () => {
+    const bar = await render([municipality]);
+    bar.host.indicators.set([]);
+    await bar.settle();
+
+    bar.pill('municipality').click();
+    await bar.settle();
+
+    bar.http.expectNone((r) => r.url === '/api/v1/projects/p1/dashboards/d1/values');
+    expect(bar.dialog()).not.toBeNull();
+    expect(bar.dialog()!.querySelectorAll('[data-testid="filter-option"]').length).toBe(0);
+  });
+
   it('offers true and false for a true/false filter without asking the server', async () => {
     const bar = await render([consent]);
 
