@@ -3,7 +3,8 @@ import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { observeSize } from './chart-data';
-import { charWidth, sequentialColor, sequentialStep, sequentialSteps, truncate } from './chart-scales';
+import { ChartColors } from './chart-colors';
+import { charWidth, sequentialStep, sequentialSteps, truncate } from './chart-scales';
 import { CrosstabWidget } from './crosstab-widget';
 import { ValueFormatter, plotted } from './format';
 import { MarkPoint, markTooltips } from './mark-tooltips';
@@ -130,7 +131,9 @@ let hatchIds = 0;
 
 /**
  * A heat map (design D5): the groups of the indicator as rows and its series as columns, each cell shaded by its value on the
- * sequential scale the maps use, from the smallest to the largest value shown, under a legend of that range. A cell with no value is
+ * sequential scale the maps use, from the smallest to the largest value shown, under a legend of that range. The scale is the
+ * widget's own or its dashboard palette's (add-dashboard-palettes, design D1): the component sets the `--tmz-seq-n` its marks read on
+ * its host, so the cells, their labels and the legend swatches take it. A cell with no value is
  * drawn in the surface color with a hatch and an outline, so it never reads as the lightest step; its tooltip says it has no value.
  * Every cell has a tooltip on hover and on the keyboard (one Tab stop, as the map), and "Show as table" is the cross table.
  */
@@ -244,7 +247,7 @@ let hatchIds = 0;
       }
     </ng-container>
   `,
-  host: { class: 'flex h-full min-h-0 flex-col gap-2' },
+  host: { class: 'flex h-full min-h-0 flex-col gap-2', '[style]': 'colors().rampStyle' },
 })
 export class HeatmapChart {
   private readonly transloco = inject(TranslocoService);
@@ -254,6 +257,8 @@ export class HeatmapChart {
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
   readonly asTable = input(false);
+  /** The colors of the widget: its sequential scale, from the widget or from its dashboard's palette. */
+  readonly colors = input.required<ChartColors>();
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private readonly svg = viewChild<ElementRef<SVGElement>>('chartSvg');
@@ -302,8 +307,9 @@ export class HeatmapChart {
 
   protected readonly marks = markTooltips({ host: () => this.svg()?.nativeElement, marks: () => this.marksGrid(), groupsAcross: () => false });
 
+  /** The fill of a step: the variable the host sets to the step of the widget's scale (it is the blue scale where none is set). */
   protected color(step: number): string {
-    return sequentialColor(step);
+    return `var(--tmz-seq-${step})`;
   }
 
   /** The label on a step is white or near-black, whichever reads better on it, and swaps with the theme as the steps do. */

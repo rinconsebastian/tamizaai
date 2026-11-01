@@ -53,6 +53,7 @@ public static class DashboardEndpoints
         dashboards.MapDelete("/{dashboardId:guid}", RemoveAsync).RequireProjectRole(ProjectRole.Analyst).WithName("RemoveDashboard");
         dashboards.MapPost("/{dashboardId:guid}/copies", DuplicateAsync).RequireProjectRole(ProjectRole.Analyst).WithName("DuplicateDashboard");
         dashboards.MapPut("/{dashboardId:guid}/filters", SaveFiltersAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveDashboardFilters");
+        dashboards.MapPut("/{dashboardId:guid}/colors", SaveColorsAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveDashboardColors");
         dashboards.MapGet("/{dashboardId:guid}/values", GetValuesAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetDashboardColumnValues");
         dashboards.MapPost("/{dashboardId:guid}/widgets", CreateWidgetAsync)
             .RequireProjectRole(ProjectRole.Analyst).WithName("CreateDashboardWidget");
@@ -72,8 +73,8 @@ public static class DashboardEndpoints
     }
 
     /// <summary>
-    /// The dashboard's name, its filters and its widgets in reading order, listed whether or not their indicator is published, and the
-    /// number of its current version.
+    /// The dashboard's name, its filters, its palette and colors kept by value, and its widgets in reading order, listed whether or not
+    /// their indicator is published, and the number of its current version.
     /// </summary>
     internal static async Task<Results<Ok<DashboardView>, ProblemHttpResult>> GetDashboardAsync(
         Guid projectId, Guid dashboardId, TamizaDbContext db, CancellationToken ct) =>
@@ -84,7 +85,7 @@ public static class DashboardEndpoints
     {
         var dashboard = await db.Dashboards.AsNoTracking()
             .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
-            .Select(d => new { d.Name, d.Filters })
+            .Select(d => new { d.Name, d.Filters, d.Palette, d.ValueColors })
             .SingleOrDefaultAsync(ct);
         if (dashboard is null)
         {
@@ -93,7 +94,8 @@ public static class DashboardEndpoints
 
         var widgets = await ReadWidgetsAsync(db, dashboardId, ct);
         var version = await DashboardVersions.CurrentAsync(db, projectId, dashboardId, ct);
-        return new DashboardView(dashboardId, dashboard.Name, ReadFilters(dashboard.Filters), widgets, version);
+        return new DashboardView(
+            dashboardId, dashboard.Name, ReadFilters(dashboard.Filters), dashboard.Palette, ReadValueColors(dashboard.ValueColors), widgets, version);
     }
 
     /// <summary>A dashboard's widgets in reading order: top to bottom, then left to right, then the older first.</summary>
@@ -214,6 +216,54 @@ public static class DashboardEndpoints
 
         versions.Note(projectId, dashboardId, new DashboardChange(DashboardChangeKinds.FiltersChanged));
         return TypedResults.Ok(new DashboardFilterList(filters));
+    }
+
+    /// <summary>
+    /// Replaces the dashboard's palette and colors kept by value with those sent, both whole, the colors in the order sent (design D5 of
+    /// dashboard palettes). No lock: the last save wins. A dashboard removed since the check updates no row. Colors equal to the stored
+    /// ones, as the API reads them, are not written again, so the dashboard keeps its stored JSON and makes no version.
+    /// </summary>
+    internal static async Task<Results<Ok<DashboardColors>, ValidationProblem, ProblemHttpResult>> SaveColorsAsync(
+        Guid projectId, Guid dashboardId, DashboardColorsRequest? request, TamizaDbContext db, DashboardVersions versions, ICurrentUser user,
+        TimeProvider time, CancellationToken ct)
+    {
+        var stored = await db.Dashboards.AsNoTracking()
+            .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
+            .Select(d => new { d.Palette, d.ValueColors })
+            .SingleOrDefaultAsync(ct);
+        if (stored is null)
+        {
+            return DashboardNotFound();
+        }
+
+        var errors = new FieldErrors();
+        var colors = DashboardValidation.Colors(request?.Palette, request?.ValueColors, errors);
+        if (colors is null)
+        {
+            return Problems.Validation(errors.ToDictionary());
+        }
+
+        var json = JsonSerializer.Serialize(colors.ValueColors, Json);
+        if (colors.Palette == stored.Palette && json == JsonSerializer.Serialize(ReadValueColors(stored.ValueColors), Json))
+        {
+            return TypedResults.Ok(colors);
+        }
+
+        var now = Now(time);
+        var updated = await db.Dashboards
+            .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(d => d.Palette, colors.Palette)
+                .SetProperty(d => d.ValueColors, json)
+                .SetProperty(d => d.UpdatedBy, user.Id)
+                .SetProperty(d => d.UpdatedAt, now), ct);
+        if (updated == 0)
+        {
+            return DashboardNotFound();
+        }
+
+        versions.Note(projectId, dashboardId, new DashboardChange(DashboardChangeKinds.ColorsChanged));
+        return TypedResults.Ok(colors);
     }
 
     /// <summary>Adds a dashboard with no widgets after the project's others.</summary>
@@ -368,8 +418,9 @@ public static class DashboardEndpoints
     }
 
     /// <summary>
-    /// Adds a copy of the dashboard right after it, holding its filters and a copy of each of its widgets: same title, chart type,
-    /// query and layout, a new id, and the caller as their author. Later changes to one leave the other as it is.
+    /// Adds a copy of the dashboard right after it, holding its filters, its palette and colors kept by value, and a copy of each of its
+    /// widgets: same title, chart type, query (display included) and layout, a new id, and the caller as their author. Later changes to
+    /// one leave the other as it is.
     /// </summary>
     internal static async Task<Results<Created<DashboardEntry>, ValidationProblem, ProblemHttpResult>> DuplicateAsync(
         Guid projectId, Guid dashboardId, DashboardNameRequest? request, TamizaDbContext db, DashboardVersions versions, ICurrentUser user,
@@ -419,8 +470,11 @@ public static class DashboardEndpoints
 
         var now = Now(time);
         var copy = NewDashboard(projectId, name!, source + 1, user, now);
-        // The filters as they are now, read under the lock with the source (design D4); the widgets keep what they ignore in their config.
+        // The filters and colors as they are now, read under the lock with the source (design D4; design D5 of dashboard palettes); the
+        // widgets keep what they ignore and how they are drawn in their config.
         copy.Filters = dashboards[source].Filters;
+        copy.Palette = dashboards[source].Palette;
+        copy.ValueColors = dashboards[source].ValueColors;
         db.Dashboards.Add(copy);
         dashboards.Insert(source + 1, copy);
         Renumber(dashboards);
@@ -520,10 +574,10 @@ public static class DashboardEndpoints
     }
 
     /// <summary>
-    /// Changes any of a widget's title, chart type, query and layout, or moves it to another dashboard of the project. A move or a
-    /// rename leaves the query as it is, even if the table no longer has what it names. Only what differs from what is stored, as the
-    /// API reads it, is written: a form saved unchanged writes nothing, and a config saved before later fields existed does not gain
-    /// them, so the dashboard makes no version (design D2, D12).
+    /// Changes any of a widget's title, chart type, query (display included) and layout, or moves it to another dashboard of the
+    /// project. A move or a rename leaves the query as it is, even if the table no longer has what it names. Only what differs from
+    /// what is stored, as the API reads it, is written: a form saved unchanged writes nothing, and a config saved before later fields
+    /// existed does not gain them, so the dashboard makes no version (design D2, D12).
     /// </summary>
     internal static async Task<Results<Ok<Widget>, ValidationProblem, ProblemHttpResult>> UpdateWidgetAsync(
         Guid projectId, Guid dashboardId, Guid widgetId, UpdateWidgetRequest? request, IndicatorDashboard indicators, TamizaDbContext db,
@@ -967,6 +1021,9 @@ public static class DashboardEndpoints
 
     /// <summary>The filters as <see cref="SaveFiltersAsync"/> stored them, which validated them first.</summary>
     internal static List<DashboardFilter> ReadFilters(string json) => JsonSerializer.Deserialize<List<DashboardFilter>>(json, Json) ?? [];
+
+    /// <summary>The colors kept by value as <see cref="SaveColorsAsync"/> stored them, which validated them first.</summary>
+    internal static List<ValueColor> ReadValueColors(string json) => JsonSerializer.Deserialize<List<ValueColor>>(json, Json) ?? [];
 
     private static ProblemHttpResult WidgetNotFound() =>
         TypedResults.Problem(statusCode: StatusCodes.Status404NotFound, title: "Widget not found.");

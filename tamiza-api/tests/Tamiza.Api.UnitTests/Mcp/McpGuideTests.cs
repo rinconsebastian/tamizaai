@@ -133,6 +133,30 @@ public sealed class McpGuideTests
     }
 
     [Fact]
+    public void The_instructions_say_when_to_keep_the_palette_keep_colors_by_value_and_give_a_widget_its_own_color()
+    {
+        var text = McpGuide.Instructions;
+
+        foreach (var setting in new[] { "palette", "valueColors", "display", "update_dashboard", "get_dashboard", "update_widget" })
+        {
+            Assert.Contains($"`{setting}`", text);
+        }
+
+        // Every palette and every scale a client can name is named.
+        foreach (var id in Tamiza.Api.Indicators.Palettes.All.Concat(Tamiza.Api.Indicators.Palettes.Scales))
+        {
+            Assert.Contains($"`{id}`", text);
+        }
+
+        Assert.Contains("Keep the default palette unless the person asks for another look", text);
+        Assert.Contains("for categories that recur across widgets, such as sex or yes/no", text);
+        Assert.Contains("Keep color 1 for a widget unless it should stand out", text);
+        // A call sends the whole list, and a new config replaces the whole old one, display included.
+        Assert.Contains("send it whole", text);
+        Assert.Contains("send the `display` again when you change the query", text);
+    }
+
+    [Fact]
     public void The_prompt_names_the_project_and_the_situation_and_asks_for_confirmation_before_scripts()
     {
         var id = Guid.NewGuid();
@@ -145,5 +169,7 @@ public sealed class McpGuideTests
         Assert.DoesNotContain("  access", text);
         Assert.Contains("wait for me to confirm", text);
         Assert.Contains("Test every script before you save it", text);
+        Assert.Contains("Leave the dashboard's palette as it is unless I ask for another", text);
+        Assert.Contains("valueColors", text);
     }
 }

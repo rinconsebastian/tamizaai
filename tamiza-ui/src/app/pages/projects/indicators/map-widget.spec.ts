@@ -9,8 +9,10 @@ import { byTestId, settle } from '../../../../testing/project-harness';
 import { translocoTesting } from '../../../../testing/transloco-testing';
 import { BasemapList, Basemaps } from '../../../core/basemaps.service';
 import { DataColumnType } from '../../../core/projects/data.service';
-import { IndicatorEntry, QueryResult, QueryRow, WidgetConfig, WidgetTooltipItem } from '../../../core/projects/indicators.service';
+import { DashboardColors, IndicatorEntry, PaletteId, QueryResult, QueryRow, WidgetConfig, WidgetTooltipItem } from '../../../core/projects/indicators.service';
 import { ChartTooltips } from '../../../shared/ui';
+import styles from '../../../../styles.css';
+import { chartColors, defaultColors } from './chart-colors';
 import { plainIndicator, valueFormatter } from './format';
 import { Context, all, catalog, clearOverlay, config, indicator, isColumns, isQuery, open, overlay, paperOn, printOf, result, row, text, wait, widget } from './indicators-testing';
 import { MapEngine, loadLeaflet } from './map-engine';
@@ -33,6 +35,8 @@ interface Show {
   list?: BasemapList | false;
   /** Waits for the map to be drawn (the default). */
   drawn?: boolean;
+  /** The colors of the dashboard: the palette Tamiza with no color kept by value unless this says otherwise. */
+  colors?: DashboardColors;
 }
 
 const noList: BasemapList = { provider: 'none', basemaps: [] };
@@ -64,8 +68,8 @@ const googleList = (version = 1, refreshIn = 1980): BasemapList => ({
 
 const isCredits = (kind: string) => (r: { url: string; method: string }) => r.method === 'GET' && r.url.startsWith(`${basemapsUrl}/${kind}/credits`);
 
-async function show(rows: QueryRow[], { settings = {}, indicators, answer = {}, list = noList, drawn = true }: Show = {}) {
-  const context = await open('viewer', [widget('w1', { chartType: 'map', config: config({ geometryColumn: 'geometry', ...settings }) })], null, indicators ? { indicators } : {});
+async function show(rows: QueryRow[], { settings = {}, indicators, answer = {}, list = noList, drawn = true, colors }: Show = {}) {
+  const context = await open('viewer', [widget('w1', { chartType: 'map', config: config({ geometryColumn: 'geometry', ...settings }) })], null, indicators ? { indicators } : {}, colors ? { colors } : {});
   const requests = context.http.match(isQuery);
   expect(requests).toHaveLength(1);
   requests[0].flush(result(rows, answer));
@@ -87,8 +91,10 @@ async function mount(rows: QueryRow[], settings: Partial<WidgetConfig> = {}, lis
   TestBed.configureTestingModule({ imports: [translocoTesting()], providers: [provideHttpClient(), provideHttpClientTesting(), provideVisibleElements()] });
   const http = TestBed.inject(HttpTestingController);
   const fixture = TestBed.createComponent(MapWidget);
+  const widgetConfig = config({ geometryColumn: 'geometry', ...settings });
   fixture.componentRef.setInput('rows', rows);
-  fixture.componentRef.setInput('config', config({ geometryColumn: 'geometry', ...settings }));
+  fixture.componentRef.setInput('config', widgetConfig);
+  fixture.componentRef.setInput('colors', chartColors(defaultColors, 'map', widgetConfig));
   fixture.componentRef.setInput('label', 'Coverage');
   fixture.componentRef.setInput('format', valueFormatter(plainIndicator, 'en-US'));
   const mounted = { fixture, http, root: fixture.nativeElement as HTMLElement, harness: { fixture } as unknown as RouterTestingHarness };
@@ -112,6 +118,22 @@ const container = (context: Pick<Context, 'root'>) => byTestId(context.root, 'ma
 const zoomOf = (context: Pick<Context, 'root'>) => Number(container(context).getAttribute('data-zoom'));
 const centerOf = (context: Pick<Context, 'root'>) => container(context).getAttribute('data-center');
 const seq = (element: Element) => Array.from(element.classList).find((c) => c.startsWith('tmz-seq-'));
+/**
+ * The color a shape ends up with in a browser: the `fill` of the global rule of its step class (`.tmz-map path.tmz-seq-n`, in
+ * styles.css), which reads a custom property, resolved on the nearest element above the shape that sets it (inheritance).
+ */
+function fillOf(shape: Element): string | null {
+  const rule = new RegExp(`\\.tmz-map path\\.${seq(shape)}\\s*\\{([^}]*)\\}`).exec(styles);
+  const variable = /fill:\s*var\((--[\w-]+)\)/.exec(rule?.[1] ?? '')?.[1];
+  for (let node: Element | null = shape; node && variable; node = node.parentElement) {
+    const value = (node as HTMLElement).style?.getPropertyValue(variable);
+    if (value) {
+      return value;
+    }
+  }
+  return null;
+}
+const stepOf = (shape: Element) => Number(seq(shape)!.slice('tmz-seq-'.length));
 const click = async (context: Pick<Context, 'harness'>, target: Element | null) => {
   (target as HTMLElement).click();
   await settle(context.harness);
@@ -243,6 +265,69 @@ describe('map widget', () => {
       const context = await show([row('A', 5, square(0, 0)), row('B', 5, square(1, 0))]);
 
       expect(regions(context).map(seq).every((step) => step === 'tmz-seq-4')).toBe(true);
+    });
+  });
+
+  describe('scale (add-dashboard-palettes)', () => {
+    const places = [row('Cali', 90, square(0, 0)), row('Bogotá', 50, square(1, 0)), row('Pasto', 10, square(0, 1))];
+    const palette = (name: PaletteId): DashboardColors => ({ palette: name, valueColors: [] });
+    const host = (context: Pick<Context, 'root'>) => context.root.querySelector('app-map-widget') ?? context.root;
+    const swatches = (context: Pick<Context, 'root'>) => Array.from(byTestId(context.root, 'map-legend')!.querySelectorAll<HTMLElement>('span[aria-hidden] > span'));
+
+    it('colors its shapes and its legend with the steps of the green scale when the widget chooses it (Map on the green scale)', async () => {
+      const context = await show(places, { settings: { display: { ramp: 'green' } } });
+
+      expect(regions(context)).toHaveLength(3);
+      expect(regions(context).map(fillOf)).toEqual(regions(context).map((shape) => `var(--tmz-ramp-green-${stepOf(shape)})`));
+      expect(new Set(regions(context).map(fillOf)).size).toBe(3);
+      // The legend swatches read the same variables, from the same element.
+      expect(swatches(context)).toHaveLength(7);
+      for (const [i, swatch] of swatches(context).entries()) {
+        expect(swatch.style.background).toBe(`var(--tmz-seq-${i + 1})`);
+        expect(host(context).contains(swatch)).toBe(true);
+      }
+      expect((host(context) as HTMLElement).style.getPropertyValue('--tmz-seq-7')).toBe('var(--tmz-ramp-green-7)');
+    });
+
+    it('colors the markers of a map of points on the scale too', async () => {
+      const context = await show([row('Cali', 80, 'POINT (-76.53 3.43)'), row('Pasto', 20, 'POINT (-77.28 1.21)')], { settings: { display: { ramp: 'red' } } });
+
+      expect(points(context).map(fillOf)).toEqual(points(context).map((shape) => `var(--tmz-ramp-red-${stepOf(shape)})`));
+    });
+
+    it('uses the default scale of its dashboard\'s palette when it names none (Palette\'s scale)', async () => {
+      const context = await show(places, { colors: palette('earth') });
+
+      expect(regions(context).map(fillOf)).toEqual(regions(context).map((shape) => `var(--tmz-ramp-orange-${stepOf(shape)})`));
+    });
+
+    it('uses the blue scale on the palette Tamiza, as it always did', async () => {
+      const context = await show(places);
+
+      expect(regions(context).map(fillOf)).toEqual(regions(context).map((shape) => `var(--tmz-ramp-blue-${stepOf(shape)})`));
+    });
+
+    it('draws in the scale the widget chooses, whatever its palette\'s', async () => {
+      const context = await show(places, { colors: palette('vivid'), settings: { display: { ramp: 'gray' } } });
+
+      expect(regions(context).map(fillOf)).toEqual(regions(context).map((shape) => `var(--tmz-ramp-gray-${stepOf(shape)})`));
+    });
+
+    it('sends the query it always sent, whatever the scale', async () => {
+      const { query } = await show(places, { settings: { display: { ramp: 'green' } } });
+
+      expect(query.config).not.toHaveProperty('display');
+    });
+
+    it('takes a new scale without drawing a new map', async () => {
+      const context = await mount(places);
+      const before = Array.from(context.root.querySelectorAll('.leaflet-container'));
+
+      context.fixture.componentRef.setInput('colors', chartColors(defaultColors, 'map', config({ geometryColumn: 'geometry', display: { ramp: 'teal' } })));
+      await settle(context.harness);
+
+      expect(Array.from(context.root.querySelectorAll('.leaflet-container'))).toEqual(before);
+      expect(regions(context).map(fillOf)).toEqual(regions(context).map((shape) => `var(--tmz-ramp-teal-${stepOf(shape)})`));
     });
   });
 

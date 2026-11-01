@@ -2,7 +2,6 @@ import { Component, inject, input } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { SeriesKind } from '../../../core/projects/indicators.service';
-import { seriesColor } from './chart-scales';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
@@ -11,16 +10,9 @@ export function seriesName(column: { series: string | null; kind: SeriesKind }, 
   return column.kind === 'value' ? (column.series ?? '') : t(column.kind === 'none' ? 'indicators.series.none' : 'indicators.series.other');
 }
 
-/**
- * The color of a series: its place in the answer's `series` (design D4, rule d), never the order the rows came in, so a dashboard
- * filter that leaves a series without rows does not repaint the others. "Other" has its own neutral.
- */
-export function seriesFill(kind: SeriesKind, index: number): string {
-  return kind === 'other' ? 'var(--tmz-series-other)' : seriesColor(index);
-}
-
 export interface LegendEntry {
   name: string;
+  /** The mark's color, resolved by `chart-colors.ts` (the legend never picks one). */
   color: string;
   /** A swatch that is as light as the surface (a Likert scale's neutral) gets a hairline, or it would not show. */
   outlined?: boolean;

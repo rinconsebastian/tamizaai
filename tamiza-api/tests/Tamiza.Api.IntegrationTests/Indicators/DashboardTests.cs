@@ -804,6 +804,98 @@ public sealed class DashboardTests(PostgresFixture postgres)
         Assert.Equal(1, (await h.GetDashboardAsync(copyId)).GetProperty("filters").GetArrayLength());
     }
 
+    // Colors duplicated (custom-dashboards: Duplicating a dashboard)
+
+    private static object Kept(string column, string value, int color) => new { column, value, color };
+
+    private static string[] KeptColors(JsonElement dashboard) =>
+        dashboard.GetProperty("valueColors").EnumerateArray()
+            .Select(c => $"{c.GetProperty("column").GetString()}|{c.GetProperty("value").GetString()}|{c.GetProperty("color").GetInt32()}")
+            .ToArray();
+
+    [Fact]
+    public async Task A_duplicate_holds_the_originals_palette_colors_kept_by_value_and_widget_colors()
+    {
+        await using var h = await PublishedAsync();
+        await h.SaveColorsAsync("earth", new[] { Kept("sex", "Female", 5), Kept("zone", "Rural", 5), Kept("sex", "Male", 1) });
+        var column = await h.AddWidgetAsync(new
+        {
+            title = "By municipality", chartType = "column", config = new { indicator = "coverage", groupBy = "municipality", display = new { color = 3 } },
+        });
+
+        var response = await DuplicateAsync(h, h.DashboardId, "Housing (copy)");
+        var copyId = (await ReadAsync(response)).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var original = await h.GetDashboardAsync(client: h.Viewer);
+        var copy = await h.GetDashboardAsync(copyId, h.Viewer);
+        Assert.Equal("earth", copy.GetProperty("palette").GetString());
+        Assert.Equal(["sex|Female|5", "zone|Rural|5", "sex|Male|1"], KeptColors(copy));
+        Assert.Equal(original.GetProperty("valueColors").GetRawText(), copy.GetProperty("valueColors").GetRawText());
+        var copied = copy.GetProperty("widgets")[0].GetProperty("config");
+        Assert.Equal(3, copied.GetProperty("display").GetProperty("color").GetInt32());
+        // The copy of the widget is stored as the original is, display included.
+        Assert.Equal(1L, await TestData.ScalarAsync<long>(h.Db,
+            """
+            SELECT count(*) FROM tamiza.dashboard_widgets AS c
+            JOIN tamiza.dashboard_widgets AS o ON o.id = @original AND o.config = c.config AND o.config -> 'display' ->> 'color' = '3'
+            WHERE c.dashboard_id = @copy
+            """,
+            ("original", column.GetProperty("id").GetGuid()), ("copy", copyId)));
+    }
+
+    [Fact]
+    public async Task A_duplicate_of_a_dashboard_with_the_default_colors_has_the_default_colors()
+    {
+        await using var h = await PublishedAsync();
+
+        var copyId = (await ReadAsync(await DuplicateAsync(h, h.DashboardId, "Housing (copy)"))).GetProperty("id").GetGuid();
+
+        var copy = await h.GetDashboardAsync(copyId);
+        Assert.Equal("tamiza", copy.GetProperty("palette").GetString());
+        Assert.Equal(0, copy.GetProperty("valueColors").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task The_colors_of_a_duplicate_and_its_original_change_independently()
+    {
+        await using var h = await PublishedAsync();
+        await h.SaveColorsAsync("earth", new[] { Kept("sex", "Female", 5) });
+        var copyId = (await ReadAsync(await DuplicateAsync(h, h.DashboardId, "Housing (copy)"))).GetProperty("id").GetGuid();
+
+        await h.SaveColorsAsync("vivid", new[] { Kept("sex", "Female", 2), Kept("sex", "Male", 6) }, dashboardId: copyId);
+        await h.SaveColorsAsync("institutional", Array.Empty<object>());
+
+        var original = await h.GetDashboardAsync();
+        var copy = await h.GetDashboardAsync(copyId);
+        Assert.Equal("institutional", original.GetProperty("palette").GetString());
+        Assert.Empty(KeptColors(original));
+        Assert.Equal("vivid", copy.GetProperty("palette").GetString());
+        Assert.Equal(["sex|Female|2", "sex|Male|6"], KeptColors(copy));
+    }
+
+    [Fact]
+    public async Task A_widget_color_of_a_duplicate_and_its_original_change_independently()
+    {
+        await using var h = await PublishedAsync();
+        var column = await h.AddWidgetAsync(new
+        {
+            title = "By municipality", chartType = "column", config = new { indicator = "coverage", groupBy = "municipality", display = new { color = 3 } },
+        });
+        var copyId = (await ReadAsync(await DuplicateAsync(h, h.DashboardId, "Housing (copy)"))).GetProperty("id").GetGuid();
+        var copied = (await h.GetWidgetsAsync(copyId))[0];
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(copied.GetProperty("id").GetGuid(), copyId), new
+        {
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { color = 6 } },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(6, (await h.GetWidgetsAsync(copyId))[0].GetProperty("config").GetProperty("display").GetProperty("color").GetInt32());
+        Assert.Equal(3, (await h.GetWidgetsAsync())[0].GetProperty("config").GetProperty("display").GetProperty("color").GetInt32());
+        Assert.Equal(column.GetProperty("id").GetGuid(), (await h.GetWidgetsAsync())[0].GetProperty("id").GetGuid());
+    }
+
     // Duplicate at the limit
 
     [Fact]
@@ -908,6 +1000,7 @@ public sealed class DashboardTests(PostgresFixture postgres)
                 "/dashboards post",
                 "/dashboards/order put",
                 "/dashboards/{dashboardId} delete get patch",
+                "/dashboards/{dashboardId}/colors put",
                 "/dashboards/{dashboardId}/copies post",
                 "/dashboards/{dashboardId}/filters put",
                 "/dashboards/{dashboardId}/layout put",
@@ -926,9 +1019,17 @@ public sealed class DashboardTests(PostgresFixture postgres)
         var order = paths.GetProperty(project + "/dashboards/order");
         var dashboard = paths.GetProperty(project + "/dashboards/{dashboardId}");
         var filters = paths.GetProperty(project + "/dashboards/{dashboardId}/filters");
-        Assert.Equal(["filters", "id", "name", "version", "widgets"], Properties(Component(document, Answer(dashboard.GetProperty("get"), "200"))));
+        var colors = paths.GetProperty(project + "/dashboards/{dashboardId}/colors");
+        Assert.Equal(
+            ["filters", "id", "name", "palette", "valueColors", "version", "widgets"],
+            Properties(Component(document, Answer(dashboard.GetProperty("get"), "200"))));
         Assert.Equal(["filters"], Properties(Component(document, Body(filters.GetProperty("put")))));
         Assert.Equal(["filters"], Properties(Component(document, Answer(filters.GetProperty("put"), "200"))));
+        // The colors are saved and answered whole, and each kept color is a column, a value and the number of a palette color.
+        Assert.Equal(["palette", "valueColors"], Properties(Component(document, Body(colors.GetProperty("put")))));
+        var savedColors = Component(document, Answer(colors.GetProperty("put"), "200"));
+        Assert.Equal(["palette", "valueColors"], Properties(savedColors));
+        Assert.Equal(["color", "column", "value"], Properties(Component(document, Items(savedColors.GetProperty("properties").GetProperty("valueColors")))));
         Assert.Contains("dashboardId", Properties(Component(document, Answer(widgets.GetProperty("post"), "201"))));
         Assert.Contains("dashboardId", Properties(Component(document, Answer(widget.GetProperty("patch"), "200"))));
         Assert.Contains("dashboardId", Properties(Component(document, Body(widget.GetProperty("patch")))));
@@ -956,12 +1057,13 @@ public sealed class DashboardTests(PostgresFixture postgres)
         Assert.Contains("dashboardId", Properties(Component(document, Items(Answer(layout, "200")))));
         var versions = Component(document, Answer(list, "200"));
         Assert.Equal(["current", "versions"], Properties(versions));
-        // What the history shows of a version, and the details' name, filters and widgets with it.
+        // What the history shows of a version, and the details' name, filters, colors and widgets with it.
         string[] shown = ["author", "changes", "createdAt", "current", "moreChanges", "name", "note", "number", "origin", "restoredFrom", "savedAt"];
         Assert.Equal(shown.Append("filterCount").Append("widgetCount").Order(StringComparer.Ordinal),
             Properties(Component(document, Items(versions.GetProperty("properties").GetProperty("versions")))));
         var versionDetails = Component(document, Answer(details, "200"));
-        Assert.Equal(shown.Append("filters").Append("widgets").Order(StringComparer.Ordinal), Properties(versionDetails));
+        Assert.Equal(shown.Append("filters").Append("palette").Append("valueColors").Append("widgets").Order(StringComparer.Ordinal), Properties(versionDetails));
+        Assert.Equal(["color", "column", "value"], Properties(Component(document, Items(versionDetails.GetProperty("properties").GetProperty("valueColors")))));
         var origin = versionDetails.GetProperty("properties").GetProperty("origin");
         origin = origin.TryGetProperty("$ref", out _) ? Component(document, origin) : origin;
         Assert.Equal(["app", "mcp"], origin.GetProperty("enum").EnumerateArray().Select(value => value.GetString()));

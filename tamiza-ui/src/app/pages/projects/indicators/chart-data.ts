@@ -6,6 +6,8 @@ import { DashboardPrint } from './dashboard-print';
 export interface Pivot {
   categories: string[];
   values: number[];
+  /** The group value of each category, null for the missing one: what a color kept by value is looked up by (a category is its label). */
+  groups: (string | null)[];
 }
 
 /**
@@ -13,11 +15,11 @@ export interface Pivot {
  * 10); a missing group shows as `emptyLabel`. The server sends one row per group value.
  */
 export function pivot(rows: readonly QueryRow[], emptyLabel: string, order: 'listed' | 'natural'): Pivot {
-  const listed = rows.map((row) => ({ category: row.group ?? emptyLabel, missing: row.group === null, value: row.value }));
+  const listed = rows.map((row) => ({ category: row.group ?? emptyLabel, group: row.group, missing: row.group === null, value: row.value }));
   if (order === 'natural') {
     listed.sort((a, b) => (a.missing ? 1 : b.missing ? -1 : naturalCompare(a.category, b.category)));
   }
-  return { categories: listed.map((entry) => entry.category), values: listed.map((entry) => entry.value) };
+  return { categories: listed.map((entry) => entry.category), values: listed.map((entry) => entry.value), groups: listed.map((entry) => entry.group) };
 }
 
 export interface Bucket {

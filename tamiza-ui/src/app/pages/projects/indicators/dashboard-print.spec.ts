@@ -1,9 +1,11 @@
 import { ApplicationRef, EnvironmentInjector, createEnvironmentInjector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { MapStub, stubMap } from '../../../../testing/leaflet';
 import { byTestId, settle } from '../../../../testing/project-harness';
-import { ChartType, WidgetConfig } from '../../../core/projects/indicators.service';
+import { ChartType, DashboardColors, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { DashboardPrint, printDeadlineMs, printTitle, printingClass } from './dashboard-print';
-import { all, cell, clearOverlay, config, indicator, isQuery, open, paperOn, seriesResult, text, widget } from './indicators-testing';
+import { all, cell, clearOverlay, config, indicator, isQuery, open, paperOn, result, row, seriesResult, text, wait, widget } from './indicators-testing';
+import { loadLeaflet } from './map-engine';
 
 // Paper mode (dashboard printing, design D1, D5, D6, D9, D10). jsdom lays nothing out and never prints, so these check the steps,
 // their order and the waiting; the sheets themselves are checked in a real browser (tasks, group 7).
@@ -260,7 +262,7 @@ describe('the new kinds of widget on paper (dashboard printing, "Charts on paper
     const legend = byTestId(context.root, 'series-legend')!;
     expect(legend.className).toContain('flex-wrap'); // it wraps, never scrolls
     expect(legend.closest('.paper\\:hidden')).toBeNull();
-    expect(all(context.root, 'legend-swatch').map((s) => s.getAttribute('style'))).toEqual(series.map((_, i) => expect.stringContaining(`var(--tmz-series-${i + 1})`)));
+    expect(all(context.root, 'legend-swatch').map((s) => s.getAttribute('style'))).toEqual(series.map((_, i) => expect.stringContaining(`var(--tmz-pal-tamiza-${i + 1})`)));
   });
 
   it('prints the group column and the columns that fit, and says how many it left out (Wide cross table)', async () => {
@@ -305,5 +307,97 @@ describe('the new kinds of widget on paper (dashboard printing, "Charts on paper
 
     expect(Array.from(context.root.querySelectorAll('thead th')).filter((c) => c.classList.contains('paper:hidden'))).toHaveLength(0);
     expect(byTestId(context.root, 'widget-table-columns-left-out')).toBeNull();
+  });
+});
+
+describe('the dashboard\'s colors on paper (dashboard printing, "Colors on paper")', () => {
+  let stub: MapStub;
+
+  beforeAll(async () => {
+    const preload = stubMap();
+    await loadLeaflet();
+    preload.restore();
+  });
+
+  beforeEach(() => {
+    stub = stubMap({ width: 600, height: 400 });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearOverlay();
+    stub.restore();
+    document.documentElement.classList.remove(printingClass);
+    document.getElementById('tmz-print-page')?.remove();
+  });
+
+  const households = indicator('households_visited');
+  const square = (x: number) => `POLYGON ((${x} 0, ${x + 1} 0, ${x + 1} 1, ${x} 1, ${x} 0))`;
+  const colorOf = (element: Element | null) => /var\(--[\w-]+\)/.exec(element?.getAttribute('style') ?? '')?.[0] ?? null;
+
+  /** "Housing": the palette Earth, Well kept in color 6; a column chart in color 3, a stacked chart by water source and a map on the green scale. */
+  async function housing() {
+    const colors: DashboardColors = { palette: 'earth', valueColors: [{ column: 'water_source', value: 'Well', color: 6 }] };
+    const widgets = [
+      widget('w1', { chartType: 'column', config: config({ indicator: 'households_visited', groupBy: 'municipality', display: { color: 3 } }), layout: { x: 0, y: 0, w: 4, h: 4 } }),
+      widget('w2', { chartType: 'column', config: config({ indicator: 'households_visited', groupBy: 'municipality', seriesBy: 'water_source', layout: 'stacked' }), layout: { x: 4, y: 0, w: 4, h: 4 } }),
+      widget('w3', { chartType: 'map', config: config({ indicator: 'households_visited', geometryColumn: 'geometry', display: { ramp: 'green' } }), layout: { x: 8, y: 0, w: 4, h: 4 } }),
+    ];
+    const answer = (body: { config: WidgetConfig; chartType?: string }): QueryResult =>
+      body.chartType === 'map'
+        ? result([row('Cali', 90, square(0)), row('Pasto', 10, square(1))])
+        : body.config.seriesBy
+          ? seriesResult([cell('Cali', 'Piped', 35), cell('Cali', 'Well', 15)], ['Piped', 'Well'])
+          : result([row('Cali', 75), row('Pasto', 35)]);
+    const context = await open('viewer', widgets, answer, { indicators: [households] }, { colors });
+    context.http.match((r) => r.method === 'GET' && r.url === '/api/v1/basemaps').forEach((r) => r.flush({ provider: 'none', basemaps: [] }));
+    for (let i = 0; i < 20 && !context.root.querySelector('.leaflet-container path'); i++) {
+      await wait(5);
+      await settle(context.harness);
+    }
+    return context;
+  }
+
+  /** What the print shows of the colors: the marks of each chart, the legend's swatches and the variables the map sets for its scale. */
+  function colorsPrinted(root: HTMLElement) {
+    const map = root.querySelector<HTMLElement>('app-map-widget')!;
+    return {
+      columns: all(root, 'chart-mark').map(colorOf),
+      swatches: all(root, 'legend-swatch').map(colorOf),
+      mapSteps: [1, 2, 3, 4, 5, 6, 7].map((n) => map.style.getPropertyValue(`--tmz-seq-${n}`)),
+      mapLegend: Array.from(byTestId(root, 'map-legend')!.querySelectorAll('[style*="--tmz-seq-"]')).map(colorOf),
+      shapes: all(root, 'map-region').map((shape) => Array.from(shape.classList).find((c) => c.startsWith('tmz-seq-'))),
+    };
+  }
+
+  it('prints the charts in the colors of the dashboard\'s palette and the map on its scale, as on screen (Palette printed)', async () => {
+    const context = await housing();
+    const onScreen = colorsPrinted(context.root);
+
+    await paperOn(context);
+    const onPaper = colorsPrinted(context.root);
+
+    expect(onPaper).toEqual(onScreen);
+    // The column chart in color 3 of Earth, the stacked chart in the first color of Earth and the one kept for Well, color 6.
+    expect(onPaper.columns).toEqual([...Array(2).fill('var(--tmz-pal-earth-3)'), 'var(--tmz-pal-earth-1)', 'var(--tmz-pal-earth-6)']);
+    expect(onPaper.swatches).toEqual(['var(--tmz-pal-earth-1)', 'var(--tmz-pal-earth-6)']);
+    // The map is on the green scale: it sets the steps its shapes and its legend read, and none of them is Earth's own scale.
+    expect(onPaper.mapSteps).toEqual([1, 2, 3, 4, 5, 6, 7].map((n) => `var(--tmz-ramp-green-${n})`));
+    expect(onPaper.mapLegend).toEqual([1, 2, 3, 4, 5, 6, 7].map((n) => `var(--tmz-seq-${n})`));
+    expect(onPaper.shapes).toHaveLength(2);
+    // Nothing of the print sheet hides the legends or the swatches.
+    expect(byTestId(context.root, 'map-legend')!.closest('.paper\\:hidden')).toBeNull();
+    expect(byTestId(context.root, 'series-legend')!.closest('.paper\\:hidden')).toBeNull();
+  });
+
+  it('draws the screen again, in the same colors, once the print is over', async () => {
+    const context = await housing();
+    const onScreen = colorsPrinted(context.root);
+    const print = await paperOn(context);
+
+    print.restore();
+    await settle(context.harness);
+
+    expect(colorsPrinted(context.root)).toEqual(onScreen);
   });
 });

@@ -147,10 +147,10 @@ The MCP server SHALL offer these tools, each requiring the role given and acting
 | `test_script`, `get_test` | analyst | Start a sample test of a draft and read it |
 | `start_run`, `get_run` | analyst | Queue a run and read the latest or a given run |
 | `list_indicators`, `get_indicator_columns`, `query_indicator` | viewer | Indicators with their metadata and publish state, their columns and roles, and what a widget query returns |
-| `list_dashboards`, `get_dashboard`, `get_widget_data` | viewer | Dashboards in order, one dashboard's filters, widgets and current version, and what its widgets show |
-| `create_dashboard`, `update_dashboard`, `duplicate_dashboard`, `remove_dashboard` | analyst | Add, rename, move, change the filters of, duplicate and remove dashboards |
-| `create_widget`, `update_widget`, `remove_widget` | analyst | Add, change, move to another dashboard and remove widgets |
-| `list_dashboard_versions`, `get_dashboard_version` | analyst | A dashboard's kept versions with what changed, author, time and origin, and any kept version's name, filters and widgets |
+| `list_dashboards`, `get_dashboard`, `get_widget_data` | viewer | Dashboards in order, one dashboard's filters, palette, colors kept by value, widgets and current version, and what its widgets show |
+| `create_dashboard`, `update_dashboard`, `duplicate_dashboard`, `remove_dashboard` | analyst | Add, rename, move, change the filters and the colors (palette and colors kept by value) of, duplicate and remove dashboards |
+| `create_widget`, `update_widget`, `remove_widget` | analyst | Add, change (a widget's color or scale included), move to another dashboard and remove widgets |
+| `list_dashboard_versions`, `get_dashboard_version` | analyst | A dashboard's kept versions with what changed, author, time and origin, and any kept version's name, filters, palette, colors kept by value and widgets |
 | `restore_dashboard_version` | analyst | Restore a kept version of a dashboard as a new version |
 
 Each tool SHALL describe its arguments with a JSON schema and SHALL be marked as read-only, or as changing or removing data, so clients can ask the person before running it.
@@ -252,7 +252,7 @@ Because scripts run without a strong sandbox and an AI client can be misled by t
 - **THEN** the result holds one value per municipality and water source, each municipality's and each water source's total, and the grand total
 
 ### Requirement: Dashboards and widgets through MCP
-`create_dashboard`, `update_dashboard`, `duplicate_dashboard` and `remove_dashboard` SHALL add, rename, move to a position, change the filters of, duplicate and remove dashboards with the rules of the UI. `create_widget` SHALL add a widget with a title, a chart type, a query and an optional position and size on the 12-column grid, placed under the dashboard's widgets when none is given; `update_widget` SHALL change any of them or move the widget to another dashboard. Both SHALL take every chart type and setting the widget form offers, including the series column, the layout of bars and columns, the sides of a population pyramid and the scale of a Likert widget, with the same validation. A dashboard's members SHALL see the change the next time their page reads the dashboard.
+`create_dashboard`, `update_dashboard`, `duplicate_dashboard` and `remove_dashboard` SHALL add, rename, move to a position, change the filters of, change the colors of (palette and colors kept by value), duplicate and remove dashboards with the rules of the UI. `get_dashboard` SHALL return the dashboard's palette and colors kept by value. `create_widget` SHALL add a widget with a title, a chart type, a query and an optional position and size on the 12-column grid, placed under the dashboard's widgets when none is given; `update_widget` SHALL change any of them or move the widget to another dashboard. Both SHALL take every chart type and setting the widget form offers, including the series column, the layout of bars and columns, the sides of a population pyramid, the scale of a Likert widget, and a widget's color and sequential scale, with the same validation. A dashboard's members SHALL see the change the next time their page reads the dashboard.
 
 #### Scenario: Dashboard for a situation
 - **WHEN** Claude creates the dashboard "Water access", adds a stat tile and a map of `piped_water_rate` without positions, and a dashboard filter on `municipality`
@@ -269,6 +269,14 @@ Because scripts run without a strong sandbox and an AI client can be misled by t
 #### Scenario: Invalid Likert scale through MCP
 - **WHEN** Claude calls `create_widget` for a Likert widget whose scale puts a positive value before a negative one
 - **THEN** the call is refused with `mcp.validation` and the error on the scale, and nothing is saved
+
+#### Scenario: Colors through MCP
+- **WHEN** Claude calls `update_dashboard` on "Water access" with the palette `earth` and color 5 kept for `Female` of `sex`, then `create_widget` for a map with the green scale
+- **THEN** a member who opens "Water access" sees its charts in the colors of *Earth*, `Female` in color 5, and the map on the green scale, and `get_dashboard` returns the palette and the color kept
+
+#### Scenario: Unknown palette through MCP
+- **WHEN** Claude calls `update_dashboard` with the palette `neon`
+- **THEN** the call is refused with `mcp.validation` and the error on the palette, and nothing is saved
 
 ### Requirement: Rows of a table
 `query_rows` SHALL be available only at *Summaries and rows*. It SHALL return at most 100 rows of one table of a source the person's role can read, with chosen columns, the clean data dashboard's filters and one sort column, and the total of rows that match. Text longer than 500 characters SHALL be cut and marked as cut.
@@ -408,7 +416,7 @@ Writes through MCP by one person on one dashboard with the same `change`, compar
 - **THEN** "Water" has two new versions: the restore and the widget
 
 ### Requirement: Dashboard versions through MCP
-`list_dashboard_versions` SHALL return a dashboard's kept versions, newest first, with what the version history shows for each and which one is current. `get_dashboard_version` SHALL return a kept version's name, filters and widgets with their settings, as `get_dashboard` returns them. `restore_dashboard_version` SHALL restore a kept version with the rules of the UI and its `change`, and return the new version, whether the name was kept, and the widgets restored as copies.
+`list_dashboard_versions` SHALL return a dashboard's kept versions, newest first, with what the version history shows for each and which one is current. `get_dashboard_version` SHALL return a kept version's name, filters, palette, colors kept by value and widgets with their settings, as `get_dashboard` returns them. `restore_dashboard_version` SHALL restore a kept version with the rules of the UI and its `change`, and return the new version, whether the name was kept, and the widgets restored as copies.
 
 #### Scenario: Undoing a request
 - **WHEN** an analyst asks Claude to undo its last request on "Water access", whose current version 9 was made by that request
@@ -429,6 +437,10 @@ Writes through MCP by one person on one dashboard with the same `change`, compar
 #### Scenario: Version no longer kept
 - **WHEN** Claude calls `get_dashboard_version` for version 1 of a dashboard that keeps versions 2 to 11
 - **THEN** the tool is refused with `dashboards.versionNotFound`
+
+#### Scenario: Colors of a version
+- **WHEN** Claude calls `update_dashboard` on "Water access" with the palette `earth` and color 5 kept for `Female` of `sex`, and then calls `get_dashboard_version` for the version before that change and for the version it made
+- **THEN** the first holds the palette `tamiza` and no colors kept by value, and the second holds the palette `earth` and the color kept
 
 ### Requirement: Restoring dashboards against the current version
 `restore_dashboard_version` SHALL require `baseVersion`, the number of the dashboard's current version as the client last read it. When the current version is another, the tool SHALL change nothing and be refused with the code `mcp.dashboardChanged`, giving the current version's number, author, time and origin.

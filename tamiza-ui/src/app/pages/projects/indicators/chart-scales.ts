@@ -88,16 +88,13 @@ export function slicePath(cx: number, cy: number, radius: number, a0: number, a1
   return `M${fixed(cx)} ${fixed(cy)} L${fixed(start.x)} ${fixed(start.y)} A${fixed(radius)} ${fixed(radius)} 0 ${large} 1 ${fixed(end.x)} ${fixed(end.y)} Z`;
 }
 
-// Colors come from the CSS custom properties in styles.css, which swap for the dark theme: eight categorical hues in a fixed
-// order (never cycled; a ninth series is drawn in the neutral) and one sequential ramp of seven steps.
+// Colors are not picked here: `chart-colors.ts` resolves them from the dashboard's palette (add-dashboard-palettes, design D7). What
+// stays is the size of a palette and of a sequential scale, and the step a value falls in.
 
+/** The categorical colors of a palette: a fixed order, never cycled (a ninth value is drawn in the neutral of "Other"). */
 export const seriesCount = 8;
+/** The steps of a sequential scale. */
 export const sequentialSteps = 7;
-
-/** The color of the n-th series (0-based): a fixed order, then a neutral for anything past the eighth. */
-export function seriesColor(index: number): string {
-  return index < seriesCount ? `var(--tmz-series-${index + 1})` : 'var(--tmz-series-other)';
-}
 
 /** The step (1..7) of the sequential ramp for a value between `min` and `max`; a flat range uses the middle step. */
 export function sequentialStep(value: number, min: number, max: number): number {
@@ -106,10 +103,6 @@ export function sequentialStep(value: number, min: number, max: number): number 
   }
   const ratio = (value - min) / (max - min);
   return Math.min(sequentialSteps, Math.max(1, Math.floor(ratio * sequentialSteps) + 1));
-}
-
-export function sequentialColor(step: number): string {
-  return `var(--tmz-seq-${step})`;
 }
 
 /** Natural order: 2 before 10, and text by the browser's rules. */

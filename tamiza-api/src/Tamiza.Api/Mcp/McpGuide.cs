@@ -33,7 +33,8 @@ public static class McpGuide
             .Append(situation.Trim()).Append("\n\n")
             .Append("Work in the order of the server instructions. Start by reading the project and its form with get_project, get_form, get_tables and profile_table. ")
             .Append("Then propose the indicators you would build and wait for me to confirm them before you write any script. ")
-            .Append("Test every script before you save it, run the project, build a dashboard with widgets and a filter, and finish by telling me what it shows.");
+            .Append("Test every script before you save it, run the project, build a dashboard with widgets and a filter, and finish by telling me what it shows. ")
+            .Append("Leave the dashboard's palette as it is unless I ask for another, and keep colors by value (valueColors) for categories that recur across widgets, such as sex or yes/no.");
         return text.ToString();
     }
 

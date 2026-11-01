@@ -22,6 +22,12 @@ public sealed class Dashboard
     /// <summary>The dashboard's filters, in order, as JSON text in a <c>jsonb</c> column: the indicators module validates and reads them.</summary>
     public string Filters { get; set; } = "[]";
 
+    /// <summary>The id of the dashboard's palette, one of a fixed set the <c>ck_dashboards_palette</c> check lists; the indicators module validates and reads it.</summary>
+    public string Palette { get; set; } = "tamiza";
+
+    /// <summary>The colors kept for values of columns, in the order they were saved, as JSON text in a <c>jsonb</c> column: the indicators module validates and reads them.</summary>
+    public string ValueColors { get; set; } = "[]";
+
     public Guid CreatedBy { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }

@@ -148,11 +148,15 @@ A map SHALL print its shapes, its basemap and its legend, with the basemap's att
 - **THEN** the sheet shows that municipality's area
 
 ### Requirement: Colors on paper
-Chart marks, map shapes and legend swatches SHALL print in their colors even when the browser's option to print background graphics is off. The sheet's background SHALL be white, and widgets SHALL have a thin border and no shadow.
+Chart marks, map shapes and legend swatches SHALL print in their colors, the dashboard's palette, the widgets' colors and scales and the colors kept by value included, even when the browser's option to print background graphics is off. The sheet's background SHALL be white, and widgets SHALL have a thin border and no shadow.
 
 #### Scenario: Background graphics off
 - **WHEN** a member prints a map in a browser whose option to print background graphics is off
 - **THEN** the map's legend swatches print in their colors
+
+#### Scenario: Palette printed
+- **WHEN** a member prints "Housing", which has the palette *Earth* and a map on the green scale
+- **THEN** the charts print in the colors of *Earth* and the map on the green scale
 
 ### Requirement: Tables on paper
 A widget shown as a table, and a cross table widget, SHALL print the rows that fit in its box. When some rows do not fit, it SHALL say how many were left out. A table whose columns do not all fit SHALL print the group column and the columns that fit, and SHALL say how many columns were left out.

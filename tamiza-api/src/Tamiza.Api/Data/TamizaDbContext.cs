@@ -412,12 +412,18 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
 
         modelBuilder.Entity<Dashboard>(dashboard =>
         {
-            dashboard.ToTable("dashboards", table => table.HasCheckConstraint("ck_dashboards_position", "position >= 0"));
+            dashboard.ToTable("dashboards", table =>
+            {
+                table.HasCheckConstraint("ck_dashboards_position", "position >= 0");
+                table.HasCheckConstraint("ck_dashboards_palette", "palette IN ('tamiza', 'institutional', 'earth', 'vivid')");
+            });
             dashboard.HasKey(d => d.Id);
             dashboard.Property(d => d.Id).HasDefaultValueSql("gen_random_uuid()");
             dashboard.Property(d => d.Name).HasColumnType("text");
             dashboard.Property(d => d.NormalizedName).HasColumnType("text");
             dashboard.Property(d => d.Filters).HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb");
+            dashboard.Property(d => d.Palette).HasColumnType("text").HasDefaultValue("tamiza");
+            dashboard.Property(d => d.ValueColors).HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb");
             dashboard.Property(d => d.CreatedAt).HasDefaultValueSql("now()");
             dashboard.Property(d => d.UpdatedAt).HasDefaultValueSql("now()");
             // One name per project whatever its case; also serves the lookups by project, so the project has no index of its own.

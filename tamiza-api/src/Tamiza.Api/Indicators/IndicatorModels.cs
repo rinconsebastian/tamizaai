@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 using Tamiza.Api.CleanData;
 
@@ -130,6 +132,31 @@ public sealed record WidgetTooltipItem(string Column, string? Label = null, stri
 }
 
 /// <summary>
+/// How a widget is drawn, apart from its query (design D3 of dashboard palettes): a change here never changes the rows. Each field is
+/// left out of the JSON while it is not set, so a config saved without it reads and writes exactly as before. The description and range on
+/// the fields are what the MCP tools' input schema shows of them; nothing is validated with them, since
+/// <see cref="IndicatorValidation"/> is the rule, and a test keeps them with <see cref="Palettes"/>. The scale names are in the
+/// description and not in an enum: the fields are nullable, and a schema whose enum leaves out null would refuse the null that the
+/// server accepts for "not set".
+/// </summary>
+/// <param name="Color">Bar, column and line with no series, and histogram only: the number, 1 to <see cref="Palettes.ColorCount"/>, of the dashboard palette's color the widget is drawn in; left out, color 1.</param>
+/// <param name="Ramp">Map and heat map only: one of <see cref="Palettes.Scales"/>; left out, the dashboard palette's own scale.</param>
+public sealed record WidgetDisplay(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("A place in the dashboard's palette, 1 to 8, never a color code. For a bar, column or line chart with no seriesBy and for a histogram; left out, color 1."),
+     Range(1, Palettes.ColorCount)] int? Color = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("A sequential scale: blue, teal, green, orange, red, purple or gray, matched exactly in lower case. For a map or heatmap only; left out, the palette's own scale.")] string? Ramp = null)
+{
+    /// <summary>The display as saved: an empty scale is none, and a display that sets nothing is no display (null).</summary>
+    public WidgetDisplay? Normalize()
+    {
+        var ramp = string.IsNullOrEmpty(Ramp) ? null : Ramp;
+        return Color is null && ramp is null ? null : this with { Ramp = ramp };
+    }
+}
+
+/// <summary>
 /// A widget's query as a request carries it: anything left out takes its default (<see cref="WidgetConfig"/>). It is the
 /// <c>config</c> of a widget and of the query endpoint's body.
 /// </summary>
@@ -151,6 +178,7 @@ public sealed record WidgetTooltipItem(string Column, string? Label = null, stri
 /// The columns of the dashboard filters the widget ignores, at most 8 (design D6). Kept by column, so they hold on any dashboard the
 /// widget is moved or copied to, and for a filter removed and defined again. Not a query setting: a query ignores it.
 /// </param>
+/// <param name="Display">How the widget is drawn (<see cref="WidgetDisplay"/>). Not a query setting: a query ignores it.</param>
 public sealed record WidgetConfigInput(
     string? Indicator = null,
     string? Measure = null,
@@ -166,7 +194,9 @@ public sealed record WidgetConfigInput(
     string? SeriesBy = null,
     string? Layout = null,
     WidgetPyramid? Pyramid = null,
-    IReadOnlyList<LikertStep>? Scale = null)
+    IReadOnlyList<LikertStep>? Scale = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("How the widget is drawn: its color or its scale. It never changes the rows.")] WidgetDisplay? Display = null)
 {
     public WidgetConfig Normalize() => new(
         Indicator ?? "",
@@ -185,7 +215,8 @@ public sealed record WidgetConfigInput(
         string.IsNullOrEmpty(Layout) ? null : Layout,
         Pyramid,
         // A null step is kept so validation can name it.
-        Scale ?? []);
+        Scale ?? [],
+        Display?.Normalize());
 }
 
 /// <summary>A widget's query with its defaults applied. With no <see cref="Measure"/> and no <see cref="Ratio"/>, the table's default measure is plotted.</summary>
@@ -204,7 +235,8 @@ public sealed record WidgetConfig(
     string? SeriesBy = null,
     string? Layout = null,
     WidgetPyramid? Pyramid = null,
-    IReadOnlyList<LikertStep>? Scale = null)
+    IReadOnlyList<LikertStep>? Scale = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WidgetDisplay? Display = null)
 {
     public const int DefaultBuckets = 10;
 
@@ -216,6 +248,10 @@ public sealed record WidgetConfig(
     /// <summary>The most series a bar, column or line widget shows before the smallest are combined into "Other", and the most a heat map or a cross table shows.</summary>
     public const int MaxSeries = 8;
     public const int MaxMatrixSeries = 30;
+
+    /// <summary>The most slices a pie colors by value before the smallest are folded into "Other": the palette's colors, "Other" included (design D8 of dashboard palettes).</summary>
+    public const int MaxSlices = Palettes.ColorCount;
+
     public const int MaxBuckets = 100;
 
     /// <summary>The most tooltip columns a map has.</summary>
@@ -257,14 +293,18 @@ public sealed record IndicatorEntry(
 /// <param name="Indicators">The project's current indicator scripts, ordered by name.</param>
 public sealed record IndicatorOverview(IReadOnlyList<IndicatorEntry> Indicators, IndicatorLimits Limits);
 
-/// <summary>One of the project's own dashboards with its filters and widgets.</summary>
+/// <summary>One of the project's own dashboards with its filters, colors and widgets.</summary>
 /// <param name="Filters">The dashboard's filters, in order; none for a dashboard that has not defined any.</param>
+/// <param name="Palette">One of <see cref="Palettes.All"/>; <see cref="Palettes.Tamiza"/> for a dashboard that has not chosen one.</param>
+/// <param name="ValueColors">The colors the dashboard keeps for values of columns, in the order they were saved; none for a dashboard that keeps none.</param>
 /// <param name="Widgets">Ordered by <c>layout.y</c>, <c>layout.x</c>, then creation; listed whether or not their indicator is published.</param>
 /// <param name="Version">
 /// The number of the dashboard's current version, its newest (design D9 of dashboard versions); null while it has none, which only a
 /// version that could not be recorded leaves.
 /// </param>
-public sealed record DashboardView(Guid Id, string Name, IReadOnlyList<DashboardFilter> Filters, IReadOnlyList<Widget> Widgets, int? Version);
+public sealed record DashboardView(
+    Guid Id, string Name, IReadOnlyList<DashboardFilter> Filters, string Palette, IReadOnlyList<ValueColor> ValueColors,
+    IReadOnlyList<Widget> Widgets, int? Version);
 
 /// <summary>One of the project's own dashboards, without its widgets.</summary>
 public sealed record DashboardEntry(Guid Id, string Name);
@@ -318,6 +358,14 @@ public sealed record MissingReferences(bool Indicator, IReadOnlyList<string> Col
 /// <param name="Series">A widget with a series only: its series in display order. <see cref="Rows"/> then holds one <see cref="SeriesCell"/> per group and series value that has a value.</param>
 /// <param name="Totals">A widget with a series only: the totals of its groups, its series and all its rows.</param>
 /// <param name="LeftOut">A population pyramid or a Likert widget only: the rows it left out because their group or series value does not belong.</param>
+/// <param name="Domain">
+/// A pie chart only (design D8 of dashboard palettes): the groups its colors and its "Other" slice follow, read from the rows that
+/// match the widget's own filters, not the dashboard's. Every group with a total above zero is ranked by total, largest first, the
+/// missing group (<c>none</c>) in its place, as the page ranked the slices of a pie before the domain existed. At most
+/// <see cref="WidgetConfig.MaxSlices"/> entries: all the groups when there are that many or fewer, otherwise the largest
+/// <see cref="WidgetConfig.MaxSlices"/> - 1 followed by <c>other</c>. A group outside it, the missing one included, is part of "Other".
+/// Left out for every other widget.
+/// </param>
 public sealed record IndicatorQueryResponse(
     bool Published,
     IReadOnlyList<IndicatorRow> Rows,
@@ -327,7 +375,8 @@ public sealed record IndicatorQueryResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? NotFiltered = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SeriesInfo>? Series = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SeriesTotals? Totals = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? LeftOut = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? LeftOut = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SeriesInfo>? Domain = null);
 
 /// <summary>The outcome of a query: the response, or the validation errors of the request.</summary>
 public sealed record IndicatorQueryOutcome(IndicatorQueryResponse? Response, IDictionary<string, string[]>? Errors);

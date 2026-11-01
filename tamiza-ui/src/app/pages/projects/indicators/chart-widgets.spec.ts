@@ -1,6 +1,6 @@
 import { byTestId, settle } from '../../../../testing/project-harness';
 import { pressKey } from '../../../../testing/cdk';
-import { ChartType, IndicatorEntry, QueryResult, QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
+import { ChartType, DashboardColors, IndicatorEntry, PaletteId, QueryResult, QueryRow, QuerySeries, ValueColor, WidgetConfig } from '../../../core/projects/indicators.service';
 import { Context, all, cell, clearOverlay, config, indicator, isQuery, open, overlay, printOf, result, row, seriesResult, text, wait, widget } from './indicators-testing';
 
 interface Query {
@@ -8,19 +8,22 @@ interface Query {
   chartType: ChartType;
 }
 
-/** Opens a dashboard with one widget of `chartType` over `settings`, and answers its one query with `rows`. */
-async function show(chartType: ChartType, settings: Partial<WidgetConfig>, rows: QueryRow[], indicators?: IndicatorEntry[]) {
-  const context = await open('viewer', [widget('w1', { chartType, config: config(settings) })], null, indicators ? { indicators } : {});
+/**
+ * Opens a dashboard with one widget of `chartType` over `settings`, and answers its one query with `rows` (and, for a pie, its `domain`).
+ * The dashboard has the palette Tamiza and no colors kept by value unless `colors` says otherwise.
+ */
+async function show(chartType: ChartType, settings: Partial<WidgetConfig>, rows: QueryRow[], indicators?: IndicatorEntry[], colors?: DashboardColors, domain?: QuerySeries[]) {
+  const context = await open('viewer', [widget('w1', { chartType, config: config(settings) })], null, indicators ? { indicators } : {}, colors ? { colors } : {});
   const requests = context.http.match(isQuery);
   expect(requests).toHaveLength(1);
-  requests[0].flush(result(rows));
+  requests[0].flush(result(rows, domain ? { domain } : {}));
   await settle(context.harness);
   return { ...context, query: requests[0].request.body as Query };
 }
 
 /** Opens a dashboard with one widget of `chartType` over `settings`, and answers its one query with the whole `answer` (a widget with a series). */
-async function showAnswer(chartType: ChartType, settings: Partial<WidgetConfig>, answer: QueryResult, indicators?: IndicatorEntry[]) {
-  const context = await open('viewer', [widget('w1', { chartType, config: config(settings) })], null, indicators ? { indicators } : {});
+async function showAnswer(chartType: ChartType, settings: Partial<WidgetConfig>, answer: QueryResult, indicators?: IndicatorEntry[], colors?: DashboardColors) {
+  const context = await open('viewer', [widget('w1', { chartType, config: config(settings) })], null, indicators ? { indicators } : {}, colors ? { colors } : {});
   const requests = context.http.match(isQuery);
   expect(requests).toHaveLength(1);
   requests[0].flush(answer);
@@ -43,6 +46,12 @@ const x = (element: Element) => Number(element.getAttribute('x'));
 
 const households = indicator('households_visited');
 const rate = indicator('piped_water_rate');
+
+/** The color token a mark is drawn in: the `var(--tmz-…)` of its style, whichever property holds it (fill, stroke, background). */
+const colorOf = (element: Element | null) => /var\(--[\w-]+\)/.exec(element?.getAttribute('style') ?? '')?.[0] ?? null;
+/** The colors of a dashboard: a palette and the values it keeps a color for. */
+const palette = (name: PaletteId, valueColors: ValueColor[] = []): DashboardColors => ({ palette: name, valueColors });
+const pal = (name: PaletteId, n: number) => `var(--tmz-pal-${name}-${n})`;
 
 describe('chart widgets', () => {
   afterEach(clearOverlay);
@@ -141,7 +150,7 @@ describe('chart widgets', () => {
     it('colors the marks from the color tokens, not literal colors', async () => {
       const context = await show('column', {}, groups);
 
-      expect(marks(context)[0].getAttribute('style')).toContain('var(--tmz-series-1)');
+      expect(marks(context)[0].getAttribute('style')).toContain('var(--tmz-pal-tamiza-1)');
     });
 
     it('describes a single group in the singular', async () => {
@@ -391,7 +400,162 @@ describe('chart widgets', () => {
       const context = await show('pie', {}, [row('Small', 10), row('Large', 90)]);
 
       expect(titles(all(context.root, 'pie-slice'))).toEqual(['Large: 90 (90%)', 'Small: 10 (10%)']);
-      expect(all(context.root, 'pie-slice').map((s) => s.getAttribute('style'))).toEqual([expect.stringContaining('var(--tmz-series-1)'), expect.stringContaining('var(--tmz-series-2)')]);
+      expect(all(context.root, 'pie-slice').map((s) => s.getAttribute('style'))).toEqual([expect.stringContaining('var(--tmz-pal-tamiza-1)'), expect.stringContaining('var(--tmz-pal-tamiza-2)')]);
+    });
+
+    describe('colors from the domain (add-dashboard-palettes)', () => {
+      const own = { groupBy: 'water_source' };
+      const named = (...values: string[]): QuerySeries[] => values.map((value) => ({ value, kind: 'value' }));
+      const sliceTitles = (context: Context) => titles(all(context.root, 'pie-slice'));
+      const sliceColors = (context: Context) => all(context.root, 'pie-slice').map(colorOf);
+
+      it('keeps the colors of the slices when a dashboard filter makes the second the largest, and sizes them by the filtered rows (Colors kept under a dashboard filter)', async () => {
+        // Piped is the larger in the widget\'s own rows; after the filter Well is.
+        const context = await show('pie', own, [row('Piped', 20), row('Well', 50)], undefined, undefined, named('Piped', 'Well'));
+
+        expect(sliceTitles(context)).toEqual(['Well: 50 (71.4%)', 'Piped: 20 (28.6%)']);
+        expect(sliceColors(context)).toEqual([pal('tamiza', 2), pal('tamiza', 1)]);
+        expect(all(context.root, 'legend-item').map((item) => colorOf(item.querySelector('span[aria-hidden]')))).toEqual([pal('tamiza', 2), pal('tamiza', 1)]);
+      });
+
+      it('keeps a value that folded into "Other" in "Other" when a dashboard filter makes it the largest (Other kept under a dashboard filter)', async () => {
+        // Ten values in the widget\'s own rows: the seven largest have a color, the three smallest (G8, G9, G10) are "Other".
+        const domain: QuerySeries[] = [...named('G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7'), { value: null, kind: 'other' }];
+        const filtered = [row('G2', 10), row('G8', 5), row('G9', 50), row('G10', 1), row('G1', 3)];
+        const context = await show('pie', own, filtered, undefined, undefined, domain);
+
+        expect(sliceTitles(context)).toEqual(['G2: 10 (14.5%)', 'G1: 3 (4.3%)', 'Other: 56 (81.2%)']);
+        expect(sliceColors(context)).toEqual([pal('tamiza', 2), pal('tamiza', 1), 'var(--tmz-series-other)']);
+      });
+
+      it('draws "Other" after the named slices and in the neutral color whatever is kept by value', async () => {
+        const domain: QuerySeries[] = [...named('A', 'B'), { value: null, kind: 'other' }];
+        const kept = palette('tamiza', [{ column: 'water_source', value: 'Other', color: 3 }]);
+        const context = await show('pie', own, [row('A', 10), row('B', 20), row('Z', 100)], undefined, kept, domain);
+
+        expect(sliceTitles(context).map((title) => title.split(':')[0])).toEqual(['B', 'A', 'Other']);
+        expect(sliceColors(context)).toEqual([pal('tamiza', 2), pal('tamiza', 1), 'var(--tmz-series-other)']);
+      });
+
+      it('colors a slice by its value: the color kept for it, then the free colors in the order of the domain (Same value, same color)', async () => {
+        const kept = palette('tamiza', [{ column: 'water_source', value: 'River', color: 1 }]);
+        const context = await show('pie', own, [row('Piped', 50), row('Well', 30), row('River', 20)], undefined, kept, named('Piped', 'Well', 'River'));
+
+        expect(sliceTitles(context).map((title) => title.split(':')[0])).toEqual(['Piped', 'Well', 'River']);
+        expect(sliceColors(context)).toEqual([pal('tamiza', 2), pal('tamiza', 3), pal('tamiza', 1)]);
+      });
+
+      it('draws in the palette of its dashboard', async () => {
+        const context = await show('pie', own, [row('Piped', 50), row('Well', 30)], undefined, palette('earth'), named('Piped', 'Well'));
+
+        expect(sliceColors(context)).toEqual([pal('earth', 1), pal('earth', 2)]);
+      });
+
+      it('gives the missing group its place in the domain and never a color kept by value', async () => {
+        const kept = palette('tamiza', [{ column: 'water_source', value: '(none)', color: 4 }]);
+        const domain: QuerySeries[] = [...named('Piped'), { value: null, kind: 'none' }];
+        const context = await show('pie', own, [row('Piped', 30), row(null, 10)], undefined, kept, domain);
+
+        expect(sliceTitles(context)).toEqual(['Piped: 30 (75%)', '(none): 10 (25%)']);
+        expect(sliceColors(context)).toEqual([pal('tamiza', 1), pal('tamiza', 2)]);
+      });
+
+      it('keeps the missing group in the place the domain ranks it, with the next free color, whatever is kept by value', async () => {
+        // The domain ranks the missing group by size, as the series' domain does: here between Piped and River.
+        const kept = palette('tamiza', [
+          { column: 'water_source', value: 'River', color: 2 },
+          { column: 'water_source', value: '(none)', color: 4 },
+        ]);
+        const domain: QuerySeries[] = [...named('Piped'), { value: null, kind: 'none' }, ...named('River')];
+        const context = await show('pie', own, [row('Piped', 50), row(null, 30), row('River', 20)], undefined, kept, domain);
+
+        expect(sliceTitles(context).map((title) => title.split(':')[0])).toEqual(['Piped', '(none)', 'River']);
+        // River's color is set aside, so Piped and the missing group take the free ones in order of the domain.
+        expect(sliceColors(context)).toEqual([pal('tamiza', 1), pal('tamiza', 3), pal('tamiza', 2)]);
+      });
+
+      describe('the missing group and the fold, by rank', () => {
+        // Ten groups of one pie's own rows. The missing group is the third by size, so the domain ranks it there, takes the seven
+        // largest and folds G8, G9 and G10 into "Other": the order and the fold this component made from the rows before the domain.
+        const rows = [row('G1', 100), row('G2', 90), row(null, 80), row('G4', 70), row('G5', 60), row('G6', 50), row('G7', 40), row('G8', 30), row('G9', 20), row('G10', 10)];
+        const domain: QuerySeries[] = [...named('G1', 'G2'), { value: null, kind: 'none' }, ...named('G4', 'G5', 'G6', 'G7'), { value: null, kind: 'other' }];
+        const expectedNames = ['G1', 'G2', '(none)', 'G4', 'G5', 'G6', 'G7', 'Other'];
+        const expectedColors = [1, 2, 3, 4, 5, 6, 7].map((n) => pal('tamiza', n)).concat('var(--tmz-series-other)');
+        const names = (context: Context) => sliceTitles(context).map((title) => title.split(':')[0]);
+
+        it('colors the missing group by its rank and folds the smallest groups, not it, into "Other"', async () => {
+          const context = await show('pie', own, rows, undefined, undefined, domain);
+
+          expect(names(context)).toEqual(expectedNames);
+          expect(sliceColors(context)).toEqual(expectedColors);
+          expect(sliceTitles(context).at(-1)).toMatch(/^Other: 60 /);
+        });
+
+        it('draws the same slices in the same colors from an answer with no domain (an older API)', async () => {
+          const context = await show('pie', own, rows);
+
+          expect(names(context)).toEqual(expectedNames);
+          expect(sliceColors(context)).toEqual(expectedColors);
+          expect(sliceTitles(context).at(-1)).toMatch(/^Other: 60 /);
+        });
+
+        it('draws an answer with an empty domain as one with none', async () => {
+          const context = await show('pie', own, rows, undefined, undefined, []);
+
+          expect(names(context)).toEqual(expectedNames);
+          expect(sliceColors(context)).toEqual(expectedColors);
+        });
+      });
+
+      it('sums into "Other" a group the domain does not hold but the filtered rows give a value above zero, after the named slices and in the neutral color', async () => {
+        // In the pie\'s own rows Lake and River have no share, so the domain leaves them out and has no "Other" entry. A dashboard
+        // filter then makes both positive.
+        const context = await show('pie', own, [row('Piped', 50), row('Well', 10), row('Lake', 15), row('River', 25)], undefined, undefined, named('Piped', 'Well'));
+
+        expect(sliceTitles(context)).toEqual(['Piped: 50 (50%)', 'Well: 10 (10%)', 'Other: 40 (40%)']);
+        expect(sliceColors(context)).toEqual([pal('tamiza', 1), pal('tamiza', 2), 'var(--tmz-series-other)']);
+        expect(all(context.root, 'legend-item').map((item) => colorOf(item.querySelector('span[aria-hidden]')))).toEqual([pal('tamiza', 1), pal('tamiza', 2), 'var(--tmz-series-other)']);
+        expect(all(context.root, 'legend-item').map((item) => text(item.querySelector('span:not([aria-hidden])')))).toEqual(['Piped', 'Well', 'Other']);
+        expect(byTestId(context.root, 'pie-skipped')).toBeNull();
+      });
+
+      it('leaves a group outside the domain with a value at or below zero out of "Other", and counts it', async () => {
+        const context = await show('pie', own, [row('Piped', 30), row('Lake', -5), row('River', 0)], undefined, undefined, named('Piped'));
+
+        expect(sliceTitles(context)).toEqual(['Piped: 30 (100%)']);
+        expect(text(byTestId(context.root, 'pie-skipped'))).toBe('2 groups with a zero or negative value are not drawn; the table lists them.');
+      });
+
+      it('adds a group outside the domain to the "Other" the domain already holds', async () => {
+        const domain: QuerySeries[] = [...named('A'), { value: null, kind: 'other' }];
+        const context = await show('pie', own, [row('A', 10), row('Z', 30), row('Y', 20)], undefined, undefined, domain);
+
+        expect(sliceTitles(context)).toEqual(['A: 10 (16.7%)', 'Other: 50 (83.3%)']);
+        expect(sliceColors(context)).toEqual([pal('tamiza', 1), 'var(--tmz-series-other)']);
+      });
+
+      it('still counts a group at or below zero instead of drawing it', async () => {
+        const context = await show('pie', own, [row('Piped', 30), row('Well', 0)], undefined, undefined, named('Piped', 'Well'));
+
+        expect(sliceTitles(context)).toEqual(['Piped: 30 (100%)']);
+        expect(text(byTestId(context.root, 'pie-skipped'))).toBe('1 group with a zero or negative value is not drawn; the table lists it.');
+      });
+
+      it('lists every group in the table, "Other" folded or not', async () => {
+        const domain: QuerySeries[] = [...named('A'), { value: null, kind: 'other' }];
+        const context = await show('pie', own, [row('A', 10), row('Z', 30)], undefined, undefined, domain);
+
+        await toggle(context);
+        expect(tableRows(context)).toEqual([['A', '10', '25%'], ['Z', '30', '75%']]);
+      });
+
+      it('still draws a pie whose answer has no domain (an older API), in the order of size and with the kept colors', async () => {
+        const kept = palette('tamiza', [{ column: 'water_source', value: 'Small', color: 5 }]);
+        const context = await show('pie', own, [row('Small', 10), row('Large', 90)], undefined, kept);
+
+        expect(sliceTitles(context)).toEqual(['Large: 90 (90%)', 'Small: 10 (10%)']);
+        expect(sliceColors(context)).toEqual([pal('tamiza', 1), pal('tamiza', 5)]);
+      });
     });
 
     it('counts a single value at or below zero in the singular', async () => {
@@ -433,6 +597,80 @@ describe('chart widgets', () => {
       const context = await show('pie', settings, visits, [households]);
 
       expect(label(context)).toBe('Pie chart of Households visited by municipality: 4 slices. Largest: Cali, 50%.');
+    });
+  });
+
+  describe('colors of a chart with no series (add-dashboard-palettes)', () => {
+    const groups = [row('Cali', 75), row('Bogotá', 60), row('Pasto', 35), row('Rionegro', 90), row('Leticia', 10)];
+    const accent = (kind: 'column' | 'bar', colors: DashboardColors, display?: WidgetConfig['display']) => show(kind, display ? { display } : {}, groups, undefined, colors);
+
+    it('draws the columns in the place the widget keeps in its palette (Column chart in color 3)', async () => {
+      const context = await accent('column', palette('tamiza'), { color: 3 });
+
+      expect(marks(context).map(colorOf)).toEqual(Array(5).fill(pal('tamiza', 3)));
+    });
+
+    it('draws a widget saved before colors in color 1 and sends the query it always sent (Widget saved before colors)', async () => {
+      const context = await accent('column', palette('tamiza'));
+
+      expect(marks(context).map(colorOf)).toEqual(Array(5).fill(pal('tamiza', 1)));
+      expect(context.query.config).not.toHaveProperty('display');
+    });
+
+    it('keeps the widget\'s number and draws it in the palette of the dashboard it is on (Palette changed)', async () => {
+      const context = await accent('column', palette('vivid'), { color: 3 });
+
+      expect(marks(context).map(colorOf)).toEqual(Array(5).fill(pal('vivid', 3)));
+    });
+
+    it('draws a bar chart in its color too', async () => {
+      const context = await accent('bar', palette('earth'), { color: 5 });
+
+      expect(marks(context).map(colorOf)).toEqual(Array(5).fill(pal('earth', 5)));
+    });
+
+    it('draws the one column that has a color kept in it, and every other column in the widget\'s color (One bar highlighted)', async () => {
+      const context = await accent('column', palette('tamiza', [{ column: 'municipality', value: 'Rionegro', color: 2 }]));
+
+      expect(marks(context).map(colorOf)).toEqual([pal('tamiza', 1), pal('tamiza', 1), pal('tamiza', 1), pal('tamiza', 2), pal('tamiza', 1)]);
+    });
+
+    it('highlights a bar of a bar chart the same way, and draws the others in the widget\'s own color', async () => {
+      const context = await accent('bar', palette('earth', [{ column: 'municipality', value: 'Cali', color: 8 }]), { color: 4 });
+
+      expect(marks(context).map(colorOf)).toEqual([pal('earth', 8), pal('earth', 4), pal('earth', 4), pal('earth', 4), pal('earth', 4)]);
+    });
+
+    it('does not give a bar the next free color: a value with no color kept stays in the widget\'s color', async () => {
+      const context = await accent('column', palette('tamiza', [{ column: 'municipality', value: 'Pasto', color: 1 }]), { color: 6 });
+
+      expect(marks(context).map(colorOf)).toEqual([pal('tamiza', 6), pal('tamiza', 6), pal('tamiza', 1), pal('tamiza', 6), pal('tamiza', 6)]);
+    });
+
+    it('matches a group value by its exact text, and never takes the missing group for "(none)"', async () => {
+      const kept = palette('tamiza', [
+        { column: 'municipality', value: 'cali', color: 3 },
+        { column: 'municipality', value: '(none)', color: 4 },
+        { column: 'sex', value: 'Pasto', color: 5 },
+      ]);
+      const context = await show('column', {}, [row('Cali', 75), row('Pasto', 35), row(null, 5)], undefined, kept);
+
+      expect(marks(context).map(colorOf)).toEqual(Array(3).fill(pal('tamiza', 1)));
+    });
+
+    it('draws a line chart with no series in the widget\'s color whatever is kept by value', async () => {
+      const kept = palette('tamiza', [{ column: 'round', value: '2', color: 2 }]);
+      const context = await show('line', { indicator: 'attendance', groupBy: 'round', display: { color: 4 } }, [row('1', 60), row('2', 70), row('3', 80)], undefined, kept);
+
+      expect(all(context.root, 'chart-line').map(colorOf)).toEqual([pal('tamiza', 4)]);
+      expect(all(context.root, 'chart-dot').map(colorOf)).toEqual(Array(3).fill(pal('tamiza', 4)));
+    });
+
+    it('draws a histogram in the widget\'s color whatever is kept by value', async () => {
+      const kept = palette('tamiza', [{ column: 'municipality', value: 'Cali', color: 2 }]);
+      const context = await show('histogram', { buckets: 2, groupBy: null, display: { color: 7 } }, [row('Cali', 1), row('Pasto', 5), row('Buga', 9)], undefined, kept);
+
+      expect(marks(context).map(colorOf)).toEqual(Array(2).fill(pal('tamiza', 7)));
     });
   });
 
@@ -512,11 +750,11 @@ describe('chart widgets with a series (design D5)', () => {
       const context = await showAnswer('column', { ...source, layout: 'grouped' }, answer(), [households]);
 
       expect(marks(context).map((m) => m.getAttribute('style'))).toEqual([
-        expect.stringContaining('var(--tmz-series-1)'),
-        expect.stringContaining('var(--tmz-series-2)'),
-        expect.stringContaining('var(--tmz-series-1)'),
+        expect.stringContaining('var(--tmz-pal-tamiza-1)'),
+        expect.stringContaining('var(--tmz-pal-tamiza-2)'),
+        expect.stringContaining('var(--tmz-pal-tamiza-1)'),
       ]);
-      expect(swatches(context)).toEqual([expect.stringContaining('var(--tmz-series-1)'), expect.stringContaining('var(--tmz-series-2)')]);
+      expect(swatches(context)).toEqual([expect.stringContaining('var(--tmz-pal-tamiza-1)'), expect.stringContaining('var(--tmz-pal-tamiza-2)')]);
       for (const mark of marks(context)) {
         expect(number(mark, 'width')).toBeLessThanOrEqual(24);
       }
@@ -651,14 +889,14 @@ describe('chart widgets with a series (design D5)', () => {
 
       expect(legend(context)).toEqual(['Piped', 'Well', '(none)', 'Other']);
       expect(swatches(context)).toEqual([
-        expect.stringContaining('var(--tmz-series-1)'),
-        expect.stringContaining('var(--tmz-series-2)'),
-        expect.stringContaining('var(--tmz-series-3)'),
+        expect.stringContaining('var(--tmz-pal-tamiza-1)'),
+        expect.stringContaining('var(--tmz-pal-tamiza-2)'),
+        expect.stringContaining('var(--tmz-pal-tamiza-3)'),
         expect.stringContaining('var(--tmz-series-other)'),
       ]);
       expect(marks(context).map((m) => m.getAttribute('style'))).toEqual([
-        expect.stringContaining('var(--tmz-series-1)'),
-        expect.stringContaining('var(--tmz-series-3)'),
+        expect.stringContaining('var(--tmz-pal-tamiza-1)'),
+        expect.stringContaining('var(--tmz-pal-tamiza-3)'),
         expect.stringContaining('var(--tmz-series-other)'),
       ]);
     });
@@ -669,7 +907,74 @@ describe('chart widgets with a series (design D5)', () => {
       const context = await showAnswer('column', { ...source, layout: 'stacked' }, filtered, [households]);
 
       expect(legend(context)).toEqual(['Piped', 'Well', 'River']);
-      expect(marks(context).map((m) => m.getAttribute('style'))).toEqual([expect.stringContaining('var(--tmz-series-1)'), expect.stringContaining('var(--tmz-series-3)')]);
+      expect(marks(context).map((m) => m.getAttribute('style'))).toEqual([expect.stringContaining('var(--tmz-pal-tamiza-1)'), expect.stringContaining('var(--tmz-pal-tamiza-3)')]);
+    });
+
+    describe('colors of the dashboard (add-dashboard-palettes)', () => {
+      const three = () => seriesResult([cell('Cali', 'Piped', 35), cell('Cali', 'River', 5), cell('Cali', 'Well', 15)], ['Piped', 'River', 'Well']);
+      const swatchColors = (context: Context) => all(context.root, 'legend-swatch').map(colorOf);
+
+      it('draws a series in the color its dashboard keeps for its value, in its segments and in its legend (Color kept by value)', async () => {
+        const kept = palette('tamiza', [{ column: 'water_source', value: 'River', color: 6 }]);
+        const context = await showAnswer('column', { ...source, layout: 'stacked' }, three(), [households], kept);
+
+        expect(legend(context)).toEqual(['Piped', 'River', 'Well']);
+        expect(swatchColors(context)).toEqual([pal('tamiza', 1), pal('tamiza', 6), pal('tamiza', 2)]);
+        expect(marks(context).map(colorOf)).toEqual([pal('tamiza', 1), pal('tamiza', 6), pal('tamiza', 2)]);
+      });
+
+      it('sets the colors kept aside, so the others take the remaining colors in the order of the series (Colors set aside)', async () => {
+        const kept = palette('tamiza', [{ column: 'water_source', value: 'Well', color: 1 }]);
+        const context = await showAnswer('column', { ...source, layout: 'stacked' }, three(), [households], kept);
+
+        expect(swatchColors(context)).toEqual([pal('tamiza', 2), pal('tamiza', 3), pal('tamiza', 1)]); // Piped, River, Well
+        expect(marks(context).map(colorOf)).toEqual(swatchColors(context));
+      });
+
+      it('keeps a series in its color when a dashboard filter leaves it without rows, kept or not', async () => {
+        const kept = palette('tamiza', [{ column: 'water_source', value: 'Well', color: 1 }]);
+        const filtered = seriesResult([cell('Cali', 'Piped', 35), cell('Cali', 'River', 5)], ['Piped', 'River', 'Well']);
+        const context = await showAnswer('column', { ...source, layout: 'stacked' }, filtered, [households], kept);
+
+        expect(swatchColors(context)).toEqual([pal('tamiza', 2), pal('tamiza', 3), pal('tamiza', 1)]);
+        expect(marks(context).map(colorOf)).toEqual([pal('tamiza', 2), pal('tamiza', 3)]);
+      });
+
+      it('draws "Other" in the neutral color whatever is kept by value (Other stays neutral)', async () => {
+        const kept = palette('tamiza', [
+          { column: 'water_source', value: 'Piped', color: 8 },
+          { column: 'water_source', value: 'Other', color: 4 },
+        ]);
+        const folded = seriesResult(
+          [cell('Cali', 'Piped', 10), cell('Cali', 'Well', 5), cell('Cali', null, 3, 1, 'other')],
+          ['Piped', 'Well', { value: null, kind: 'other' }],
+        );
+        const context = await showAnswer('column', { ...source, layout: 'stacked' }, folded, [households], kept);
+
+        expect(swatchColors(context)).toEqual([pal('tamiza', 8), pal('tamiza', 1), 'var(--tmz-series-other)']);
+      });
+
+      it('draws the series in the palette of the dashboard (Palette changed)', async () => {
+        const context = await showAnswer('column', { ...source, layout: 'grouped' }, answer(), [households], palette('vivid'));
+
+        expect(swatchColors(context)).toEqual([pal('vivid', 1), pal('vivid', 2)]);
+        expect(marks(context).map(colorOf)).toEqual([pal('vivid', 1), pal('vivid', 2), pal('vivid', 1)]);
+      });
+
+      it('colors the lines of a line chart by their series\' values too', async () => {
+        const lines = seriesResult([cell('1', 'Cali', 60), cell('2', 'Cali', 70), cell('1', 'Buga', 50), cell('2', 'Buga', 55)], ['Buga', 'Cali']);
+        const kept = palette('earth', [{ column: 'municipality', value: 'Cali', color: 7 }]);
+        const context = await showAnswer('line', { indicator: 'attendance', groupBy: 'round', seriesBy: 'municipality' }, lines, undefined, kept);
+
+        expect(swatchColors(context)).toEqual([pal('earth', 1), pal('earth', 7)]);
+        expect(all(context.root, 'chart-line').map(colorOf)).toEqual([pal('earth', 1), pal('earth', 7)]);
+      });
+
+      it('gives a chart with a series no color of its own: the widget\'s color is for a chart with none', async () => {
+        const context = await showAnswer('column', { ...source, layout: 'grouped', display: { color: 5 } }, answer(), [households], palette('tamiza'));
+
+        expect(swatchColors(context)).toEqual([pal('tamiza', 1), pal('tamiza', 2)]);
+      });
     });
 
     it('draws no legend for a widget whose answer holds a single series, and names it in the caption', async () => {
@@ -695,7 +1000,7 @@ describe('chart widgets with a series (design D5)', () => {
       expect(all(context.root, 'chart-line').map((line) => line.getAttribute('d')!.match(/[ML]/g))).toEqual([['M', 'L', 'L'], ['M', 'L', 'L']]);
       expect(all(context.root, 'chart-dot')).toHaveLength(6);
       expect(legend(context)).toEqual(['Buga', 'Cali']);
-      expect(all(context.root, 'chart-line').map((line) => line.getAttribute('style'))).toEqual([expect.stringContaining('var(--tmz-series-1)'), expect.stringContaining('var(--tmz-series-2)')]);
+      expect(all(context.root, 'chart-line').map((line) => line.getAttribute('style'))).toEqual([expect.stringContaining('var(--tmz-pal-tamiza-1)'), expect.stringContaining('var(--tmz-pal-tamiza-2)')]);
     });
 
     it('puts the groups in natural order, 2 before 10, whatever order the answer lists them in', async () => {
@@ -744,13 +1049,35 @@ describe('chart widgets with a series (design D5)', () => {
   });
 
   describe('tooltips and keyboard', () => {
+    it('gives a tooltip line the color of its mark, the one its dashboard keeps for the value included', async () => {
+      const kept = palette('earth', [{ column: 'water_source', value: 'Well', color: 6 }]);
+      const context = await showAnswer('column', { ...source, layout: 'stacked' }, answer(), [households], kept);
+
+      const [piped, well] = marks(context);
+      await hover(context, hits(context)[1]);
+      expect(tooltipLines()).toEqual(['Well: 15 households']);
+      expect(colorOf(overlay().querySelector('[data-testid="tooltip-key"]'))).toBe(pal('earth', 6));
+      expect(colorOf(well)).toBe(pal('earth', 6));
+      expect(colorOf(piped)).toBe(pal('earth', 1));
+    });
+
+    it('gives each line of a line chart\'s tooltip the color of its line', async () => {
+      const lines = seriesResult([cell('1', 'Cali', 60), cell('1', 'Buga', 50)], ['Buga', 'Cali']);
+      const kept = palette('tamiza', [{ column: 'municipality', value: 'Cali', color: 5 }]);
+      const context = await showAnswer('line', { indicator: 'attendance', groupBy: 'round', seriesBy: 'municipality' }, lines, undefined, kept);
+
+      await hover(context, hits(context)[0]);
+      expect(Array.from(overlay().querySelectorAll('[data-testid="tooltip-key"]')).map(colorOf)).toEqual([pal('tamiza', 1), pal('tamiza', 5)]);
+      expect(all(context.root, 'chart-line').map(colorOf)).toEqual([pal('tamiza', 1), pal('tamiza', 5)]);
+    });
+
     it('shows the group, the series value and the value with the indicator\'s unit on hover, and closes on leaving (Segment tooltip)', async () => {
       const context = await showAnswer('column', { ...source, layout: 'stacked' }, answer(), [households]);
 
       await hover(context, hits(context)[0]);
       expect(text(overlay().querySelector('[data-testid="tooltip-heading"]'))).toBe('Cali');
       expect(tooltipLines()).toEqual(['Piped: 35 households']);
-      expect(overlay().querySelector<HTMLElement>('[data-testid="tooltip-key"]')!.getAttribute('style')).toContain('var(--tmz-series-1)');
+      expect(overlay().querySelector<HTMLElement>('[data-testid="tooltip-key"]')!.getAttribute('style')).toContain('var(--tmz-pal-tamiza-1)');
 
       hits(context)[0].dispatchEvent(new MouseEvent('pointerleave'));
       await settle(context.harness);
@@ -794,6 +1121,36 @@ describe('chart widgets with a series (design D5)', () => {
         'Column chart stacked to 100% of Households visited by municipality and water_source: 2 groups, 2 series, from 15 households to 35 households. Highest: Cali, Piped.',
       );
     });
+  });
+});
+
+describe('one value in several widgets (add-dashboard-palettes)', () => {
+  afterEach(clearOverlay);
+
+  it('draws Female in color 5 in a pie by sex and in a stacked column chart with the series sex (Same value, same color)', async () => {
+    const pie = widget('w1', { chartType: 'pie', config: config({ indicator: 'households_visited', groupBy: 'sex' }) });
+    const column = widget('w2', {
+      chartType: 'column',
+      config: config({ indicator: 'households_visited', groupBy: 'municipality', seriesBy: 'sex', layout: 'stacked' }),
+      layout: { x: 6, y: 0, w: 6, h: 4 },
+    });
+    const sexes = [{ value: 'Male', kind: 'value' as const }, { value: 'Female', kind: 'value' as const }];
+    const context = await open(
+      'viewer',
+      [pie, column],
+      (body) =>
+        body.chartType === 'pie'
+          ? result([row('Male', 60), row('Female', 40)], { domain: sexes })
+          : seriesResult([cell('Cali', 'Female', 30), cell('Cali', 'Male', 50)], ['Female', 'Male']),
+      { indicators: [households] },
+      { colors: palette('tamiza', [{ column: 'sex', value: 'Female', color: 5 }]) },
+    );
+
+    const slices = all(context.root, 'pie-slice');
+    expect(titles(slices)).toEqual(['Male: 60 households (60%)', 'Female: 40 households (40%)']);
+    expect(slices.map(colorOf)).toEqual([pal('tamiza', 1), pal('tamiza', 5)]);
+    const segments = marks(context);
+    expect(segments.map(colorOf)).toEqual([pal('tamiza', 5), pal('tamiza', 1)]); // Female, Male
   });
 });
 

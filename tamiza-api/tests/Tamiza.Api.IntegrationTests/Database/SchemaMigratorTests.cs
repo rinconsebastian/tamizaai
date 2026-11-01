@@ -959,6 +959,124 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres)
         Assert.Equal(0L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.dashboard_versions"));
     }
 
+    [Fact]
+    public async Task Dashboard_palettes_script_gives_every_dashboard_the_palette_tamiza_with_no_colors_and_changes_nothing_else()
+    {
+        var connectionString = await postgres.CreateDatabaseAsync();
+        string[] through0017 =
+        [
+            SchemaMigrator.InitialScript, "0002_add_ingestion.sql", "0003_add_pipeline.sql", "0004_add_pipeline_authoring.sql",
+            "0005_add_choice_labels.sql", "0006_add_performance_dashboard.sql", "0007_add_indicators_dashboard.sql", "0008_split_indicator_scripts.sql",
+            "0009_add_script_workbench.sql", "0010_add_local_dev_kit.sql", "0011_add_script_assistant.sql", "0012_add_multiple_dashboards.sql",
+            "0013_add_account_emails.sql", "0014_add_dashboard_filters.sql", "0015_add_dashboard_reports.sql", "0016_add_mcp_server.sql",
+            "0017_add_two_dimension_widgets.sql",
+        ];
+        ApplyScripts(connectionString, through0017);
+        const string project = "00000000-0000-0000-0000-0000000000aa";
+        const string ada = "00000000-0000-0000-0000-000000000001";
+        const string housing = "00000000-0000-0000-0000-0000000000d1";
+        const string field = "00000000-0000-0000-0000-0000000000d2";
+        const string households = "00000000-0000-0000-0000-0000000000c1";
+        const string waterSource = "00000000-0000-0000-0000-0000000000c2";
+        const string filters = """[{"column":"municipality","label":"Municipality","kind":"text","default":{"values":["Rionegro"]}}]""";
+        // A dashboard as the release of 0018 left it: filters, two widgets stored with the config of that time (which has no display),
+        // and an empty one. Version 1 of each is the one script 0018 records.
+        const string householdsConfig = """{"indicator":"households","measure":"value"}""";
+        const string waterSourceConfig = """{"indicator":"water","measure":"value","groupBy":"source","seriesBy":null,"ignoredDashboardFilters":["municipality"]}""";
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.users (id, keycloak_sub, name, created_at, updated_at) VALUES ('{{ada}}', 'sub-1', 'Ada', now(), now());
+            INSERT INTO tamiza.projects (id, name, kobo_server_url, kobo_asset_uid, encrypted_api_token, encrypted_webhook_secret,
+                                         form_name, form_fields, form_checked_at, created_by, created_at, updated_at)
+            VALUES ('{{project}}', 'Survey', 'https://kf.kobotoolbox.org', 'aAsset', 'x', 'x', 'Form', '[]', now(), '{{ada}}', now(), now());
+            INSERT INTO tamiza.dashboards (id, project_id, name, normalized_name, position, filters, created_by, created_at, updated_by, updated_at)
+            VALUES ('{{housing}}', '{{project}}', 'Housing', 'housing', 0, '{{filters}}', '{{ada}}', '2026-10-01 07:00:00+00', '{{ada}}',
+                    '2026-10-05 10:00:00+00'),
+                   ('{{field}}', '{{project}}', 'Field', 'field', 1, '[]', '{{ada}}', '2026-10-01 07:30:00+00', '{{ada}}', '2026-10-03 11:20:00+00');
+            INSERT INTO tamiza.dashboard_widgets (id, project_id, dashboard_id, chart_type, title, config, layout, created_by, created_at, updated_by, updated_at)
+            VALUES ('{{households}}', '{{project}}', '{{housing}}', 'stat', 'Households', '{{householdsConfig}}', '{"x":0,"y":0,"w":3,"h":2}', '{{ada}}',
+                    '2026-10-01 08:00:00+00', '{{ada}}', '2026-10-02 09:30:00+00'),
+                   ('{{waterSource}}', '{{project}}', '{{housing}}', 'bar', 'Water source', '{{waterSourceConfig}}', '{"x":3,"y":0,"w":9,"h":4}', '{{ada}}',
+                    '2026-10-01 09:00:00+00', '{{ada}}', '2026-10-06 14:15:00+00');
+            """);
+        ApplyScripts(connectionString, [.. through0017, "0018_add_dashboard_versions.sql"]);
+        const string dashboards = """
+            SELECT string_agg(format('%s %s %s %s %s %s %s %s', id, project_id, name, normalized_name, position, filters, updated_by, updated_at),
+                              ' | ' ORDER BY id)
+            FROM tamiza.dashboards
+            """;
+        const string widgets = """
+            SELECT string_agg(format('%s %s %s %s %s %s %s %s', id, dashboard_id, chart_type, title, config, layout, created_at, updated_at), ' | ' ORDER BY id)
+            FROM tamiza.dashboard_widgets
+            """;
+        const string versions = """
+            SELECT string_agg(format('%s %s %s %s %s %s %s', dashboard_id, number, content, changes, origin, author_id, saved_at), ' | ' ORDER BY dashboard_id, number)
+            FROM tamiza.dashboard_versions
+            """;
+        var dashboardsBefore = await ScalarAsync<string>(connectionString, dashboards);
+        var widgetsBefore = await ScalarAsync<string>(connectionString, widgets);
+        var versionsBefore = await ScalarAsync<string>(connectionString, versions);
+        Assert.Equal(2L, await ScalarAsync<long>(connectionString, "SELECT count(*) FROM tamiza.dashboard_versions"));
+
+        await SchemaMigrator.MigrateAsync(connectionString, NullLogger.Instance);
+
+        Assert.Equal(Scripts, await JournalAsync(connectionString));
+        Assert.Contains("0019_add_dashboard_palettes.sql", Scripts);
+
+        // Both dashboards read as the palette tamiza with no colors kept.
+        Assert.Equal("Field tamiza [] | Housing tamiza []", await ScalarAsync<string>(connectionString,
+            "SELECT string_agg(format('%s %s %s', name, palette, value_colors), ' | ' ORDER BY name) FROM tamiza.dashboards"));
+
+        // Nothing else moved: the dashboards keep their filters and their last change (updated_at included), the widgets their config as
+        // stored, and version 1 the content it was recorded with.
+        Assert.Equal(dashboardsBefore, await ScalarAsync<string>(connectionString, dashboards));
+        Assert.Equal(widgetsBefore, await ScalarAsync<string>(connectionString, widgets));
+        Assert.Equal(versionsBefore, await ScalarAsync<string>(connectionString, versions));
+        Assert.DoesNotContain("display", await ScalarAsync<string>(connectionString, "SELECT string_agg(config::text, ' ') FROM tamiza.dashboard_widgets") ?? "");
+        Assert.Equal(0L, await ScalarAsync<long>(connectionString,
+            "SELECT count(*) FROM tamiza.dashboard_versions WHERE content ? 'palette' OR content ? 'valueColors'"));
+
+        // What the API builds for each dashboard is still what version 1 holds, so the first save after the upgrade that changes nothing
+        // records no version.
+        var options = new DbContextOptionsBuilder<TamizaDbContext>();
+        DatabaseRegistration.Configure(options, connectionString);
+        await using (var db = new TamizaDbContext(options.Options))
+        {
+            foreach (var dashboard in new[] { housing, field })
+            {
+                var built = await DashboardVersions.ContentAsync(db, Guid.Parse(project), Guid.Parse(dashboard), CancellationToken.None);
+                Assert.Equal(
+                    await ScalarAsync<string>(connectionString, $"SELECT content::text FROM tamiza.dashboard_versions WHERE dashboard_id = '{dashboard}'"),
+                    await TestData.ScalarAsync<string>(connectionString, "SELECT @built::jsonb::text", ("built", built!)));
+            }
+        }
+
+        // A dashboard added without them gets the same defaults. Each palette of the catalog is accepted, a palette that is not in it is
+        // refused by the one check, and the colors kept are never null.
+        await ExecuteAsync(connectionString, $$"""
+            INSERT INTO tamiza.dashboards (project_id, name, normalized_name, position, created_by, updated_by)
+            VALUES ('{{project}}', 'Health', 'health', 2, '{{ada}}', '{{ada}}')
+            """);
+        Assert.Equal("tamiza []", await ScalarAsync<string>(connectionString, "SELECT format('%s %s', palette, value_colors) FROM tamiza.dashboards WHERE name = 'Health'"));
+        foreach (var palette in new[] { "tamiza", "institutional", "earth", "vivid" })
+        {
+            await ExecuteAsync(connectionString, $"UPDATE tamiza.dashboards SET palette = '{palette}' WHERE name = 'Health'");
+        }
+
+        await ExecuteAsync(connectionString,
+            """UPDATE tamiza.dashboards SET value_colors = '[{"column":"sex","value":"Female","color":5}]' WHERE name = 'Health'""");
+        Assert.Equal("Female", await ScalarAsync<string>(connectionString, "SELECT value_colors -> 0 ->> 'value' FROM tamiza.dashboards WHERE name = 'Health'"));
+        foreach (var palette in new[] { "neon", "Earth", "#ff0000", "" })
+        {
+            var refused = await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString,
+                $"UPDATE tamiza.dashboards SET palette = '{palette}' WHERE name = 'Health'"));
+            Assert.Equal("ck_dashboards_palette", refused.ConstraintName);
+        }
+
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, "UPDATE tamiza.dashboards SET value_colors = NULL WHERE name = 'Health'"));
+        await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(connectionString, "UPDATE tamiza.dashboards SET palette = NULL WHERE name = 'Health'"));
+        Assert.Equal("vivid", await ScalarAsync<string>(connectionString, "SELECT palette FROM tamiza.dashboards WHERE name = 'Health'"));
+    }
+
     private static void ApplyScripts(string connectionString, params string[] names)
     {
         var builder = DeployChanges.To

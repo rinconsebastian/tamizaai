@@ -18,9 +18,13 @@ public sealed record IndicatorSql(string Sql, IReadOnlyList<SqlParam> Parameters
 /// </summary>
 /// <param name="NotFiltered">The columns of the dashboard filters that do not narrow this table, in the request's order (design D3).</param>
 /// <param name="Series">Set instead of <paramref name="Sql"/> for a widget with a series (design D3): its statements are built and run in two steps.</param>
+/// <param name="Domain">
+/// A pie chart only (design D8 of dashboard palettes): next to <paramref name="Sql"/>, the statement that ranks its groups, the missing
+/// one included, by total over the widget's own filters, at most <see cref="WidgetConfig.MaxSlices"/> + 1 of them. Null for every other kind.
+/// </param>
 public sealed record IndicatorQueryPlan(
     IndicatorSql? Sql, IReadOnlyList<string> MissingColumns, IDictionary<string, string[]>? Errors, IReadOnlyList<string>? NotFiltered = null,
-    SeriesQueryPlan? Series = null);
+    SeriesQueryPlan? Series = null, IndicatorSql? Domain = null);
 
 /// <summary>Validates a widget query against the indicator table's columns and turns it into SQL.</summary>
 public static class IndicatorQueryBuilder
@@ -48,7 +52,7 @@ public static class IndicatorQueryBuilder
     /// </summary>
     internal static string OrderBy(WidgetConfig config, IReadOnlyDictionary<string, TableColumn> byName, string from, string aggregate)
     {
-        var group = $"{from}.{DataSources.Quote(byName[config.GroupBy!].Name)} NULLS LAST";
+        var group = GroupOrder(from, DataSources.Quote(byName[config.GroupBy!].Name));
         if (config.Sort is not { } sort)
         {
             return "ORDER BY " + group;
@@ -57,6 +61,43 @@ public static class IndicatorQueryBuilder
         var key = sort.By == SortValues.ByValue ? $"({aggregate})" : ColumnSortKey(sort, byName[sort.Column!]);
         var direction = sort.Direction == SortValues.Desc ? "DESC" : "ASC";
         return $"ORDER BY {key} {direction} NULLS LAST, {group}";
+    }
+
+    /// <summary>
+    /// The order of a group column on its own: the column's own type (numbers by value, dates by time, text by the collation), the
+    /// missing group last. It is the order of the rows of a widget that has no sort, and where a sort has equal keys.
+    /// </summary>
+    /// <param name="quotedGroup">The quoted group column.</param>
+    private static string GroupOrder(string from, string quotedGroup) => $"{from}.{quotedGroup} NULLS LAST";
+
+    /// <summary>
+    /// The statement that ranks a pie's groups (design D8 of dashboard palettes): <c>group, total</c> for every group of the widget's own
+    /// rows, the missing group (a null group) among them, whose total is a number above zero, since a pie draws no slice for the others.
+    /// The largest total comes first, and equal totals keep the order of the pie's own rows (<see cref="GroupOrder"/>; a pie cannot be
+    /// sorted), as the page ranks the rows it draws. At most <paramref name="cap"/> groups are read. The dashboard's filters are never
+    /// part of it, so a dashboard filter never changes the groups a pie keeps.
+    /// </summary>
+    /// <param name="group">The quoted group column.</param>
+    /// <param name="from">The quoted <c>"schema"."table"</c>.</param>
+    /// <param name="aggregate">The widget's aggregate over a set of rows: a sum, or a ratio of sums.</param>
+    /// <param name="rowFilter">The condition that keeps the rows that have something to plot.</param>
+    /// <param name="own">The widget's own filters.</param>
+    /// <param name="cap">How many groups to read; one more than the pie has colors for tells the caller that some will be folded.</param>
+    public static IndicatorSql PieDomain(string group, string from, string aggregate, string rowFilter, DataQuery own, int cap)
+    {
+        var ownWhere = own.Where.Length > 0 ? " AND " + own.Where : "";
+        // A total of NaN or infinity is not a number to draw, and NaN sorts above every number: both are left out here, so the cap counts groups with a share.
+        var sql =
+            $"""
+            SELECT {group}::text, ({aggregate}) FROM {from}
+            WHERE {rowFilter}{ownWhere}
+            GROUP BY {group}
+            HAVING ({aggregate}) > 0 AND ({aggregate}) < 'Infinity'::double precision
+            ORDER BY 2 DESC, {GroupOrder(from, group)}
+            LIMIT @{SeriesQueryBuilder.CapParameter}
+            """;
+        var parameters = new List<SqlParam>(own.Parameters) { new(SeriesQueryBuilder.CapParameter, NpgsqlDbType.Integer, cap) };
+        return new IndicatorSql(sql, parameters);
     }
 
     /// <summary>
@@ -259,8 +300,15 @@ public static class IndicatorQueryBuilder
         var parameters = new List<SqlParam>(query.Parameters);
         parameters.AddRange(dashboard.Parameters.Where(p => !parameters.Any(q => q.Name == p.Name)));
         parameters.Add(new(IndicatorSql.LimitParameter, NpgsqlDbType.Integer, maxRows + 1));
+
+        // A pie colors its slices by the groups of its own rows, as a series is colored (design D8 of dashboard palettes): the domain is
+        // read through the widget's own filters only, one group past what the pie has colors for, so a fold can be told.
+        var domain = chartType == ChartTypes.Pie && grouped
+            ? PieDomain(Q(config.GroupBy!), from, aggregate, rowFilter, query, WidgetConfig.MaxSlices + 1)
+            : null;
         return new IndicatorQueryPlan(
-            new IndicatorSql(sql, parameters, isMap ? tooltip.Select(item => byName[item.Column].Type).ToList() : null), missing, null, notFiltered);
+            new IndicatorSql(sql, parameters, isMap ? tooltip.Select(item => byName[item.Column].Type).ToList() : null), missing, null, notFiltered,
+            Domain: domain);
     }
 
     /// <summary>

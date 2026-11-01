@@ -38,6 +38,28 @@ public sealed class SeriesQueryBuilderTests
     }
 
     [Fact]
+    public void The_series_domain_statement_is_the_text_it_was_before_a_pie_shared_it()
+    {
+        var domain = Build(Config(), ChartTypes.Column).Domain!;
+
+        // Pinned as the build before pie domains wrote it (design D8 of dashboard palettes): the statement a pie now builds with
+        // SeriesQueryBuilder.Domain is this one, so a change here changes the series and the pie alike.
+        Assert.Equal(
+            """
+            (SELECT "water_source"::text, (sum("value")::double precision) FROM "p_x_indicators"."households"
+             WHERE "value" IS NOT NULL AND "water_source" <> @f0 AND "water_source" IS NOT NULL
+             GROUP BY "water_source" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap)
+            UNION ALL
+            (SELECT NULL::text, (sum("value")::double precision) FROM "p_x_indicators"."households"
+             WHERE "value" IS NOT NULL AND "water_source" <> @f0 AND "water_source" IS NULL
+             HAVING count(*) > 0)
+            """,
+            domain.Sql);
+        Assert.Equal(["f0", "cap"], domain.Parameters.Select(p => p.Name));
+        Assert.Equal(domain.Sql, SeriesQueryBuilder.Domain("\"water_source\"", From, Aggregate, RowFilter, Own, 9).Sql);
+    }
+
+    [Fact]
     public void The_cells_are_read_through_both_sets_of_filters_and_bind_the_kept_series_and_the_limit()
     {
         var sql = Build(Config(), ChartTypes.Column).Cells(["Piped", "Well"]);
@@ -203,5 +225,71 @@ public sealed class SeriesDomainTests
     public void No_series_is_an_empty_list()
     {
         Assert.Empty(SeriesDomain.Order([], false, false));
+    }
+
+    private static (string? Value, string Kind)[] Described(IEnumerable<SeriesInfo> domain) => domain.Select(s => (s.Value, s.Kind)).ToArray();
+
+    [Fact]
+    public void A_pies_domain_keeps_every_group_as_it_comes_the_missing_one_in_its_place()
+    {
+        var domain = SeriesDomain.BySize(["10", "Well", null, "2", "River"], limit: 8);
+
+        // Largest total first, as the groups come: no natural order, and the missing group is not moved to the end.
+        Assert.Equal([("10", "value"), ("Well", "value"), (null, "none"), ("2", "value"), ("River", "value")], Described(domain));
+    }
+
+    [Fact]
+    public void A_pie_of_exactly_eight_groups_keeps_all_eight_and_has_no_other()
+    {
+        var groups = Enumerable.Range(1, 7).Select(i => (string?)$"s{i}").Append(null).ToList();
+
+        var domain = SeriesDomain.BySize(groups, limit: 8);
+
+        Assert.Equal(8, domain.Count);
+        Assert.DoesNotContain(domain, s => s.Kind == SeriesKinds.Other);
+        Assert.Equal(groups, domain.Select(s => s.Value));
+    }
+
+    [Fact]
+    public void A_pie_of_more_than_eight_groups_keeps_the_seven_largest_and_folds_the_rest_into_other()
+    {
+        // The reader brings one group more than the pie shows, and no more.
+        var nine = Enumerable.Range(1, 9).Select(i => (string?)$"s{i}").ToList();
+
+        var domain = SeriesDomain.BySize(nine, limit: 8);
+
+        Assert.Equal(nine.Take(7).Select(v => (v, "value")).Append((null, "other")), Described(domain));
+    }
+
+    [Fact]
+    public void A_small_missing_group_is_folded_into_other_like_any_value_and_a_large_one_keeps_its_place()
+    {
+        var small = Enumerable.Range(1, 8).Select(i => (string?)$"s{i}").Append(null).ToList();
+        var large = Enumerable.Range(1, 3).Select(i => (string?)$"s{i}").Append(null).Concat(Enumerable.Range(4, 5).Select(i => (string?)$"s{i}")).ToList();
+
+        var foldedNone = SeriesDomain.BySize(small, limit: 8);
+        var keptNone = SeriesDomain.BySize(large, limit: 8);
+
+        Assert.DoesNotContain(foldedNone, s => s.Kind == SeriesKinds.None);
+        Assert.Equal((null, "other"), Described(foldedNone)[^1]);
+        Assert.Equal(7, foldedNone.Count(s => s.Kind == SeriesKinds.Value));
+        Assert.Equal((null, "none"), Described(keptNone)[3]);
+        Assert.Equal((null, "other"), Described(keptNone)[^1]);
+        Assert.Equal(8, keptNone.Count);
+    }
+
+    [Fact]
+    public void A_pies_domain_is_empty_for_no_groups_and_a_missing_group_alone_is_none()
+    {
+        Assert.Empty(SeriesDomain.BySize([], 8));
+        Assert.Equal([(null, "none")], Described(SeriesDomain.BySize([null], 8)));
+        Assert.Equal([("b", "value"), ("a", "value")], Described(SeriesDomain.BySize(["b", "a"], 8)));
+    }
+
+    [Fact]
+    public void A_limit_of_one_folds_every_group_of_a_pie_into_other()
+    {
+        Assert.Equal([(null, "other")], Described(SeriesDomain.BySize(["a", "b"], limit: 1)));
+        Assert.Equal([("a", "value")], Described(SeriesDomain.BySize(["a"], limit: 1)));
     }
 }

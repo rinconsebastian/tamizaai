@@ -49,6 +49,31 @@ public static class SeriesDomain
         return (valuesBestFirst.Take(room).ToList(), true);
     }
 
+    /// <summary>
+    /// A pie's domain (design D8 of dashboard palettes): every group of the pie, the missing one in its place, ranked by total, largest
+    /// first. A pie has <paramref name="limit"/> colors, "Other" included: the groups all fit when there are at most that many, and
+    /// otherwise the first <c>limit - 1</c> are kept and the rest become one "Other" entry. It is how the page ranked and folded a pie's
+    /// slices before the domain existed, so a pie keeps its colors. Unlike <see cref="Fold"/>, which the series use, the missing group
+    /// has no special place: it is ranked, and folded when it is small, like any value.
+    /// </summary>
+    /// <param name="groupsBestFirst">
+    /// The groups, the missing one as null, with the largest total first; may be cut after one more than <paramref name="limit"/>.
+    /// </param>
+    public static List<SeriesInfo> BySize(IReadOnlyList<string?> groupsBestFirst, int limit)
+    {
+        var folds = groupsBestFirst.Count > limit;
+        var domain = groupsBestFirst
+            .Take(folds ? Math.Max(0, limit - 1) : groupsBestFirst.Count)
+            .Select(group => group is null ? new SeriesInfo(null, SeriesKinds.None) : new SeriesInfo(group, SeriesKinds.Value))
+            .ToList();
+        if (folds)
+        {
+            domain.Add(new SeriesInfo(null, SeriesKinds.Other));
+        }
+
+        return domain;
+    }
+
     /// <summary>The display order: the kept values in natural order, then the missing value, then "Other".</summary>
     public static List<SeriesInfo> Order(IEnumerable<string> kept, bool hasNone, bool hasOther)
     {

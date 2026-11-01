@@ -10,6 +10,7 @@ import { ApiErrors } from '../../core/api-error';
 import { Downloader } from '../../core/download.service';
 import { ExportFormat } from '../../core/projects/data.service';
 import {
+  DashboardColors,
   DashboardFilter,
   DashboardRestore,
   DashboardVersionDetails,
@@ -23,6 +24,8 @@ import {
 import { DashboardEntry } from '../../core/projects/projects.service';
 import { SystemConfigService } from '../../core/system-config';
 import { Alert, ApiLang, Badge, Button, Card, ConfirmDialog, Disclosure, DropdownMenu, MenuItem, Skeleton, ToastService, DateTimePipe, NumberPipe, dateText, numberText } from '../../shared/ui';
+import { colorsOf, defaultColors } from './indicators/chart-colors';
+import { DashboardColorsData, DashboardColorsDialog, DashboardColorsResult } from './indicators/dashboard-colors-dialog';
 import { DashboardFilterBar, FilterChange } from './indicators/dashboard-filter-bar';
 import { FilterValues, activeFilters, defaultsOf, readAddress, writeAddress } from './indicators/dashboard-filters';
 import { DashboardFiltersData, DashboardFiltersDialog, DashboardFiltersResult } from './indicators/dashboard-filters-dialog';
@@ -331,6 +334,7 @@ export const layoutSaveDelayMs = 400;
             [indicators]="overview.indicators"
             [allTables]="allTables()"
             [dashboardFilters]="active()"
+            [colors]="colors()"
             (layoutsChange)="layoutsChanged($event)"
             (edit)="editWidget($event)"
             (remove)="removeWidget($event)"
@@ -428,6 +432,7 @@ export class ProjectIndicators {
       { id: 'moveLeft', label: t('dashboards.menu.moveLeft'), disabled: moving || first, description: moveHint(first, 'first'), testId: 'dashboard-move-left' },
       { id: 'moveRight', label: t('dashboards.menu.moveRight'), disabled: moving || last, description: moveHint(last, 'last'), testId: 'dashboard-move-right' },
       { id: 'filters', label: t('dashboards.menu.filters'), testId: 'dashboard-filters' },
+      { id: 'colors', label: t('dashboards.menu.colors'), testId: 'dashboard-colors' },
       ...(this.emailEnabled() ? [{ id: 'report', label: t('dashboards.menu.report'), testId: 'dashboard-report' }] : []),
       { id: 'versions', label: t('dashboards.menu.versions'), testId: 'dashboard-versions' },
       {
@@ -490,6 +495,14 @@ export class ProjectIndicators {
   });
   /** The filters with a value, in the bar's order, for the widgets. */
   protected readonly active = computed(() => activeFilters(this.shownFilters(), this.filterValues()));
+
+  /** The open dashboard's palette and colors kept by value as it is; Tamiza and none until it is read (add-dashboard-palettes, design D7). */
+  protected readonly dashboardColors = signal<DashboardColors>(defaultColors);
+  /** What the widgets are drawn in: the colors of the version shown while one is, so it looks as it did; the dashboard's otherwise. */
+  protected readonly colors = computed<DashboardColors>(() => {
+    const version = this.viewing();
+    return version ? colorsOf(version) : this.dashboardColors();
+  });
   /** The filters of an address that no longer apply, named, until the member changes a value or another dashboard opens. */
   protected readonly dropped = signal<string[]>([]);
 
@@ -502,8 +515,9 @@ export class ProjectIndicators {
   /** Some widget has a chart or map whose table can be shown. */
   protected readonly hasTables = computed(() => this.anyPublished() && this.shownWidgets().some((w) => w.chartType !== 'stat'));
 
-  // Viewing a version (add-dashboard-versions, design D11): its name, filters and widgets in place of the dashboard's, read-only and
-  // with today's data, until the member goes back to the current version, restores one or opens another dashboard.
+  // Viewing a version (add-dashboard-versions, design D11): its name, filters, palette, colors kept by value and widgets in place of the
+  // dashboard's, read-only and with today's data, until the member goes back to the current version, restores one or opens another
+  // dashboard.
 
   /** The version shown in place of the dashboard as it is; null while the dashboard itself is shown. */
   protected readonly viewing = signal<DashboardVersionDetails | null>(null);
@@ -611,6 +625,7 @@ export class ProjectIndicators {
         this.overview.set(overview);
         this.filters.set(dashboard.filters ?? []);
         this.filtersRead.set(true);
+        this.dashboardColors.set(colorsOf(dashboard));
         this.widgets.set(dashboard.widgets);
         this.error.set(null);
         this.loading.set(false);
@@ -658,6 +673,7 @@ export class ProjectIndicators {
     this.widgets.set([]);
     this.filters.set([]);
     this.filtersRead.set(false);
+    this.dashboardColors.set(defaultColors);
     this.dropped.set([]);
     this.allTables.set(false);
     this.exporting.set(null);
@@ -885,6 +901,7 @@ export class ProjectIndicators {
         refused: () => this.reloadProject(),
         filters: this.filters(),
         values: this.filterValues(),
+        colors: this.colors(),
       },
       ariaLabelledBy: 'widget-dialog-title',
       autoFocus: 'first-tabbable',
@@ -960,6 +977,9 @@ export class ProjectIndicators {
         break;
       case 'filters':
         this.editFilters();
+        break;
+      case 'colors':
+        this.editColors();
         break;
       case 'report':
         this.editReport();
@@ -1055,6 +1075,48 @@ export class ProjectIndicators {
         this.dropped.set([]);
         void this.router.navigate([], { relativeTo: this.route, queryParams: { f: null } });
         this.toasts.success(this.transloco.translate('dashboardFilters.saved'));
+      });
+  }
+
+  /**
+   * Chooses the dashboard's palette and the colors kept by value (add-dashboard-palettes, design D9). Once saved, the widgets are drawn
+   * in them at once: only their colors change, so nothing is queried again. Saving what the dashboard already has closes the form and
+   * changes nothing. Focus returns to the actions button, where the form was opened from.
+   */
+  private editColors(): void {
+    const dashboard = this.current();
+    if (!dashboard) {
+      return;
+    }
+    this.dialog
+      .open<DashboardColorsResult, DashboardColorsData>(DashboardColorsDialog, {
+        data: {
+          projectId: this.projectId,
+          dashboardId: dashboard.id,
+          colors: this.dashboardColors(),
+          widgets: this.widgets(),
+          indicators: this.overview()?.indicators ?? [],
+        },
+        ariaLabelledBy: 'dashboard-colors-dialog-title',
+        autoFocus: 'first-tabbable',
+        restoreFocus: true,
+        backdropClass: ['cdk-overlay-dark-backdrop'],
+        maxWidth: '100vw',
+        maxHeight: '100dvh',
+      })
+      .closed.subscribe((saved) => {
+        if (!saved) {
+          return;
+        }
+        if ('gone' in saved) {
+          this.gone(dashboard);
+          return;
+        }
+        if (!this.showing(dashboard.id)) {
+          return; // another dashboard opened meanwhile: it reads its own colors
+        }
+        this.dashboardColors.set(saved);
+        this.toasts.success(this.transloco.translate('dashboardColors.saved'));
       });
   }
 
@@ -1218,10 +1280,10 @@ export class ProjectIndicators {
   }
 
   /**
-   * After a restore (design D11): the page leaves the view and reads the dashboard again, which drops from the address the values of
-   * filters the version does not define, the tab follows a name the restore changed, one message says what was done (the name kept
-   * and why, each widget that came back as a copy and the dashboard that still holds it), and focus moves to the heading. A restore
-   * that found the dashboard already as in the version changed nothing, and nothing on the page changes either.
+   * After a restore (design D11): the page leaves the view, takes the restored colors and reads the dashboard again, which drops from
+   * the address the values of filters the version does not define, the tab follows a name the restore changed, one message says what
+   * was done (the name kept and why, each widget that came back as a copy and the dashboard that still holds it), and focus moves to
+   * the heading. A restore that found the dashboard already as in the version changed nothing, and nothing on the page changes either.
    */
   private restored(dashboard: DashboardEntry, version: VersionToRestore, restore: DashboardRestore): void {
     const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
@@ -1237,6 +1299,9 @@ export class ProjectIndicators {
     }
     if (this.showing(dashboard.id)) {
       this.leaveView();
+      // The palette and colors kept by value the restore brought back, at once: until the dashboard is read again, the widgets would be
+      // drawn in the colors the restore replaced, or in the version's, which are no longer shown.
+      this.dashboardColors.set(colorsOf(restore.dashboard));
       this.loads.next(dashboard.id);
       this.focusHeading();
     }

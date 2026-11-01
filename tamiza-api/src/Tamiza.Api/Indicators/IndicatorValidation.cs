@@ -153,6 +153,48 @@ public static class IndicatorValidation
         CheckTooltip(config, chartType, prefix, errors);
         CheckBasemap(config.Basemap, chartType, prefix, errors);
         CheckIgnoredDashboardFilters(config.IgnoredDashboardFilters, prefix, errors);
+        CheckDisplay(config, chartType, prefix, errors);
+    }
+
+    /// <summary>
+    /// How a widget is drawn (design D4 of dashboard palettes): a color is a number of the dashboard's palette, for the charts that
+    /// draw one color, and a scale is one of the sequential scales, for a map and a heat map. Neither is checked against a palette or
+    /// a table. Per-kind rules are skipped when <paramref name="chartType"/> is null, as the query endpoint may have none.
+    /// </summary>
+    private static void CheckDisplay(WidgetConfig config, string? chartType, string prefix, FieldErrors errors)
+    {
+        if (config.Display is not { } display)
+        {
+            return;
+        }
+
+        if (display.Color is { } color)
+        {
+            if (!Palettes.IsColor(color))
+            {
+                errors.Add(prefix + "display.color", $"The color must be a number from 1 to {Palettes.ColorCount}.");
+            }
+            else if (chartType is not null && chartType != ChartTypes.Histogram && !ChartTypes.TakesSeries(chartType))
+            {
+                errors.Add(prefix + "display.color", $"A {chartType} widget has no color of its own.");
+            }
+            else if (chartType is not null && config.SeriesBy is not null && ChartTypes.TakesSeries(chartType))
+            {
+                errors.Add(prefix + "display.color", "A widget with a series takes its colors from its series.");
+            }
+        }
+
+        if (display.Ramp is { } ramp)
+        {
+            if (!Palettes.IsScale(ramp))
+            {
+                errors.Add(prefix + "display.ramp", $"The scale must be one of {string.Join(", ", Palettes.Scales)}.");
+            }
+            else if (chartType is not null && chartType is not (ChartTypes.Map or ChartTypes.Heatmap))
+            {
+                errors.Add(prefix + "display.ramp", "Only map and heatmap widgets have a scale.");
+            }
+        }
     }
 
     /// <summary>

@@ -129,11 +129,12 @@ public sealed class DashboardVersionsTests
 
     // Content (design D2)
 
-    private static DashboardWidget Widget(string id, string title, string layout, DateTimeOffset created, string config = """{"indicator":"coverage"}""") => new()
+    private static DashboardWidget Widget(
+        string id, string title, string layout, DateTimeOffset created, string config = """{"indicator":"coverage"}""", string chartType = "stat") => new()
     {
         Id = Guid.Parse(id),
         Title = title,
-        ChartType = "stat",
+        ChartType = chartType,
         Config = config,
         Layout = layout,
         CreatedAt = created,
@@ -154,7 +155,7 @@ public sealed class DashboardVersionsTests
             Widget("00000000-0000-0000-0000-0000000000c2", "Left of older", """{"x":9,"y":2,"w":1,"h":2}""", early.AddDays(1)),
         };
 
-        var content = JsonDocument.Parse(DashboardVersions.Content("Housing", "[]", widgets)).RootElement;
+        var content = JsonDocument.Parse(DashboardVersions.Content("Housing", "[]", "tamiza", "[]", widgets)).RootElement;
 
         Assert.Equal(
             ["First", "Left of older", "Older", "Newer", "Tie, smaller id", "Tie, larger id", "Last"],
@@ -169,7 +170,7 @@ public sealed class DashboardVersionsTests
         const string config = """{"indicator":"households","measure":"value","legacy":true}""";
         var widget = Widget("00000000-0000-0000-0000-0000000000c1", "Households <b>", """{"x":0,"y":0,"w":3,"h":2}""", Saved, config);
 
-        var content = DashboardVersions.Content("Housing", filters, [widget]);
+        var content = DashboardVersions.Content("Housing", filters, "tamiza", "[]", [widget]);
 
         Assert.Equal(
             """{"name":"Housing","filters":[{"column":"municipality","label":"Municipality","kind":"text","default":{"values":["Rionegro"]}}],"widgets":""" +
@@ -177,6 +178,108 @@ public sealed class DashboardVersionsTests
             """{"indicator":"households","measure":"value","legacy":true},"layout":{"x":0,"y":0,"w":3,"h":2}}]}""",
             content);
         Assert.Equal("Households <b>", JsonDocument.Parse(content).RootElement.GetProperty("widgets")[0].GetProperty("title").GetString());
+    }
+
+    // The palette and the colors kept by value (design D6 of dashboard palettes)
+
+    private const string HousingWidgetsJson =
+        """[{"id":"00000000-0000-0000-0000-0000000000a1","title":"Households","chartType":"stat","config":{"indicator":"households","measure":"value","legacy":true},"layout":{"x":0,"y":0,"w":3,"h":2}},""" +
+        """{"id":"00000000-0000-0000-0000-0000000000a2","title":"Coverage","chartType":"column","config":{"indicator":"coverage","groupBy":"municipality","seriesBy":null},"layout":{"x":3,"y":0,"w":9,"h":4}},""" +
+        """{"id":"00000000-0000-0000-0000-0000000000a3","title":"Water source","chartType":"pie","config":{"indicator":"water","groupBy":"source"},"layout":{"x":0,"y":4,"w":6,"h":4}}]""";
+
+    /// <summary>
+    /// The content of a dashboard migrated from script 0018, as its version 1 holds it and as this build gave it before palettes existed:
+    /// three widgets, the first with a key no field reads. A fixed fixture: it is never built from the code under test.
+    /// </summary>
+    private const string BeforePalettes =
+        """{"name":"Housing","filters":[{"column":"municipality","label":"Municipality","kind":"text","default":{"values":["Rionegro"]}}],"widgets":""" +
+        HousingWidgetsJson + "}";
+
+    private const string FiltersJson = """[{"column":"municipality","label":"Municipality","kind":"text","default":{"values":["Rionegro"]}}]""";
+
+    private const string TwoColors = """[{"column":"sex","value":"Female","color":5},{"column":"answer","value":"No","color":8}]""";
+
+    private static DashboardWidget[] HousingWidgets() =>
+    [
+        Widget("00000000-0000-0000-0000-0000000000a3", "Water source", """{"x":0,"y":4,"w":6,"h":4}""", Saved, """{"indicator":"water","groupBy":"source"}""", "pie"),
+        Widget("00000000-0000-0000-0000-0000000000a1", "Households", """{"x":0,"y":0,"w":3,"h":2}""", Saved, """{"indicator":"households","measure":"value","legacy":true}"""),
+        Widget("00000000-0000-0000-0000-0000000000a2", "Coverage", """{"x":3,"y":0,"w":9,"h":4}""", Saved,
+            """{"indicator":"coverage","groupBy":"municipality","seriesBy":null}""", "column"),
+    ];
+
+    [Fact]
+    public void A_dashboard_with_the_default_colors_has_the_content_it_had_before_palettes_byte_for_byte()
+    {
+        var content = DashboardVersions.Content("Housing", FiltersJson, Palettes.Tamiza, "[]", HousingWidgets());
+
+        Assert.Equal(BeforePalettes, content);
+        Assert.DoesNotContain("palette", content);
+        Assert.DoesNotContain("valueColors", content);
+        // Whatever spacing PostgreSQL gave the empty list it stores.
+        Assert.Equal(BeforePalettes, DashboardVersions.Content("Housing", FiltersJson, "tamiza", " [ ] ", HousingWidgets()));
+    }
+
+    [Fact]
+    public void A_content_recorded_before_palettes_reads_as_the_palette_tamiza_with_no_colors_kept()
+    {
+        var content = DashboardVersions.ReadContent(BeforePalettes);
+
+        Assert.Equal(("Housing", FiltersJson, "tamiza", "[]"), (content.Name, content.Filters, content.Palette, content.ValueColors));
+        Assert.Equal(["Households", "Coverage", "Water source"], content.Widgets.Select(w => w.Title).ToArray());
+        Assert.Equal("""{"indicator":"households","measure":"value","legacy":true}""", content.Widgets[0].Config);
+    }
+
+    [Fact]
+    public void A_palette_and_two_colors_kept_are_written_after_the_filters_and_read_back_the_same()
+    {
+        var content = DashboardVersions.Content("Housing", FiltersJson, Palettes.Earth, TwoColors, HousingWidgets());
+
+        Assert.Equal(["name", "filters", "palette", "valueColors", "widgets"], JsonDocument.Parse(content).RootElement.EnumerateObject().Select(p => p.Name).ToArray());
+        Assert.Equal(
+            """{"name":"Housing","filters":""" + FiltersJson + ""","palette":"earth","valueColors":""" + TwoColors + ""","widgets":""" +
+            HousingWidgetsJson + "}",
+            content);
+        var read = DashboardVersions.ReadContent(content);
+        Assert.Equal(("Housing", FiltersJson, "earth", TwoColors), (read.Name, read.Filters, read.Palette, read.ValueColors));
+        Assert.Equal(["Households", "Coverage", "Water source"], read.Widgets.Select(w => w.Title).ToArray());
+        // And again: what was read builds the same content.
+        Assert.Equal(content, DashboardVersions.Content(read.Name, read.Filters, read.Palette, read.ValueColors,
+            read.Widgets.Select(w => Widget(w.Id.ToString(), w.Title, w.Layout, Saved, w.Config, w.ChartType))));
+    }
+
+    [Theory]
+    [InlineData("earth", "[]", """{"name":"A","filters":[],"palette":"earth","widgets":[]}""")]
+    [InlineData("tamiza", TwoColors, """{"name":"A","filters":[],"valueColors":""" + TwoColors + ""","widgets":[]}""")]
+    [InlineData("vivid", TwoColors, """{"name":"A","filters":[],"palette":"vivid","valueColors":""" + TwoColors + ""","widgets":[]}""")]
+    [InlineData("tamiza", "[]", """{"name":"A","filters":[],"widgets":[]}""")]
+    public void Each_of_the_palette_and_the_colors_is_written_only_when_it_is_not_the_default(string palette, string colors, string expected)
+    {
+        var content = DashboardVersions.Content("A", "[]", palette, colors, []);
+
+        Assert.Equal(expected, content);
+        var read = DashboardVersions.ReadContent(content);
+        Assert.Equal((palette, JsonDocument.Parse(colors).RootElement.GetRawText()), (read.Palette, read.ValueColors));
+    }
+
+    [Theory]
+    [InlineData("""{"name":"A","filters":[],"palette":"neon","widgets":[]}""")]
+    [InlineData("""{"name":"A","filters":[],"palette":7,"valueColors":{},"widgets":[]}""")]
+    [InlineData("""{"name":"A","filters":[],"palette":null,"valueColors":"[]","widgets":[]}""")]
+    public void A_palette_the_catalog_does_not_have_and_a_value_that_is_not_a_list_read_as_the_defaults(string json)
+    {
+        var read = DashboardVersions.ReadContent(json);
+
+        Assert.Equal(("tamiza", "[]"), (read.Palette, read.ValueColors));
+    }
+
+    [Fact]
+    public void Saving_the_colors_is_a_kind_of_change_the_history_lists()
+    {
+        Assert.Equal("colorsChanged", DashboardChangeKinds.ColorsChanged);
+        Assert.Contains(DashboardChangeKinds.ColorsChanged, DashboardChangeKinds.All);
+        Assert.False(DashboardChangeKinds.Closes(DashboardChangeKinds.ColorsChanged));
+        Assert.Equal(DashboardChangeKinds.All.Count, DashboardChangeKinds.All.Distinct().Count());
+        Assert.Equal(new DashboardChange("colorsChanged"), DashboardVersions.ReadChanges("""[{"kind": "colorsChanged"}]""").Single());
     }
 
     [Fact]

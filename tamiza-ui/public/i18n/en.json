@@ -1748,6 +1748,15 @@
         "percent": "Stacked to 100%",
         "ratioReason": "Stacked bars add their values, so they need a measure, not a ratio."
       },
+      "color": {
+        "legend": "Color",
+        "help": "One of the eight colors of the dashboard's palette. The chart keeps its number if the palette changes."
+      },
+      "ramp": {
+        "legend": "Scale",
+        "help": "The sequential scale the values are shaded on.",
+        "palette": "Palette's scale"
+      },
       "pyramid": {
         "legend": "Pyramid sides",
         "help": "Name two values of the series column: one is drawn to the left of the axis and the other to the right.",
@@ -1837,6 +1846,7 @@
       "moveRight": "Move right",
       "remove": "Remove",
       "filters": "Filters",
+      "colors": "Colors",
       "report": "Scheduled email…",
       "versions": "Version history"
     },
@@ -1957,6 +1967,7 @@
         "duplicated": "Duplicated from “{{ dashboard }}”",
         "renamed": "Renamed to “{{ dashboard }}”",
         "filtersChanged": "Filters changed",
+        "colorsChanged": "Colors changed",
         "widgetAdded": "Widget “{{ widget }}” added",
         "widgetChanged": "Widget “{{ widget }}” changed",
         "widgetRemoved": "Widget “{{ widget }}” removed",
@@ -1971,7 +1982,7 @@
       "noWidgets": "No widgets in this version",
       "confirm": {
         "title": "Restore version {{ number }}?",
-        "message": "The name, filters and widgets of “{{ name }}” go back to how they were on {{ time }}. The current state stays in the history.",
+        "message": "The name, filters, colors and widgets of “{{ name }}” go back to how they were on {{ time }}. The current state stays in the history.",
         "action": "Restore"
       },
       "restored": "Restored version {{ number }} as version {{ version }}.",
@@ -2035,6 +2046,100 @@
         "labelRequired": "Write a label.",
         "labelLong": "The label can have at most {{ max }} characters.",
         "labelTaken": "Another filter of this dashboard is labelled \"{{ label }}\"."
+      }
+    }
+  },
+  "dashboardColors": {
+    "title": "Dashboard colors",
+    "intro": "Everyone who opens this dashboard sees its charts in the palette you choose. A widget's color is its place in the palette, so it keeps its place if the palette changes.",
+    "palette": {
+      "legend": "Palette",
+      "scale": "Scale for maps and heat maps: {{ scale }}",
+      "colors": "Colors in order: {{ colors }}."
+    },
+    "kept": {
+      "title": "Colors kept by value",
+      "intro": "A value with a kept color has it in every widget of this dashboard that colors by its column: the series of a chart, the sides of a pyramid, the slices of a pie and the bars of a chart with no series. Indicators that use the same column name share its colors.",
+      "loadingColumns": "Reading the columns of the dashboard's indicators…",
+      "noColumns": "There are no columns to keep colors for yet: none of the indicators of this dashboard's widgets has published a table.",
+      "empty": "No colors are kept by value. Values without one take the palette's colors in order.",
+      "column": "Column",
+      "columnOfEntry": "Column, entry {{ number }} of {{ total }}",
+      "columnMissing": "{{ column }} · in no table",
+      "value": "Value",
+      "valueOfEntry": "Value, entry {{ number }} of {{ total }}",
+      "valuePlaceholder": "Pick or type a value",
+      "color": "Color",
+      "colorFor": "for {{ name }}",
+      "colorOption": "Color {{ number }}, {{ hue }}",
+      "remove": "Remove the color kept for {{ name }}",
+      "removeShort": "Remove",
+      "add": "Add a color kept by value",
+      "limitHint": "A dashboard keeps at most {{ max }} colors by value.",
+      "errors": {
+        "valueRequired": "Pick or type a value."
+      }
+    },
+    "save": "Save colors",
+    "saving": "Saving…",
+    "saved": "Colors saved."
+  },
+  "colors": {
+    "palettes": {
+      "tamiza": "Tamiza",
+      "institutional": "Institutional",
+      "earth": "Earth",
+      "vivid": "Vivid"
+    },
+    "scales": {
+      "blue": "Blue",
+      "teal": "Teal",
+      "green": "Green",
+      "orange": "Orange",
+      "red": "Red",
+      "purple": "Purple",
+      "gray": "Gray"
+    },
+    "hues": {
+      "tamiza": {
+        "1": "blue",
+        "2": "orange",
+        "3": "jade",
+        "4": "amber",
+        "5": "pink",
+        "6": "green",
+        "7": "violet",
+        "8": "red"
+      },
+      "institutional": {
+        "1": "navy blue",
+        "2": "turquoise",
+        "3": "burgundy",
+        "4": "sky blue",
+        "5": "mustard",
+        "6": "slate",
+        "7": "salmon",
+        "8": "olive green"
+      },
+      "earth": {
+        "1": "terracotta",
+        "2": "indigo",
+        "3": "ochre",
+        "4": "wine",
+        "5": "moss",
+        "6": "brown",
+        "7": "plum",
+        "8": "teal"
+      },
+      "vivid": {
+        "1": "purple",
+        "2": "cyan",
+        "3": "lime",
+        "4": "fuchsia",
+        "5": "green",
+        "6": "blue",
+        "7": "crimson",
+        "8": "orange"
       }
     }
   }

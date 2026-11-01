@@ -1,10 +1,10 @@
 import { TestBed } from '@angular/core/testing';
 import { translocoTesting } from '../../../../testing/transloco-testing';
-import { LegendEntry, SeriesLegend, SeriesNotes, seriesFill, seriesName } from './series-legend';
+import { LegendEntry, SeriesLegend, SeriesNotes, seriesName } from './series-legend';
 
 const entries: LegendEntry[] = [
-  { name: 'Piped', color: 'var(--tmz-series-1)' },
-  { name: 'Well', color: 'var(--tmz-series-2)' },
+  { name: 'Piped', color: 'var(--tmz-pal-tamiza-1)' },
+  { name: 'Well', color: 'var(--tmz-pal-tamiza-2)' },
   { name: 'Mixed', color: 'var(--tmz-div-neutral)', outlined: true },
 ];
 
@@ -27,8 +27,8 @@ describe('series legend', () => {
     expect(items.map((item) => item.querySelector('[data-testid="legend-name"]')!.textContent!.trim())).toEqual(['Piped', 'Well', 'Mixed']);
     const swatches = items.map((item) => item.querySelector<HTMLElement>('[data-testid="legend-swatch"]')!);
     expect(swatches.map((s) => s.getAttribute('style'))).toEqual([
-      expect.stringContaining('var(--tmz-series-1)'),
-      expect.stringContaining('var(--tmz-series-2)'),
+      expect.stringContaining('var(--tmz-pal-tamiza-1)'),
+      expect.stringContaining('var(--tmz-pal-tamiza-2)'),
       expect.stringContaining('var(--tmz-div-neutral)'),
     ]);
     // The swatch carries the color; the name is text, never in the series' color.
@@ -58,20 +58,13 @@ describe('series legend', () => {
   });
 });
 
-describe('series names and colors', () => {
+describe('series names', () => {
   const t = (key: string) => ({ 'indicators.series.none': '(none)', 'indicators.series.other': 'Other' })[key] ?? key;
 
   it('names a series by its value, and "(none)" and "Other" by their kind', () => {
     expect(seriesName({ series: 'Piped', kind: 'value' }, t)).toBe('Piped');
     expect(seriesName({ series: null, kind: 'none' }, t)).toBe('(none)');
     expect(seriesName({ series: null, kind: 'other' }, t)).toBe('Other');
-  });
-
-  it('colors a series by its place among the series, and "Other" in its own neutral', () => {
-    expect(seriesFill('value', 0)).toBe('var(--tmz-series-1)');
-    expect(seriesFill('none', 2)).toBe('var(--tmz-series-3)');
-    expect(seriesFill('other', 3)).toBe('var(--tmz-series-other)');
-    expect(seriesFill('value', 7)).toBe('var(--tmz-series-8)');
   });
 });
 

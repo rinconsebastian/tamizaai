@@ -1,8 +1,9 @@
 import { LOCALE_ID, Component, ElementRef, computed, inject, input, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
-import { QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
+import { QueryRow, QuerySeries, WidgetConfig } from '../../../core/projects/indicators.service';
+import { ChartColors, SeriesKey } from './chart-colors';
 import { observeSize, pivot } from './chart-data';
-import { seriesColor, seriesCount, slicePath } from './chart-scales';
+import { seriesCount, slicePath } from './chart-scales';
 import { ValueFormatter, plotted } from './format';
 import { TableModel, WidgetTable } from './widget-table';
 import { PctPipe } from '../../../shared/ui';
@@ -19,10 +20,26 @@ interface Slice {
   d: string | null;
 }
 
+/** What a slice stands for: a group value, the missing one (`none`), or the group values that did not get a color of their own (`other`). */
+interface Part {
+  id: string;
+  name: string;
+  value: number;
+}
+
+/** The identity of a group value, of the missing one and of "Other", for matching a row to the domain. */
+const idOf = (group: string | null): string => (group === null ? 'none' : `value:${group}`);
+const idOfKey = (key: SeriesKey): string => (key.kind === 'other' ? 'other' : idOf(key.kind === 'none' ? null : key.value));
+const otherKey: SeriesKey = { value: null, kind: 'other' };
+
 /**
  * A pie chart (design D5): one slice per group value of the indicator, sized by its share of the total. Slices run from the
- * largest; past the eighth color the smallest fold into one "Other" slice. Values at or below zero have no share and are only
- * counted, and listed in the table.
+ * largest. Values at or below zero have no share and are only counted, and listed in the table.
+ *
+ * Colors and "Other" come from the widget's `domain` (add-dashboard-palettes, design D8), the group values of its own rows, not the
+ * dashboard filters': a slice is colored by its value, as a series is, and every group value outside the domain is summed into
+ * "Other", in the neutral color. So a dashboard filter that reorders the slices repaints none of them. Without a domain (an API that
+ * predates it) the slices are colored in the order of their size, the smallest past the eighth color folding into "Other".
  */
 @Component({
   selector: 'app-pie-widget',
@@ -79,6 +96,10 @@ export class PieWidget {
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
   readonly asTable = input(false);
+  /** The colors of the widget, from the dashboard's palette and its colors kept by value. */
+  readonly colors = input.required<ChartColors>();
+  /** The group values of the widget's own rows (design D8); null or empty for an API that sends none. */
+  readonly domain = input<readonly QuerySeries[] | null | undefined>(null);
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private readonly size = observeSize(() => this.box());
@@ -87,32 +108,73 @@ export class PieWidget {
 
   private readonly all = computed(() => {
     const data = pivot(this.rows(), this.transloco.translate('indicators.chart.noGroup'), 'listed');
-    return data.categories.map((name, i) => ({ name, value: data.values[i] }));
+    return data.categories.map((name, i) => ({ name, group: data.groups[i], value: data.values[i] }));
   });
 
   protected readonly notDrawn = computed(() => this.all().filter((entry) => entry.value <= 0).length);
 
-  protected readonly slices = computed<Slice[]>(() => {
-    const positive = this.all()
+  /**
+   * The group values that decide the colors, in order, and which values fold into "Other": the response's domain, or, from an API that
+   * sends none, the filtered rows ranked by size with the smallest past the eighth color folded.
+   */
+  private readonly colorDomain = computed<readonly SeriesKey[]>(() => {
+    const given = this.domain();
+    if (given?.length) {
+      return given.map(({ value, kind }) => ({ value, kind }));
+    }
+    const ranked = this.all()
       .filter((entry) => entry.value > 0)
       .sort((a, b) => b.value - a.value);
-    const total = positive.reduce((sum, entry) => sum + entry.value, 0);
+    const folds = ranked.length > seriesCount;
+    const kept = (folds ? ranked.slice(0, seriesCount - 1) : ranked).map((entry): SeriesKey => ({ value: entry.group, kind: entry.group === null ? 'none' : 'value' }));
+    return folds ? [...kept, otherKey] : kept;
+  });
+
+  /**
+   * The parts of the pie in the order they are drawn: the groups of the domain that have a value above zero, from the largest, then
+   * "Other" with the sum of every other group. The others (at or below zero) are not parts: they are counted and listed in the table.
+   */
+  private readonly parts = computed<Part[]>(() => {
+    const inDomain = new Set(this.colorDomain().map(idOfKey));
+    const named: Part[] = [];
+    let rest = 0;
+    for (const entry of this.all().filter((entry) => entry.value > 0)) {
+      if (inDomain.has(idOf(entry.group))) {
+        named.push({ id: idOf(entry.group), name: entry.name, value: entry.value });
+      } else {
+        rest += entry.value;
+      }
+    }
+    named.sort((a, b) => b.value - a.value);
+    return rest > 0 ? [...named, { id: 'other', name: this.transloco.translate('indicators.pie.other'), value: rest }] : named;
+  });
+
+  /**
+   * The color of each part, by the value it stands for: the order of the whole domain gives the colors, so a slice keeps its color
+   * whichever of the others the filtered rows leave out.
+   */
+  private readonly partColors = computed<Map<string, string>>(() => {
+    const keys = this.colorDomain().filter((key) => key.kind !== 'other');
+    const colors = this.colors().forValues(this.config().groupBy ?? '', [...keys, otherKey]);
+    const byId = new Map(keys.map((key, i) => [idOfKey(key), colors[i]]));
+    return byId.set('other', colors[keys.length]);
+  });
+
+  protected readonly slices = computed<Slice[]>(() => {
+    const parts = this.parts();
+    const total = parts.reduce((sum, part) => sum + part.value, 0);
     if (!total) {
       return [];
     }
-    let entries = positive;
-    if (positive.length > seriesCount) {
-      const rest = positive.slice(seriesCount - 1);
-      entries = [...positive.slice(0, seriesCount - 1), { name: this.transloco.translate('indicators.pie.other'), value: rest.reduce((sum, entry) => sum + entry.value, 0) }];
-    }
+    const colors = this.partColors();
     const { cx, cy, radius } = this.geometry();
     let angle = 0;
-    return entries.map((entry, i) => {
-      const share = entry.value / total;
+    return parts.map((part) => {
+      const share = part.value / total;
       const next = angle + share * 2 * Math.PI;
-      const d = entries.length === 1 ? null : slicePath(cx, cy, radius, angle, next);
+      const d = parts.length === 1 ? null : slicePath(cx, cy, radius, angle, next);
       angle = next;
-      return { ...entry, share, color: seriesColor(i), d };
+      return { name: part.name, value: part.value, share, color: colors.get(part.id) ?? colors.get('other')!, d };
     });
   });
 

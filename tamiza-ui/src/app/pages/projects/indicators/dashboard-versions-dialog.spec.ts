@@ -3,7 +3,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { Component, ViewContainerRef, inject } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { DashboardChange, DashboardVersionList, DashboardVersionSummary } from '../../../core/projects/indicators.service';
+import { DashboardChange, DashboardVersionList, DashboardVersionSummary, dashboardChangeKinds } from '../../../core/projects/indicators.service';
 import { InterfaceLanguage } from '../../../core/i18n/interface-language';
 import { dateText } from '../../../shared/ui';
 import { provideVisibleElements, tick } from '../../../../testing/cdk';
@@ -160,6 +160,7 @@ describe('DashboardVersionsDialog', () => {
       [{ kind: 'duplicated', dashboard: 'Health' }, 'Duplicated from “Health”'],
       [{ kind: 'renamed', dashboard: 'Agua' }, 'Renamed to “Agua”'],
       [{ kind: 'filtersChanged' }, 'Filters changed'],
+      [{ kind: 'colorsChanged' }, 'Colors changed'],
       [{ kind: 'widgetAdded', widget: 'Water source' }, 'Widget “Water source” added'],
       [{ kind: 'widgetChanged', widget: 'Coverage.' }, 'Widget “Coverage.” changed'],
       [{ kind: 'widgetRemoved', widget: 'Water source' }, 'Widget “Water source” removed'],
@@ -172,6 +173,37 @@ describe('DashboardVersionsDialog', () => {
     const dialog = await open(listOf(kinds.map(([change], i) => version(kinds.length - i, { changes: [change] }))));
 
     expect(dialog.items().map((item) => text(item.querySelector('[data-testid="dashboard-version-change"]')))).toEqual(kinds.map(([, words]) => words));
+  });
+
+  it.each<[InterfaceLanguage, string]>([
+    ['en', 'Colors changed'],
+    ['es', 'Se cambiaron los colores'],
+  ])('says in %s that a version changed the dashboard\'s colors, its palette or the colors kept by value (Palette changed)', async (lang, words) => {
+    // Alone (version 5), and among the other changes a version holds (version 3).
+    const dialog = await open(
+      listOf([
+        version(5, { changes: [{ kind: 'colorsChanged' }] }),
+        version(3, { changes: [{ kind: 'filtersChanged' }, { kind: 'colorsChanged' }, { kind: 'widgetAdded', widget: 'Water' }] }),
+      ]),
+      { lang },
+    );
+
+    expect(dialog.changes(5)).toEqual([words]);
+    expect(dialog.changes(3)[1]).toBe(words);
+  });
+
+  it.each<InterfaceLanguage>(['en', 'es'])('has words in %s for every kind of change the service lists', async (lang) => {
+    const dialog = await open(
+      listOf(dashboardChangeKinds.map((kind, i) => version(dashboardChangeKinds.length - i, { changes: [{ kind, widget: 'W', dashboard: 'D', version: 7 }] }))),
+      { lang },
+    );
+
+    for (const item of dialog.items()) {
+      const words = text(item.querySelector('[data-testid="dashboard-version-change"]'));
+      expect(words).not.toBe('');
+      expect(words).not.toContain('dashboards.versions.changes');
+    }
+    expect(dialog.items()).toHaveLength(dashboardChangeKinds.length);
   });
 
   it('writes the history in Spanish, in the interface\'s regional format', async () => {

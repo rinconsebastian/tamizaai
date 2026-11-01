@@ -1,3 +1,4 @@
+using Tamiza.Api.CleanData;
 using Tamiza.Api.Http;
 using Tamiza.Api.Pipeline;
 
@@ -120,6 +121,108 @@ public static class DashboardValidation
         }
 
         return errors.Any ? null : filters;
+    }
+
+    /// <summary>
+    /// A dashboard's palette and colors kept by value as they are saved, or null with <paramref name="errors"/> keyed <c>palette</c>,
+    /// <c>valueColors</c>, <c>valueColors[i]</c> or <c>valueColors[i].column</c>, <c>.value</c> or <c>.color</c> (design D4 of dashboard
+    /// palettes). The same function serves the REST endpoint and the MCP tools, which give it the palette the dashboard has when the
+    /// request names none. Nothing is checked against the tables, and nothing is trimmed: a value is matched exactly, so an entry is
+    /// kept as it was sent.
+    /// </summary>
+    public static DashboardColors? Colors(string? palette, IReadOnlyList<ValueColorInput?>? input, FieldErrors errors)
+    {
+        if (!Palettes.IsKnown(palette))
+        {
+            errors.Add("palette", $"Choose one of the palettes: {string.Join(", ", Palettes.All)}.");
+        }
+
+        if (input is null)
+        {
+            errors.Add("valueColors", "The colors kept by value are required; send an empty list for none.");
+            return null;
+        }
+
+        if (input.Count > Palettes.MaxValueColors)
+        {
+            errors.Add("valueColors", $"A dashboard keeps at most {Palettes.MaxValueColors} colors by value.");
+            return null;
+        }
+
+        var entries = new List<ValueColor>();
+        // What each column keeps so far: the values and the colors of its earlier entries.
+        var kept = new Dictionary<string, (HashSet<string> Values, HashSet<int> Colors)>(StringComparer.Ordinal);
+        for (var i = 0; i < input.Count; i++)
+        {
+            var field = $"valueColors[{i}]";
+            if (input[i] is not { } entry)
+            {
+                errors.Add(field, "An entry needs a column, a value and a color.");
+                continue;
+            }
+
+            var column = entry.Column;
+            if (!ColumnNames.IsValidColumnName(column))
+            {
+                errors.Add(field + ".column", "The column must be a published column's name: lowercase letters, digits and underscores, "
+                    + "not starting with a digit, at most 63 characters.");
+                column = null;
+            }
+
+            var value = entry.Value;
+            if (value is null)
+            {
+                errors.Add(field + ".value", "The value is required; an empty text is a value too.");
+            }
+            else if (value.Length > DataQueryBuilder.MaxTextLength)
+            {
+                errors.Add(field + ".value", $"The value is longer than {DataQueryBuilder.MaxTextLength} characters.");
+                value = null;
+            }
+            else if (value.Contains('\0'))
+            {
+                // Any other character is a value as it is, but jsonb cannot hold NUL, so saving it would end as a 500.
+                errors.Add(field + ".value", "The value cannot contain a NUL character.");
+                value = null;
+            }
+
+            var color = entry.Color;
+            if (!Palettes.IsColor(color))
+            {
+                errors.Add(field + ".color", $"The color must be a number from 1 to {Palettes.ColorCount}.");
+                color = null;
+            }
+
+            if (column is null || value is null || color is null)
+            {
+                continue;
+            }
+
+            // A value and a color are each kept once per column, so no two values of a widget share a color. Values compare as text,
+            // exactly. An entry refused here is not kept, so it takes nothing from the entries after it.
+            if (!kept.TryGetValue(column, out var ofColumn))
+            {
+                ofColumn = ([], []);
+                kept[column] = ofColumn;
+            }
+
+            if (ofColumn.Values.Contains(value))
+            {
+                errors.Add(field, $"{column} already keeps a color for {(value.Length == 0 ? "an empty text" : value)}.");
+            }
+            else if (ofColumn.Colors.Contains(color.Value))
+            {
+                errors.Add(field, $"{column} already uses color {color}.");
+            }
+            else
+            {
+                ofColumn.Values.Add(value);
+                ofColumn.Colors.Add(color.Value);
+                entries.Add(new ValueColor(column, value, color.Value));
+            }
+        }
+
+        return errors.Any ? null : new DashboardColors(palette!, entries);
     }
 
     private static string? Label(string? input, string field, FieldErrors errors)

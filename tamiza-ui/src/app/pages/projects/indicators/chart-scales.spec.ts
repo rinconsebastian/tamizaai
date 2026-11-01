@@ -7,9 +7,7 @@ import {
   naturalCompare,
   niceAxis,
   ringsPath,
-  sequentialColor,
   sequentialStep,
-  seriesColor,
   slicePath,
   truncate,
 } from './chart-scales';
@@ -86,17 +84,10 @@ describe('chart scales', () => {
     });
   });
 
-  describe('colors', () => {
-    it('gives each series a fixed color token and a neutral past the eighth', () => {
-      expect(seriesColor(0)).toBe('var(--tmz-series-1)');
-      expect(seriesColor(7)).toBe('var(--tmz-series-8)');
-      expect(seriesColor(8)).toBe('var(--tmz-series-other)');
-    });
-
+  describe('sequential steps', () => {
     it('steps a value through the sequential ramp, low to high', () => {
       expect([0, 14, 50, 99, 100].map((v) => sequentialStep(v, 0, 100))).toEqual([1, 1, 4, 7, 7]);
       expect(sequentialStep(5, 5, 5)).toBe(4);
-      expect(sequentialColor(3)).toBe('var(--tmz-seq-3)');
     });
   });
 
@@ -120,6 +111,11 @@ describe('chart data', () => {
 
       expect(data.categories).toEqual(['Cali', 'Bogotá', '(none)']);
       expect(data.values).toEqual([5, 3, 1]);
+    });
+
+    it('keeps each category\'s own group, null for the missing one, so a color can be looked up by the value itself', () => {
+      expect(pivot(rows, '(none)', 'listed').groups).toEqual(['Cali', 'Bogotá', null]);
+      expect(pivot([r(null, 1), r('10', 3), r('2', 2)], '(none)', 'natural').groups).toEqual(['2', '10', null]);
     });
 
     it('orders categories naturally on request, a missing group last, each keeping its value', () => {

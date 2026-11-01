@@ -157,10 +157,13 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
             }
 
             var group = columns.FirstOrDefault(c => c.Name == config.GroupBy);
+            // A pie's domain is read before its rows (design D8 of dashboard palettes); no other kind has one.
+            var domain = plan.Domain is null ? null : await ReadPieDomainAsync(connection, transaction, plan.Domain, group?.Type, ct);
             var (rows, limitReached) = await ReadRowsAsync(connection, transaction, plan.Sql!, group?.Type, maxRows, ct);
             return new IndicatorQueryOutcome(
                 new IndicatorQueryResponse(
-                    true, rows, limitReached, MissingReferences.None, plan.Sql!.TooltipTypes, dashboardFilters is { Count: > 0 } ? plan.NotFiltered : null),
+                    true, rows, limitReached, MissingReferences.None, plan.Sql!.TooltipTypes, dashboardFilters is { Count: > 0 } ? plan.NotFiltered : null,
+                    Domain: domain),
                 null);
         }, ct), ct);
     }
@@ -296,7 +299,9 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
         }
         else
         {
-            var (values, hasNone) = await ReadDomainAsync(connection, transaction, plan.Domain!, ct);
+            var listed = await ReadDomainAsync(connection, transaction, plan.Domain!, ct);
+            var values = listed.OfType<string>().ToList();
+            var hasNone = listed.Contains(null);
             var (keptValues, hasOther) = SeriesDomain.Fold(values, hasNone, plan.MaxSeries);
             kept = keptValues;
             series = SeriesDomain.Order(keptValues, hasNone, hasOther);
@@ -402,8 +407,22 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
         return new IndicatorQueryResponse(true, rowsOut, limitReached, MissingReferences.None, null, notFiltered, series, totals, leftOut);
     }
 
-    /// <summary>The series values of a widget by total, largest first, and whether some rows have no series value.</summary>
-    private static async Task<(List<string> Values, bool HasNone)> ReadDomainAsync(
+    /// <summary>
+    /// A pie's domain (design D8 of dashboard palettes): the groups of its own rows, the missing one in its place, by total, largest
+    /// first, folded to the pie's <see cref="WidgetConfig.MaxSlices"/> colors with "Other" (<see cref="SeriesDomain.BySize"/>). The
+    /// values are written as the pie's rows write their groups, so a row finds its place in the domain by its group.
+    /// </summary>
+    private static async Task<IReadOnlyList<SeriesInfo>> ReadPieDomainAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, DataColumnType? groupType, CancellationToken ct)
+    {
+        var groups = (await ReadDomainAsync(connection, transaction, sql, ct))
+            .Select(group => group is not null && groupType == DataColumnType.Timestamp ? DataValues.IsoTimestamp(group) : group)
+            .ToList();
+        return SeriesDomain.BySize(groups, WidgetConfig.MaxSlices);
+    }
+
+    /// <summary>The values a domain statement lists, in its order; null is the missing value.</summary>
+    private static async Task<List<string?>> ReadDomainAsync(
         NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, CancellationToken ct)
     {
         await using var command = new NpgsqlCommand(sql.Sql, connection, transaction);
@@ -412,22 +431,14 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
             command.Parameters.Add(parameter.ToParameter());
         }
 
-        var values = new List<string>();
-        var hasNone = false;
+        var values = new List<string?>();
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            if (reader.IsDBNull(0))
-            {
-                hasNone = true;
-            }
-            else
-            {
-                values.Add(reader.GetString(0));
-            }
+            values.Add(reader.IsDBNull(0) ? null : reader.GetString(0));
         }
 
-        return (values, hasNone);
+        return values;
     }
 
     /// <summary>NaN and infinity have no number in JSON.</summary>
