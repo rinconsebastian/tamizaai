@@ -646,6 +646,16 @@ public static class DashboardEndpoints
             widget.Config = configJson;
         }
 
+        // A request that sent the chart type or the query writes both, as the pair checked above, even the one equal to what was read.
+        // A change that stays on its dashboard takes no lock, so a restore or another member may save the widget between the read and
+        // this write, which waits for it: writing only the column that differs would pair it with one never checked against it (design
+        // D7, D12). A config left as it was keeps its stored text.
+        if (configChanged)
+        {
+            db.Entry(widget).Property(w => w.ChartType).IsModified = true;
+            db.Entry(widget).Property(w => w.Config).IsModified = true;
+        }
+
         if (layoutDiffers)
         {
             widget.Layout = layoutJson;

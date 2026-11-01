@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Tamiza.Api.Data;
+using Tamiza.Api.Http;
 using Tamiza.Api.Indicators;
 using Tamiza.Api.IntegrationTests.Infrastructure;
 using Tamiza.Api.IntegrationTests.Reports;
@@ -1273,6 +1274,49 @@ public sealed class DashboardVersionTests(PostgresFixture postgres)
             Assert.Equal("""6 ada app [{"kind": "widgetRemoved", "widget": "Households"}]""", versions[^1]);
             Assert.Equal(["Coverage"], Titles(await ContentAsync(h, housing, 6)));
         }
+    }
+
+    [Fact]
+    public async Task Query_saved_by_another_member_while_the_restore_runs_is_saved_after_it_with_the_chart_type_it_was_checked_against()
+    {
+        var write = new WriteDuringRestore();
+        await using var h = await PublishedAsync(services =>
+            services.ConfigureDbContext<TamizaDbContext>(options => options.AddInterceptors(write)));
+        var housing = await h.AddDashboardAsync("Housing");
+        var id = await AddWidgetAsync(h, "Coverage", housing);
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { chartType = "stat" })).StatusCode);
+        // Another member's query with no group column, which the stat tile it read takes and the column chart of version 2 does not,
+        // sent with no chart type once the restore of version 2 has read the widget.
+        write.Arm(h.Db, () => h.Admin.PatchJsonAsync(h.WidgetUrl(id, housing), new { config = new { indicator = "coverage" } }),
+            $"SELECT EXISTS (SELECT FROM tamiza.dashboard_widgets WHERE id = '{id}' AND config ->> 'groupBy' IS NULL)");
+
+        var restore = await RestoredAsync(h, housing, 2);
+        var edit = await write.Sent!;
+
+        Assert.True(write.Blocked);
+        Assert.Equal(HttpStatusCode.OK, edit.StatusCode);
+        Assert.Equal("column", restore.GetProperty("dashboard").GetProperty("widgets")[0].GetProperty("chartType").GetString());
+        Assert.True(await SameContentAsync(h, housing, 2, 4));
+        // It waited for the restore's commit, then saved the chart type and the query it checked together, never the restored column
+        // chart with a query checked only against the stat tile.
+        var stored = (await TestData.ScalarAsync<string>(h.Db,
+            "SELECT format('%s|%s', chart_type, config) FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id)))!.Split('|', 2);
+        var errors = new FieldErrors();
+        IndicatorValidation.CheckConfig(
+            JsonSerializer.Deserialize<WidgetConfigInput>(stored[1], new JsonSerializerOptions(JsonSerializerDefaults.Web))!.Normalize(), stored[0],
+            "config.", errors);
+        Assert.Empty(errors.ToDictionary());
+        Assert.Equal("stat", stored[0]);
+        Assert.Equal(
+            [
+                """3 grace app [{"kind": "widgetChanged", "widget": "Coverage"}]""",
+                """4 grace app [{"kind": "restored", "version": 2}]""",
+                """5 ada app [{"kind": "widgetChanged", "widget": "Coverage"}]""",
+            ],
+            (await VersionsAsync(h, housing))[2..]);
+        var saved = (await ContentAsync(h, housing, 5)).GetProperty("widgets")[0];
+        Assert.Equal("stat", saved.GetProperty("chartType").GetString());
+        Assert.Equal(JsonValueKind.Null, saved.GetProperty("config").GetProperty("groupBy").ValueKind);
     }
 
     /// <summary>Whether a kept version of the dashboard holds a widget with this title.</summary>
