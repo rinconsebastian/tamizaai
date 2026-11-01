@@ -73,7 +73,7 @@ See proposal.md for the motivation and the specs for the behavior. The pieces th
 | Palette | Mood | Default scale |
 |---|---|---|
 | `tamiza` | today's colors | `blue` |
-| `institutional` | sober: blues, teals, slate, with muted warm accents | `teal` |
+| `institutional` | sober: blues, teals, slate, with muted warm accents and an olive green | `teal` |
 | `earth` | terracotta, ochre, olive, clay, moss | `orange` |
 | `vivid` | saturated, high-energy hues | `purple` |
 
@@ -229,7 +229,7 @@ The domain holds at most 8 entries, "Other" included, and a column keeps each co
 
 ## Verification Results
 
-Palettes and sequential scales (tasks 7.1 to 7.3). The values of `institutional`, `earth` and `vivid` and of the six new scales were designed by five independent runs of the dataviz method, each against the same gates; the lead then re-ran every command below on the values as they went into `styles.css` and recomputed every number with its own OKLab code (the helpers of `chart-tokens.spec.ts`). **No hex value was changed after validation: every palette and every scale shipped as it was designed, so there were no repairs and no palette or scale was dropped from the catalog.**
+Palettes and sequential scales (tasks 7.1 to 7.3). The values of `institutional`, `earth` and `vivid` and of the six new scales were designed by five independent runs of the dataviz method, each against the same gates; the lead then re-ran every command below on the values as they went into `styles.css` and recomputed every number with its own OKLab code (the helpers of `chart-tokens.spec.ts`). **One hex value was changed after this validation: slot 8 of `institutional`, in the fix pass that followed the first review (see Repairs). Every other palette color and every scale shipped as it was designed, and no palette or scale was dropped from the catalog.** The `institutional` commands and numbers below are those of the values that ship.
 
 Commands run in the development sandbox (Node 22) with the validator of the dataviz skill, `scripts/validate_palette.js`, written below as `validate_palette.js`. The chart surface is `#ffffff` in the light theme and `#101828` (Flowbite `neutral-primary-soft`, gray-900) in the dark theme, the surfaces of `chart-tokens.spec.ts`. A palette is validated as a categorical palette on adjacent pairs, which is what a stacked chart, a legend and a bar chart with a series show side by side; a scale is validated as an ordinal ramp (`--ordinal`).
 
@@ -241,8 +241,8 @@ The gates, all hard: OKLab L inside the band (0.43 to 0.77 light, 0.48 to 0.67 d
 |---|---|---|---|---|---|---|---|
 | `tamiza` | light | 0.527 to 0.764 | 0.141 | 9.1 (tritan 5.8) | 19.6 | 2.17:1 | 3 (2.82:1), 4 (2.17:1), 5 (2.69:1) |
 | `tamiza` | dark | 0.529 to 0.670 | 0.128 | 8.4 (tritan 8.7) | 19.3 | 3.59:1 | none |
-| `institutional` | light | 0.446 to 0.745 | 0.104 | 23.8 (tritan 20.6) | 24.1 | 2.36:1 | 2 (2.67:1), 4 (2.49:1), 5 (2.70:1), 7 (2.36:1) |
-| `institutional` | dark | 0.539 to 0.662 | 0.108 | 14.6 (tritan 13.9) | 16.5 | 3.29:1 | none |
+| `institutional` | light | 0.446 to 0.745 | 0.104 | 15.5 (tritan 20.6) | 24.1 | 2.36:1 | 2 (2.67:1), 4 (2.49:1), 5 (2.70:1), 7 (2.36:1) |
+| `institutional` | dark | 0.500 to 0.662 | 0.113 | 11.0 (tritan 13.9) | 16.5 | 3.07:1 | none |
 | `earth` | light | 0.441 to 0.660 | 0.104 | 16.6 (tritan 7.3) | 19.2 | 3.15:1 | none |
 | `earth` | dark | 0.513 to 0.666 | 0.104 | 14.8 (tritan 9.3) | 20.9 | 3.05:1 | none |
 | `vivid` | light | 0.529 to 0.761 | 0.137 | 17.4 (tritan 7.2) | 24.3 | 2.05:1 | 2 (2.06:1), 3 (2.05:1), 8 (2.48:1) |
@@ -273,18 +273,18 @@ $ node validate_palette.js "#3987e5,#d95926,#199e70,#c98500,#d55181,#008300,#908
 **`institutional`**
 
 ```
-$ node validate_palette.js "#1f5398,#18aec2,#893747,#52ade3,#be9922,#4a5e9f,#e5957b,#076392" --mode light --surface "#ffffff"
+$ node validate_palette.js "#1f5398,#18aec2,#893747,#52ade3,#be9922,#4a5e9f,#e5957b,#657d19" --mode light --surface "#ffffff"
   [PASS] Lightness band         all 8 inside L 0.43–0.77
   [PASS] Chroma floor           all 8 >= 0.1
-  [PASS] CVD separation         worst adjacent #be9922↔#52ade3 ΔE 23.8 (protan) · tritan 20.6
+  [PASS] CVD separation         worst adjacent #657d19↔#e5957b ΔE 15.5 (protan) · tritan 20.6
   [PASS] Normal-vision floor    worst adjacent #be9922↔#52ade3 ΔE 24.1 (normal)
   [WARN] Contrast vs surface    below 3:1 — relief required (visible labels or table view): [["#18aec2",2.67],["#52ade3",2.49],["#be9922",2.7],["#e5957b",2.36]]
   → ALL CHECKS PASS   (exit 0)
 
-$ node validate_palette.js "#3f6cbb,#00a5b6,#a94d58,#26a0ca,#a98900,#6473bd,#cf785c,#357cb1" --mode dark --surface "#101828"
+$ node validate_palette.js "#3f6cbb,#00a5b6,#a94d58,#26a0ca,#a98900,#6473bd,#cf785c,#516f0a" --mode dark --surface "#101828"
   [PASS] Lightness band         all 8 inside L 0.48–0.67
   [PASS] Chroma floor           all 8 >= 0.1
-  [PASS] CVD separation         worst adjacent #a94d58↔#00a5b6 ΔE 14.6 (deutan) · tritan 13.9
+  [PASS] CVD separation         worst adjacent #516f0a↔#cf785c ΔE 11.0 (protan) · tritan 13.9
   [PASS] Normal-vision floor    worst adjacent #00a5b6↔#3f6cbb ΔE 16.5 (normal)
   [PASS] Contrast vs surface    all 8 >= 3:1
   → ALL CHECKS PASS   (exit 0)
@@ -450,7 +450,7 @@ $ node validate_palette.js "#b34027,#506cad,#988904,#984e6b" --mode dark --surfa
 
 **Against the neutral of "Other"** (`#898781`, the same in every palette): the lowest normal-vision ΔE (OKLab ×100) of any palette color is 14.5 (tamiza), 13.7 (institutional), 13.1 (earth) and 19.1 (vivid) in the light theme, and 12.6, 11.8, 12.1 and 13.0 in the dark one. Under protan and deutan (the smaller of the two) the lowest is 5.1 (tamiza), 9.0 (institutional), 9.8 (earth) and 8.0 (vivid) in the light theme, and 1.1, 5.2, 9.0 and 8.6 in the dark one; the weakest new color is `institutional` salmon in the dark theme, and Tamiza's own colors were already closer. `chart-tokens.spec.ts` keeps every palette color at least 10 from "Other" for full-color readers.
 
-**Against Tamiza** (ΔE ×100 to the nearest Tamiza color of the same theme): the first four colors of each new palette are at least 10.8 (institutional), 11.1 (earth) and 11.2 (vivid) away in the light theme and at least 8.8, 8.2 and 11.1 in the dark one, so none is a near-duplicate of a Tamiza color. Over all eight, the nearest are 8.1 (institutional), 9.0 (earth) and 7.5 (vivid, slot 8, orange, in the crowded warm zone) in the light theme and 5.5, 7.6 and 5.7 in the dark one (institutional slot 5, mustard, and vivid slot 8). These are looked at, not gated.
+**Against Tamiza** (ΔE ×100 to the nearest Tamiza color of the same theme): the first four colors of each new palette are at least 10.8 (institutional), 11.1 (earth) and 11.2 (vivid) away in the light theme and at least 8.8, 8.2 and 11.1 in the dark one, so none is a near-duplicate of a Tamiza color. Over all eight, the nearest are 7.9 (institutional, slot 8, olive green, beside Tamiza's green), 9.0 (earth) and 7.5 (vivid, slot 8, orange, in the crowded warm zone) in the light theme and 5.5, 7.6 and 5.7 in the dark one (institutional slot 5, mustard, and vivid slot 8). These are looked at, not gated.
 
 ### The sequential scales
 
@@ -645,28 +645,107 @@ The spec has a `Checks on every palette` block (spec "Palette checks", scenario 
 
 - the tokens are exactly the 4 palettes of 8 colors and the 7 scales of 7 steps and 7 labels, in both themes, and the `--tmz-series-1..8` are gone;
 - every palette and scale holds the hex values above, pinned literally, so `tamiza` and `blue` equal the values validated before this change;
-- per palette and theme: 8 distinct colors, each inside the band and above the chroma floor, neighbors at least 15 apart (OKLab ×100, normal vision), each at least 10 from "Other". The CVD check stays with the validator and its recorded results;
+- per palette and theme: 8 distinct colors, each inside the band and above the chroma floor, neighbors at least 15 apart (OKLab ×100, normal vision) and at least 8 apart under protan and under deutan (the validator's simulation and its CVD target, see below), each at least 10 from "Other";
 - per scale and theme: lightness in one direction with steps of at least 0.06 (`blue`: 0.04), one hue within 40° (`gray` instead stays under a chroma of 0.02, its measured maximum being 0.017), step 1 a tint (at least 1.25:1 on white, measured 1.30 to 1.35; at least 2:1 on the dark surface, measured 2.14 to 2.41), and a label of white or near-black at 4.5:1 and at least as good as the other;
 - the scales are at least 3 apart at every step;
 - the `--tmz-seq-n` and `--tmz-seq-ink-n` that a mark reads are the blue scale in both themes;
-- the checks themselves fail on a missing or repeated color, a color off the band, dull, too close to its neighbor or to "Other", steps out of order, a second hue, a gray with a hue, a lost first step and a faint or wrong label.
+- for every palette and theme, the color-vision simulation gives back the worst adjacent distances the validator printed, within 0.1 (the validator prints one decimal): the smaller of protan and deutan, and tritan;
+- the checks themselves fail on a missing or repeated color, a color off the band, dull, too close to its neighbor or to "Other", a neighbor that full-color readers tell apart and a reader with protan does not, steps out of order, a second hue, a gray with a hue, a lost first step and a faint or wrong label.
+
+### The color-vision check in the spec
+
+Spec "Palette checks" asks that adjacent colors stay apart for readers with each common color-vision deficiency, and its scenario fails the checks when any color breaks one. `chart-tokens.spec.ts` first left that check to the validator run recorded here, so a developer who edited a palette in `styles.css` and in the spec's pinned lists passed every check with no color-vision check at all. It now runs the check itself, the way the validator does (`validate_palette.js`: `MACHADO`, `simulate`, `deltaE`, `CVD_TARGET`):
+
+- `simulate` and `deltaE(x, y, deficiency)` sit next to the OKLab helpers. A color goes through the Machado, Oliveira and Fernandes (2009) matrix of the deficiency at severity 1.0, on linear RGB, clamped to 0-1, then into OKLab, and the distance is ×100. The validator's thresholds are calibrated to that model, so it is copied, not swapped for another.
+- For every palette and theme, `paletteProblems` fails a color that is under 8 from its neighbor under protan or under deutan, the two deficiencies the validator gates on. 8 is the validator's `CVD_TARGET` and the gate of design D2. The validator's floor of 6 is only a WARN that labels, gaps or texture must excuse, which a palette's colors do not bring. The validator reports tritan without gating on it, and the spec does not gate on it either: its 5.8 for Tamiza in the light theme would fail an 8.
+- The block that tests the checks themselves has a negative case: a dark olive green, `#4c6118`, in place of the indigo of `earth` next to terracotta `#af4a1b` is 18.0 apart with full color vision and 0.38 under protan (8.8 under deutan). The checks return exactly one problem for it, the protan one.
+
+**Cross-check against the validator.** The worst adjacent distance of each palette from the simulation of the spec, written at two decimals, against what the validator printed (the smaller of protan and deutan, and tritan). They agree within 0.05, the rounding of one decimal, and the spec asserts 0.1. The cross-check ran first against the recorded values of the first validation (Tamiza 9.1 / 8.4, institutional 23.8 / 14.6, earth 16.6 / 14.8, vivid 17.4 / 13.1) and passed at once, so the gate was asserted on a simulation known to match; the `institutional` rows below also give the values after the repair.
+
+| Palette | Theme | Protan and deutan: validator | Spec | Tritan: validator | Spec |
+|---|---|---|---|---|---|
+| `tamiza` | light | 9.1 | 9.12 | 5.8 | 5.83 |
+| `tamiza` | dark | 8.4 | 8.36 | 8.7 | 8.65 |
+| `institutional` | light | 15.5 (before the repair 23.8) | 15.46 (23.77) | 20.6 | 20.59 |
+| `institutional` | dark | 11.0 (before the repair 14.6) | 11.01 (14.64) | 13.9 | 13.87 |
+| `earth` | light | 16.6 | 16.62 | 7.3 | 7.31 |
+| `earth` | dark | 14.8 | 14.81 | 9.3 | 9.31 |
+| `vivid` | light | 17.4 | 17.35 | 7.2 | 7.16 |
+| `vivid` | dark | 13.1 | 13.09 | 9.1 | 9.14 |
+
+The simulation is held to the validator by that test: changing one coefficient of the deutan matrix by 0.1 fails four of the eight palette-and-theme rows by 0.16 to 0.66, and a CVD target of 0 fails the negative case.
 
 ### Repairs
 
-None. Every palette passed every hard gate in both themes on the first run, every scale passed its checks except the two settled above (the light end on the light theme, and the dark steps of `blue`), and no hex value was changed.
+One, found after the verification above, in the fix pass that followed the first review: the eighth color of `institutional`.
 
+*The finding.* The palette is blue-heavy and its slot 8, steel blue (`#076392` light, `#357cb1` dark), sat next to slot 1, navy. Only adjacent pairs are gated and slots 7 and 8 were 24 apart, so every gate passed; but a pie of exactly eight values puts slice 8 beside slice 1 at 12 o'clock, and a line chart with several series needs every pair apart. The validator, run on that pair alone, fails it:
+
+```
+$ node validate_palette.js "#076392,#1f5398" --mode light --surface "#ffffff"
+  [FAIL] CVD separation         worst adjacent #1f5398↔#076392 ΔE 4.8 (deutan) · tritan 3.6
+  [FAIL] Normal-vision floor    worst adjacent #1f5398↔#076392 ΔE 4.9 (normal) — below 15, hard to tell apart even with full color vision
+
+$ node validate_palette.js "#357cb1,#3f6cbb" --mode dark --surface "#101828"
+  [FAIL] CVD separation         worst adjacent #3f6cbb↔#357cb1 ΔE 4.8 (deutan) · tritan 3.2
+  [FAIL] Normal-vision floor    worst adjacent #3f6cbb↔#357cb1 ΔE 5.1 (normal) — below 15, hard to tell apart even with full color vision
+```
+
+Over all pairs, the closest were slots 1 and 8 (4.9 in the light theme) and slots 2 and 4 (3.9 in the dark one), and under protan slots 6 and 8 were 2.3 apart in the light theme (1.8 under deutan in the dark one).
+
+*The search.* Slot 8 alone was replaced; slot 6 did not have to change. Every OKLCH color with chroma 0.10 to 0.13 was tried (hue in steps of 1°, chroma of 0.005 and lightness of 0.004, across each theme's band), and kept only when, in its theme, it passed the hard gates against slot 7, its one neighbor (lightness band, chroma floor, CVD ΔE at least 8 for protan and deutan, normal-vision ΔE at least 15), had contrast of 3:1 or more on the surface (so the dark theme keeps no WARN), stayed at least 10 from "Other" and was at least 15 from slot 1. The best a family of hues could do for its distance to the nearest of slots 1 to 7 (normal vision, OKLab ×100), light and dark: greens 21.9 and 19.9, yellow-olives 18.1 and 14.6, purples 17.9 and 13.4, red-pinks 17.7 and 11.4, teal-cyans 16.7 and 6.8, orange-browns 15.2 and 11.7, blues 12.2 and 2.4. Only the greens stay 15 or more from every other slot in the dark theme. Within them, hue 123° to 126° gave the best color-vision margin against slot 3, burgundy, the slot a green is hardest to tell apart from for a reader with protan or deutan (7.0 in the dark theme at that hue with 3.07:1 on the surface, 5.8 to 6.4 at hue 140° to 148°).
+
+*The choice.* An olive green, hue name `colors.hues.institutional.8` ("olive green" / "verde oliva", it was "steel blue" / "azul acero"): `#657d19` in the light theme (OKLCH 0.552, 0.124, 123°) and `#516f0a` in the dark theme (0.500, 0.124, 126°). Against slot 1: 25.3 and 24.0 for full-color readers, 24.6 and 23.2 under protan and deutan. Against every other slot, 16.4 and 16.0 at the nearest for full-color readers (slot 5, mustard), 11.8 and 7.0 at the nearest under protan and deutan (slot 3 and slot 5 in the light theme, slot 3 in the dark one); against slot 6, 22.8 and 24.2. Contrast on the surface is 4.67:1 and 3.07:1, so no new WARN, and the distance to the neutral of "Other" is 13.7 and 17.0. The validator, on the whole palette and on slots 8 and 1 alone, all exit 0:
+
+```
+$ node validate_palette.js "#1f5398,#18aec2,#893747,#52ade3,#be9922,#4a5e9f,#e5957b,#657d19" --mode light --surface "#ffffff"
+  [PASS] CVD separation         worst adjacent #657d19↔#e5957b ΔE 15.5 (protan) · tritan 20.6
+  [PASS] Normal-vision floor    worst adjacent #be9922↔#52ade3 ΔE 24.1 (normal)
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#3f6cbb,#00a5b6,#a94d58,#26a0ca,#a98900,#6473bd,#cf785c,#516f0a" --mode dark --surface "#101828"
+  [PASS] CVD separation         worst adjacent #516f0a↔#cf785c ΔE 11.0 (protan) · tritan 13.9
+  [PASS] Normal-vision floor    worst adjacent #00a5b6↔#3f6cbb ΔE 16.5 (normal)
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#657d19,#1f5398" --mode light --surface "#ffffff"
+  [PASS] CVD separation         worst adjacent #1f5398↔#657d19 ΔE 24.6 (protan) · tritan 11.9
+  [PASS] Normal-vision floor    worst adjacent #1f5398↔#657d19 ΔE 25.3 (normal)
+  → ALL CHECKS PASS   (exit 0)
+
+$ node validate_palette.js "#516f0a,#3f6cbb" --mode dark --surface "#101828"
+  [PASS] CVD separation         worst adjacent #3f6cbb↔#516f0a ΔE 23.2 (deutan) · tritan 8.6
+  [PASS] Normal-vision floor    worst adjacent #3f6cbb↔#516f0a ΔE 24.0 (normal)
+  → ALL CHECKS PASS   (exit 0)
+```
+
+The worst adjacent color-vision distance of the palette falls, from 23.8 to 15.5 in the light theme and from 14.6 to 11.0 in the dark one, because slots 7 and 8 (salmon and a green) are now neighbors that red-green deficiencies bring closer; both stay above the target of 8. The worst adjacent distance for full-color readers (24.1 and 16.5), the contrast WARNs of slots 2, 4, 5 and 7 and the `--pairs all` runs of the first three and four slots (above) are unchanged.
+
+*What stays.* All eight slots still do not pass `--pairs all`, and this repair does not try to. The closest pairs are now slots 1 and 6 (navy and slate) in the light theme and slots 2 and 4 (turquoise and sky blue) in the dark one, pairs the repair did not touch:
+
+```
+$ node validate_palette.js "#1f5398,#18aec2,#893747,#52ade3,#be9922,#4a5e9f,#e5957b,#657d19" --mode light --surface "#ffffff" --pairs all
+  [FAIL] CVD separation         worst all-pairs #4a5e9f↔#1f5398 ΔE 4.3 (protan) · tritan 1.8
+  [FAIL] Normal-vision floor    worst all-pairs #4a5e9f↔#1f5398 ΔE 6.0 (normal) — below 15, hard to tell apart even with full color vision
+
+$ node validate_palette.js "#3f6cbb,#00a5b6,#a94d58,#26a0ca,#a98900,#6473bd,#cf785c,#516f0a" --mode dark --surface "#101828" --pairs all
+  [FAIL] CVD separation         worst all-pairs #6473bd↔#3f6cbb ΔE 3.0 (protan) · tritan 0.8
+  [FAIL] Normal-vision floor    worst all-pairs #26a0ca↔#00a5b6 ΔE 3.9 (normal) — below 15, hard to tell apart even with full color vision
+```
+
+So the advice under "Beyond adjacent pairs" stands: a form that needs every pair apart (a line chart with several series, a scatter) should carry at most three series in `institutional`. What the repair settles is the pie of eight values, whose slice 8 and slice 1 were 4.9 apart and are now 25.3 apart.
 
 ### UI checks after the tokens (tasks 7.2 and 7.3)
 
-Run in the same sandbox, with the other groups of this change still in progress in the working tree, so the totals are those of the moment, not final.
+Run in the same sandbox, with the other groups of this change still in progress in the working tree, so the totals are those of the moment, not final. The rows for the token specs, the build and the safety check were run again in the fix pass (the color-vision check in the spec, the new slot 8 of `institutional`, the raised budget).
 
 | Check | Result |
 |---|---|
-| `chart-tokens.spec.ts` | 77 tests pass: the Likert tests as they were, and the `Checks on every palette` block (the tokens, each of the 4 palettes and 7 scales in both themes, the scales together, and the checks failing on a broken color) |
-| `translations.spec.ts` | passes with the new `colors.palettes`, `colors.scales` and `colors.hues` keys in `en.json` and `es.json` (4 palette names, 7 scale names, 32 hue names each) |
-| `map-styles.spec.ts`, `print-styles.spec.ts` | pass: the `.tmz-map` rules are untouched and still read `--tmz-seq-n` |
+| `chart-tokens.spec.ts` | 86 tests pass: the Likert tests as they were, and the `Checks on every palette` block (the tokens, each of the 4 palettes and 7 scales in both themes, the color-vision simulation against the validator's numbers, the scales together, and the checks failing on a broken color, a pair confusable under protan included) |
+| `translations.spec.ts` | passes with the new `colors.palettes`, `colors.scales` and `colors.hues` keys in `en.json` and `es.json` (4 palette names, 7 scale names, 32 hue names each; hue 8 of `institutional` is "olive green" and "verde oliva") |
+| `map-styles.spec.ts`, `print-styles.spec.ts` | pass: the `.tmz-map` rules are untouched and still read `--tmz-seq-n`. Together with `chart-tokens`, `translations`, `chart-widgets`, `chart-colors`, `map-widget` and `dashboard-colors-dialog`: 8 files, 422 tests pass |
 | UI, whole suite (`npm test -- --watch=false`) | 101 files, 2,392 tests passed. One unhandled error, `Cannot read properties of undefined (reading 'total')` in `ProjectPerformance`, raised during `project-indicators.spec.ts`: it was there before this change (baseline: 99 files, 2,256 tests, the same error) and still makes the exit code 1 |
-| `ng build` | succeeds. The initial bundle is 657.47 kB against a warning budget of 650 kB (error budget 1 MB): the change before this one ended at 649.56 kB. All of the 7.9 kB comes from `styles.css`: the tokens of the built CSS went from about 1 kB to 8.8 kB (244 more custom properties, 3.7 kB of them the labels on the scale steps) |
+| `ng build` | succeeds. The initial bundle is 660.21 kB; before this change it was 649.71 kB. The 10.5 kB are `styles.css` (68.30 to 77.27 kB: the palette and scale tokens, 244 more custom properties, 3.7 kB of them the labels on the scale steps) and 1.5 kB of shared JavaScript. The warning budget of the initial bundle in `angular.json` goes from 650 kB to 675 kB, as it went from 500 kB to 650 kB in the commit "maps ok", and the error budget stays at 1 MB. The build prints no budget warning, only the NG8113 warning about `Card` in `ProjectReference` that was already there; the tokens were not shrunk |
 | `npm run check:safety` | clean |
 
-`--tmz-series-1..8` no longer exist in `styles.css`. Until group 10 moves `chart-scales.ts` (`seriesColor`) and `series-legend.ts` to `chart-colors.ts`, a series is drawn in `var(--tmz-series-n)`, which resolves to nothing: the specs of those files only read the string.
+`--tmz-series-1..8` no longer exist in `styles.css`, and nothing reads them: group 10 moved `chart-scales.ts` (`seriesColor`) and `series-legend.ts` to `chart-colors.ts`, which draws a series in `var(--tmz-pal-{palette}-{n})`, and the only series token left is `--tmz-series-other`. `chart-tokens.spec.ts` checks that no `--tmz-series-<n>` is defined, in either theme.

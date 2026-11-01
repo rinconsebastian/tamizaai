@@ -246,13 +246,15 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task A_dashboard_is_duplicated_with_its_widgets_and_filters_right_after_the_original()
+    public async Task A_dashboard_is_duplicated_with_its_widgets_filters_palette_and_colors_right_after_the_original()
     {
         await using var h = await CreateAsync();
         await SeedAsync(h);
         var original = await FirstDashboardAsync(h);
         await AddWidgetAsync(h, original, "By municipality", "bar", BarConfig());
         await h.CallAsync("analyst", "update_dashboard", new { dashboardId = original, filters = new[] { new { column = "municipality", label = "Municipality", kind = "text" } }, change = Request });
+        var colored = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = original, palette = "earth", valueColors = new[] { Kept("sex", "Female", 5) }, change = Request });
+        Assert.Null(colored.Code());
         await AddDashboardAsync(h, "Later");
 
         using var copy = (await h.CallAsync("analyst", "duplicate_dashboard", new { dashboardId = original, name = "Copy", change = Request })).Json();
@@ -263,6 +265,22 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         Assert.Equal(["Indicators", "Copy", "Later"], names);
         var copied = list.RootElement.GetProperty("dashboards")[1];
         Assert.Equal((1, 1), (copied.GetProperty("widgets").GetInt32(), copied.GetProperty("filters").GetInt32()));
+
+        // The copy has the original's palette and colors kept by value, as get_dashboard gives them and as the column stores them.
+        var copyId = copy.RootElement.GetProperty("id").GetGuid();
+        Assert.Equal("earth [sex=Female:5]", await ColorsOfAsync(h, copyId));
+        Assert.Equal("earth", await StoredPaletteAsync(h, copyId));
+
+        // The two are separate afterwards: changing the copy leaves the original as it was, and the other way round.
+        var recolored = await h.CallAsync(
+            "analyst", "update_dashboard", new { dashboardId = copyId, palette = "vivid", valueColors = new[] { Kept("sex", "Female", 2), Kept("sex", "Male", 7) }, change = Request });
+        Assert.Null(recolored.Code());
+        Assert.Equal("vivid [sex=Female:2, sex=Male:7]", await ColorsOfAsync(h, copyId));
+        Assert.Equal("earth [sex=Female:5]", await ColorsOfAsync(h, original));
+        Assert.Equal("earth", await StoredPaletteAsync(h, original));
+        Assert.Null((await h.CallAsync("analyst", "update_dashboard", new { dashboardId = original, valueColors = Array.Empty<object>(), change = Request })).Code());
+        Assert.Equal("earth []", await ColorsOfAsync(h, original));
+        Assert.Equal("vivid [sex=Female:2, sex=Male:7]", await ColorsOfAsync(h, copyId));
     }
 
     [Fact]
@@ -1329,6 +1347,37 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         Assert.Null((await h.CallAsync("analyst", "update_widget", new { dashboardId = water, widgetId = widget, config = Bar(), change = ColorsRequest })).Code());
         using var after = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = water })).Json();
         Assert.False(after.RootElement.GetProperty("widgets")[0].GetProperty("config").TryGetProperty("display", out _));
+    }
+
+    [Fact]
+    public async Task A_new_chart_type_alone_keeps_the_config_so_a_widget_with_a_color_or_a_scale_needs_a_config_without_what_the_new_type_does_not_take()
+    {
+        await using var h = await CreateAsync();
+        await SeedHouseholdsAsync(h);
+        var water = await AddDashboardInTamizaAsync(h, "Water access");
+        object Config(object? display = null, string? geometryColumn = null) =>
+            new { indicator = "households", measure = "value", groupBy = "municipality", geometryColumn, display };
+        var bar = await AddWidgetAsync(h, water, "Households", "bar", Config(new { color = 3 }));
+        var map = await AddWidgetAsync(h, water, "Map", "map", Config(new { ramp = "green" }, "geometry"));
+
+        // The chart type alone is checked against the config it keeps, which is the color of a bar and the scale of a map.
+        var barToPie = await h.CallAsync("analyst", "update_widget", new { dashboardId = water, widgetId = bar, chartType = "pie", change = ColorsRequest });
+        var mapToPie = await h.CallAsync("analyst", "update_widget", new { dashboardId = water, widgetId = map, chartType = "pie", change = ColorsRequest });
+
+        Assert.Equal("mcp.validation", barToPie.Code());
+        Assert.Contains("config.display.color: A pie widget has no color of its own.", barToPie.Text());
+        Assert.Equal("mcp.validation", mapToPie.Code());
+        Assert.Contains("config.display.ramp", mapToPie.Text());
+
+        // A type that takes the color or the scale keeps it, and a config without them makes the change to a type that does not.
+        Assert.Null((await h.CallAsync("analyst", "update_widget", new { dashboardId = water, widgetId = bar, chartType = "column", change = ColorsRequest })).Code());
+        Assert.Null((await h.CallAsync("analyst", "update_widget", new { dashboardId = water, widgetId = bar, chartType = "pie", config = Config(), change = ColorsRequest })).Code());
+        Assert.Null((await h.CallAsync("analyst", "update_widget", new { dashboardId = water, widgetId = map, chartType = "pie", config = Config(), change = ColorsRequest })).Code());
+        using var viewed = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = water })).Json();
+        var widgets = viewed.RootElement.GetProperty("widgets").EnumerateArray().ToDictionary(w => w.GetProperty("title").GetString()!);
+        Assert.Equal("pie", widgets["Households"].GetProperty("chartType").GetString());
+        Assert.False(widgets["Households"].GetProperty("config").TryGetProperty("display", out _));
+        Assert.False(widgets["Map"].GetProperty("config").TryGetProperty("display", out _));
     }
 
     [Fact]

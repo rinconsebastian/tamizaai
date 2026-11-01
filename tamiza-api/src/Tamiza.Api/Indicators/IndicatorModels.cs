@@ -349,10 +349,12 @@ public sealed record MissingReferences(bool Indicator, IReadOnlyList<string> Col
 /// <param name="Totals">A widget with a series only: the totals of its groups, its series and all its rows.</param>
 /// <param name="LeftOut">A population pyramid or a Likert widget only: the rows it left out because their group or series value does not belong.</param>
 /// <param name="Domain">
-/// A pie chart only (design D8 of dashboard palettes): the group values its colors and its "Other" slice follow, read from the rows that
-/// match the widget's own filters, not the dashboard's. At most <see cref="WidgetConfig.MaxSlices"/> entries: the values with the
-/// largest totals first, then <c>none</c> for the rows with no group, then <c>other</c> when some values were folded. A group value
-/// outside it is part of "Other". Left out for every other widget.
+/// A pie chart only (design D8 of dashboard palettes): the groups its colors and its "Other" slice follow, read from the rows that
+/// match the widget's own filters, not the dashboard's. Every group with a total above zero is ranked by total, largest first, the
+/// missing group (<c>none</c>) in its place, as the page ranked the slices of a pie before the domain existed. At most
+/// <see cref="WidgetConfig.MaxSlices"/> entries: all the groups when there are that many or fewer, otherwise the largest
+/// <see cref="WidgetConfig.MaxSlices"/> - 1 followed by <c>other</c>. A group outside it, the missing one included, is part of "Other".
+/// Left out for every other widget.
 /// </param>
 public sealed record IndicatorQueryResponse(
     bool Published,

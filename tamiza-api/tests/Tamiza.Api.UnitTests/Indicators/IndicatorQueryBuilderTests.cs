@@ -637,11 +637,10 @@ public sealed class IndicatorQueryBuilderTests
         Assert.NotNull(plan.Sql);
         Assert.Null(plan.Series);
         var domain = plan.Domain!;
-        Assert.Contains("(SELECT \"municipality\"::text, (sum(\"value\")::double precision) FROM " + From, domain.Sql);
+        Assert.Contains("SELECT \"municipality\"::text, (sum(\"value\")::double precision) FROM " + From, domain.Sql);
         Assert.Contains("\"value\" IS NOT NULL AND \"municipality\"::text = ANY(@f0)", domain.Sql);
-        Assert.Contains("GROUP BY \"municipality\" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap", domain.Sql);
-        Assert.Contains("(SELECT NULL::text, (sum(\"value\")::double precision) FROM " + From, domain.Sql);
-        Assert.Contains("\"municipality\" IS NULL", domain.Sql);
+        Assert.Contains("GROUP BY \"municipality\"", domain.Sql);
+        Assert.EndsWith("LIMIT @cap", domain.Sql);
         Assert.DoesNotContain("@d0", domain.Sql);
         Assert.DoesNotContain("\"year\"", domain.Sql);
         // The pie's rows are read through both sets of filters, its domain through the widget's own.
@@ -649,6 +648,55 @@ public sealed class IndicatorQueryBuilderTests
         Assert.DoesNotContain(domain.Parameters, p => p.Name.StartsWith('d'));
         Assert.Equal(["f0", "cap"], domain.Parameters.Select(p => p.Name));
         Assert.Equal(["Cali", "Buga"], (string[])domain.Parameters.Single(p => p.Name == "f0").Value);
+    }
+
+    [Fact]
+    public void A_pies_domain_ranks_the_missing_group_with_the_others_in_one_statement()
+    {
+        var domain = Of(ChartTypes.Pie, Config()).Domain!;
+
+        // One grouping, so the rows with no group are a group like any other and take their place by their total.
+        Assert.Equal(
+            $"""
+            SELECT "municipality"::text, (sum("value")::double precision) FROM {From}
+            WHERE "value" IS NOT NULL
+            GROUP BY "municipality"
+            HAVING (sum("value")::double precision) > 0 AND (sum("value")::double precision) < 'Infinity'::double precision
+            ORDER BY 2 DESC, {From}."municipality" NULLS LAST
+            LIMIT @cap
+            """,
+            domain.Sql);
+        Assert.DoesNotContain("UNION", domain.Sql);
+        Assert.DoesNotContain("\"municipality\" IS NULL", domain.Sql);
+        Assert.DoesNotContain("\"municipality\" IS NOT NULL", domain.Sql);
+    }
+
+    [Fact]
+    public void A_pies_domain_keeps_only_groups_whose_total_is_a_number_above_zero()
+    {
+        var domain = Of(ChartTypes.Pie, Config(measure: null, ratio: new WidgetRatio("numerator", "denominator"))).Domain!;
+
+        // NaN sorts above every number in PostgreSQL, so it is left out in the statement and cannot take a place of the cap.
+        const string ratio = "sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)";
+        Assert.Contains($"HAVING ({ratio}) > 0 AND ({ratio}) < 'Infinity'::double precision", domain.Sql);
+    }
+
+    [Fact]
+    public void A_pies_domain_breaks_equal_totals_in_the_order_of_the_pies_own_rows_the_missing_group_last()
+    {
+        // The rows of a pie, which cannot be sorted, are in the group column's own order with the missing group last: the domain's tie-break is that text.
+        foreach (var groupBy in new[] { "municipality", "year", "Odd \"name\"" })
+        {
+            var plan = Of(ChartTypes.Pie, Config(groupBy: groupBy), dashboard: false);
+            var order = $"{From}.{DataSources.Quote(groupBy)} NULLS LAST";
+
+            Assert.Contains($"ORDER BY {order}\n", plan.Sql!.Sql);
+            Assert.Contains($"ORDER BY 2 DESC, {order}\n", plan.Domain!.Sql);
+        }
+
+        // The column itself, not its text: a number group breaks a tie as a number (2 before 10), as its rows are ordered.
+        var byYear = Of(ChartTypes.Pie, Config(groupBy: "year"), dashboard: false).Domain!.Sql;
+        Assert.DoesNotContain("ORDER BY 2 DESC, 1", byYear);
     }
 
     [Fact]
@@ -667,19 +715,22 @@ public sealed class IndicatorQueryBuilderTests
         var plan = Of(ChartTypes.Pie, Config(measure: null, ratio: new WidgetRatio("numerator", "denominator")));
 
         const string ratio = "sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)";
-        Assert.Contains($"(SELECT \"municipality\"::text, ({ratio}) FROM {From}", plan.Domain!.Sql);
+        Assert.Contains($"SELECT \"municipality\"::text, ({ratio}) FROM {From}", plan.Domain!.Sql);
         Assert.Contains("(\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL)", plan.Domain.Sql);
         Assert.Contains($"SELECT \"municipality\"::text, ({ratio}), NULL::text", plan.Sql!.Sql);
     }
 
     [Fact]
-    public void A_pies_domain_is_the_statement_a_widget_with_that_series_column_reads()
+    public void A_pies_domain_is_not_the_statement_of_a_series_which_keeps_the_missing_value_apart()
     {
         var pie = Of(ChartTypes.Pie, Config(groupBy: "Odd \"name\"", filters: [Own]), dashboard: false);
         var series = Of(ChartTypes.Column, new WidgetConfigInput("coverage", GroupBy: "municipality", SeriesBy: "Odd \"name\"", Filters: [Own]), dashboard: false);
 
-        Assert.Equal(series.Series!.Domain!.Sql, pie.Domain!.Sql);
+        // The same filters bind the same parameters, but the series' statement lists the missing value after the others and a pie ranks it.
+        Assert.NotEqual(series.Series!.Domain!.Sql, pie.Domain!.Sql);
         Assert.Equal(Described(series.Series.Domain), Described(pie.Domain));
+        Assert.Contains("UNION ALL", series.Series.Domain.Sql);
+        Assert.DoesNotContain("UNION", pie.Domain.Sql);
     }
 
     [Theory]

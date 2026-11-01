@@ -123,10 +123,10 @@ public static class SeriesQueryBuilder
     }
 
     /// <summary>
-    /// The statement that lists the values of a column by their total over the widget's own rows (design D3; a pie's domain, design D8
-    /// of dashboard palettes): <c>value, total</c> for the non-missing values, largest total first and then by value, at most
-    /// <paramref name="cap"/> of them, plus one row of null value when some rows have none. The dashboard's filters are never part of
-    /// it, so a dashboard filter never changes the values a widget keeps.
+    /// The statement that lists the values of a column by their total over the widget's own rows (design D3): <c>value, total</c> for
+    /// the non-missing values, largest total first and then by value, at most <paramref name="cap"/> of them, plus one row of null value
+    /// when some rows have none. The dashboard's filters are never part of it, so a dashboard filter never changes the values a widget
+    /// keeps. A pie ranks its groups differently, the missing one in its place (<see cref="IndicatorQueryBuilder.PieDomain"/>).
     /// </summary>
     /// <param name="column">The quoted column.</param>
     /// <param name="from">The quoted <c>"schema"."table"</c>.</param>

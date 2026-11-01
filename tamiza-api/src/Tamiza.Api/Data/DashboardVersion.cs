@@ -17,8 +17,10 @@ public sealed class DashboardVersion
     public int Number { get; set; }
 
     /// <summary>
-    /// The dashboard's name, filters and widgets, as JSON text in a <c>jsonb</c> column (design D2): the widgets in reading order,
-    /// and the filters, each widget's config and its layout embedded as stored. The indicators module builds and reads it.
+    /// The dashboard's name, filters, palette, colors kept by value and widgets, as JSON text in a <c>jsonb</c> column (design D2): the
+    /// widgets in reading order, and the filters, the colors kept by value, each widget's config and its layout embedded as stored. The
+    /// palette and the colors are written only when they are not the defaults, so a version of a dashboard that never changed them has
+    /// neither key (design D6 of dashboard palettes). The indicators module builds and reads it.
     /// </summary>
     public required string Content { get; set; }
 

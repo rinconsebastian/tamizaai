@@ -42,7 +42,9 @@ public sealed class McpDashboardTools(
     private const string DisplayHelp =
         "config.display = { color, ramp } sets how the widget is drawn, both optional. color is a place in the dashboard's palette, 1 to 8 (not a color code; 1 when left out), " +
         "for a bar, column or line chart with no seriesBy and for a histogram. ramp is a sequential scale, one of blue, teal, green, orange, red, purple or gray, " +
-        "for a map or heatmap only; left out, the palette's own scale. A widget with a series takes its colors from its series, and no other kind has a color of its own.";
+        "for a map or heatmap only; left out, the palette's own scale. A widget with a series takes its colors from its series, and no other kind has a color of its own. " +
+        "To change the chart type of a widget that has a color or a scale, also send a config without the display fields the new type does not take: " +
+        "a new chartType alone keeps the old config, so it is refused, with an error on config.display.color or config.display.ramp, when the new type does not take them.";
 
     /// <summary>The most characters of a request's <c>change</c>, as <c>dashboard_versions.note</c> keeps it (design D1, D10 of dashboard versions).</summary>
     internal const int MaxChangeLength = 120;

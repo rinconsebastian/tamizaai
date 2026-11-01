@@ -147,7 +147,7 @@ Every widget has a title, a type, one **indicator**, what to **plot** (a measure
 
 - **Rows with no value** in the plotted measure are left out of every widget.
 - A group with no value in the group column is shown as **(none)**.
-- The **pie chart** orders slices from the largest. When there are more than 8 groups, the 7 largest keep their slice and the rest are folded into one **Other** slice. A group whose value is zero or negative has no share and is not drawn; the widget says how many, and **Show as table** lists them. The slices' colors, and which groups are folded into **Other**, come from the rows that match the widget's *own* filters, not the dashboard's, so a member who changes a dashboard filter sees each slice in the same color.
+- The **pie chart** orders slices from the largest. When there are more than 8 groups, the 7 largest keep their slice and the rest are folded into one **Other** slice. A group whose value is zero or negative has no share and is not drawn; the widget says how many, and **Show as table** lists them. The slices' colors, and which groups are folded into **Other**, come from the rows that match the widget's *own* filters, not the dashboard's, so a member who changes a dashboard filter sees each slice in the same color. A group that has no share in those rows (its total there is zero or negative) but a value above zero under a dashboard filter is added to **Other**, which keeps its neutral color.
 - Colors come from the dashboard's [palette](#colors), with the widget's own [color or scale](#widget-color-and-scale) where its type has one, and, light or dark, follow the theme.
 
 ### What to plot: a measure or a ratio
@@ -363,7 +363,7 @@ A dashboard draws its widgets in one **palette**: eight categorical colors in a 
 | Palette | Its eight colors, in order | Its scale for maps and heat maps |
 |---|---|---|
 | **Tamiza** (the default) | blue, orange, aqua, yellow, magenta, green, violet, red | Blue |
-| **Institutional** | navy blue, turquoise, burgundy, sky blue, mustard, slate, salmon, steel blue | Teal |
+| **Institutional** | navy blue, turquoise, burgundy, sky blue, mustard, slate, salmon, olive green | Teal |
 | **Earth** | terracotta, indigo, ochre, wine, moss, brown, plum, olive | Orange |
 | **Vivid** | purple, cyan, lime, fuchsia, green, blue, crimson, orange | Purple |
 
@@ -413,6 +413,7 @@ A color kept does not change maps, heat maps, Likert bars, cross tables, histogr
 - **One value, one color; one color, one value.** In a column, a value and a color each appear at most once, so two values of a widget never share a color. The same color may be used in two columns (`Female` of `sex` and `Rural` of `zone`, both in color 5). A list that breaks this is refused, and the form shows the message on the row it names, such as "sex already uses color 5.".
 - **Values are matched as exact text.** Case counts: a color kept for `piped` does not color `Piped`. A missing value, shown as **(none)**, and **Other** never take a color kept.
 - **Entries are not checked against the data.** A value that no widget shows stays saved and changes nothing, so a value can be prepared before the first run or after the data changes.
+- **The empty text.** An empty text is a group value, so the API accepts a color kept for it, but the form asks for a value on every row it adds: only the API and MCP can keep a color for the empty text, and **Colors** lists such an entry and saves it as it is.
 - **The other values take the palette in order.** A value with no color kept takes the palette's colors in the widget's series order, after the colors kept in that widget are set aside. A chart whose series are `Piped`, `River` and `Well`, with color 1 kept for `Well`, draws `Well` in color 1, `Piped` in color 2 and `River` in color 3. In a chart with no series, a bar with no color kept is drawn in the widget's own color.
 - **Colors follow the value, never its rank.** A [series](#widgets-with-a-series) or a pie slice keeps its color when a dashboard filter changes the rows that are shown, since both come from the widget's own rows.
 - **Two indicators with the same column name share its colors.** Colors kept are matched by column *name*, as [dashboard filters](#which-widgets-a-filter-narrows) are, not by indicator. If two indicators have a column called `type` and it means different things, a color kept for `type` = `A` colors the value `A` in both. Give each dimension a name of its own in the indicator scripts when it means something different, and the same name everywhere when it means the same.

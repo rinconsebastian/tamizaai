@@ -460,6 +460,80 @@ describe('chart widgets', () => {
         expect(sliceColors(context)).toEqual([pal('tamiza', 1), pal('tamiza', 2)]);
       });
 
+      it('keeps the missing group in the place the domain ranks it, with the next free color, whatever is kept by value', async () => {
+        // The domain ranks the missing group by size, as the series' domain does: here between Piped and River.
+        const kept = palette('tamiza', [
+          { column: 'water_source', value: 'River', color: 2 },
+          { column: 'water_source', value: '(none)', color: 4 },
+        ]);
+        const domain: QuerySeries[] = [...named('Piped'), { value: null, kind: 'none' }, ...named('River')];
+        const context = await show('pie', own, [row('Piped', 50), row(null, 30), row('River', 20)], undefined, kept, domain);
+
+        expect(sliceTitles(context).map((title) => title.split(':')[0])).toEqual(['Piped', '(none)', 'River']);
+        // River's color is set aside, so Piped and the missing group take the free ones in order of the domain.
+        expect(sliceColors(context)).toEqual([pal('tamiza', 1), pal('tamiza', 3), pal('tamiza', 2)]);
+      });
+
+      describe('the missing group and the fold, by rank', () => {
+        // Ten groups of one pie's own rows. The missing group is the third by size, so the domain ranks it there, takes the seven
+        // largest and folds G8, G9 and G10 into "Other": the order and the fold this component made from the rows before the domain.
+        const rows = [row('G1', 100), row('G2', 90), row(null, 80), row('G4', 70), row('G5', 60), row('G6', 50), row('G7', 40), row('G8', 30), row('G9', 20), row('G10', 10)];
+        const domain: QuerySeries[] = [...named('G1', 'G2'), { value: null, kind: 'none' }, ...named('G4', 'G5', 'G6', 'G7'), { value: null, kind: 'other' }];
+        const expectedNames = ['G1', 'G2', '(none)', 'G4', 'G5', 'G6', 'G7', 'Other'];
+        const expectedColors = [1, 2, 3, 4, 5, 6, 7].map((n) => pal('tamiza', n)).concat('var(--tmz-series-other)');
+        const names = (context: Context) => sliceTitles(context).map((title) => title.split(':')[0]);
+
+        it('colors the missing group by its rank and folds the smallest groups, not it, into "Other"', async () => {
+          const context = await show('pie', own, rows, undefined, undefined, domain);
+
+          expect(names(context)).toEqual(expectedNames);
+          expect(sliceColors(context)).toEqual(expectedColors);
+          expect(sliceTitles(context).at(-1)).toMatch(/^Other: 60 /);
+        });
+
+        it('draws the same slices in the same colors from an answer with no domain (an older API)', async () => {
+          const context = await show('pie', own, rows);
+
+          expect(names(context)).toEqual(expectedNames);
+          expect(sliceColors(context)).toEqual(expectedColors);
+          expect(sliceTitles(context).at(-1)).toMatch(/^Other: 60 /);
+        });
+
+        it('draws an answer with an empty domain as one with none', async () => {
+          const context = await show('pie', own, rows, undefined, undefined, []);
+
+          expect(names(context)).toEqual(expectedNames);
+          expect(sliceColors(context)).toEqual(expectedColors);
+        });
+      });
+
+      it('sums into "Other" a group the domain does not hold but the filtered rows give a value above zero, after the named slices and in the neutral color', async () => {
+        // In the pie\'s own rows Lake and River have no share, so the domain leaves them out and has no "Other" entry. A dashboard
+        // filter then makes both positive.
+        const context = await show('pie', own, [row('Piped', 50), row('Well', 10), row('Lake', 15), row('River', 25)], undefined, undefined, named('Piped', 'Well'));
+
+        expect(sliceTitles(context)).toEqual(['Piped: 50 (50%)', 'Well: 10 (10%)', 'Other: 40 (40%)']);
+        expect(sliceColors(context)).toEqual([pal('tamiza', 1), pal('tamiza', 2), 'var(--tmz-series-other)']);
+        expect(all(context.root, 'legend-item').map((item) => colorOf(item.querySelector('span[aria-hidden]')))).toEqual([pal('tamiza', 1), pal('tamiza', 2), 'var(--tmz-series-other)']);
+        expect(all(context.root, 'legend-item').map((item) => text(item.querySelector('span:not([aria-hidden])')))).toEqual(['Piped', 'Well', 'Other']);
+        expect(byTestId(context.root, 'pie-skipped')).toBeNull();
+      });
+
+      it('leaves a group outside the domain with a value at or below zero out of "Other", and counts it', async () => {
+        const context = await show('pie', own, [row('Piped', 30), row('Lake', -5), row('River', 0)], undefined, undefined, named('Piped'));
+
+        expect(sliceTitles(context)).toEqual(['Piped: 30 (100%)']);
+        expect(text(byTestId(context.root, 'pie-skipped'))).toBe('2 groups with a zero or negative value are not drawn; the table lists them.');
+      });
+
+      it('adds a group outside the domain to the "Other" the domain already holds', async () => {
+        const domain: QuerySeries[] = [...named('A'), { value: null, kind: 'other' }];
+        const context = await show('pie', own, [row('A', 10), row('Z', 30), row('Y', 20)], undefined, undefined, domain);
+
+        expect(sliceTitles(context)).toEqual(['A: 10 (16.7%)', 'Other: 50 (83.3%)']);
+        expect(sliceColors(context)).toEqual([pal('tamiza', 1), 'var(--tmz-series-other)']);
+      });
+
       it('still counts a group at or below zero instead of drawing it', async () => {
         const context = await show('pie', own, [row('Piped', 30), row('Well', 0)], undefined, undefined, named('Piped', 'Well'));
 

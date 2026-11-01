@@ -665,8 +665,8 @@ export class IndicatorsService {
   }
 
   /**
-   * Makes the dashboard's name, filters and widgets those of the version, as a new version (201), or changes nothing when it already
-   * is so (200, `restored` false). A version over the widget limit is refused as a duplicate is (400).
+   * Makes the dashboard's name, filters, palette, colors kept by value and widgets those of the version, as a new version (201), or
+   * changes nothing when it already is so (200, `restored` false). A version over the widget limit is refused as a duplicate is (400).
    */
   restoreVersion(projectId: string, dashboardId: string, number: number): Observable<DashboardRestore> {
     return this.http.post<DashboardRestore>(`${this.versionsUrl(projectId, dashboardId)}/${number}/restore`, null);

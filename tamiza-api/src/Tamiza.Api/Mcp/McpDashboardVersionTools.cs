@@ -9,9 +9,10 @@ using Tamiza.Api.Indicators;
 namespace Tamiza.Api.Mcp;
 
 /// <summary>
-/// The versions of a project's own dashboards (dashboard-versions): their history, one version's name, filters and widgets, and the
-/// restore of a kept one as a new version (design D10 of dashboard versions). They run the same code as the dashboard page's version
-/// history. Versions hold no rows, so the summaries level is enough; reading and restoring them is an analyst's action, as in the page.
+/// The versions of a project's own dashboards (dashboard-versions): their history, one version's name, filters, palette, colors kept
+/// by value and widgets, and the restore of a kept one as a new version (design D10 of dashboard versions). They run the same code as
+/// the dashboard page's version history. Versions hold no rows, so the summaries level is enough; reading and restoring them is an
+/// analyst's action, as in the page.
 /// </summary>
 [McpServerToolType]
 public sealed class McpDashboardVersionTools(

@@ -299,7 +299,9 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
         }
         else
         {
-            var (values, hasNone) = await ReadDomainAsync(connection, transaction, plan.Domain!, ct);
+            var listed = await ReadDomainAsync(connection, transaction, plan.Domain!, ct);
+            var values = listed.OfType<string>().ToList();
+            var hasNone = listed.Contains(null);
             var (keptValues, hasOther) = SeriesDomain.Fold(values, hasNone, plan.MaxSeries);
             kept = keptValues;
             series = SeriesDomain.Order(keptValues, hasNone, hasOther);
@@ -406,27 +408,22 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
     }
 
     /// <summary>
-    /// A pie's domain (design D8 of dashboard palettes): the group values of its own rows by total, largest first, folded to the pie's
-    /// <see cref="WidgetConfig.MaxSlices"/> colors, then the missing group, then "Other" when values were folded. The values are written
-    /// as the pie's rows write their groups, so a row finds its place in the domain by its group.
+    /// A pie's domain (design D8 of dashboard palettes): the groups of its own rows, the missing one in its place, by total, largest
+    /// first, folded to the pie's <see cref="WidgetConfig.MaxSlices"/> colors with "Other" (<see cref="SeriesDomain.BySize"/>). The
+    /// values are written as the pie's rows write their groups, so a row finds its place in the domain by its group.
     /// </summary>
     private static async Task<IReadOnlyList<SeriesInfo>> ReadPieDomainAsync(
         NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, DataColumnType? groupType, CancellationToken ct)
     {
-        var (values, hasNone) = await ReadDomainAsync(connection, transaction, sql, ct, positiveOnly: true);
-        var groups = groupType == DataColumnType.Timestamp ? values.Select(DataValues.IsoTimestamp).ToList() : values;
-        var (kept, hasOther) = SeriesDomain.Fold(groups, hasNone, WidgetConfig.MaxSlices);
-        return SeriesDomain.BySize(kept, hasNone, hasOther);
+        var groups = (await ReadDomainAsync(connection, transaction, sql, ct))
+            .Select(group => group is not null && groupType == DataColumnType.Timestamp ? DataValues.IsoTimestamp(group) : group)
+            .ToList();
+        return SeriesDomain.BySize(groups, WidgetConfig.MaxSlices);
     }
 
-    /// <summary>The series values of a widget by total, largest first, and whether some rows have no series value.</summary>
-    /// <param name="positiveOnly">
-    /// Leaves out the values whose total is not a number above zero, and the missing value when its total is not: a pie draws no slice
-    /// for them, so they take no color and cannot push a slice that has a share into "Other". They sort after every total above zero,
-    /// so the values that remain are the first of the domain's.
-    /// </param>
-    private static async Task<(List<string> Values, bool HasNone)> ReadDomainAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, CancellationToken ct, bool positiveOnly = false)
+    /// <summary>The values a domain statement lists, in its order; null is the missing value.</summary>
+    private static async Task<List<string?>> ReadDomainAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, CancellationToken ct)
     {
         await using var command = new NpgsqlCommand(sql.Sql, connection, transaction);
         foreach (var parameter in sql.Parameters)
@@ -434,32 +431,15 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
             command.Parameters.Add(parameter.ToParameter());
         }
 
-        var values = new List<string>();
-        var hasNone = false;
+        var values = new List<string?>();
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            if (positiveOnly && !HasPositiveTotal(reader))
-            {
-                continue;
-            }
-
-            if (reader.IsDBNull(0))
-            {
-                hasNone = true;
-            }
-            else
-            {
-                values.Add(reader.GetString(0));
-            }
+            values.Add(reader.IsDBNull(0) ? null : reader.GetString(0));
         }
 
-        return (values, hasNone);
+        return values;
     }
-
-    /// <summary>Whether the total in the second column of a domain's row is a number above zero.</summary>
-    private static bool HasPositiveTotal(NpgsqlDataReader reader) =>
-        !reader.IsDBNull(1) && reader.GetDouble(1) is var total && double.IsFinite(total) && total > 0;
 
     /// <summary>NaN and infinity have no number in JSON.</summary>
     private static double? FiniteOrNull(double value) => double.IsFinite(value) ? value : null;

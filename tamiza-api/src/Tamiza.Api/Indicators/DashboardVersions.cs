@@ -188,7 +188,7 @@ public sealed class DashboardVersions(
             return null;
         }
 
-        // jsonb equality in PostgreSQL: key order and spacing aside, the same name, filters and widgets in the same order.
+        // jsonb equality in PostgreSQL: key order and spacing aside, the same name, filters, palette, colors kept by value and widgets in the same order.
         var newest = await db.DashboardVersions
             .Where(v => v.ProjectId == projectId && v.DashboardId == dashboardId)
             .OrderByDescending(v => v.Number)

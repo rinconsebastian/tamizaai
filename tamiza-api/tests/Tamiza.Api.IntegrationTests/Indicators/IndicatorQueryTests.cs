@@ -875,32 +875,102 @@ public sealed class IndicatorQueryTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task A_pie_with_no_dashboard_filter_has_its_domain_in_the_order_of_size_the_missing_group_after_the_values()
+    public async Task A_pie_with_no_dashboard_filter_has_its_domain_in_the_order_of_size_the_missing_group_in_its_place()
     {
         await using var h = await WithWaterAsync(
             "('A', 'Well', 40, 0, 0), ('A', 'Piped', 100, 0, 0), ('A', 'River', 5, 0, 0), ('A', NULL, 7, 0, 0), ('A', 'Piped', NULL, 0, 0)");
 
         var result = await h.QueryAsync(Pie(), "pie");
 
-        // Not natural order (Piped, River, Well), not the group column's: the largest total first, then none.
-        Assert.Equal(["Piped:value", "Well:value", "River:value", ":none"], Domain(result));
+        // Not natural order (Piped, River, Well), not the group column's: the largest total first, the missing group ranked with the
+        // values, so River keeps the color it had when the page ranked these four slices (Piped 1, Well 2, none 3, River 4).
+        Assert.Equal(["Piped:value", "Well:value", ":none", "River:value"], Domain(result));
         Assert.Equal(
-            """[{"value":"Piped","kind":"value"},{"value":"Well","kind":"value"},{"value":"River","kind":"value"},{"value":null,"kind":"none"}]""",
+            """[{"value":"Piped","kind":"value"},{"value":"Well","kind":"value"},{"value":null,"kind":"none"},{"value":"River","kind":"value"}]""",
             result.GetProperty("domain").GetRawText());
         // The rows are the pie's as before: the group column's order, the missing group last.
         Assert.Equal(["Piped|100", "River|5", "Well|40", "|7"], IndicatorsHarness.Rows(result));
     }
 
     [Fact]
-    public async Task A_pie_of_nine_values_and_a_missing_group_keeps_six_values_the_missing_group_and_other()
+    public async Task A_pie_of_nine_values_and_a_missing_group_ranks_the_missing_group_and_keeps_the_seven_largest_and_other()
+    {
+        // s1 99 ... s9 91, and a missing group of 95.5 between s4 and s5: ten slices, so the page folded everything past the seventh.
+        var rows = string.Join(", ", Enumerable.Range(1, 9).Select(i => $"('A', 's{i}', {100 - i}, 0, 0)")) + ", ('A', NULL, 95.5, 0, 0)";
+        await using var h = await WithWaterAsync(rows);
+
+        var result = await h.QueryAsync(Pie(), "pie");
+
+        Assert.Equal(["s1:value", "s2:value", "s3:value", "s4:value", ":none", "s5:value", "s6:value", ":other"], Domain(result));
+        Assert.Equal(10, result.GetProperty("rows").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task A_small_missing_group_of_a_pie_is_folded_into_other_and_is_not_in_its_domain()
     {
         var rows = string.Join(", ", Enumerable.Range(1, 9).Select(i => $"('A', 's{i}', {100 - i}, 0, 0)")) + ", ('A', NULL, 1, 0, 0)";
         await using var h = await WithWaterAsync(rows);
 
         var result = await h.QueryAsync(Pie(), "pie");
 
-        Assert.Equal(["s1:value", "s2:value", "s3:value", "s4:value", "s5:value", "s6:value", ":none", ":other"], Domain(result));
+        // The three smallest, s8, s9 and the missing group, are "Other"; the page sums every group outside the domain.
+        Assert.Equal(["s1:value", "s2:value", "s3:value", "s4:value", "s5:value", "s6:value", "s7:value", ":other"], Domain(result));
         Assert.Equal(10, result.GetProperty("rows").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task A_pie_of_exactly_eight_groups_with_a_missing_one_keeps_them_all_and_has_no_other()
+    {
+        var rows = string.Join(", ", Enumerable.Range(1, 7).Select(i => $"('A', 's{i}', {100 - i}, 0, 0)")) + ", ('A', NULL, 2, 0, 0)";
+        await using var h = await WithWaterAsync(rows);
+
+        var result = await h.QueryAsync(Pie(), "pie");
+
+        Assert.Equal(["s1:value", "s2:value", "s3:value", "s4:value", "s5:value", "s6:value", "s7:value", ":none"], Domain(result));
+    }
+
+    [Fact]
+    public async Task A_pies_domain_keeps_equal_totals_in_the_order_of_the_pies_rows_and_the_missing_group_last()
+    {
+        // Four groups of 10 in the column's order B, A, C, none; D of 20 is larger and E of 5 smaller.
+        await using var h = await WithWaterAsync(
+            "('A', 'B', 10, 0, 0), ('A', 'E', 5, 0, 0), ('A', NULL, 10, 0, 0), ('A', 'C', 6, 0, 0), ('A', 'C', 4, 0, 0), ('A', 'D', 20, 0, 0), ('A', 'A', 4, 0, 0), ('A', 'A', 6, 0, 0)");
+
+        var result = await h.QueryAsync(Pie(), "pie");
+
+        Assert.Equal(["A|10", "B|10", "C|10", "D|20", "E|5", "|10"], IndicatorsHarness.Rows(result));
+        Assert.Equal(["D:value", "A:value", "B:value", "C:value", ":none", "E:value"], Domain(result));
+    }
+
+    [Fact]
+    public async Task A_pies_domain_breaks_a_tie_by_the_group_column_itself_not_by_its_text()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("sizes", "bracket integer, value numeric", "(10, 5), (2, 5), (9, 5), (NULL, 5), (1, 7)");
+
+        var result = await h.QueryAsync(new { indicator = "sizes", groupBy = "bracket" }, "pie");
+
+        // Its rows list 1, 2, 9, 10 and the missing group; the text of 10 would sort before 2.
+        Assert.Equal(["1|7", "2|5", "9|5", "10|5", "|5"], IndicatorsHarness.Rows(result));
+        Assert.Equal(["1:value", "2:value", "9:value", "10:value", ":none"], Domain(result));
+    }
+
+    [Fact]
+    public async Task A_pie_with_no_dashboard_filter_ranks_its_slices_as_its_rows_would_be_ranked_by_size()
+    {
+        // The page's old ranking of the rows, by size and then in the rows' order, is the domain's order (design D8 and "Migration").
+        await using var h = await WithWaterAsync(
+            "('A', 'Well', 40, 0, 0), ('A', 'Piped', 100, 0, 0), ('A', 'River', 5, 0, 0), ('A', NULL, 7, 0, 0), ('A', 'Rain', 7, 0, 0), ('A', 'Lake', 40, 0, 0)");
+
+        var result = await h.QueryAsync(Pie(), "pie");
+
+        var bySize = result.GetProperty("rows").EnumerateArray()
+            .Select(row => (Group: row.GetProperty("group").GetString(), Value: row.GetProperty("value").GetDouble()))
+            .OrderByDescending(row => row.Value)
+            .Select(row => $"{row.Group}:{(row.Group is null ? "none" : "value")}")
+            .ToArray();
+        Assert.Equal(["Piped:value", "Lake:value", "Well:value", "Rain:value", ":none", "River:value"], bySize);
+        Assert.Equal(bySize, Domain(result));
     }
 
     [Fact]

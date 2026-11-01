@@ -515,8 +515,9 @@ export class ProjectIndicators {
   /** Some widget has a chart or map whose table can be shown. */
   protected readonly hasTables = computed(() => this.anyPublished() && this.shownWidgets().some((w) => w.chartType !== 'stat'));
 
-  // Viewing a version (add-dashboard-versions, design D11): its name, filters and widgets in place of the dashboard's, read-only and
-  // with today's data, until the member goes back to the current version, restores one or opens another dashboard.
+  // Viewing a version (add-dashboard-versions, design D11): its name, filters, palette, colors kept by value and widgets in place of the
+  // dashboard's, read-only and with today's data, until the member goes back to the current version, restores one or opens another
+  // dashboard.
 
   /** The version shown in place of the dashboard as it is; null while the dashboard itself is shown. */
   protected readonly viewing = signal<DashboardVersionDetails | null>(null);

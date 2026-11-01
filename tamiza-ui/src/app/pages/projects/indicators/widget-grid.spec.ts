@@ -449,8 +449,8 @@ describe('the widget grid on paper (dashboard printing)', () => {
   });
 });
 
-// The colors of the dashboard shown reach every widget (add-dashboard-palettes, design D7): the charts do not read them yet, so
-// these check what each widget resolves.
+// The colors of the dashboard shown reach every widget (add-dashboard-palettes, design D7): these check what each widget resolves from
+// them, and the charts' own specs check that the marks are drawn in it.
 describe('the colors of the dashboard shown', () => {
   afterEach(clearOverlay);
 

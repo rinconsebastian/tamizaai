@@ -5,9 +5,8 @@ import styles from '../../../../styles.css';
 // design D5, task 13.1; add-dashboard-palettes, design D2, task 7.3). The palettes, the scales and the Likert arms were validated with
 // the palette validator (commands and results in the Verification Results of each design); these checks keep the tokens at the values
 // that were validated and keep the properties the validator checks: for a palette, the lightness band, the chroma floor and
-// neighbors that full-color readers tell apart; for a scale, one hue, lightness stepping the same way, steps apart, labels that read.
-// The color-vision-deficiency check stays with the validator and its recorded results: simulating the deficiencies here would
-// duplicate the script.
+// neighbors that readers tell apart, with full color vision and with each common color-vision deficiency (the validator's simulation,
+// below, checked against the numbers it printed); for a scale, one hue, lightness stepping the same way, steps apart, labels that read.
 
 /** The declarations of the first rule whose selector is exactly `selector`, as a map of custom properties. */
 function tokens(selector: string): Record<string, string> {
@@ -31,15 +30,45 @@ const contrast = (a: string, b: string) => {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (hi + 0.05) / (lo + 0.05);
 };
-/** OKLab: lightness L, chroma and hue angle in degrees, and the a and b axes the distance between two colors is measured on. */
-function oklab(hex: string) {
-  const [r, g, b] = linear(hex);
+/** OKLab of a color in linear RGB: lightness L, chroma and hue angle in degrees, and the a and b axes the distance between two colors is measured on. */
+function oklabOf([r, g, b]: readonly number[]) {
   const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
   const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
   const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
   const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
   const bb = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
   return { lightness: 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, chroma: Math.hypot(a, bb), hue: ((Math.atan2(bb, a) * 180) / Math.PI + 360) % 360, a, b: bb };
+}
+const oklab = (hex: string) => oklabOf(linear(hex));
+
+/**
+ * How a reader with a color-vision deficiency sees a color: the transforms of Machado, Oliveira and Fernandes (2009) at severity 1.0,
+ * applied to linear RGB and clamped to the gamut, as the palette validator does. Its thresholds are calibrated to this model, so it is
+ * copied rather than swapped for another (Vienot 1999, say, moves borderline pairs).
+ */
+const cvdMatrices = {
+  protan: [
+    [0.152286, 1.052583, -0.204868],
+    [0.114503, 0.786281, 0.099216],
+    [-0.003882, -0.048116, 1.051998],
+  ],
+  deutan: [
+    [0.367322, 0.860646, -0.227968],
+    [0.280085, 0.672501, 0.047413],
+    [-0.01182, 0.04294, 0.968881],
+  ],
+  tritan: [
+    [1.255528, -0.076749, -0.178779],
+    [-0.078411, 0.930809, 0.147602],
+    [0.004733, 0.691367, 0.3039],
+  ],
+} as const;
+type Deficiency = keyof typeof cvdMatrices;
+
+/** What a reader with `deficiency` sees of `hex`, in linear RGB. */
+function simulate(hex: string, deficiency: Deficiency): number[] {
+  const rgb = linear(hex);
+  return cvdMatrices[deficiency].map((row) => Math.min(1, Math.max(0, row[0] * rgb[0] + row[1] * rgb[1] + row[2] * rgb[2])));
 }
 
 /** The surfaces a chart sits on: white, and the dark theme's `neutral-primary-soft` (Tailwind's gray-900). */
@@ -100,8 +129,8 @@ const validatedPalettes = {
     dark: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
   },
   institutional: {
-    light: ['#1f5398', '#18aec2', '#893747', '#52ade3', '#be9922', '#4a5e9f', '#e5957b', '#076392'],
-    dark: ['#3f6cbb', '#00a5b6', '#a94d58', '#26a0ca', '#a98900', '#6473bd', '#cf785c', '#357cb1'],
+    light: ['#1f5398', '#18aec2', '#893747', '#52ade3', '#be9922', '#4a5e9f', '#e5957b', '#657d19'],
+    dark: ['#3f6cbb', '#00a5b6', '#a94d58', '#26a0ca', '#a98900', '#6473bd', '#cf785c', '#516f0a'],
   },
   earth: {
     light: ['#af4a1b', '#345895', '#b88a01', '#82344e', '#669929', '#7e4701', '#934791', '#676e02'],
@@ -164,19 +193,27 @@ const chromaFloor = 0.1;
 /** How far apart (OKLab x 100) neighbors in a palette's order must be for full-color readers: the validator's normal-vision floor. */
 const neighborFloor = 15;
 /**
+ * The deficiencies a palette's neighbors must survive, and how far (OKLab x 100) apart they must stay under each: protan and deutan,
+ * the common ones, at the validator's CVD target of 8 (design D2). Its floor of 6 is only a warning that labels, gaps or texture would
+ * have to excuse, and the colors of a palette come with none of those, so the target is the gate. Tritan is rare: the validator
+ * reports it and does not gate on it, and neither does this.
+ */
+const gatedDeficiencies: readonly Deficiency[] = ['protan', 'deutan'];
+const cvdFloor = 8;
+/**
  * How far (OKLab x 100) a palette's colors must stay from the neutral of "Other". The palettes were built to be at least 11.8 from it
  * (institutional's salmon, dark), so 10 is a tripwire for a color drifting toward gray rather than the validated margin.
  */
 const otherFloor = 10;
 
-/** The distance between two colors in OKLab, times 100. */
-function deltaE(x: string, y: string): number {
-  const p = oklab(x);
-  const q = oklab(y);
+/** The distance between two colors in OKLab, times 100, as a reader with `deficiency` sees them (full color vision when there is none). */
+function deltaE(x: string, y: string, deficiency?: Deficiency): number {
+  const p = oklabOf(deficiency ? simulate(x, deficiency) : linear(x));
+  const q = oklabOf(deficiency ? simulate(y, deficiency) : linear(y));
   return 100 * Math.hypot(p.lightness - q.lightness, p.a - q.a, p.b - q.b);
 }
 
-/** What is wrong with the eight colors of a palette in `theme` (design D2): count, distinct, band, chroma floor, neighbors, "Other". */
+/** What is wrong with the eight colors of a palette in `theme` (design D2): count, distinct, band, chroma floor, neighbors (also under protan and deutan), "Other". */
 function paletteProblems(colors: readonly string[], theme: Theme, other: string): string[] {
   const found: string[] = [];
   if (colors.length !== 8) {
@@ -196,6 +233,11 @@ function paletteProblems(colors: readonly string[], theme: Theme, other: string)
     }
     if (i > 0 && deltaE(colors[i - 1], hex) < neighborFloor) {
       found.push(`${name}: only ${deltaE(colors[i - 1], hex).toFixed(1)} from color ${i}`);
+    }
+    for (const deficiency of gatedDeficiencies) {
+      if (i > 0 && deltaE(colors[i - 1], hex, deficiency) < cvdFloor) {
+        found.push(`${name}: only ${deltaE(colors[i - 1], hex, deficiency).toFixed(1)} from color ${i} under ${deficiency}`);
+      }
     }
     if (deltaE(hex, other) < otherFloor) {
       found.push(`${name}: only ${deltaE(hex, other).toFixed(1)} from the neutral of "Other"`);
@@ -279,6 +321,25 @@ function scaleProblems(id: string, steps: readonly string[], inks: readonly stri
   return found;
 }
 
+/**
+ * The worst adjacent distance (OKLab x 100) between two neighbors that the validator printed for each palette and theme: `gated`,
+ * the smaller of protan and deutan, which it gates on, and `tritan`, which it reports (Verification Results of design.md). The
+ * simulation here must give them back, since the color-vision check stands on it.
+ */
+const validatorWorstAdjacent = {
+  tamiza: { light: { gated: 9.1, tritan: 5.8 }, dark: { gated: 8.4, tritan: 8.7 } },
+  institutional: { light: { gated: 15.5, tritan: 20.6 }, dark: { gated: 11.0, tritan: 13.9 } },
+  earth: { light: { gated: 16.6, tritan: 7.3 }, dark: { gated: 14.8, tritan: 9.3 } },
+  vivid: { light: { gated: 17.4, tritan: 7.2 }, dark: { gated: 13.1, tritan: 9.1 } },
+} as const;
+
+/** The validator prints one decimal, so a right simulation is within 0.05 of a print; 0.1 leaves room for the rounding and still catches a wrong coefficient. */
+const printedTolerance = 0.1;
+
+/** The smallest distance between neighbors of `colors` for a reader with any of `deficiencies`. */
+const worstAdjacent = (colors: readonly string[], deficiencies: readonly Deficiency[]) =>
+  Math.min(...deficiencies.flatMap((deficiency) => colors.slice(1).map((hex, i) => deltaE(colors[i], hex, deficiency))));
+
 describe('Checks on every palette', () => {
   const other = light['--tmz-series-other'];
   /** The names a catalog must define in a theme: `count` numbered tokens for each id, and their labels for a scale. */
@@ -318,10 +379,22 @@ describe('Checks on every palette', () => {
       expect(ramp(tokensOf(theme), `pal-${id}`, 8)).toEqual(validatedPalettes[id][theme]);
     });
 
-    it.each(themes)('has eight distinct colors, each inside the lightness band and above the chroma floor, neighbors apart and clear of "Other", in the %s theme', (theme) => {
+    it.each(themes)('has eight distinct colors, each inside the lightness band and above the chroma floor, neighbors apart (with full color vision, protan and deutan) and clear of "Other", in the %s theme', (theme) => {
       const colors = ramp(tokensOf(theme), `pal-${id}`, 8);
 
       expect(paletteProblems(colors, theme, tokensOf(theme)['--tmz-series-other'] ?? other)).toEqual([]);
+    });
+  });
+
+  describe.each(paletteIds)('the color-vision simulation on the palette %s', (id) => {
+    it.each(themes)('gives the worst adjacent distances the validator printed in the %s theme', (theme) => {
+      const colors = ramp(tokensOf(theme), `pal-${id}`, 8);
+      const printed = validatorWorstAdjacent[id][theme];
+      const gated = worstAdjacent(colors, gatedDeficiencies);
+      const tritan = worstAdjacent(colors, ['tritan']);
+
+      expect(Math.abs(gated - printed.gated), `protan and deutan: ${gated.toFixed(2)}, the validator printed ${printed.gated}`).toBeLessThanOrEqual(printedTolerance);
+      expect(Math.abs(tritan - printed.tritan), `tritan: ${tritan.toFixed(2)}, the validator printed ${printed.tritan}`).toBeLessThanOrEqual(printedTolerance);
     });
   });
 
@@ -381,6 +454,15 @@ describe('Checks on every palette', () => {
       expect(paletteProblems(withColor(good, 2, '#a89c8a'), 'light', other).join()).toContain('color 3 (#a89c8a): chroma');
       expect(paletteProblems(withColor(good, 1, '#b74e20'), 'light', other).join()).toContain('color 2 (#b74e20): only');
       expect(paletteProblems(withColor(good, 6, '#8a8a82'), 'light', other).join()).toContain('from the neutral of "Other"');
+    });
+
+    it('report neighbors that full-color readers tell apart but a reader with protan or deutan does not', () => {
+      // A dark olive green in place of the indigo, next to terracotta: 18 apart with full color vision, under 1 apart under protan.
+      const confusable = withColor(good, 1, '#4c6118');
+
+      expect(deltaE(good[0], '#4c6118')).toBeGreaterThanOrEqual(neighborFloor);
+      expect(deltaE(good[0], '#4c6118', 'protan')).toBeLessThan(cvdFloor);
+      expect(paletteProblems(confusable, 'light', other)).toEqual([expect.stringMatching(/^color 2 \(#4c6118\): only [\d.]+ from color 1 under protan$/)]);
     });
 
     it('report the band of the theme: a color that is in the light band but too light for the dark one', () => {

@@ -2,7 +2,7 @@ import { DIALOG_DATA, DialogRef } from '@angular/cdk/dialog';
 import { Component, DestroyRef, ElementRef, Injector, afterNextRender, computed, inject, signal, viewChild, viewChildren } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
-import { Subject, catchError, debounce, forkJoin, groupBy, map, mergeMap, of, switchMap, timer } from 'rxjs';
+import { Subject, catchError, debounce, filter, forkJoin, groupBy, map, mergeMap, of, switchMap, timer } from 'rxjs';
 import { ApiErrors } from '../../../core/api-error';
 import {
   DashboardColors,
@@ -313,18 +313,26 @@ export class DashboardColorsDialog {
         mergeMap((own) =>
           own.pipe(
             debounce((lookup) => timer(lookup.delay)),
+            // The column may have changed while the member was typing: its old column's values are not asked for.
+            filter((lookup) => this.columnOf(lookup.key) === lookup.column),
             switchMap((lookup) =>
               this.service.dashboardValues(this.data.projectId, this.data.dashboardId, lookup.column, lookup.search || undefined).pipe(
-                map((answer) => [lookup.key, answer.values.map((v) => v.value).filter((value) => value !== '')] as const),
+                map((answer) => ({ key: lookup.key, column: lookup.column, values: answer.values.map((v) => v.value).filter((value) => value !== '') })),
                 // Typing a value still works without the suggestions.
-                catchError(() => of([lookup.key, [] as string[]] as const)),
+                catchError(() => of({ key: lookup.key, column: lookup.column, values: [] as string[] })),
               ),
             ),
           ),
         ),
         takeUntilDestroyed(inject(DestroyRef)),
       )
-      .subscribe(([key, values]) => this.suggestions.update((all) => ({ ...all, [key]: values })));
+      .subscribe(({ key, column, values }) => {
+        // An answer for a column the row no longer has (or for a row that was removed) belongs to no list: `setColumn` cleared the
+        // row's suggestions, and this one would land in the new column's list and keep `listValues` from asking for its values.
+        if (this.columnOf(key) === column) {
+          this.suggestions.update((all) => ({ ...all, [key]: values }));
+        }
+      });
 
     const published = new Set(this.data.indicators.filter((i) => i.published).map((i) => i.name));
     const names = [...new Set(this.data.widgets.map((w) => w.config.indicator))].filter((name) => published.has(name));
@@ -385,6 +393,11 @@ export class DashboardColorsDialog {
     return this.suggestions()[row.key] ?? [];
   }
 
+  /** The column a row has now; undefined once the row was removed. */
+  private columnOf(key: number): string | undefined {
+    return this.rows().find((row) => row.key === key)?.column;
+  }
+
   /** What is wrong with a row: no value once the form was sent, or what the server said. */
   protected errorsOf(index: number): RowErrors {
     const row = this.rows()[index];
@@ -433,11 +446,13 @@ export class DashboardColorsDialog {
     if (this.cannotAdd() || !choices.length) {
       return;
     }
-    // The column of the row before, since entries often share one (`sex`: Female, Male); the first color it does not use yet.
-    const column = this.rows().at(-1)?.column ?? choices[0];
+    // The column of the row before, since entries often share one (`sex`: Female, Male). A saved entry can be on a column that is no
+    // longer offered; the new row then starts on the first one offered, and its color is the first that column does not use yet.
+    const before = this.rows().at(-1)?.column;
+    const column = before !== undefined && choices.includes(before) ? before : choices[0];
     const used = new Set(this.rows().filter((r) => r.column === column).map((r) => r.color));
     const color = places.find((n) => !used.has(n)) ?? 1;
-    this.rows.update((rows) => [...rows, { key: this.nextKey++, column: choices.includes(column) ? column : choices[0], value: '', color, savedBlank: false }]);
+    this.rows.update((rows) => [...rows, { key: this.nextKey++, column, value: '', color, savedBlank: false }]);
     // The new entry's column, ready to be changed.
     afterNextRender(() => this.columnSelects().at(-1)?.nativeElement.focus(), { injector: this.injector });
   }

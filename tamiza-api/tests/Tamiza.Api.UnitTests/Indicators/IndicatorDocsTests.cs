@@ -82,4 +82,19 @@ public sealed class IndicatorDocsTests
         var missing = Palettes.All.Concat(Palettes.Scales).Where(id => !text.Contains($"`{id}`", StringComparison.Ordinal)).ToList();
         Assert.True(missing.Count == 0, $"docs/mcp.md does not name: {string.Join(", ", missing)}");
     }
+
+    [Fact]
+    public void The_mcp_documentation_warns_that_changing_the_chart_type_of_a_widget_with_a_color_or_a_scale_needs_a_config()
+    {
+        if (PromptKitChecks.FindUp("docs/mcp.md") is not { } mcp)
+        {
+            return;
+        }
+
+        var text = File.ReadAllText(mcp);
+
+        Assert.Contains("Changing the `chartType` of a widget that has a color or a scale also needs a `config` without the `display` fields the new type does not take", text, StringComparison.Ordinal);
+        Assert.Contains("a new `chartType` alone keeps the old `config`", text, StringComparison.Ordinal);
+        Assert.Contains("`config.display.color` or `config.display.ramp`", text, StringComparison.Ordinal);
+    }
 }

@@ -152,7 +152,7 @@ describe('DashboardColorsDialog', () => {
       const institutional = dialog.palettes()[1];
       const named = (attribute: string) => text(document.getElementById(institutional.getAttribute(attribute)!));
       expect(named('aria-labelledby')).toBe('Institutional');
-      expect(named('aria-describedby')).toContain('Colors in order: 1 navy blue, 2 turquoise, 3 burgundy, 4 sky blue, 5 mustard, 6 slate, 7 salmon, 8 steel blue.');
+      expect(named('aria-describedby')).toContain('Colors in order: 1 navy blue, 2 turquoise, 3 burgundy, 4 sky blue, 5 mustard, 6 slate, 7 salmon, 8 olive green.');
     });
 
     it('offers every palette the API knows, in the catalog\'s order', async () => {
@@ -307,6 +307,67 @@ describe('DashboardColorsDialog', () => {
       expect(searches.filter((r) => !r.cancelled).map((r) => r.request.params.get('search'))).toEqual(['Fema']);
     });
 
+    it('drops the answer for a column the row no longer has and asks for the new column\'s values when the value is focused again', async () => {
+      const dialog = await open({ palette: 'tamiza', valueColors: [kept('sex', 'Female', 5)] });
+      await dialog.answerColumns();
+      const input = dialog.inRow<HTMLInputElement>(0, 'dashboard-colors-value');
+      const list = document.getElementById(input.getAttribute('list')!) as HTMLDataListElement;
+
+      input.dispatchEvent(new Event('focus'));
+      await dialog.settle();
+      const [stale] = dialog.valueRequests();
+      expect(stale.request.params.get('column')).toBe('sex');
+      // The column changes while the answer for `sex` is on its way.
+      await dialog.choose(dialog.inRow<HTMLSelectElement>(0, 'dashboard-colors-column'), 'municipality');
+      stale.flush({ values: [{ value: 'Female', count: 3 }, { value: 'Male', count: 2 }] });
+      await dialog.settle();
+      expect(Array.from(list.options).map((o) => o.value)).toEqual([]);
+
+      // The late answer did not mark the row as read: focusing the value asks for the municipalities.
+      input.dispatchEvent(new Event('focus'));
+      await dialog.settle();
+      const [fresh] = dialog.valueRequests();
+      expect(fresh.request.params.get('column')).toBe('municipality');
+      fresh.flush({ values: [{ value: 'Rionegro', count: 4 }] });
+      await dialog.settle();
+      expect(Array.from(list.options).map((o) => o.value)).toEqual(['Rionegro']);
+    });
+
+    it('drops a failed lookup for a column the row no longer has as it drops an answer', async () => {
+      const dialog = await open({ palette: 'tamiza', valueColors: [kept('sex', 'Female', 5)] });
+      await dialog.answerColumns();
+      const input = dialog.inRow<HTMLInputElement>(0, 'dashboard-colors-value');
+      const list = document.getElementById(input.getAttribute('list')!) as HTMLDataListElement;
+
+      input.dispatchEvent(new Event('focus'));
+      await dialog.settle();
+      const [stale] = dialog.valueRequests();
+      await dialog.choose(dialog.inRow<HTMLSelectElement>(0, 'dashboard-colors-column'), 'municipality');
+      stale.flush({ title: 'Down' }, { status: 503, statusText: 'Unavailable' });
+      await dialog.settle();
+
+      // Had the failure been kept as the new column's (empty) list, focusing again would not ask.
+      input.dispatchEvent(new Event('focus'));
+      await dialog.settle();
+      const [fresh] = dialog.valueRequests();
+      expect(fresh.request.params.get('column')).toBe('municipality');
+      fresh.flush({ values: [{ value: 'Rionegro', count: 4 }] });
+      await dialog.settle();
+      expect(Array.from(list.options).map((o) => o.value)).toEqual(['Rionegro']);
+    });
+
+    it('does not ask for the values of the old column when the column changes while the member is still typing', async () => {
+      const dialog = await open({ palette: 'tamiza', valueColors: [kept('sex', 'Female', 5)] });
+      await dialog.answerColumns();
+      const input = dialog.inRow<HTMLInputElement>(0, 'dashboard-colors-value');
+
+      await dialog.type(input, 'Fem');
+      await dialog.choose(dialog.inRow<HTMLSelectElement>(0, 'dashboard-colors-column'), 'municipality');
+      await wait(valueSearchDelayMs + 50);
+
+      expect(dialog.valueRequests().filter((r) => !r.cancelled)).toEqual([]);
+    });
+
     it('still lets a value be typed when the values cannot be read', async () => {
       const dialog = await open({ palette: 'tamiza', valueColors: [kept('sex', 'Female', 5)] });
       await dialog.answerColumns();
@@ -332,6 +393,26 @@ describe('DashboardColorsDialog', () => {
       expect(dialog.inRow<HTMLSelectElement>(2, 'dashboard-colors-column').value).toBe('sex');
       expect(dialog.checkedColor(2)).toBe('3');
       expect(document.activeElement).toBe(dialog.inRow(2, 'dashboard-colors-column'));
+    });
+
+    it('adds an entry after one on a column no table offers on the first column offered, in the first color that column does not use', async () => {
+      // The row before is on `district`, which is in no table, and `municipality` (the first column offered) already uses color 1: the
+      // color of the new row comes from the column it lands on, not from the one it fell back from.
+      const dialog = await open({ palette: 'tamiza', valueColors: [kept('municipality', 'Rionegro', 1), kept('district', 'North', 2)] });
+      await dialog.answerColumns();
+
+      await dialog.click(dialog.get('dashboard-colors-add')!);
+
+      expect(dialog.rows()).toHaveLength(3);
+      expect(dialog.inRow<HTMLSelectElement>(2, 'dashboard-colors-column').value).toBe('municipality');
+      expect(dialog.checkedColor(2)).toBe('2');
+      await dialog.type(dialog.inRow<HTMLInputElement>(2, 'dashboard-colors-value'), 'Pasto');
+      await dialog.click(dialog.get('dashboard-colors-save')!);
+      expect(dialog.http.expectOne(colorsUrl).request.body.valueColors).toEqual([
+        kept('municipality', 'Rionegro', 1),
+        kept('district', 'North', 2),
+        kept('municipality', 'Pasto', 2),
+      ]);
     });
 
     it('starts the first entry on the first column offered, in color 1', async () => {

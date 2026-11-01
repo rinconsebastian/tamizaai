@@ -2746,6 +2746,70 @@ describe('ProjectIndicators dashboard colors (add-dashboard-palettes, design D9)
 
     expect(accents(context)[0]).toBe('var(--tmz-pal-tamiza-1)');
   });
+
+  describe('a widget keeps its place in the palette (Widget colors follow their dashboard)', () => {
+    const health: DashboardEntry = { id: 'd1', name: 'Health' };
+    const field: DashboardEntry = { id: 'd2', name: 'Field' };
+    /** A column chart with no series in color 3: the answer has two groups, so two columns. */
+    const third = widget('w1', { title: 'Coverage by municipality', config: config({ display: { color: 3 } }) });
+    /** The color token each column of the open dashboard is drawn in, read from the marks the page draws. */
+    const columns = (context: Context) => all(context.root, 'chart-mark').map((mark) => /var\(--[\w-]+\)/.exec(mark.getAttribute('style') ?? '')?.[0] ?? null);
+    const inPlace3 = (name: string) => Array<string>(2).fill(`var(--tmz-pal-${name}-3)`);
+
+    /** Chooses Edit in the first widget's actions menu, and answers the columns the form reads. */
+    async function edit(context: Context): Promise<void> {
+      all(context.root, 'menu-trigger')[0].click();
+      await settle(context.harness);
+      document.querySelector<HTMLElement>('[data-testid="widget-edit"]')!.click();
+      await settle(context.harness);
+      context.http.expectOne(isColumns).flush(catalog());
+      await settle(context.harness);
+    }
+
+    it('draws a column chart in color 3 in the third color of the palette just saved, with no new query (Palette changed)', async () => {
+      const context = await open('analyst', [third], answer);
+      expect(columns(context)).toEqual(inPlace3('tamiza'));
+      expect(accents(context)).toEqual(['var(--tmz-pal-tamiza-3)']);
+      await openColors(context);
+
+      await click(context, palettes()[3]);
+      await click(context, byTestId(form()!, 'dashboard-colors-save')!);
+      const request = context.http.expectOne(colorsUrl);
+      expect(request.request.body).toEqual({ palette: 'vivid', valueColors: [] });
+      request.flush({ palette: 'vivid', valueColors: [] });
+      await settle(context.harness);
+
+      // The widget keeps its number: the page resolves it again against the new palette, and the columns are drawn in it.
+      expect(accents(context)).toEqual(['var(--tmz-pal-vivid-3)']);
+      expect(columns(context)).toEqual(inPlace3('vivid'));
+      expect(context.http.match(isQuery)).toEqual([]);
+    });
+
+    it('draws a column chart in color 3 moved to a dashboard with another palette in the third color of that palette (Widget moved)', async () => {
+      const context = await open('analyst', [third], answer, {}, { dashboards: [health, field], colors: { palette: 'earth', valueColors: [] } });
+      expect(columns(context)).toEqual(inPlace3('earth'));
+      await edit(context);
+
+      typeInto(byTestId<HTMLSelectElement>(overlay(), 'dialog-dashboard')!, 'd2');
+      await settle(context.harness);
+      byTestId(overlay(), 'dialog-save')!.click();
+      await settle(context.harness);
+      const request = context.http.expectOne(isPatch);
+      // Only the dashboard is sent: the widget's number travels with it, saved as it was.
+      expect(request.request.body).toEqual({ dashboardId: 'd2' });
+      const moved = { ...third, dashboardId: 'd2', layout: { x: 0, y: 0, w: 6, h: 4 } };
+      request.flush(moved);
+      await settle(context.harness);
+      expect(all(context.root, 'chart-mark')).toEqual([]);
+
+      await go(context, 'd2');
+      await answerLoad(context, [moved], {}, 'd2', [], { palette: 'institutional', valueColors: [] });
+      await answerQueries(context, answer);
+
+      expect(accents(context)).toEqual(['var(--tmz-pal-institutional-3)']);
+      expect(columns(context)).toEqual(inPlace3('institutional'));
+    });
+  });
 });
 
 describe('ProjectIndicators scheduled email (dashboard reports, design D14)', () => {

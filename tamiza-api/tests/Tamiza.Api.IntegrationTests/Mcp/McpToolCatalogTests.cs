@@ -73,6 +73,24 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task The_widget_tools_warn_that_a_new_chart_type_alone_keeps_the_config_and_so_the_color_or_scale()
+    {
+        await using var h = await McpProjectHarness.CreateAsync(postgres);
+        var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
+
+        foreach (var name in new[] { "create_widget", "update_widget" })
+        {
+            Assert.Contains(
+                "To change the chart type of a widget that has a color or a scale, also send a config without the display fields the new type does not take: a new chartType alone keeps the old config",
+                tools[name].Description);
+            Assert.Contains("config.display.color or config.display.ramp", tools[name].Description);
+        }
+
+        // update_widget says what a new config replaces, which is why the chart type alone is not enough.
+        Assert.Contains("What you leave out keeps its value; a new config replaces the old one whole", tools["update_widget"].Description);
+    }
+
+    [Fact]
     public async Task Restore_marked_as_changing_data_and_not_destructive_and_the_versions_read_only()
     {
         await using var h = await McpProjectHarness.CreateAsync(postgres);
