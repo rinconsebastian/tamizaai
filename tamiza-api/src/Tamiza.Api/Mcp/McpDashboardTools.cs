@@ -37,12 +37,14 @@ public sealed class McpDashboardTools(
     private const string ColorsHelp =
         "A dashboard draws its widgets in one palette: tamiza (the default), institutional, earth or vivid, each with eight numbered colors (1 to 8) and a sequential scale for maps and heat maps. " +
         "valueColors keeps a color for a value of a column, [{ column, value, color }] with color 1 to 8, so the value has that color in every widget of the dashboard that colors by that column. " +
-        "In a column a value and a color are each kept once, and a value is matched as exact text, case included.";
+        "In a column a value and a color are each kept once. Names are matched exactly, as written: the palette is lower case (Vivid is refused), column is a column's name in lower case (a capital letter is refused), " +
+        "and value is matched as exact text, case and spaces included, so female does not color Female.";
 
     private const string DisplayHelp =
         "config.display = { color, ramp } sets how the widget is drawn, both optional. color is a place in the dashboard's palette, 1 to 8 (not a color code; 1 when left out), " +
         "for a bar, column or line chart with no seriesBy and for a histogram. ramp is a sequential scale, one of blue, teal, green, orange, red, purple or gray, " +
-        "for a map or heatmap only; left out, the palette's own scale. A widget with a series takes its colors from its series, and no other kind has a color of its own. " +
+        "for a map or heatmap only; left out, the palette's own scale. The scale is matched exactly, in lower case: Green is refused. " +
+        "A widget with a series takes its colors from its series, and no other kind has a color of its own. " +
         "To change the chart type of a widget that has a color or a scale, also send a config without the display fields the new type does not take: " +
         "a new chartType alone keeps the old config, so it is refused, with an error on config.display.color or config.display.ramp, when the new type does not take them.";
 
@@ -232,7 +234,7 @@ public sealed class McpDashboardTools(
         [Description("Optional. The new name.")] string? name = null,
         [Description("Optional. The new place, 1 for the first.")] int? position = null,
         [Description("Optional. The whole list of filters, replacing the current one; an empty list removes them all.")] DashboardFilterInput[]? filters = null,
-        [Description("Optional. The dashboard's palette: tamiza, institutional, earth or vivid. The colors kept by value stay as they are unless you also give valueColors.")] string? palette = null,
+        [Description("Optional. The dashboard's palette: tamiza, institutional, earth or vivid, in lower case exactly as written (Vivid is refused). The colors kept by value stay as they are unless you also give valueColors.")] string? palette = null,
         [Description("Optional. The whole list of colors kept by value, [{ column, value, color }] with color 1 to 8, replacing the current one; an empty list removes them all. The palette stays as it is unless you also give palette.")] ValueColorInput[]? valueColors = null,
         CancellationToken ct = default) =>
         RunAsync(async () =>

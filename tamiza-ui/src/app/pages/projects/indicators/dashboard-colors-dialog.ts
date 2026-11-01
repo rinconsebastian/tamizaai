@@ -92,12 +92,14 @@ export function sameColors(a: DashboardColors, b: DashboardColors): boolean {
               [attr.data-palette]="id"
             >
               <span class="flex items-center gap-2">
+                <!-- The dialog opens on the palette in use: it is the radio group's one tab stop and the one the arrow keys move from. -->
                 <input
                   type="radio"
                   name="dashboardPalette"
                   class="size-4 shrink-0"
                   [value]="id"
                   [checked]="palette() === id"
+                  [attr.cdkFocusInitial]="palette() === id ? '' : null"
                   [attr.aria-labelledby]="'dashboard-colors-palette-' + id + '-name'"
                   [attr.aria-describedby]="'dashboard-colors-palette-' + id + '-info'"
                   (change)="setPalette(id)"
@@ -140,8 +142,16 @@ export function sameColors(a: DashboardColors, b: DashboardColors): boolean {
           @for (row of rows(); track row.key; let i = $index) {
             <li class="rounded-base border border-default p-3" data-testid="dashboard-colors-row">
               <div class="grid gap-3 sm:grid-cols-2">
+                <!-- Both controls are named from their visible label and the entry they belong to: with several entries, "Column" and "Value" alone would read the same in each. -->
                 <tmz-form-field [label]="t('dashboardColors.kept.column')" [fieldId]="'color-column-' + row.key" [error]="errorsOf(i).column">
-                  <select tmzInput [id]="'color-column-' + row.key" #columnSelect (change)="setColumn(i, $any($event.target).value)" data-testid="dashboard-colors-column">
+                  <select
+                    tmzInput
+                    [id]="'color-column-' + row.key"
+                    #columnSelect
+                    [attr.aria-label]="t('dashboardColors.kept.columnOfEntry', { number: i + 1, total: rows().length })"
+                    (change)="setColumn(i, $any($event.target).value)"
+                    data-testid="dashboard-colors-column"
+                  >
                     @if (!known(row)) {
                       <option [value]="row.column" selected>{{ t('dashboardColors.kept.columnMissing', { column: row.column }) }}</option>
                     }
@@ -158,6 +168,7 @@ export function sameColors(a: DashboardColors, b: DashboardColors): boolean {
                     autocomplete="off"
                     [attr.maxlength]="maxValueLength"
                     [attr.list]="'color-values-' + row.key"
+                    [attr.aria-label]="t('dashboardColors.kept.valueOfEntry', { number: i + 1, total: rows().length })"
                     [attr.placeholder]="t('dashboardColors.kept.valuePlaceholder')"
                     [value]="row.value"
                     (focus)="listValues(i)"

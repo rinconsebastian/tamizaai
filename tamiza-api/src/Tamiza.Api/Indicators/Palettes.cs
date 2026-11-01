@@ -1,3 +1,6 @@
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+
 namespace Tamiza.Api.Indicators;
 
 /// <summary>
@@ -51,8 +54,14 @@ public static class Palettes
 /// <param name="Color">The number, 1 to <see cref="Palettes.ColorCount"/>, of one of the dashboard palette's colors.</param>
 public sealed record ValueColor(string Column, string Value, int Color);
 
-/// <summary>An entry as the request to save a dashboard's colors carries it; <see cref="DashboardValidation.Colors"/> checks it.</summary>
-public sealed record ValueColorInput(string? Column, string? Value, int? Color);
+/// <summary>
+/// An entry as the request to save a dashboard's colors carries it; <see cref="DashboardValidation.Colors"/> checks it. The description
+/// and range on the fields are what the MCP tools' input schema shows of them, and validate nothing.
+/// </summary>
+public sealed record ValueColorInput(
+    [property: Description("A column's name, in lower case: letters, digits and underscores.")] string? Column,
+    [property: Description("The value's text, matched exactly, case and spaces included; an empty text is a value too.")] string? Value,
+    [property: Description("A place in the dashboard's palette, 1 to 8, never a color code."), Range(1, Palettes.ColorCount)] int? Color);
 
 /// <summary>The body that replaces a dashboard's palette and colors kept by value (design D5): both, whole.</summary>
 /// <param name="Palette">One of <see cref="Palettes.All"/>.</param>

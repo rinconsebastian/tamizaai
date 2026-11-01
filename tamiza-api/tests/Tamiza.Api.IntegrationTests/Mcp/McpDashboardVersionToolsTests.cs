@@ -202,6 +202,14 @@ public sealed class McpDashboardVersionToolsTests(PostgresFixture postgres)
         Assert.Equal(Enumerable.Range(2, 10), await NumbersAsync(h, housing));
         Assert.Equal("dashboards.versionNotFound", read.Code());
         Assert.Equal("dashboards.versionNotFound", restore.Code());
+        // The page's code, not an mcp. one, and the HTTP status next to it (docs/mcp.md, Troubleshooting).
+        foreach (var refused in new[] { read, restore })
+        {
+            using var body = refused.Json();
+            Assert.Equal(404, body.RootElement.GetProperty("status").GetInt32());
+            Assert.Contains("keeps its 10 newest", body.RootElement.GetProperty("message").GetString());
+        }
+
         Assert.Equal(stored, await StoredAsync(h, housing));
         Assert.Equal(Enumerable.Range(2, 10), await NumbersAsync(h, housing));
     }

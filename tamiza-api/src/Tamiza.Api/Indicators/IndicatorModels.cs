@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 using Tamiza.Api.CleanData;
 
@@ -131,13 +133,20 @@ public sealed record WidgetTooltipItem(string Column, string? Label = null, stri
 
 /// <summary>
 /// How a widget is drawn, apart from its query (design D3 of dashboard palettes): a change here never changes the rows. Each field is
-/// left out of the JSON while it is not set, so a config saved without it reads and writes exactly as before.
+/// left out of the JSON while it is not set, so a config saved without it reads and writes exactly as before. The description and range on
+/// the fields are what the MCP tools' input schema shows of them; nothing is validated with them, since
+/// <see cref="IndicatorValidation"/> is the rule, and a test keeps them with <see cref="Palettes"/>. The scale names are in the
+/// description and not in an enum: the fields are nullable, and a schema whose enum leaves out null would refuse the null that the
+/// server accepts for "not set".
 /// </summary>
 /// <param name="Color">Bar, column and line with no series, and histogram only: the number, 1 to <see cref="Palettes.ColorCount"/>, of the dashboard palette's color the widget is drawn in; left out, color 1.</param>
 /// <param name="Ramp">Map and heat map only: one of <see cref="Palettes.Scales"/>; left out, the dashboard palette's own scale.</param>
 public sealed record WidgetDisplay(
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Color = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Ramp = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("A place in the dashboard's palette, 1 to 8, never a color code. For a bar, column or line chart with no seriesBy and for a histogram; left out, color 1."),
+     Range(1, Palettes.ColorCount)] int? Color = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("A sequential scale: blue, teal, green, orange, red, purple or gray, matched exactly in lower case. For a map or heatmap only; left out, the palette's own scale.")] string? Ramp = null)
 {
     /// <summary>The display as saved: an empty scale is none, and a display that sets nothing is no display (null).</summary>
     public WidgetDisplay? Normalize()

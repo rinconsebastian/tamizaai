@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Tamiza.Api.Indicators;
 using Tamiza.Api.UnitTests.Assistant;
 
@@ -96,5 +97,58 @@ public sealed class IndicatorDocsTests
         Assert.Contains("Changing the `chartType` of a widget that has a color or a scale also needs a `config` without the `display` fields the new type does not take", text, StringComparison.Ordinal);
         Assert.Contains("a new `chartType` alone keeps the old `config`", text, StringComparison.Ordinal);
         Assert.Contains("`config.display.color` or `config.display.ramp`", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_mcp_documentation_says_that_palette_and_scale_names_and_kept_values_are_matched_exactly()
+    {
+        if (PromptKitChecks.FindUp("docs/mcp.md") is not { } mcp)
+        {
+            return;
+        }
+
+        var text = File.ReadAllText(mcp);
+
+        // The sentences are true of the validation: a name that is not written exactly as listed is no palette and no scale.
+        Assert.False(Palettes.IsKnown("Vivid"));
+        Assert.False(Palettes.IsScale("Green"));
+        Assert.Contains("**Names are matched exactly.**", text, StringComparison.Ordinal);
+        Assert.Contains("`Vivid` or `Green` is refused with `mcp.validation` on `palette` or `config.display.ramp`", text, StringComparison.Ordinal);
+        Assert.Contains("`Sex` is refused, on `valueColors[0].column`", text, StringComparison.Ordinal);
+        Assert.Contains("`value` is matched as exact text, case and spaces included", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_mcp_documentation_lists_every_kind_of_change_a_version_can_list_and_says_the_page_words_colorsChanged_as_colors_changed()
+    {
+        if (PromptKitChecks.FindUp("docs/mcp.md") is not { } mcp)
+        {
+            return;
+        }
+
+        var text = File.ReadAllText(mcp);
+
+        // One row for each kind, so a kind added to the code and left out of the documentation fails here.
+        var missing = DashboardChangeKinds.All.Where(kind => !text.Contains($"| `{kind}` |", StringComparison.Ordinal)).ToList();
+        Assert.True(missing.Count == 0, $"docs/mcp.md does not list the kinds of change: {string.Join(", ", missing)}");
+        Assert.Contains("`colorsChanged` as \"Colors changed\"", text, StringComparison.Ordinal);
+        Assert.Contains("whose `changes` list `colorsChanged` (the page words it \"Colors changed\"", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_mcp_documentation_lists_the_two_dashboard_refusals_that_keep_the_pages_code_and_give_a_status()
+    {
+        if (PromptKitChecks.FindUp("docs/mcp.md") is not { } mcp)
+        {
+            return;
+        }
+
+        var text = File.ReadAllText(mcp);
+
+        Assert.Contains($"`create_dashboard` or `duplicate_dashboard` says `{DashboardEndpoints.LimitCode}`", text, StringComparison.Ordinal);
+        Assert.Contains($"The project already has {IndicatorDashboardOptions.MaxDashboards} dashboards, the most it can have (`status` {StatusCodes.Status409Conflict})", text, StringComparison.Ordinal);
+        Assert.Contains($"`get_dashboard_version` or `restore_dashboard_version` says `{DashboardEndpoints.VersionNotFoundCode}`", text, StringComparison.Ordinal);
+        Assert.Contains($"The dashboard keeps only its {DashboardVersions.Kept} newest versions, and the number asked for is older than those or was never recorded (`status` {StatusCodes.Status404NotFound})", text, StringComparison.Ordinal);
+        Assert.Contains("keeps the page's code instead of an `mcp.` one and adds the HTTP `status`", text, StringComparison.Ordinal);
     }
 }

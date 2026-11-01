@@ -25,7 +25,8 @@ public sealed class McpDashboardVersionTools(
 
     [McpServerTool(Name = "list_dashboard_versions", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "List the versions of a dashboard"),
      Description("A dashboard's kept versions, newest first: the 10 newest, the current one included. Each has its number, whether it is current, the dashboard's name, how many widgets and filters it holds, " +
-                 "what changed (changes, the first 20, and moreChanges), restoredFrom for a restore, who made it, when its first and last changes were saved, and whether it was made in Tamiza (app) or through MCP (mcp) with the request given as change (note). " +
+                 "what changed (changes, the first 20, and moreChanges; each is { kind, widget?, dashboard?, version? } with kind one of initial, created, duplicated, renamed, filtersChanged, colorsChanged, widgetAdded, widgetChanged, widgetRemoved, widgetMovedOut, widgetMovedIn, layoutChanged, restored or unrecorded), " +
+                 "restoredFrom for a restore, who made it, when its first and last changes were saved, and whether it was made in Tamiza (app) or through MCP (mcp) with the request given as change (note). " +
                  "current is the number restore_dashboard_version needs as baseVersion. Use get_dashboard_version for what a version holds.")]
     public Task<CallToolResult> ListDashboardVersions(
         [Description(ProjectHelp)] Guid projectId, [Description(DashboardHelp)] Guid dashboardId, CancellationToken ct = default) =>

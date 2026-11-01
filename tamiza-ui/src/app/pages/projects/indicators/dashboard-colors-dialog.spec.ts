@@ -715,6 +715,15 @@ describe('DashboardColorsDialog', () => {
       ]);
     });
 
+    it.each([...paletteIds])('opens with focus on the palette in use, %s, not on the first radio, so the arrow keys move from it', async (palette) => {
+      const dialog = await open({ palette, valueColors: [] });
+      await dialog.answerColumns();
+
+      const checked = dialog.palettes().filter((p) => p.checked);
+      expect(checked.map((p) => p.value)).toEqual([palette]);
+      expect(document.activeElement).toBe(checked[0]);
+    });
+
     it('moves focus to the next entry\'s Remove button when one is removed, and to "Add" when none is left', async () => {
       const dialog = await open({ palette: 'tamiza', valueColors: [kept('sex', 'Female', 5), kept('sex', 'Male', 1)] });
       await dialog.answerColumns();
@@ -734,6 +743,44 @@ describe('DashboardColorsDialog', () => {
       await dialog.answerColumns();
 
       expect(dialog.inRow(0, 'dashboard-colors-remove').getAttribute('aria-label')).toBe('Remove the color kept for sex: Female');
+    });
+
+    it('names each entry\'s column and value after the visible label and the entry\'s place, so no two entries read the same', async () => {
+      const dialog = await open({ palette: 'tamiza', valueColors: [kept('sex', 'Female', 5), kept('sex', 'Male', 1), kept('municipality', 'Cali', 2)] });
+      await dialog.answerColumns();
+
+      const controls = (id: string) => dialog.rows().map((_, i) => dialog.inRow<HTMLSelectElement | HTMLInputElement>(i, id));
+      const names = (id: string) => controls(id).map((control) => control.getAttribute('aria-label'));
+      expect(names('dashboard-colors-column')).toEqual(['Column, entry 1 of 3', 'Column, entry 2 of 3', 'Column, entry 3 of 3']);
+      expect(names('dashboard-colors-value')).toEqual(['Value, entry 1 of 3', 'Value, entry 2 of 3', 'Value, entry 3 of 3']);
+      expect(new Set([...names('dashboard-colors-column'), ...names('dashboard-colors-value')]).size).toBe(6);
+      // The visible label is still the start of the name (label in name), and still tied to its control.
+      for (const control of [...controls('dashboard-colors-column'), ...controls('dashboard-colors-value')]) {
+        const visible = text(control.labels![0]);
+        expect(['Column', 'Value']).toContain(visible);
+        expect(control.getAttribute('aria-label')!.startsWith(visible)).toBe(true);
+      }
+    });
+
+    it('keeps the entries\' names in step with the list as entries are added and removed', async () => {
+      const dialog = await open({ palette: 'tamiza', valueColors: [kept('sex', 'Female', 5), kept('sex', 'Male', 1)] });
+      await dialog.answerColumns();
+      const valueNames = () => dialog.rows().map((_, i) => dialog.inRow(i, 'dashboard-colors-value').getAttribute('aria-label'));
+
+      await dialog.click(dialog.get('dashboard-colors-add')!);
+      expect(valueNames()).toEqual(['Value, entry 1 of 3', 'Value, entry 2 of 3', 'Value, entry 3 of 3']);
+
+      await dialog.click(dialog.inRow(0, 'dashboard-colors-remove'));
+      expect(valueNames()).toEqual(['Value, entry 1 of 2', 'Value, entry 2 of 2']);
+      expect(dialog.rows().map((_, i) => dialog.inRow(i, 'dashboard-colors-column').getAttribute('aria-label'))).toEqual(['Column, entry 1 of 2', 'Column, entry 2 of 2']);
+    });
+
+    it('names them in Spanish too', async () => {
+      const dialog = await open({ palette: 'tamiza', valueColors: [kept('sex', 'Female', 5), kept('sex', 'Male', 1)] }, {}, 'es');
+      await dialog.answerColumns();
+
+      expect(dialog.inRow(1, 'dashboard-colors-column').getAttribute('aria-label')).toBe('Columna, entrada 2 de 2');
+      expect(dialog.inRow(1, 'dashboard-colors-value').getAttribute('aria-label')).toBe('Valor, entrada 2 de 2');
     });
 
     it('closes on Escape without saving', async () => {

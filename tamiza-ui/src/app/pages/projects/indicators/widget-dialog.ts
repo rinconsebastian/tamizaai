@@ -472,8 +472,9 @@ const rampChoices: readonly (ScaleId | null)[] = [null, ...scaleIds];
                   [attr.data-ramp]="choice ?? 'palette'"
                   data-testid="dialog-ramp-option"
                 />
+                <!-- The rows start at the card's top: the cards of a row are as tall as the tallest (the palette's scale has a caption more), and centered rows would put its gradient higher than the others'. -->
                 <span
-                  class="flex h-full min-h-10 cursor-pointer flex-col justify-center gap-1 rounded-base border border-default-medium bg-neutral-secondary-medium p-2 text-sm text-heading peer-checked:border-brand peer-checked:bg-brand-softer peer-checked:ring-2 peer-checked:ring-brand peer-focus-visible:ring-4 peer-focus-visible:ring-brand-medium"
+                  class="grid h-full min-h-10 cursor-pointer content-start gap-1 rounded-base border border-default-medium bg-neutral-secondary-medium p-2 text-sm text-heading peer-checked:border-brand peer-checked:bg-brand-softer peer-checked:ring-2 peer-checked:ring-brand peer-focus-visible:ring-4 peer-focus-visible:ring-brand-medium"
                 >
                   <span class="h-3 rounded-sm border border-default" aria-hidden="true" [style.background-image]="gradient(choice)" data-testid="dialog-ramp-gradient"></span>
                   <span>{{ choice === null ? t('indicators.dialog.ramp.palette') : t('colors.scales.' + choice) }}</span>

@@ -2481,6 +2481,25 @@ describe('the widget dialog\'s color and scale', () => {
       expect(gradients.every((g) => g.startsWith('linear-gradient'))).toBe(true);
     });
 
+    it('keeps every gradient in the first row of its card, packed from the top, so they line up although the palette\'s scale has a caption more', async () => {
+      await openDialog({ existing: map(), colors: withColors('earth') });
+
+      // jsdom has no layout: this proves the structure that lines the gradients up; the alignment itself is checked in the browser.
+      const cards = rampRadios().map((radio) => radio.closest('label')!.querySelector<HTMLElement>(':scope > span')!);
+      expect(cards).toHaveLength(8);
+      for (const card of cards) {
+        // Rows packed from the top: a card as tall as the palette's one would otherwise spread (or center) its rows.
+        expect(card.className).toContain('grid');
+        expect(card.className).toContain('content-start');
+        expect(card.firstElementChild!.getAttribute('data-testid')).toBe('dialog-ramp-gradient');
+      }
+      // The palette's caption comes after the scale's name, below the gradient, and no other card has one.
+      expect(cards.map((card) => Array.from(card.children).map((child) => child.getAttribute('data-testid')))).toEqual([
+        ['dialog-ramp-gradient', null, 'dialog-ramp-palette-scale'],
+        ...Array(7).fill(['dialog-ramp-gradient', null]),
+      ]);
+    });
+
     it('names them in Spanish too', async () => {
       await openDialog({ existing: map(), colors: withColors('institutional'), lang: 'es' });
 

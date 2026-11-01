@@ -197,10 +197,20 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         }
 
         var eighth = await h.CallAsync("analyst", "create_dashboard", new { name = "Eighth", change = Request });
+        var copied = await h.CallAsync("analyst", "duplicate_dashboard", new { dashboardId = await FirstDashboardAsync(h), name = "Copy", change = Request });
         var taken = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = await FirstDashboardAsync(h), name = "DASHBOARD 3", change = Request });
         var reserved = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = await FirstDashboardAsync(h), name = "Performance", change = Request });
 
         Assert.Equal("dashboards.limit", eighth.Code());
+        Assert.Equal("dashboards.limit", copied.Code());
+        // The page's code, not an mcp. one, and the HTTP status next to it (docs/mcp.md, Troubleshooting).
+        foreach (var refused in new[] { eighth, copied })
+        {
+            using var body = refused.Json();
+            Assert.Equal(409, body.RootElement.GetProperty("status").GetInt32());
+            Assert.Contains("at most 7 dashboards", body.RootElement.GetProperty("message").GetString());
+        }
+
         Assert.Equal("mcp.validation", taken.Code());
         Assert.Equal("mcp.validation", reserved.Code());
         Assert.Equal(7, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboards"));
@@ -1278,6 +1288,35 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         Assert.Equal("mcp.validation", result.Code());
         Assert.Contains("Give a name, a position, filters, a palette or colors kept by value to change.", result.Text());
         Assert.Equal(Enumerable.Range(1, 1), await NumbersAsync(h, water));
+    }
+
+    [Fact]
+    public async Task Palette_scale_and_column_are_matched_exactly_in_lower_case_while_a_value_keeps_its_case_so_two_cases_are_two_values()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        await SeedHouseholdsAsync(h);
+        var water = await AddDashboardInTamizaAsync(h, "Water access");
+
+        var shouted = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, palette = "Vivid", change = ColorsRequest });
+        var padded = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, palette = " vivid", change = ColorsRequest });
+        var column = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, valueColors = new[] { Kept("Sex", "Female", 5) }, change = ColorsRequest });
+        var ramp = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = water, title = "Map", chartType = "map", change = ColorsRequest,
+            config = new { indicator = "households", measure = "value", groupBy = "municipality", geometryColumn = "geometry", display = new { ramp = "Green" } },
+        });
+
+        Assert.All(new[] { shouted, padded, column, ramp }, r => Assert.Equal("mcp.validation", r.Code()));
+        Assert.Contains("palette: Choose one of the palettes: tamiza, institutional, earth, vivid.", shouted.Text());
+        Assert.Contains("palette: Choose one of the palettes: tamiza, institutional, earth, vivid.", padded.Text());
+        Assert.Contains("valueColors[0].column: The column must be a published column's name", column.Text());
+        Assert.Contains("config.display.ramp: The scale must be one of blue, teal, green, orange, red, purple, gray.", ramp.Text());
+        Assert.Equal("tamiza []", await ColorsOfAsync(h, water));
+
+        // A value is matched as exact text: Female and female are two values, and each keeps a color.
+        Assert.Null((await h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, valueColors = new[] { Kept("sex", "Female", 5), Kept("sex", "female", 2) }, change = ColorsRequest })).Code());
+        Assert.Equal("tamiza [sex=Female:5, sex=female:2]", await ColorsOfAsync(h, water));
     }
 
     [Fact]
