@@ -124,6 +124,10 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         var missing = Expected.Select(e => e.Name).Where(name => !text.Contains($"`{name}`", StringComparison.Ordinal)).ToList();
 
         Assert.True(missing.Count == 0, $"docs/mcp.md does not name: {string.Join(", ", missing)}");
+
+        // The settings the dashboard tools take for colors are named too (design D10 of dashboard palettes).
+        var settings = new[] { "palette", "valueColors", "display" }.Where(setting => !text.Contains($"`{setting}`", StringComparison.Ordinal)).ToList();
+        Assert.True(settings.Count == 0, $"docs/mcp.md does not name: {string.Join(", ", settings)}");
         await Task.CompletedTask;
     }
 

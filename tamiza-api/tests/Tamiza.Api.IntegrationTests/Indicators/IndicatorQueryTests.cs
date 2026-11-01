@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Tamiza.Api.Indicators;
 using Tamiza.Api.IntegrationTests.Infrastructure;
 
 namespace Tamiza.Api.IntegrationTests.Indicators;
@@ -818,5 +819,212 @@ public sealed class IndicatorQueryTests(PostgresFixture postgres)
 
         Assert.False(without.TryGetProperty("notFiltered", out _));
         Assert.False(empty.TryGetProperty("notFiltered", out _));
+    }
+
+    // A pie's domain (dashboard-indicators "Pie chart"; design D8 of dashboard palettes)
+
+    private const string WaterColumns = "municipality text, water_source text, value numeric, numerator numeric, denominator numeric";
+
+    private static object Pie(object? filters = null) => new { indicator = "water", groupBy = "water_source", filters };
+
+    private async Task<IndicatorsHarness> WithWaterAsync(string rows)
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("water", WaterColumns, rows);
+        return h;
+    }
+
+    /// <summary>A response's pie domain as <c>value:kind</c>; a missing value is written as nothing.</summary>
+    private static string[] Domain(JsonElement result) =>
+        result.GetProperty("domain").EnumerateArray()
+            .Select(entry => $"{entry.GetProperty("value").GetString()}:{entry.GetProperty("kind").GetString()}")
+            .ToArray();
+
+    [Fact]
+    public async Task Colors_kept_under_a_dashboard_filter_the_pie_answers_the_same_domain_with_and_without_it()
+    {
+        await using var h = await WithWaterAsync(
+            "('Cali', 'Piped', 90, 0, 0), ('Cali', 'Well', 10, 0, 0), ('Palmira', 'Piped', 10, 0, 0), ('Palmira', 'Well', 60, 0, 0)");
+
+        var all = await h.QueryAsync(Pie(), "pie");
+        var palmira = await h.QueryAsync(Pie(), "pie", dashboardFilters: new[] { Text("municipality", "Palmira") });
+
+        // Piped is larger overall and Well inside the filter; the slices follow the filtered rows, the colors the domain.
+        Assert.Equal(["Piped|100", "Well|70"], IndicatorsHarness.Rows(all));
+        Assert.Equal(["Piped|10", "Well|60"], IndicatorsHarness.Rows(palmira));
+        Assert.Equal("""[{"value":"Piped","kind":"value"},{"value":"Well","kind":"value"}]""", all.GetProperty("domain").GetRawText());
+        Assert.Equal(all.GetProperty("domain").GetRawText(), palmira.GetProperty("domain").GetRawText());
+    }
+
+    [Fact]
+    public async Task Other_kept_under_a_dashboard_filter_the_values_folded_into_other_stay_out_of_the_domain()
+    {
+        // Ten values in municipality A, 100 down to 10; municipality B holds only the three smallest, the middle one the largest of them.
+        var rows = string.Join(", ", Enumerable.Range(1, 10).Select(i => $"('A', 's{i}', {110 - (10 * i)}, 0, 0)"))
+            + ", ('B', 's8', 1, 0, 0), ('B', 's9', 2, 0, 0), ('B', 's10', 1, 0, 0)";
+        await using var h = await WithWaterAsync(rows);
+
+        var all = await h.QueryAsync(Pie(), "pie");
+        var b = await h.QueryAsync(Pie(), "pie", dashboardFilters: new[] { Text("municipality", "B") });
+
+        // Seven values keep a color, the three smallest are "Other", and the domain holds eight entries.
+        Assert.Equal(["s1:value", "s2:value", "s3:value", "s4:value", "s5:value", "s6:value", "s7:value", ":other"], Domain(all));
+        Assert.Equal(all.GetProperty("domain").GetRawText(), b.GetProperty("domain").GetRawText());
+        // The rows still hold every group the filter keeps: it is the page that sums those outside the domain into "Other".
+        Assert.Equal(["s10|1", "s8|1", "s9|2"], IndicatorsHarness.Rows(b).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_pie_with_no_dashboard_filter_has_its_domain_in_the_order_of_size_the_missing_group_after_the_values()
+    {
+        await using var h = await WithWaterAsync(
+            "('A', 'Well', 40, 0, 0), ('A', 'Piped', 100, 0, 0), ('A', 'River', 5, 0, 0), ('A', NULL, 7, 0, 0), ('A', 'Piped', NULL, 0, 0)");
+
+        var result = await h.QueryAsync(Pie(), "pie");
+
+        // Not natural order (Piped, River, Well), not the group column's: the largest total first, then none.
+        Assert.Equal(["Piped:value", "Well:value", "River:value", ":none"], Domain(result));
+        Assert.Equal(
+            """[{"value":"Piped","kind":"value"},{"value":"Well","kind":"value"},{"value":"River","kind":"value"},{"value":null,"kind":"none"}]""",
+            result.GetProperty("domain").GetRawText());
+        // The rows are the pie's as before: the group column's order, the missing group last.
+        Assert.Equal(["Piped|100", "River|5", "Well|40", "|7"], IndicatorsHarness.Rows(result));
+    }
+
+    [Fact]
+    public async Task A_pie_of_nine_values_and_a_missing_group_keeps_six_values_the_missing_group_and_other()
+    {
+        var rows = string.Join(", ", Enumerable.Range(1, 9).Select(i => $"('A', 's{i}', {100 - i}, 0, 0)")) + ", ('A', NULL, 1, 0, 0)";
+        await using var h = await WithWaterAsync(rows);
+
+        var result = await h.QueryAsync(Pie(), "pie");
+
+        Assert.Equal(["s1:value", "s2:value", "s3:value", "s4:value", "s5:value", "s6:value", ":none", ":other"], Domain(result));
+        Assert.Equal(10, result.GetProperty("rows").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task A_pies_domain_is_read_through_its_own_filters_and_not_the_dashboards()
+    {
+        await using var h = await WithWaterAsync(
+            "('Cali', 'Piped', 90, 0, 0), ('Cali', 'River', 99, 0, 0), ('Palmira', 'Piped', 10, 0, 0), ('Palmira', 'Well', 60, 0, 0), ('Palmira', 'Rain', 1, 0, 0)");
+        var own = new[] { new { column = "water_source", op = "in", values = new[] { "Piped", "Well" } } };
+
+        var narrowed = await h.QueryAsync(Pie(own), "pie");
+        var filtered = await h.QueryAsync(Pie(own), "pie", dashboardFilters: new[] { Text("municipality", "Cali") });
+
+        // River and Rain are not in the widget's rows, so they have no place; Well has none in Cali, but keeps its place in the domain.
+        Assert.Equal(["Piped:value", "Well:value"], Domain(narrowed));
+        Assert.Equal(["Piped:value", "Well:value"], Domain(filtered));
+        Assert.Equal(["Piped|90"], IndicatorsHarness.Rows(filtered));
+    }
+
+    [Fact]
+    public async Task A_group_without_a_share_takes_no_place_in_a_pies_domain_so_it_cannot_push_a_slice_into_other()
+    {
+        // Eight values with a share, one at zero and one below it: a pie draws eight slices, with no "Other".
+        var rows = string.Join(", ", Enumerable.Range(1, 8).Select(i => $"('A', 's{i}', {90 - (10 * i)}, 0, 0)")) + ", ('A', 'zero', 0, 0, 0), ('A', 'below', -5, 0, 0)";
+        await using var h = await WithWaterAsync(rows);
+
+        var result = await h.QueryAsync(Pie(), "pie");
+
+        Assert.Equal(["s1:value", "s2:value", "s3:value", "s4:value", "s5:value", "s6:value", "s7:value", "s8:value"], Domain(result));
+        Assert.Equal(10, result.GetProperty("rows").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task A_ratio_pie_leaves_a_group_whose_denominator_sums_to_zero_out_of_its_domain()
+    {
+        await using var h = await WithWaterAsync("('A', 'Open', 0, 3, 10), ('A', 'Half', 0, 5, 10), ('A', 'Empty', 0, 0, 0), ('A', NULL, 0, 4, 0)");
+
+        var result = await h.QueryAsync(new { indicator = "water", groupBy = "water_source", ratio = new { numerator = "numerator", denominator = "denominator" } }, "pie");
+
+        Assert.Equal(["Half:value", "Open:value"], Domain(result));
+        Assert.Equal(["Half|0.5", "Open|0.3"], IndicatorsHarness.Rows(result));
+    }
+
+    [Fact]
+    public async Task A_pies_domain_writes_a_timestamp_group_as_its_rows_do()
+    {
+        await using var h = await WithVisitsAsync();
+
+        var result = await h.QueryAsync(new { indicator = "visits", groupBy = "visited_at" }, "pie");
+
+        var slices = result.GetProperty("rows").EnumerateArray()
+            .Select(row => (Group: row.GetProperty("group").GetString()!, Value: row.GetProperty("value").GetDouble()))
+            .ToArray();
+        Assert.Equal(4, slices.Length);
+        Assert.All(slices, slice => Assert.Contains('T', slice.Group));
+        // Largest first (60 at 05:30, 40 at 15:00, 35 at 04:30, 25 on the 3rd), each written as its row writes it.
+        Assert.Equal(
+            slices.OrderByDescending(slice => slice.Value).Select(slice => slice.Group),
+            result.GetProperty("domain").EnumerateArray().Select(e => e.GetProperty("value").GetString()!));
+        Assert.All(result.GetProperty("domain").EnumerateArray(), entry => Assert.Equal("value", entry.GetProperty("kind").GetString()));
+    }
+
+    [Fact]
+    public async Task A_pie_that_cannot_be_drawn_answers_no_domain()
+    {
+        await using var h = await WithWaterAsync("('A', 'Piped', 90, 0, 0)");
+
+        var unpublished = await h.QueryAsync(new { indicator = "nothing", groupBy = "water_source" }, "pie");
+        var gone = await h.QueryAsync(new { indicator = "water", groupBy = "town" }, "pie");
+
+        Assert.False(unpublished.GetProperty("published").GetBoolean());
+        Assert.False(unpublished.TryGetProperty("domain", out _));
+        Assert.Equal(["town"], IndicatorsHarness.Strings(gone.GetProperty("missing").GetProperty("columns")));
+        Assert.False(gone.TryGetProperty("domain", out _));
+    }
+
+    [Fact]
+    public async Task Every_other_kind_answers_what_it_answered_before_with_no_domain()
+    {
+        await using var h = await WithWaterAsync("('Cali', 'Piped', 90, 0, 0), ('Cali', 'Well', 10, 0, 0), ('Palmira', 'Piped', 10, 0, 0), ('Palmira', NULL, 5, 0, 0)");
+        var grouped = new { indicator = "water", groupBy = "water_source" };
+
+        // The rows, and every key of the response, as the build before pie domains answered them.
+        var bar = await h.QueryAsync(grouped, "bar");
+        Assert.Equal(
+            """{"published":true,"rows":[{"group":"Piped","value":100,"geometry":null},{"group":"Well","value":10,"geometry":null},{"group":null,"value":5,"geometry":null}],"rowLimitReached":false,"missing":{"indicator":false,"columns":[],"any":false}}""",
+            bar.GetRawText());
+        Assert.Equal(
+            """{"published":true,"rows":[{"group":null,"value":115,"geometry":null}],"rowLimitReached":false,"missing":{"indicator":false,"columns":[],"any":false}}""",
+            (await h.QueryAsync(new { indicator = "water" }, "stat")).GetRawText());
+        Assert.Equal(
+            """{"published":true,"rows":[{"group":"Piped","value":100,"geometry":null},{"group":"Well","value":10,"geometry":null},{"group":null,"value":5,"geometry":null}],"rowLimitReached":false,"missing":{"indicator":false,"columns":[],"any":false},"notFiltered":[]}""",
+            (await h.QueryAsync(grouped, "column", dashboardFilters: new[] { Text("municipality", "Cali", "Palmira") })).GetRawText());
+
+        var bySeries = new { indicator = "water", groupBy = "water_source", seriesBy = "municipality" };
+        var others = new (string ChartType, object Config)[]
+        {
+            ("column", grouped),
+            ("line", grouped),
+            ("histogram", new { indicator = "water" }),
+            ("column", bySeries),
+            ("bar", bySeries),
+            ("line", bySeries),
+            ("heatmap", bySeries),
+            ("crosstab", bySeries),
+            ("pyramid", new { indicator = "water", groupBy = "water_source", seriesBy = "municipality", pyramid = new { left = "Cali", right = "Palmira" } }),
+            ("likert", new
+            {
+                indicator = "water", groupBy = "water_source", seriesBy = "municipality",
+                scale = new[] { new { value = "Cali", side = LikertSides.Negative }, new { value = "Palmira", side = LikertSides.Positive } },
+            }),
+        };
+        foreach (var (chartType, config) in others)
+        {
+            Assert.False((await h.QueryAsync(config, chartType)).TryGetProperty("domain", out _), chartType);
+        }
+
+        var columnWithSeries = await h.QueryAsync(bySeries, "column");
+        Assert.Equal(["Cali", "Palmira"], columnWithSeries.GetProperty("series").EnumerateArray().Select(s => s.GetProperty("value").GetString()!));
+
+        // And a pie's answer is a column's of the same query, with the domain added.
+        var pie = await h.QueryAsync(grouped, "pie");
+        var column = await h.QueryAsync(grouped, "column");
+        var withoutDomain = System.Text.Json.Nodes.JsonNode.Parse(pie.GetRawText())!.AsObject();
+        Assert.True(withoutDomain.Remove("domain"));
+        Assert.Equal(column.GetRawText(), withoutDomain.ToJsonString());
     }
 }

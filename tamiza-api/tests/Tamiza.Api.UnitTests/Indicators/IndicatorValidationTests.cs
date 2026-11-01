@@ -914,4 +914,134 @@ public sealed class IndicatorValidationTests
         Assert.Equal("The table has no column 'water_source'.", Assert.Single(errors.ToDictionary()["config.seriesBy"]));
         Assert.DoesNotContain("config.seriesBy", found.ToDictionary().Keys);
     }
+
+    // How a widget is drawn (dashboard-colors, design D4)
+
+    private static WidgetConfig Drawn(WidgetDisplay? display, string? seriesBy = null, string? groupBy = "municipality") =>
+        new WidgetConfigInput("households_by_source", GroupBy: groupBy, SeriesBy: seriesBy, Display: display).Normalize();
+
+    [Fact]
+    public void A_config_without_a_display_has_none_and_a_display_that_sets_nothing_is_none()
+    {
+        Assert.Null(new WidgetConfigInput("coverage").Normalize().Display);
+        Assert.Null(new WidgetConfigInput("coverage", Display: new WidgetDisplay()).Normalize().Display);
+        Assert.Null(new WidgetConfigInput("coverage", Display: new WidgetDisplay(Ramp: "")).Normalize().Display);
+        Assert.Equal(new WidgetDisplay(3), new WidgetConfigInput("coverage", Display: new WidgetDisplay(3, "")).Normalize().Display);
+    }
+
+    [Theory]
+    [InlineData("bar")]
+    [InlineData("column")]
+    [InlineData("line")]
+    [InlineData("histogram")]
+    public void A_color_is_accepted_on_the_charts_that_draw_one_color(string chartType)
+    {
+        foreach (var color in new[] { 1, 3, 8 })
+        {
+            Assert.Empty(Check(Drawn(new WidgetDisplay(color), groupBy: chartType == "histogram" ? null : "municipality"), chartType));
+        }
+    }
+
+    [Theory]
+    [InlineData("stat")]
+    [InlineData("pie")]
+    [InlineData("map")]
+    [InlineData("heatmap")]
+    [InlineData("pyramid")]
+    [InlineData("likert")]
+    [InlineData("crosstab")]
+    public void A_color_on_any_other_kind_is_refused_on_the_color(string chartType)
+    {
+        var errors = Check(Drawn(new WidgetDisplay(3)), chartType);
+
+        Assert.Equal($"A {chartType} widget has no color of its own.", Assert.Single(errors["config.display.color"]));
+    }
+
+    [Theory]
+    [InlineData("bar")]
+    [InlineData("column")]
+    [InlineData("line")]
+    public void A_color_on_a_widget_with_a_series_is_refused_on_the_color(string chartType)
+    {
+        var errors = Check(Drawn(new WidgetDisplay(3), seriesBy: "water_source"), chartType);
+
+        Assert.Equal("A widget with a series takes its colors from its series.", Assert.Single(errors["config.display.color"]));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(9)]
+    [InlineData(-3)]
+    public void A_color_outside_1_to_8_is_refused_on_the_color(int color)
+    {
+        var errors = Check(Drawn(new WidgetDisplay(color)), "column");
+
+        Assert.Equal("The color must be a number from 1 to 8.", Assert.Single(errors["config.display.color"]));
+    }
+
+    [Fact]
+    public void A_color_outside_1_to_8_is_refused_whatever_the_kind_and_even_with_none_given()
+    {
+        Assert.Contains("config.display.color", Check(Drawn(new WidgetDisplay(9)), "pie").Keys);
+        Assert.Contains("config.display.color", Check(Drawn(new WidgetDisplay(9)), null).Keys);
+    }
+
+    [Theory]
+    [InlineData("map", "geometry")]
+    [InlineData("heatmap", null)]
+    public void Every_scale_is_accepted_on_a_map_and_a_heat_map(string chartType, string? geometry)
+    {
+        foreach (var scale in Palettes.Scales)
+        {
+            var config = new WidgetConfigInput("households_by_source", GroupBy: "municipality", GeometryColumn: geometry, SeriesBy: chartType == "heatmap" ? "water_source" : null,
+                Display: new WidgetDisplay(Ramp: scale)).Normalize();
+
+            Assert.Empty(Check(config, chartType));
+        }
+    }
+
+    [Theory]
+    [InlineData("stat")]
+    [InlineData("bar")]
+    [InlineData("column")]
+    [InlineData("line")]
+    [InlineData("histogram")]
+    [InlineData("pie")]
+    [InlineData("pyramid")]
+    [InlineData("likert")]
+    [InlineData("crosstab")]
+    public void A_scale_on_any_other_kind_is_refused_on_the_scale(string chartType)
+    {
+        var errors = Check(Drawn(new WidgetDisplay(Ramp: "green")), chartType);
+
+        Assert.Equal("Only map and heatmap widgets have a scale.", Assert.Single(errors["config.display.ramp"]));
+    }
+
+    [Theory]
+    [InlineData("Green")]
+    [InlineData("earth")]
+    [InlineData("#00ff00")]
+    [InlineData("magenta")]
+    public void A_scale_that_is_not_one_of_the_seven_is_refused_on_the_scale(string scale)
+    {
+        var errors = Check(Drawn(new WidgetDisplay(Ramp: scale)), "heatmap");
+
+        Assert.Equal("The scale must be one of blue, teal, green, orange, red, purple, gray.", Assert.Single(errors["config.display.ramp"]));
+        Assert.Contains("config.display.ramp", Check(Drawn(new WidgetDisplay(Ramp: scale)), null).Keys);
+    }
+
+    [Fact]
+    public void Without_a_chart_type_only_the_shape_of_the_display_is_checked()
+    {
+        Assert.Empty(Check(Drawn(new WidgetDisplay(3, "green")), null));
+        Assert.Empty(Check(Drawn(new WidgetDisplay(3), seriesBy: "water_source"), null));
+    }
+
+    [Fact]
+    public void The_errors_of_the_color_and_the_scale_are_kept_apart()
+    {
+        var errors = Check(Drawn(new WidgetDisplay(3, "green")), "pie");
+
+        Assert.Equal(["config.display.color", "config.display.ramp"], errors.Keys.Order(StringComparer.Ordinal));
+    }
 }

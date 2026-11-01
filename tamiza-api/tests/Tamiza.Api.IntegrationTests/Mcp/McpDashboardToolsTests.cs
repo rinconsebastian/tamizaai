@@ -117,6 +117,36 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_pie_keeps_the_row_shape_of_any_grouped_widget_and_the_page_only_domain_is_not_returned()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+        await AddWidgetAsync(h, dashboard, "Share by municipality", "pie", BarConfig());
+        await AddWidgetAsync(h, dashboard, "Rate by municipality", "bar", BarConfig());
+
+        using var previewed = (await h.CallAsync("viewer", "query_indicator", new { chartType = "pie", config = BarConfig() })).Json();
+        using var bar = (await h.CallAsync("viewer", "query_indicator", new { chartType = "bar", config = BarConfig() })).Json();
+        using var shown = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard })).Json();
+
+        // The domain is a drawing aid for the page: neither tool returns it, and a pie answers the keys and rows of a bar.
+        Assert.False(previewed.RootElement.TryGetProperty("domain", out _));
+        Assert.Equal(
+            bar.RootElement.EnumerateObject().Select(p => p.Name).ToArray(),
+            previewed.RootElement.EnumerateObject().Select(p => p.Name).ToArray());
+        Assert.Equal(bar.RootElement.GetProperty("rows").GetRawText(), previewed.RootElement.GetProperty("rows").GetRawText());
+        var widgets = shown.RootElement.GetProperty("widgets").EnumerateArray().ToDictionary(w => w.GetProperty("title").GetString()!);
+        Assert.Equal("shown", widgets["Share by municipality"].GetProperty("status").GetString());
+        Assert.False(widgets["Share by municipality"].TryGetProperty("domain", out _));
+        Assert.Equal(
+            widgets["Rate by municipality"].EnumerateObject().Select(p => p.Name).Where(name => name != "id" && name != "title" && name != "chartType").ToArray(),
+            widgets["Share by municipality"].EnumerateObject().Select(p => p.Name).Where(name => name != "id" && name != "title" && name != "chartType").ToArray());
+        Assert.Equal(widgets["Rate by municipality"].GetProperty("rows").GetRawText(), widgets["Share by municipality"].GetProperty("rows").GetRawText());
+        Assert.DoesNotContain("domain", previewed.RootElement.GetRawText());
+        Assert.DoesNotContain("domain", shown.RootElement.GetRawText());
+    }
+
+    [Fact]
     public async Task A_dashboard_for_a_situation_is_built_with_widgets_a_filter_and_the_analysts_name_on_them()
     {
         await using var h = await CreateAsync();
@@ -380,6 +410,7 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
                  {
                      ("create_dashboard", new { name = "X", change = Request }),
                      ("update_dashboard", new { dashboardId = dashboard, name = "X", change = Request }),
+                     ("update_dashboard", new { dashboardId = dashboard, palette = "earth", valueColors = new[] { new { column = "municipality", value = "Santa Ana", color = 2 } }, change = Request }),
                      ("duplicate_dashboard", new { dashboardId = dashboard, name = "X", change = Request }),
                      ("remove_dashboard", new { dashboardId = dashboard, expectedName = "Indicators" }),
                      ("create_widget", new { dashboardId = dashboard, title = "X", chartType = "stat", config = new { indicator = "piped_water_rate" }, change = Request }),
@@ -392,6 +423,7 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
 
         Assert.Equal(1, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboards"));
         Assert.Equal(1, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+        Assert.Equal("tamiza | 0", await TestData.ScalarAsync<string>(h.Db, "SELECT format('%s | %s', palette, jsonb_array_length(value_colors)) FROM tamiza.dashboards"));
     }
 
     // Widgets with a series
@@ -1030,5 +1062,309 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         var copyId = copyBody.RootElement.GetProperty("id").GetGuid();
         Assert.Equal([(copyId, 1)], DashboardVersionsOf(copy));
         Assert.Equal(2, (await VersionsAsync(h, field)).Length);
+    }
+
+    // Colors (mcp-server "Dashboards and widgets through MCP", design D10 of dashboard palettes)
+
+    private const string ColorsRequest = "Color the water dashboard";
+
+    private static object Kept(string column, string value, int color) => new { column, value, color };
+
+    /// <summary>The indicator <c>households</c>: a group, a series and a geometry column to draw a map from.</summary>
+    private static Task SeedHouseholdsAsync(McpProjectHarness h) =>
+        PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "households", "municipality text, sex text, geometry text, value numeric",
+            "('Cali', 'Female', 'POINT(0 0)', 40), ('Cali', 'Male', 'POINT(0 0)', 35), ('Palmira', 'Female', 'POINT(1 1)', 60)");
+
+    /// <summary>A dashboard's palette and colors kept by value as <c>get_dashboard</c> gives them: <c>earth [sex=Female:5, sex=Male:2]</c>, the colors as <c>column=value:color</c>.</summary>
+    private static async Task<string> ColorsOfAsync(McpProjectHarness h, Guid dashboard, string person = "viewer")
+    {
+        using var body = (await h.CallAsync(person, "get_dashboard", new { dashboardId = dashboard })).Json();
+        var colors = body.RootElement.GetProperty("valueColors").EnumerateArray()
+            .Select(c => $"{c.GetProperty("column").GetString()}={c.GetProperty("value").GetString()}:{c.GetProperty("color").GetInt32()}");
+        return $"{body.RootElement.GetProperty("palette").GetString()} [{string.Join(", ", colors)}]";
+    }
+
+    private static Task<string?> StoredPaletteAsync(McpProjectHarness h, Guid dashboard) =>
+        TestData.ScalarAsync<string>(h.Db, "SELECT palette FROM tamiza.dashboards WHERE id = @d", ("d", dashboard));
+
+    [Fact]
+    public async Task Colors_through_mcp_a_palette_and_a_color_kept_then_a_map_on_the_green_scale_are_saved_and_read_back_by_the_tools_and_the_page()
+    {
+        await using var h = await CreateAsync();
+        await SeedHouseholdsAsync(h);
+        var water = await AddDashboardInTamizaAsync(h, "Water access");
+
+        var colored = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, palette = "earth", valueColors = new[] { Kept("sex", "Female", 5) }, change = ColorsRequest });
+        var map = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = water, title = "Households", chartType = "map", change = ColorsRequest,
+            config = new { indicator = "households", measure = "value", groupBy = "municipality", geometryColumn = "geometry", display = new { ramp = "green" } },
+        });
+
+        // The call answers with the colors as saved, and both writes are one version of the request.
+        Assert.Equal([(water, 2)], DashboardVersionsOf(colored));
+        using (var answer = colored.Json())
+        {
+            Assert.Equal("earth", answer.RootElement.GetProperty("palette").GetString());
+            Assert.Equal("""[{"column":"sex","value":"Female","color":5}]""", answer.RootElement.GetProperty("valueColors").GetRawText());
+        }
+
+        Assert.Null(map.Code());
+        Assert.Equal([(water, 2)], DashboardVersionsOf(map));
+        Assert.Equal(
+            [
+                """1 | analyst | app | - | [{"kind": "created"}]""",
+                "2 | analyst | mcp | " + ColorsRequest + " | " + Changes("""{"kind": "colorsChanged"}""", Added("Households")),
+            ],
+            await VersionsAsync(h, water));
+        // get_dashboard gives the palette, the color kept and the widget's scale to a viewer, and the page gives the same.
+        Assert.Equal("earth [sex=Female:5]", await ColorsOfAsync(h, water));
+        using (var viewed = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = water })).Json())
+        {
+            Assert.Equal("green", viewed.RootElement.GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("ramp").GetString());
+        }
+
+        var page = await Rest(h, "viewer").GetAsync($"/api/v1/projects/{h.ProjectId}/dashboards/{water}");
+        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+        using (var pageBody = JsonDocument.Parse(await page.Content.ReadAsStringAsync()))
+        {
+            Assert.Equal("earth", pageBody.RootElement.GetProperty("palette").GetString());
+            Assert.Equal("""[{"column":"sex","value":"Female","color":5}]""", pageBody.RootElement.GetProperty("valueColors").GetRawText());
+            Assert.Equal("green", pageBody.RootElement.GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("ramp").GetString());
+        }
+
+        // The version holds the colors, and a version from before any colors reads the defaults.
+        using var kept = (await h.CallAsync("analyst", "get_dashboard_version", new { dashboardId = water, version = 2 })).Json();
+        Assert.Equal("earth", kept.RootElement.GetProperty("palette").GetString());
+        Assert.Equal("""[{"column":"sex","value":"Female","color":5}]""", kept.RootElement.GetProperty("valueColors").GetRawText());
+        using var first = (await h.CallAsync("analyst", "get_dashboard_version", new { dashboardId = water, version = 1 })).Json();
+        Assert.Equal("tamiza", first.RootElement.GetProperty("palette").GetString());
+        Assert.Equal("[]", first.RootElement.GetProperty("valueColors").GetRawText());
+    }
+
+    [Fact]
+    public async Task Unknown_palette_through_mcp_is_refused_with_the_error_on_the_palette_and_nothing_is_saved()
+    {
+        await using var h = await CreateAsync();
+        var water = await AddDashboardInTamizaAsync(h, "Water access");
+
+        var result = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, palette = "neon", change = ColorsRequest });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("palette: Choose one of the palettes: tamiza, institutional, earth, vivid.", result.Text());
+        using (var body = result.Json())
+        {
+            Assert.Equal(["palette"], body.RootElement.GetProperty("fields").EnumerateObject().Select(f => f.Name).ToArray());
+        }
+
+        Assert.Equal("tamiza", await StoredPaletteAsync(h, water));
+        Assert.Equal("tamiza []", await ColorsOfAsync(h, water));
+        Assert.Equal(Enumerable.Range(1, 1), await NumbersAsync(h, water));
+    }
+
+    [Fact]
+    public async Task One_call_with_a_rename_and_colors_makes_one_version_that_holds_both()
+    {
+        await using var h = await CreateAsync();
+        var water = await AddDashboardInTamizaAsync(h, "Water");
+
+        var result = await h.CallAsync("analyst", "update_dashboard", new
+        {
+            dashboardId = water, name = "Agua", palette = "vivid", valueColors = new[] { Kept("sex", "Female", 5), Kept("sex", "Male", 2) }, change = "Rename Water and color it",
+        });
+
+        Assert.Equal([(water, 2)], DashboardVersionsOf(result));
+        Assert.Equal(
+            [
+                """1 | analyst | app | - | [{"kind": "created"}]""",
+                """2 | analyst | mcp | Rename Water and color it | [{"kind": "renamed", "dashboard": "Agua"}, {"kind": "colorsChanged"}]""",
+            ],
+            await VersionsAsync(h, water));
+        Assert.Equal("vivid", await TestData.ScalarAsync<string>(h.Db, "SELECT content->>'palette' FROM tamiza.dashboard_versions WHERE dashboard_id = @d AND number = 2", ("d", water)));
+        Assert.Equal("Agua", await TestData.ScalarAsync<string>(h.Db, "SELECT content->>'name' FROM tamiza.dashboard_versions WHERE dashboard_id = @d AND number = 2", ("d", water)));
+        Assert.Equal(2, await TestData.ScalarAsync<int>(h.Db, "SELECT jsonb_array_length(content->'valueColors') FROM tamiza.dashboard_versions WHERE dashboard_id = @d AND number = 2", ("d", water)));
+        Assert.Equal("vivid [sex=Female:5, sex=Male:2]", await ColorsOfAsync(h, water));
+    }
+
+    [Fact]
+    public async Task A_palette_alone_keeps_the_colors_and_the_colors_alone_keep_the_palette_and_an_empty_list_removes_them()
+    {
+        await using var h = await CreateAsync();
+        var water = await AddDashboardInTamizaAsync(h, "Water access");
+        Task<CallToolResult> Update(string? palette = null, object[]? valueColors = null) =>
+            h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, palette, valueColors, change = ColorsRequest });
+
+        Assert.Null((await Update(palette: "earth", valueColors: [Kept("sex", "Female", 5), Kept("sex", "Male", 2)])).Code());
+        Assert.Null((await Update(palette: "vivid")).Code());
+        Assert.Equal("vivid [sex=Female:5, sex=Male:2]", await ColorsOfAsync(h, water));
+
+        // The list sent is the whole list, and the palette stays.
+        Assert.Null((await Update(valueColors: [Kept("answer", "No", 8)])).Code());
+        Assert.Equal("vivid [answer=No:8]", await ColorsOfAsync(h, water));
+
+        Assert.Null((await Update(valueColors: [])).Code());
+        Assert.Equal("vivid []", await ColorsOfAsync(h, water));
+    }
+
+    [Fact]
+    public async Task Colors_the_dashboard_already_has_make_no_version_and_the_call_gives_the_version_it_has()
+    {
+        await using var h = await CreateAsync();
+        var water = await AddDashboardInTamizaAsync(h, "Water access");
+        Assert.Equal([(water, 2)], DashboardVersionsOf(await h.CallAsync("analyst", "update_dashboard",
+            new { dashboardId = water, palette = "earth", valueColors = new[] { Kept("sex", "Female", 5) }, change = "Color the dashboard" })));
+        var stored = await TestData.ScalarAsync<string>(h.Db, "SELECT updated_at::text FROM tamiza.dashboards WHERE id = @d", ("d", water));
+
+        // Another request sets what is already there.
+        var again = await h.CallAsync("analyst", "update_dashboard",
+            new { dashboardId = water, palette = "earth", valueColors = new[] { Kept("sex", "Female", 5) }, change = "Color it again" });
+
+        Assert.Equal([(water, 2)], DashboardVersionsOf(again));
+        Assert.Equal(Enumerable.Range(1, 2), await NumbersAsync(h, water));
+        Assert.Equal(stored, await TestData.ScalarAsync<string>(h.Db, "SELECT updated_at::text FROM tamiza.dashboards WHERE id = @d", ("d", water)));
+    }
+
+    [Fact]
+    public async Task Colors_refused_carry_the_keys_and_messages_of_the_page_and_save_nothing()
+    {
+        await using var h = await CreateAsync();
+        var water = await AddDashboardInTamizaAsync(h, "Water access");
+
+        var result = await h.CallAsync("analyst", "update_dashboard", new
+        {
+            dashboardId = water, palette = "earth", change = ColorsRequest,
+            valueColors = new object[] { Kept("sex", "Female", 5), Kept("sex", "Male", 5), Kept("Bad Column", "x", 9), Kept("sex", "Female", 6) },
+        });
+
+        Assert.Equal("mcp.validation", result.Code());
+        using (var body = result.Json())
+        {
+            var fields = body.RootElement.GetProperty("fields");
+            Assert.Equal(["valueColors[1]", "valueColors[2].column", "valueColors[2].color", "valueColors[3]"], fields.EnumerateObject().Select(f => f.Name).ToArray());
+            Assert.Equal("sex already uses color 5.", fields.GetProperty("valueColors[1]")[0].GetString());
+            Assert.Equal("sex already keeps a color for Female.", fields.GetProperty("valueColors[3]")[0].GetString());
+        }
+
+        Assert.Equal("tamiza []", await ColorsOfAsync(h, water));
+        Assert.Equal(Enumerable.Range(1, 1), await NumbersAsync(h, water));
+    }
+
+    [Fact]
+    public async Task A_call_that_names_no_setting_to_change_is_refused()
+    {
+        await using var h = await CreateAsync();
+        var water = await AddDashboardInTamizaAsync(h, "Water access");
+
+        var result = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, change = ColorsRequest });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("Give a name, a position, filters, a palette or colors kept by value to change.", result.Text());
+        Assert.Equal(Enumerable.Range(1, 1), await NumbersAsync(h, water));
+    }
+
+    [Fact]
+    public async Task A_rename_saved_before_colors_that_are_refused_is_still_a_version_and_the_palette_is_not_changed()
+    {
+        await using var h = await CreateAsync();
+        var water = await AddDashboardInTamizaAsync(h, "Water");
+
+        var result = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, name = "Agua", palette = "neon", change = "Rename Water and color it" });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("palette", result.Text());
+        Assert.Equal("""2 | analyst | mcp | Rename Water and color it | [{"kind": "renamed", "dashboard": "Agua"}]""", (await VersionsAsync(h, water))[^1]);
+        Assert.Equal("tamiza", await StoredPaletteAsync(h, water));
+    }
+
+    [Fact]
+    public async Task Colors_of_a_dashboard_that_is_not_the_projects_are_not_found()
+    {
+        await using var h = await CreateAsync();
+
+        var result = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = Guid.NewGuid(), palette = "earth", change = ColorsRequest });
+
+        Assert.NotNull(result.Code());
+        Assert.NotEqual("mcp.validation", result.Code());
+    }
+
+    [Fact]
+    public async Task A_widgets_color_is_set_with_display_checked_like_the_widget_form_and_replaced_with_the_config()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        await SeedHouseholdsAsync(h);
+        var water = await AddDashboardInTamizaAsync(h, "Water access");
+        object Bar(object? display = null, string? seriesBy = null) => new { indicator = "households", measure = "value", groupBy = "municipality", seriesBy, display };
+
+        var created = await h.CallAsync("analyst", "create_widget", new { dashboardId = water, title = "Households", chartType = "bar", config = Bar(new { color = 3 }), change = ColorsRequest });
+
+        Assert.Null(created.Code());
+        using var made = created.Json();
+        Assert.Equal(3, made.RootElement.GetProperty("config").GetProperty("display").GetProperty("color").GetInt32());
+        var widget = made.RootElement.GetProperty("id").GetGuid();
+
+        // The rules of the widget form: no color with a series, none above 8, a scale only on a map or a heat map, an unknown scale.
+        var series = await h.CallAsync("analyst", "update_widget", new { dashboardId = water, widgetId = widget, config = Bar(new { color = 3 }, seriesBy: "sex"), change = ColorsRequest });
+        var tooHigh = await h.CallAsync("analyst", "update_widget", new { dashboardId = water, widgetId = widget, config = Bar(new { color = 9 }), change = ColorsRequest });
+        var scale = await h.CallAsync("analyst", "update_widget", new { dashboardId = water, widgetId = widget, config = Bar(new { ramp = "green" }), change = ColorsRequest });
+        var unknown = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = water, title = "Map", chartType = "map", change = ColorsRequest,
+            config = new { indicator = "households", measure = "value", groupBy = "municipality", geometryColumn = "geometry", display = new { ramp = "pink" } },
+        });
+
+        Assert.All(new[] { series, tooHigh, scale, unknown }, r => Assert.Equal("mcp.validation", r.Code()));
+        Assert.Contains("config.display.color: A widget with a series takes its colors from its series.", series.Text());
+        Assert.Contains("config.display.color: The color must be a number from 1 to 8.", tooHigh.Text());
+        Assert.Contains("config.display.ramp: Only map and heatmap widgets have a scale.", scale.Text());
+        Assert.Contains("config.display.ramp", unknown.Text());
+        using (var viewed = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = water })).Json())
+        {
+            var widgets = viewed.RootElement.GetProperty("widgets");
+            Assert.Equal(1, widgets.GetArrayLength());
+            Assert.Equal(3, widgets[0].GetProperty("config").GetProperty("display").GetProperty("color").GetInt32());
+        }
+
+        // A new config replaces the old one whole, so one without display leaves the widget in color 1.
+        Assert.Null((await h.CallAsync("analyst", "update_widget", new { dashboardId = water, widgetId = widget, config = Bar(), change = ColorsRequest })).Code());
+        using var after = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = water })).Json();
+        Assert.False(after.RootElement.GetProperty("widgets")[0].GetProperty("config").TryGetProperty("display", out _));
+    }
+
+    [Fact]
+    public async Task The_tool_descriptions_and_schemas_name_the_color_settings()
+    {
+        await using var h = await CreateAsync();
+        var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
+
+        var update = tools["update_dashboard"];
+        var properties = update.JsonSchema.GetProperty("properties");
+        Assert.True(properties.TryGetProperty("palette", out var palette));
+        Assert.True(properties.TryGetProperty("valueColors", out var valueColors));
+        Assert.DoesNotContain("palette", update.JsonSchema.GetProperty("required").EnumerateArray().Select(r => r.GetString()));
+        Assert.DoesNotContain("valueColors", update.JsonSchema.GetProperty("required").EnumerateArray().Select(r => r.GetString()));
+        Assert.Contains("tamiza, institutional, earth or vivid", palette.GetProperty("description").GetString());
+        Assert.Contains("whole list", valueColors.GetProperty("description").GetString());
+        foreach (var word in new[] { "palette", "valueColors", "color 1 to 8", "one version" })
+        {
+            Assert.Contains(word, update.Description);
+        }
+
+        foreach (var tool in new[] { "create_widget", "update_widget" })
+        {
+            foreach (var word in new[] { "display", "color", "ramp", "blue, teal, green, orange, red, purple or gray", "palette" })
+            {
+                Assert.Contains(word, tools[tool].Description);
+            }
+
+            var config = tools[tool].JsonSchema.GetProperty("properties").GetProperty("config");
+            Assert.Contains("\"display\"", config.GetRawText() + tools[tool].JsonSchema.GetRawText());
+        }
+
+        foreach (var tool in new[] { "get_dashboard", "get_dashboard_version" })
+        {
+            Assert.Contains("palette", tools[tool].Description);
+            Assert.Contains("valueColors", tools[tool].Description);
+        }
     }
 }

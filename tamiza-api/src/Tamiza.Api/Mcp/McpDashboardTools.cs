@@ -34,6 +34,16 @@ public sealed class McpDashboardTools(
         "With a series the result lists series, cells ({ group, series, value, formatted, share? }), totals of every group, series and all rows, and notes; rows are not sent.";
     private const string DashboardHelp = "The dashboard's id, from list_dashboards.";
 
+    private const string ColorsHelp =
+        "A dashboard draws its widgets in one palette: tamiza (the default), institutional, earth or vivid, each with eight numbered colors (1 to 8) and a sequential scale for maps and heat maps. " +
+        "valueColors keeps a color for a value of a column, [{ column, value, color }] with color 1 to 8, so the value has that color in every widget of the dashboard that colors by that column. " +
+        "In a column a value and a color are each kept once, and a value is matched as exact text, case included.";
+
+    private const string DisplayHelp =
+        "config.display = { color, ramp } sets how the widget is drawn, both optional. color is a place in the dashboard's palette, 1 to 8 (not a color code; 1 when left out), " +
+        "for a bar, column or line chart with no seriesBy and for a histogram. ramp is a sequential scale, one of blue, teal, green, orange, red, purple or gray, " +
+        "for a map or heatmap only; left out, the palette's own scale. A widget with a series takes its colors from its series, and no other kind has a color of its own.";
+
     /// <summary>The most characters of a request's <c>change</c>, as <c>dashboard_versions.note</c> keeps it (design D1, D10 of dashboard versions).</summary>
     internal const int MaxChangeLength = 120;
 
@@ -129,7 +139,7 @@ public sealed class McpDashboardTools(
         });
 
     [McpServerTool(Name = "get_dashboard", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Get a dashboard"),
-     Description("One dashboard with its filters, its widgets in reading order (each widget's id, title, chart type, query (config) and layout on the 12-column grid) and the number of its current version, which restore_dashboard_version needs as baseVersion. Use get_widget_data for what the widgets show.")]
+     Description("One dashboard with its filters, its palette and the colors it keeps by value (palette, valueColors), its widgets in reading order (each widget's id, title, chart type, query and display (config) and layout on the 12-column grid) and the number of its current version, which restore_dashboard_version needs as baseVersion. Use get_widget_data for what the widgets show.")]
     public Task<CallToolResult> GetDashboard(
         [Description(ProjectHelp)] Guid projectId, [Description(DashboardHelp)] Guid dashboardId, CancellationToken ct = default) =>
         RunAsync(async () =>
@@ -208,9 +218,11 @@ public sealed class McpDashboardTools(
             };
         });
 
-    [McpServerTool(Name = "update_dashboard", Title = "Rename, move or set the filters of a dashboard", Idempotent = true, OpenWorld = false, Destructive = false),
-     Description("Renames a dashboard, moves it to a position (1 = first) or replaces its filters (up to 8; each { column, label, kind: text | boolean | number | date, default? }). Give any of name, position and filters; what you leave out keeps its value. " +
-                 "A filter narrows every widget whose indicator table has its column with a type of its kind.")]
+    [McpServerTool(Name = "update_dashboard", Title = "Rename, move or set the filters or colors of a dashboard", Idempotent = true, OpenWorld = false, Destructive = false),
+     Description("Renames a dashboard, moves it to a position (1 = first), replaces its filters (up to 8; each { column, label, kind: text | boolean | number | date, default? }) or sets its colors: its palette and the colors it keeps by value (up to 64). " +
+                 "Give any of name, position, filters, palette and valueColors; what you leave out keeps its value. " +
+                 "A filter narrows every widget whose indicator table has its column with a type of its kind. " + ColorsHelp + " " +
+                 "A color change is one more commit of the same request, so a call that renames and sets colors makes one version.")]
     public Task<CallToolResult> UpdateDashboard(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
@@ -218,17 +230,19 @@ public sealed class McpDashboardTools(
         [Description("Optional. The new name.")] string? name = null,
         [Description("Optional. The new place, 1 for the first.")] int? position = null,
         [Description("Optional. The whole list of filters, replacing the current one; an empty list removes them all.")] DashboardFilterInput[]? filters = null,
+        [Description("Optional. The dashboard's palette: tamiza, institutional, earth or vivid. The colors kept by value stay as they are unless you also give valueColors.")] string? palette = null,
+        [Description("Optional. The whole list of colors kept by value, [{ column, value, color }] with color 1 to 8, replacing the current one; an empty list removes them all. The palette stays as it is unless you also give palette.")] ValueColorInput[]? valueColors = null,
         CancellationToken ct = default) =>
         RunAsync(async () =>
         {
             var request = RequireChange(change);
             await Gate.RequireAsync(projectId, ProjectRole.Analyst, McpNeeds.Summaries, ct);
-            if (name is null && position is null && filters is null)
+            if (name is null && position is null && filters is null && palette is null && valueColors is null)
             {
-                throw McpRefusal.Validation(new Dictionary<string, string[]> { ["name"] = ["Give a name, a position or filters to change."] });
+                throw McpRefusal.Validation(new Dictionary<string, string[]> { ["name"] = ["Give a name, a position, filters, a palette or colors kept by value to change."] });
             }
 
-            // Up to three commits: a rename that is saved before the filters are refused is still recorded (design D3).
+            // Up to four commits: a rename that is saved before the filters or the colors are refused is still recorded (design D3).
             var recorded = await RecordAsync(request, async () =>
             {
                 if (name is not null)
@@ -241,25 +255,32 @@ public sealed class McpDashboardTools(
                     McpResults.Unwrap(await DashboardEndpoints.SaveFiltersAsync(projectId, dashboardId, new DashboardFiltersRequest(filters), db, versions, user, time, ct));
                 }
 
+                if (palette is not null || valueColors is not null)
+                {
+                    await SaveColorsAsync(projectId, dashboardId, palette, valueColors, ct);
+                }
+
                 if (position is { } place)
                 {
                     await MoveAsync(projectId, dashboardId, place, ct);
                 }
             });
 
-            var current = await db.Dashboards.AsNoTracking().Where(d => d.Id == dashboardId && d.ProjectId == projectId).Select(d => new { d.Name, d.Filters }).SingleOrDefaultAsync(ct);
+            var current = await db.Dashboards.AsNoTracking().Where(d => d.Id == dashboardId && d.ProjectId == projectId).Select(d => new { d.Name, d.Filters, d.Palette, d.ValueColors }).SingleOrDefaultAsync(ct);
             return new
             {
                 id = dashboardId,
                 name = current?.Name,
                 position = await PositionOfAsync(projectId, dashboardId, ct),
                 filters = current is null ? null : DashboardEndpoints.ReadFilters(current.Filters),
+                palette = current?.Palette,
+                valueColors = current is null ? null : DashboardEndpoints.ReadValueColors(current.ValueColors),
                 dashboardVersions = await VersionsOfAsync(projectId, recorded, [dashboardId], ct),
             };
         });
 
     [McpServerTool(Name = "duplicate_dashboard", Title = "Duplicate a dashboard", Idempotent = false, OpenWorld = false, Destructive = false),
-     Description("Copies a dashboard with all its widgets and filters right after the original, under a new name. Fails at 7 dashboards.")]
+     Description("Copies a dashboard with all its widgets, filters, palette and colors kept by value right after the original, under a new name. Fails at 7 dashboards.")]
     public Task<CallToolResult> DuplicateDashboard(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
@@ -305,15 +326,15 @@ public sealed class McpDashboardTools(
 
     [McpServerTool(Name = "create_widget", Title = "Add a widget to a dashboard", Idempotent = false, OpenWorld = false, Destructive = false),
      Description("Adds a widget: a stat tile, bar, column, line, histogram, pie chart, map, heat map, population pyramid, diverging Likert chart or cross table, with a title and a query over one indicator's table. Check the query with query_indicator first. " +
-                 "config = { indicator, measure | ratio: { numerator, denominator }, groupBy, seriesBy, layout, pyramid: { left, right }, scale: [{ value, side }], filters, geometryColumn, buckets, sort, tooltip }. " +
-                 "Every kind but stat tile and histogram needs groupBy; a map also needs geometryColumn (WKT in degrees). " + SeriesHelp + " " +
+                 "config = { indicator, measure | ratio: { numerator, denominator }, groupBy, seriesBy, layout, pyramid: { left, right }, scale: [{ value, side }], filters, geometryColumn, buckets, sort, tooltip, display: { color, ramp } }. " +
+                 "Every kind but stat tile and histogram needs groupBy; a map also needs geometryColumn (WKT in degrees). " + SeriesHelp + " " + DisplayHelp + " " +
                  "It goes under the dashboard's widgets unless you give layout = { x, y, w, h } on the 12-column grid. A dashboard holds a limited number of widgets.")]
     public Task<CallToolResult> CreateWidget(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
         [Description("The widget's title, up to 200 characters.")] string title,
         [Description(ChartTypeHelp)] string chartType,
-        [Description("The widget's query.")] WidgetConfigInput config,
+        [Description("The widget's query, and optionally its display (color or scale).")] WidgetConfigInput config,
         [Description(ChangeHelp)] string change,
         [Description("Optional. Position and size on the grid.")] WidgetLayout? layout = null,
         CancellationToken ct = default) =>
@@ -327,7 +348,7 @@ public sealed class McpDashboardTools(
         });
 
     [McpServerTool(Name = "update_widget", Title = "Change or move a widget", Idempotent = true, OpenWorld = false, Destructive = false),
-     Description("Changes a widget's title, chart type, query or layout, or moves it to another dashboard of the project with moveToDashboardId (it lands under that dashboard's widgets). What you leave out keeps its value; a new config replaces the old one whole, including its series settings.")]
+     Description("Changes a widget's title, chart type, query or layout, or moves it to another dashboard of the project with moveToDashboardId (it lands under that dashboard's widgets). What you leave out keeps its value; a new config replaces the old one whole, including its series settings and its display. " + DisplayHelp)]
     public Task<CallToolResult> UpdateWidget(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
@@ -335,7 +356,7 @@ public sealed class McpDashboardTools(
         [Description(ChangeHelp)] string change,
         [Description("Optional. The new title.")] string? title = null,
         [Description("Optional. The new chart type: " + ChartTypeHelp)] string? chartType = null,
-        [Description("Optional. The new query, replacing the old one.")] WidgetConfigInput? config = null,
+        [Description("Optional. The new query and display, replacing the old ones.")] WidgetConfigInput? config = null,
         [Description("Optional. The new position and size on the grid.")] WidgetLayout? layout = null,
         [Description("Optional. Another dashboard of the project to move the widget to.")] Guid? moveToDashboardId = null,
         CancellationToken ct = default) =>
@@ -500,6 +521,30 @@ public sealed class McpDashboardTools(
         }
 
         McpResults.Unwrap(await DashboardEndpoints.ReorderAsync(projectId, new ReorderDashboardsRequest(order, wanted), db, ct));
+    }
+
+    /// <summary>
+    /// Saves a dashboard's colors with the handler of the colors endpoint, so the rules and their error keys are the same (design D10 of
+    /// dashboard palettes). The endpoint takes the palette and the colors kept by value together, so a call that names only one of them
+    /// keeps the other as the dashboard has it. The save is one more commit of the request: it notes <c>colorsChanged</c> and the flush
+    /// that follows makes the request's one version.
+    /// </summary>
+    private async Task SaveColorsAsync(Guid projectId, Guid dashboardId, string? palette, ValueColorInput[]? valueColors, CancellationToken ct)
+    {
+        IReadOnlyList<ValueColorInput?>? entries = valueColors;
+        if (palette is null || valueColors is null)
+        {
+            var stored = await db.Dashboards.AsNoTracking().Where(d => d.Id == dashboardId && d.ProjectId == projectId)
+                .Select(d => new { d.Palette, d.ValueColors }).SingleOrDefaultAsync(ct);
+            // A dashboard that is gone is refused as not found by the handler.
+            if (stored is not null)
+            {
+                palette ??= stored.Palette;
+                entries ??= DashboardEndpoints.ReadValueColors(stored.ValueColors).Select(c => new ValueColorInput(c.Column, c.Value, c.Color)).ToList();
+            }
+        }
+
+        McpResults.Unwrap(await DashboardEndpoints.SaveColorsAsync(projectId, dashboardId, new DashboardColorsRequest(palette, entries), db, versions, user, time, ct));
     }
 
     private async Task<int?> PositionOfAsync(Guid projectId, Guid dashboardId, CancellationToken ct)

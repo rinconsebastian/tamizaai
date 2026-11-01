@@ -33,6 +33,14 @@ A widget groups an indicator table by one column (`groupBy`) and may split each 
 - `stacked`, `percent` and `likert` need a measure (counts), not a ratio: rates do not add up. A rate by two dimensions goes in `grouped`, `line`, `heatmap`, `pyramid` or `crosstab`.
 - With `seriesBy`, `query_indicator` and `get_widget_data` return `series`, `cells`, `totals` and `notes` instead of `rows`. Check them before and after you create the widget.
 
+## Colors
+
+A dashboard draws all its widgets in one palette: `tamiza` (the default), `institutional`, `earth` or `vivid`. Each has eight numbered colors and a scale for maps and heat maps. `update_dashboard` sets the dashboard's `palette` and its `valueColors`; `get_dashboard` returns both.
+
+- Keep the default palette unless the person asks for another look. Do not change a dashboard's palette on your own.
+- Keep colors by value, `valueColors` = `[{ column, value, color }]` with `color` 1 to 8, for categories that recur across widgets, such as sex or yes/no, so a value has the same color in every widget that colors by that column. The list you send replaces the current one, so read it with `get_dashboard` and send it whole. A column keeps each value once and each color once.
+- Keep color 1 for a widget unless it should stand out. `display` = `{ color, ramp }` in the widget's `config` is a `color` (1 to 8) for a `bar`, `column` or `line` with no `seriesBy` and for a `histogram`, or a `ramp` (`blue`, `teal`, `green`, `orange`, `red`, `purple` or `gray`) for a `map` or a `heatmap`. A widget with a series takes its colors from its series. `update_widget` replaces the whole `config`, so send the `display` again when you change the query.
+
 ## Rules
 
 - Answers to select questions are choice LABELS in the data, never codes. Select-multiple answers are labels joined by "; ".

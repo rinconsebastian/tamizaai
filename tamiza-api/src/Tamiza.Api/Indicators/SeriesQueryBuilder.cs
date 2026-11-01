@@ -61,23 +61,8 @@ public static class SeriesQueryBuilder
         var parameters = new List<SqlParam>(own.Parameters);
         parameters.AddRange(dashboard.Parameters.Where(p => !parameters.Any(q => q.Name == p.Name)));
 
-        IndicatorSql? domain = null;
-        if (fixedDomain is null)
-        {
-            // The values with the largest totals first, one more than the widget shows so the caller can tell that some will be folded.
-            var sql =
-                $"""
-                (SELECT {series}::text, ({aggregate}) FROM {from}
-                 WHERE {rowFilter}{ownWhere} AND {series} IS NOT NULL
-                 GROUP BY {series} ORDER BY 2 DESC NULLS LAST, 1 LIMIT @{CapParameter})
-                UNION ALL
-                (SELECT NULL::text, ({aggregate}) FROM {from}
-                 WHERE {rowFilter}{ownWhere} AND {series} IS NULL
-                 HAVING count(*) > 0)
-                """;
-            var domainParameters = new List<SqlParam>(own.Parameters) { new(CapParameter, NpgsqlDbType.Integer, maxSeries + 1) };
-            domain = new IndicatorSql(sql, domainParameters);
-        }
+        // The values with the largest totals first, one more than the widget shows so the caller can tell that some will be folded.
+        var domain = fixedDomain is null ? Domain(series, from, aggregate, rowFilter, own, maxSeries + 1) : null;
 
         // A pyramid and a Likert widget draw only the rows of their fixed values that have a group; the rest are counted.
         var included = fixedDomain is null ? "" : $"{group} IS NOT NULL AND {series} IS NOT NULL AND {series}::text = ANY(@{KeptParameter})";
@@ -135,6 +120,35 @@ public static class SeriesQueryBuilder
         }
 
         return new SeriesQueryPlan(domain, fixedDomain, maxSeries, natural, Cells);
+    }
+
+    /// <summary>
+    /// The statement that lists the values of a column by their total over the widget's own rows (design D3; a pie's domain, design D8
+    /// of dashboard palettes): <c>value, total</c> for the non-missing values, largest total first and then by value, at most
+    /// <paramref name="cap"/> of them, plus one row of null value when some rows have none. The dashboard's filters are never part of
+    /// it, so a dashboard filter never changes the values a widget keeps.
+    /// </summary>
+    /// <param name="column">The quoted column.</param>
+    /// <param name="from">The quoted <c>"schema"."table"</c>.</param>
+    /// <param name="aggregate">The widget's aggregate over a set of rows: a sum, or a ratio of sums.</param>
+    /// <param name="rowFilter">The condition that keeps the rows that have something to plot.</param>
+    /// <param name="own">The widget's own filters.</param>
+    /// <param name="cap">How many values to read; one more than the widget shows tells the caller that some will be folded.</param>
+    public static IndicatorSql Domain(string column, string from, string aggregate, string rowFilter, DataQuery own, int cap)
+    {
+        var ownWhere = own.Where.Length > 0 ? " AND " + own.Where : "";
+        var sql =
+            $"""
+            (SELECT {column}::text, ({aggregate}) FROM {from}
+             WHERE {rowFilter}{ownWhere} AND {column} IS NOT NULL
+             GROUP BY {column} ORDER BY 2 DESC NULLS LAST, 1 LIMIT @{CapParameter})
+            UNION ALL
+            (SELECT NULL::text, ({aggregate}) FROM {from}
+             WHERE {rowFilter}{ownWhere} AND {column} IS NULL
+             HAVING count(*) > 0)
+            """;
+        var parameters = new List<SqlParam>(own.Parameters) { new(CapParameter, NpgsqlDbType.Integer, cap) };
+        return new IndicatorSql(sql, parameters);
     }
 
     /// <summary>A population pyramid's two sides or a Likert widget's scale, in order; null for every other kind.</summary>

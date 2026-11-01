@@ -18,9 +18,13 @@ public sealed record IndicatorSql(string Sql, IReadOnlyList<SqlParam> Parameters
 /// </summary>
 /// <param name="NotFiltered">The columns of the dashboard filters that do not narrow this table, in the request's order (design D3).</param>
 /// <param name="Series">Set instead of <paramref name="Sql"/> for a widget with a series (design D3): its statements are built and run in two steps.</param>
+/// <param name="Domain">
+/// A pie chart only (design D8 of dashboard palettes): next to <paramref name="Sql"/>, the statement that lists its group values by
+/// total over the widget's own filters, at most <see cref="WidgetConfig.MaxSlices"/> + 1 of them. Null for every other kind.
+/// </param>
 public sealed record IndicatorQueryPlan(
     IndicatorSql? Sql, IReadOnlyList<string> MissingColumns, IDictionary<string, string[]>? Errors, IReadOnlyList<string>? NotFiltered = null,
-    SeriesQueryPlan? Series = null);
+    SeriesQueryPlan? Series = null, IndicatorSql? Domain = null);
 
 /// <summary>Validates a widget query against the indicator table's columns and turns it into SQL.</summary>
 public static class IndicatorQueryBuilder
@@ -259,8 +263,15 @@ public static class IndicatorQueryBuilder
         var parameters = new List<SqlParam>(query.Parameters);
         parameters.AddRange(dashboard.Parameters.Where(p => !parameters.Any(q => q.Name == p.Name)));
         parameters.Add(new(IndicatorSql.LimitParameter, NpgsqlDbType.Integer, maxRows + 1));
+
+        // A pie colors its slices by the group values of its own rows, as a series is colored (design D8 of dashboard palettes): the
+        // domain is read through the widget's own filters only, one value past what the pie has colors for, so a fold can be told.
+        var domain = chartType == ChartTypes.Pie && grouped
+            ? SeriesQueryBuilder.Domain(Q(config.GroupBy!), from, aggregate, rowFilter, query, WidgetConfig.MaxSlices + 1)
+            : null;
         return new IndicatorQueryPlan(
-            new IndicatorSql(sql, parameters, isMap ? tooltip.Select(item => byName[item.Column].Type).ToList() : null), missing, null, notFiltered);
+            new IndicatorSql(sql, parameters, isMap ? tooltip.Select(item => byName[item.Column].Type).ToList() : null), missing, null, notFiltered,
+            Domain: domain);
     }
 
     /// <summary>

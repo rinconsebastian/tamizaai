@@ -1579,4 +1579,302 @@ public sealed class DashboardVersionTests(PostgresFixture postgres)
         Assert.Equal((4, 1, "Go back"), (restore.Version.Number, restore.Version.RestoredFrom, restore.Version.Note));
         Assert.Empty(restore.Dashboard.Widgets);
     }
+
+    // The palette and the colors kept by value (design D6 of dashboard palettes)
+
+    private static readonly object[] FemaleInColor5 = [new { column = "sex", value = "Female", color = 5 }];
+
+    private static readonly object[] MaleInColor1AndNoInColor8 = [new { column = "sex", value = "Male", color = 1 }, new { column = "answer", value = "No", color = 8 }];
+
+    /// <summary>
+    /// Version 1 of a dashboard inserted with SQL, as script 0018 records it for a dashboard that existed when version history began: its
+    /// name, filters and widgets, with no key for the palette or the colors, which did not exist yet.
+    /// </summary>
+    private static Task RecordMigratedVersionAsync(IndicatorsHarness h, Guid dashboardId) =>
+        h.ExecuteAsync(
+            """
+            INSERT INTO tamiza.dashboard_versions (id, project_id, dashboard_id, number, content, changes, origin, author_id, created_at, saved_at)
+            SELECT gen_random_uuid(), d.project_id, d.id, 1,
+                   jsonb_build_object(
+                       'name', d.name,
+                       'filters', d.filters,
+                       'widgets', COALESCE((
+                           SELECT jsonb_agg(jsonb_build_object(
+                                      'id', w.id, 'title', w.title, 'chartType', w.chart_type, 'config', w.config, 'layout', w.layout)
+                                  ORDER BY (w.layout ->> 'y')::integer, (w.layout ->> 'x')::integer, w.created_at, w.id)
+                           FROM tamiza.dashboard_widgets w
+                           WHERE w.dashboard_id = d.id), '[]'::jsonb)),
+                   '[{"kind": "initial"}]'::jsonb, 'app', d.updated_by, d.updated_at, d.updated_at
+            FROM tamiza.dashboards d
+            WHERE d.id = @id
+            """,
+            ("id", dashboardId));
+
+    /// <summary>The keys of a content as PostgreSQL holds it, which keeps jsonb's own key order: sorted here, since only the keys count.</summary>
+    private static string[] Keys(JsonElement content) => content.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).ToArray();
+
+    [Fact]
+    public async Task Palette_changed_makes_a_version_saying_the_colors_changed_that_holds_the_palette_after_the_filters()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+        Assert.Equal(new[] { 1, 2 }, await NumbersAsync(h, housing));
+
+        await h.SaveColorsAsync("earth", Array.Empty<object>(), dashboardId: housing);
+
+        Assert.Equal("""3 grace app [{"kind": "colorsChanged"}]""", (await VersionsAsync(h, housing))[^1]);
+        var content = await ContentAsync(h, housing, 3);
+        Assert.Equal("earth", content.GetProperty("palette").GetString());
+        Assert.False(content.TryGetProperty("valueColors", out _));
+        Assert.Equal(["Coverage"], Titles(content));
+        // The versions before it hold neither key: they were recorded with the defaults.
+        Assert.Equal(["filters", "name", "widgets"], Keys(await ContentAsync(h, housing, 2)));
+        Assert.False(await SameContentAsync(h, housing, 2, 3));
+        // A palette back to the default drops the key again, so the dashboard is as version 2 held it.
+        await h.SaveColorsAsync("tamiza", Array.Empty<object>(), dashboardId: housing);
+        Assert.Equal("""4 grace app [{"kind": "colorsChanged"}]""", (await VersionsAsync(h, housing))[^1]);
+        Assert.True(await SameContentAsync(h, housing, 2, 4));
+    }
+
+    [Fact]
+    public async Task Colors_kept_by_value_make_a_version_that_holds_them_in_the_order_saved()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+
+        await h.SaveColorsAsync("tamiza", MaleInColor1AndNoInColor8, dashboardId: housing);
+
+        Assert.Equal("""2 grace app [{"kind": "colorsChanged"}]""", (await VersionsAsync(h, housing))[^1]);
+        var content = await ContentAsync(h, housing, 2);
+        Assert.Equal(["filters", "name", "valueColors", "widgets"], Keys(content));
+        Assert.Equal(
+            """[{"color": 1, "value": "Male", "column": "sex"}, {"color": 8, "value": "No", "column": "answer"}]""",
+            content.GetProperty("valueColors").GetRawText());
+        // The history lists the version as any other: the colors add nothing to its counts of widgets and filters.
+        var summary = (await HistoryAsync(h, housing)).GetProperty("versions")[0];
+        Assert.Equal((2, 0, 0), (summary.GetProperty("number").GetInt32(), summary.GetProperty("widgetCount").GetInt32(), summary.GetProperty("filterCount").GetInt32()));
+        Assert.Equal("""[{"kind":"colorsChanged"}]""", summary.GetProperty("changes").GetRawText());
+    }
+
+    [Fact]
+    public async Task Colors_saved_unchanged_make_no_version_and_leave_the_stored_colors_as_they_were()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var saved = await h.SaveColorsAsync("earth", MaleInColor1AndNoInColor8, dashboardId: housing);
+        var dashboards = await h.StoredDashboardsAsync();
+        var versions = await AllVersionsAsync(h);
+
+        var again = await h.SaveColorsAsync(
+            saved.GetProperty("palette").GetString()!, saved.GetProperty("valueColors"), dashboardId: housing);
+
+        Assert.Equal(saved.GetRawText(), again.GetRawText());
+        Assert.Equal(new[] { 1, 2 }, await NumbersAsync(h, housing));
+        Assert.Equal(dashboards, await h.StoredDashboardsAsync());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+    }
+
+    [Fact]
+    public async Task Widget_color_changed_makes_a_version_saying_the_widget_changed_that_holds_its_color()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var id = await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing),
+            new { config = new { indicator = "coverage", groupBy = "municipality", display = new { color = 3 } } });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("""3 grace app [{"kind": "widgetChanged", "widget": "Coverage"}]""", (await VersionsAsync(h, housing))[^1]);
+        var widget = (await ContentAsync(h, housing, 3)).GetProperty("widgets")[0];
+        Assert.Equal(3, widget.GetProperty("config").GetProperty("display").GetProperty("color").GetInt32());
+        // The version before it holds the widget with no display at all.
+        Assert.False((await ContentAsync(h, housing, 2)).GetProperty("widgets")[0].GetProperty("config").TryGetProperty("display", out _));
+        // Sent again as read, the color changes nothing.
+        var read = (await h.GetDashboardAsync(housing)).GetProperty("widgets")[0];
+        var versions = await AllVersionsAsync(h);
+        var again = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { title = read.GetProperty("title").GetString(), chartType = "column", config = read.GetProperty("config") });
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        Assert.Equal(versions, await AllVersionsAsync(h));
+    }
+
+    [Fact]
+    public async Task Dashboard_saved_before_palettes_keeps_its_newest_version_when_the_default_colors_are_saved_and_when_the_flush_finds_them()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.InsertDashboardAsync("Housing");
+        await h.SaveFiltersAsync(new[] { new { label = "Municipality", column = "municipality", kind = "text", @default = (object?)null } }, dashboardId: housing);
+        await h.ExecuteAsync("DELETE FROM tamiza.dashboard_versions WHERE dashboard_id = @id", ("id", housing));
+        await RecordMigratedVersionAsync(h, housing);
+        var versions = await AllVersionsAsync(h);
+        var dashboards = await h.StoredDashboardsAsync();
+
+        // Opening Colors and saving the palette Tamiza with none kept.
+        var saved = await h.SaveColorsAsync("tamiza", Array.Empty<object>(), dashboardId: housing);
+        // And the flush of a request that noted a colors change, which finds the dashboard as version 1 holds it.
+        var numbers = await FlushAsync(h, DashboardVersionOrigin.App, null, (housing, new DashboardChange(DashboardChangeKinds.ColorsChanged)));
+
+        Assert.Equal("tamiza", saved.GetProperty("palette").GetString());
+        Assert.Equal(0, saved.GetProperty("valueColors").GetArrayLength());
+        Assert.Equal([new DashboardVersionNumber(housing, 1)], numbers);
+        Assert.Equal(new[] { 1 }, await NumbersAsync(h, housing));
+        Assert.Equal(versions, await AllVersionsAsync(h));
+        Assert.Equal(dashboards, await h.StoredDashboardsAsync());
+        // The content built today is the one version 1 holds, key for key.
+        using var scope = h.Factory.Services.CreateScope();
+        var built = await DashboardVersions.ContentAsync(scope.ServiceProvider.GetRequiredService<TamizaDbContext>(), h.ProjectId, housing, CancellationToken.None);
+        Assert.Equal(["filters", "name", "widgets"], Keys(JsonDocument.Parse(built!).RootElement));
+        Assert.Equal(
+            await TestData.ScalarAsync<string>(h.Db, "SELECT content::text FROM tamiza.dashboard_versions WHERE dashboard_id = @id", ("id", housing)),
+            await TestData.ScalarAsync<string>(h.Db, "SELECT @built::jsonb::text", ("built", built!)));
+    }
+
+    [Fact]
+    public async Task Restoring_a_version_on_a_dashboard_migrated_from_0018_records_no_unrecorded_state()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.InsertDashboardAsync("Housing");
+        await h.ExecuteAsync(
+            """
+            INSERT INTO tamiza.dashboard_widgets (project_id, dashboard_id, chart_type, title, config, layout, created_by, updated_by)
+            SELECT d.project_id, d.id, 'column', 'Coverage', '{"indicator": "coverage", "groupBy": "municipality"}', '{"x": 0, "y": 0, "w": 6, "h": 4}',
+                   d.created_by, d.created_by
+            FROM tamiza.dashboards AS d WHERE d.id = @id
+            """,
+            ("id", housing));
+        await RecordMigratedVersionAsync(h, housing);
+        var dashboards = await h.StoredDashboardsAsync();
+        var widgets = await h.StoredWidgetsAsync();
+
+        // Step 2 finds the dashboard as version 1 holds it, although it now builds a content that may carry colors: nothing to record.
+        var response = await RestoreAsync(h, housing, 1);
+        var restore = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(restore.GetProperty("restored").GetBoolean());
+        Assert.Equal(["""1 ada app [{"kind": "initial"}]"""], await VersionsAsync(h, housing));
+        Assert.Equal(dashboards, await h.StoredDashboardsAsync());
+        Assert.Equal(widgets, await h.StoredWidgetsAsync());
+
+        // After a change of colors, restoring version 1 is version 3, and still no state was found that no version held.
+        await h.SaveColorsAsync("earth", FemaleInColor5, dashboardId: housing);
+        var undone = await RestoredAsync(h, housing, 1);
+
+        Assert.Equal(
+            [
+                """1 ada app [{"kind": "initial"}]""",
+                """2 grace app [{"kind": "colorsChanged"}]""",
+                """3 grace app [{"kind": "restored", "version": 1}]""",
+            ],
+            await VersionsAsync(h, housing));
+        Assert.Equal(("tamiza", 0), (undone.GetProperty("dashboard").GetProperty("palette").GetString(), undone.GetProperty("dashboard").GetProperty("valueColors").GetArrayLength()));
+        Assert.True(await SameContentAsync(h, housing, 1, 3));
+    }
+
+    [Fact]
+    public async Task Colors_restored_by_restoring_version_5_after_the_palette_and_a_color_were_changed_in_version_6()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.InsertDashboardAsync("Housing");
+        await SeedVersionsAsync(h, housing, 1, 4);
+        await h.SaveColorsAsync("vivid", MaleInColor1AndNoInColor8, dashboardId: housing);
+        Assert.Equal(Enumerable.Range(1, 5), await NumbersAsync(h, housing));
+        await h.SaveColorsAsync("earth", FemaleInColor5, dashboardId: housing);
+        Assert.Equal(Enumerable.Range(1, 6), await NumbersAsync(h, housing));
+
+        var restore = await RestoredAsync(h, housing, 5);
+
+        var dashboard = restore.GetProperty("dashboard");
+        Assert.Equal(7, restore.GetProperty("version").GetProperty("number").GetInt32());
+        Assert.Equal("vivid", dashboard.GetProperty("palette").GetString());
+        Assert.Equal(
+            """[{"column":"sex","value":"Male","color":1},{"column":"answer","value":"No","color":8}]""",
+            dashboard.GetProperty("valueColors").GetRawText());
+        Assert.Equal((await h.GetDashboardAsync(housing)).GetRawText(), dashboard.GetRawText());
+        Assert.Equal("vivid", (await h.Analyst.GetFromJsonAsync<JsonElement>(h.DashboardUrl(housing))).GetProperty("palette").GetString());
+        Assert.Equal("""7 grace app [{"kind": "restored", "version": 5}]""", (await VersionsAsync(h, housing))[^1]);
+        Assert.True(await SameContentAsync(h, housing, 5, 7));
+        // The version that restore replaced is in the history, and restoring it brings the other colors back.
+        var back = await RestoredAsync(h, housing, 6);
+        Assert.Equal(("earth", 1), (back.GetProperty("dashboard").GetProperty("palette").GetString(), back.GetProperty("dashboard").GetProperty("valueColors").GetArrayLength()));
+        Assert.True(await SameContentAsync(h, housing, 6, 8));
+    }
+
+    [Fact]
+    public async Task Version_recorded_before_palettes_restores_the_palette_tamiza_with_no_colors_kept_and_a_version_equal_to_the_dashboard_changes_nothing()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.InsertDashboardAsync("Housing");
+        await RecordMigratedVersionAsync(h, housing);
+        await h.SaveColorsAsync("earth", FemaleInColor5, dashboardId: housing);
+
+        var restore = await RestoredAsync(h, housing, 1);
+
+        var dashboard = restore.GetProperty("dashboard");
+        Assert.Equal(("tamiza", 0), (dashboard.GetProperty("palette").GetString(), dashboard.GetProperty("valueColors").GetArrayLength()));
+        Assert.Equal(("tamiza", "[]"), (await StoredColorsAsync(h, housing)));
+        // The dashboard is now as version 1 and version 3 hold it: restoring either again changes nothing.
+        var dashboards = await h.StoredDashboardsAsync();
+        var versions = await AllVersionsAsync(h);
+        foreach (var number in new[] { 1, 3 })
+        {
+            var again = await RestoreAsync(h, housing, number);
+            Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+            Assert.False((await again.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("restored").GetBoolean());
+        }
+
+        Assert.Equal(dashboards, await h.StoredDashboardsAsync());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+    }
+
+    [Fact]
+    public async Task A_restore_through_mcp_brings_the_colors_back_too()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        await h.SaveColorsAsync("institutional", FemaleInColor5, dashboardId: housing);
+        await h.SaveColorsAsync("vivid", MaleInColor1AndNoInColor8, dashboardId: housing);
+
+        var restore = await RestoreThroughMcpAsync(h, housing, 2, "Back to the institutional colors", baseVersion: 3);
+
+        Assert.Equal(4, restore.Version.Number);
+        Assert.Equal("institutional", restore.Dashboard.Palette);
+        Assert.Equal(["sex Female 5"], restore.Dashboard.ValueColors.Select(c => $"{c.Column} {c.Value} {c.Color}"));
+        Assert.Equal(("institutional", "[{\"color\": 5, \"value\": \"Female\", \"column\": \"sex\"}]"), await StoredColorsAsync(h, housing));
+    }
+
+    [Fact]
+    public async Task The_details_of_a_version_hold_its_palette_and_colors_kept_and_read_a_version_before_palettes_as_the_defaults()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        await h.SaveColorsAsync("vivid", MaleInColor1AndNoInColor8, dashboardId: housing);
+        await h.SaveColorsAsync("earth", FemaleInColor5, dashboardId: housing);
+        var versions = await AllVersionsAsync(h);
+        var dashboards = await h.StoredDashboardsAsync();
+
+        var before = await h.Analyst.GetFromJsonAsync<JsonElement>(VersionsUrl(h, housing) + "/1");
+        var vivid = await h.Analyst.GetFromJsonAsync<JsonElement>(VersionsUrl(h, housing) + "/2");
+        var current = await h.Analyst.GetFromJsonAsync<JsonElement>(VersionsUrl(h, housing) + "/3");
+
+        Assert.Equal(("tamiza", "[]"), (before.GetProperty("palette").GetString(), before.GetProperty("valueColors").GetRawText()));
+        Assert.Equal("vivid", vivid.GetProperty("palette").GetString());
+        Assert.Equal(
+            """[{"column":"sex","value":"Male","color":1},{"column":"answer","value":"No","color":8}]""", vivid.GetProperty("valueColors").GetRawText());
+        // The current version is the dashboard as GET .../dashboards/{id} answers it.
+        var dashboard = await h.GetDashboardAsync(housing);
+        Assert.Equal(dashboard.GetProperty("palette").GetString(), current.GetProperty("palette").GetString());
+        Assert.Equal(dashboard.GetProperty("valueColors").GetRawText(), current.GetProperty("valueColors").GetRawText());
+        // Reading a version changes nothing.
+        Assert.Equal(versions, await AllVersionsAsync(h));
+        Assert.Equal(dashboards, await h.StoredDashboardsAsync());
+    }
+
+    private static async Task<(string Palette, string Colors)> StoredColorsAsync(IndicatorsHarness h, Guid dashboardId)
+    {
+        var row = await TestData.ScalarAsync<string>(h.Db, "SELECT palette || '|' || value_colors::text FROM tamiza.dashboards WHERE id = @id", ("id", dashboardId));
+        var parts = row!.Split('|', 2);
+        return (parts[0], parts[1]);
+    }
 }

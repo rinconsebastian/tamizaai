@@ -615,4 +615,110 @@ public sealed class IndicatorQueryBuilderTests
         Assert.Empty(Plan(Config()).NotFiltered!);
         Assert.DoesNotContain("@d", Plan(Config()).Sql!.Sql);
     }
+
+    // A pie's domain (design D8 of dashboard palettes)
+
+    private static readonly DataFilter Own = new("municipality", "in", Values: ["Cali", "Buga"]);
+
+    private static readonly AppliedDashboardFilter OnDashboard = new("year", DashboardFilterKinds.Number, Min: "2025");
+
+    /// <summary>A statement's parameters as <c>name type value</c>, a list of values joined, to compare two statements.</summary>
+    private static string[] Described(IndicatorSql sql) =>
+        [.. sql.Parameters.Select(p => $"{p.Name} {p.Type} {(p.Value is string[] values ? string.Join(",", values) : p.Value)}")];
+
+    private static IndicatorQueryPlan Of(string? chartType, WidgetConfigInput input, bool dashboard = true, TableColumn[]? columns = null) =>
+        IndicatorQueryBuilder.Plan(input.Normalize(), columns ?? Columns, "UTC", From, 5000, dashboardFilters: dashboard ? [OnDashboard] : null, chartType: chartType);
+
+    [Fact]
+    public void A_pie_plans_a_domain_statement_over_its_group_column_through_its_own_filters_and_never_the_dashboards()
+    {
+        var plan = Of(ChartTypes.Pie, Config(filters: [Own]));
+
+        Assert.NotNull(plan.Sql);
+        Assert.Null(plan.Series);
+        var domain = plan.Domain!;
+        Assert.Contains("(SELECT \"municipality\"::text, (sum(\"value\")::double precision) FROM " + From, domain.Sql);
+        Assert.Contains("\"value\" IS NOT NULL AND \"municipality\"::text = ANY(@f0)", domain.Sql);
+        Assert.Contains("GROUP BY \"municipality\" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap", domain.Sql);
+        Assert.Contains("(SELECT NULL::text, (sum(\"value\")::double precision) FROM " + From, domain.Sql);
+        Assert.Contains("\"municipality\" IS NULL", domain.Sql);
+        Assert.DoesNotContain("@d0", domain.Sql);
+        Assert.DoesNotContain("\"year\"", domain.Sql);
+        // The pie's rows are read through both sets of filters, its domain through the widget's own.
+        Assert.Contains(plan.Sql!.Parameters, p => p.Name == "d0min");
+        Assert.DoesNotContain(domain.Parameters, p => p.Name.StartsWith('d'));
+        Assert.Equal(["f0", "cap"], domain.Parameters.Select(p => p.Name));
+        Assert.Equal(["Cali", "Buga"], (string[])domain.Parameters.Single(p => p.Name == "f0").Value);
+    }
+
+    [Fact]
+    public void A_pies_domain_reads_one_value_more_than_the_pie_has_colors_for_so_a_fold_can_be_told()
+    {
+        var domain = Of(ChartTypes.Pie, Config()).Domain!;
+
+        Assert.Equal(8, WidgetConfig.MaxSlices);
+        var cap = domain.Parameters.Single(p => p.Name == SeriesQueryBuilder.CapParameter);
+        Assert.Equal((NpgsqlDbType.Integer, 9), (cap.Type, cap.Value));
+    }
+
+    [Fact]
+    public void A_ratio_pie_sums_numerator_and_denominator_in_its_domain_as_it_does_in_its_rows()
+    {
+        var plan = Of(ChartTypes.Pie, Config(measure: null, ratio: new WidgetRatio("numerator", "denominator")));
+
+        const string ratio = "sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)";
+        Assert.Contains($"(SELECT \"municipality\"::text, ({ratio}) FROM {From}", plan.Domain!.Sql);
+        Assert.Contains("(\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL)", plan.Domain.Sql);
+        Assert.Contains($"SELECT \"municipality\"::text, ({ratio}), NULL::text", plan.Sql!.Sql);
+    }
+
+    [Fact]
+    public void A_pies_domain_is_the_statement_a_widget_with_that_series_column_reads()
+    {
+        var pie = Of(ChartTypes.Pie, Config(groupBy: "Odd \"name\"", filters: [Own]), dashboard: false);
+        var series = Of(ChartTypes.Column, new WidgetConfigInput("coverage", GroupBy: "municipality", SeriesBy: "Odd \"name\"", Filters: [Own]), dashboard: false);
+
+        Assert.Equal(series.Series!.Domain!.Sql, pie.Domain!.Sql);
+        Assert.Equal(Described(series.Series.Domain), Described(pie.Domain));
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Pie)]
+    [InlineData(ChartTypes.Bar)]
+    [InlineData(ChartTypes.Column)]
+    [InlineData(ChartTypes.Line)]
+    [InlineData(ChartTypes.Histogram)]
+    [InlineData(ChartTypes.Stat)]
+    [InlineData(null)]
+    public void A_pies_rows_are_the_statement_any_other_query_over_the_same_column_plans(string? chartType)
+    {
+        var config = Config(filters: [Own]);
+        var pie = Of(ChartTypes.Pie, config);
+        var other = Of(chartType, config);
+
+        Assert.Equal(other.Sql!.Sql, pie.Sql!.Sql);
+        Assert.Equal(Described(other.Sql), Described(pie.Sql));
+        Assert.Equal(chartType == ChartTypes.Pie, other.Domain is not null);
+    }
+
+    [Fact]
+    public void Every_other_kind_plans_no_domain_and_a_pie_with_no_group_plans_none_either()
+    {
+        var withSeries = new WidgetConfigInput("coverage", GroupBy: "municipality", SeriesBy: "Odd \"name\"", Filters: [Own]);
+        var map = new WidgetConfigInput("coverage", GroupBy: "municipality", GeometryColumn: "geometry");
+        var pyramid = new WidgetConfigInput("coverage", GroupBy: "municipality", SeriesBy: "Odd \"name\"", Pyramid: new WidgetPyramid("Female", "Male"));
+
+        foreach (var chartType in new[] { ChartTypes.Bar, ChartTypes.Column, ChartTypes.Line, ChartTypes.Heatmap, ChartTypes.Crosstab })
+        {
+            Assert.Null(Of(chartType, withSeries).Domain);
+        }
+
+        Assert.Null(Of(ChartTypes.Pyramid, pyramid).Domain);
+        Assert.Null(Of(ChartTypes.Map, map).Domain);
+        Assert.Null(Of(ChartTypes.Stat, Config(groupBy: null)).Domain);
+        Assert.Null(Of(ChartTypes.Pie, Config(groupBy: null)).Domain);
+        Assert.Null(Of(null, Config()).Domain);
+        // A pie that names a column the table no longer has plans nothing.
+        Assert.Null(Of(ChartTypes.Pie, Config(groupBy: "gone")).Domain);
+    }
 }

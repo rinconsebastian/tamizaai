@@ -63,4 +63,23 @@ public sealed class IndicatorDocsTests
             Assert.Contains($"`{setting}`", mcpText, StringComparison.Ordinal);
         }
     }
+
+    [Fact]
+    public void The_color_settings_are_explained_in_the_mcp_documentation_with_every_palette_and_scale_a_client_can_name()
+    {
+        if (PromptKitChecks.FindUp("docs/mcp.md") is not { } mcp)
+        {
+            return;
+        }
+
+        var text = File.ReadAllText(mcp);
+
+        foreach (var setting in new[] { "palette", "valueColors", "display", "display.color", "display.ramp", "update_dashboard" })
+        {
+            Assert.Contains($"`{setting}`", text, StringComparison.Ordinal);
+        }
+
+        var missing = Palettes.All.Concat(Palettes.Scales).Where(id => !text.Contains($"`{id}`", StringComparison.Ordinal)).ToList();
+        Assert.True(missing.Count == 0, $"docs/mcp.md does not name: {string.Join(", ", missing)}");
+    }
 }

@@ -49,6 +49,26 @@ public static class SeriesDomain
         return (valuesBestFirst.Take(room).ToList(), true);
     }
 
+    /// <summary>
+    /// The order of a pie's domain (design D8 of dashboard palettes): the kept values as they come, largest total first, since a pie
+    /// colors by size, then the missing value, then "Other".
+    /// </summary>
+    public static List<SeriesInfo> BySize(IEnumerable<string> kept, bool hasNone, bool hasOther)
+    {
+        var domain = kept.Select(value => new SeriesInfo(value, SeriesKinds.Value)).ToList();
+        if (hasNone)
+        {
+            domain.Add(new SeriesInfo(null, SeriesKinds.None));
+        }
+
+        if (hasOther)
+        {
+            domain.Add(new SeriesInfo(null, SeriesKinds.Other));
+        }
+
+        return domain;
+    }
+
     /// <summary>The display order: the kept values in natural order, then the missing value, then "Other".</summary>
     public static List<SeriesInfo> Order(IEnumerable<string> kept, bool hasNone, bool hasOther)
     {

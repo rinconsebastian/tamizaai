@@ -301,4 +301,22 @@ public sealed class ScriptConventionTests
         Assert.Contains("REFERENCES tamiza.projects (id) ON DELETE CASCADE", sql);
         Assert.Contains("REFERENCES tamiza.users (id) ON DELETE RESTRICT", sql);
     }
+
+    [Fact]
+    public void The_dashboard_palettes_script_adds_two_columns_and_one_named_check()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0019_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0019_add_dashboard_palettes.sql", resource);
+        Assert.Contains("ADD COLUMN palette text NOT NULL DEFAULT 'tamiza'", sql);
+        Assert.Contains("ADD COLUMN value_colors jsonb NOT NULL DEFAULT '[]'", sql);
+        Assert.Contains("ADD CONSTRAINT ck_dashboards_palette CHECK (palette IN ('tamiza', 'institutional', 'earth', 'vivid'))", sql);
+
+        // The one check is introduced by a CONSTRAINT name, so nothing can be left unnamed, and no key, foreign key or index is added.
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"\bCHECK\b"));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"ADD CONSTRAINT (?:pk|fk|ck)_\w+ CHECK\b"));
+        Assert.Empty(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|INDEX|CREATE TABLE)\b"));
+    }
 }

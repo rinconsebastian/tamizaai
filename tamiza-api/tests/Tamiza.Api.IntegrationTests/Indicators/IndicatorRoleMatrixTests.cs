@@ -35,6 +35,7 @@ public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
             data.Add(role, "reorder dashboards", Write(HttpStatusCode.OK));
             data.Add(role, "duplicate dashboard", Write(HttpStatusCode.Created));
             data.Add(role, "save filters", Write(HttpStatusCode.OK));
+            data.Add(role, "save colors", Write(HttpStatusCode.OK));
             data.Add(role, "values", read);
             data.Add(role, "save layout", Write(HttpStatusCode.OK));
             // Versions hold no rows, but only those who change a dashboard read them (custom-dashboards "Roles for dashboards").
@@ -73,6 +74,7 @@ public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
             "reorder dashboards" => await ReorderAsync(h, client),
             "duplicate dashboard" => await client.PostAsJsonAsync(h.DashboardUrl() + "/copies", new { name = "Copy" }),
             "save filters" => await client.PutAsJsonAsync(h.FiltersUrl(), new { filters = new[] { new { label = "Municipality", column = "municipality", kind = "text" } } }),
+            "save colors" => await client.PutAsJsonAsync(h.ColorsUrl(), new { palette = "earth", valueColors = new[] { new { column = "sex", value = "Female", color = 5 } } }),
             "values" => await client.GetAsync(h.DashboardUrl() + "/values?column=municipality"),
             "save layout" => await client.PutAsJsonAsync(h.DashboardUrl() + "/layout", new { widgets = new[] { new { id = widgetId, layout = new { x = 6, y = 0, w = 3, h = 2 } } } }),
             "list versions" => await client.GetAsync(h.DashboardUrl() + "/versions"),
@@ -109,6 +111,7 @@ public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
             await client.PutAsJsonAsync(h.DashboardsUrl + "/order", new { expectedIds = new[] { h.DashboardId, second }, dashboardIds = new[] { second, h.DashboardId } }),
             await client.PostAsJsonAsync(h.DashboardUrl() + "/copies", new { name = "Copy" }),
             await client.PutAsJsonAsync(h.FiltersUrl(), new { filters = new[] { new { label = "Municipality", column = "municipality", kind = "text" } } }),
+            await client.PutAsJsonAsync(h.ColorsUrl(), new { palette = "earth", valueColors = new[] { new { column = "sex", value = "Female", color = 5 } } }),
             await client.PutAsJsonAsync(h.DashboardUrl() + "/layout", new { widgets = new[] { new { id = widgetId, layout = new { x = 6, y = 0, w = 3, h = 2 } } } }),
             await client.PostAsync(h.DashboardUrl() + "/versions/1/restore", null),
         ];

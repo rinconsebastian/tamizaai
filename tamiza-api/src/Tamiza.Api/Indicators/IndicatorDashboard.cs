@@ -157,10 +157,13 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
             }
 
             var group = columns.FirstOrDefault(c => c.Name == config.GroupBy);
+            // A pie's domain is read before its rows (design D8 of dashboard palettes); no other kind has one.
+            var domain = plan.Domain is null ? null : await ReadPieDomainAsync(connection, transaction, plan.Domain, group?.Type, ct);
             var (rows, limitReached) = await ReadRowsAsync(connection, transaction, plan.Sql!, group?.Type, maxRows, ct);
             return new IndicatorQueryOutcome(
                 new IndicatorQueryResponse(
-                    true, rows, limitReached, MissingReferences.None, plan.Sql!.TooltipTypes, dashboardFilters is { Count: > 0 } ? plan.NotFiltered : null),
+                    true, rows, limitReached, MissingReferences.None, plan.Sql!.TooltipTypes, dashboardFilters is { Count: > 0 } ? plan.NotFiltered : null,
+                    Domain: domain),
                 null);
         }, ct), ct);
     }
@@ -402,9 +405,28 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
         return new IndicatorQueryResponse(true, rowsOut, limitReached, MissingReferences.None, null, notFiltered, series, totals, leftOut);
     }
 
+    /// <summary>
+    /// A pie's domain (design D8 of dashboard palettes): the group values of its own rows by total, largest first, folded to the pie's
+    /// <see cref="WidgetConfig.MaxSlices"/> colors, then the missing group, then "Other" when values were folded. The values are written
+    /// as the pie's rows write their groups, so a row finds its place in the domain by its group.
+    /// </summary>
+    private static async Task<IReadOnlyList<SeriesInfo>> ReadPieDomainAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, DataColumnType? groupType, CancellationToken ct)
+    {
+        var (values, hasNone) = await ReadDomainAsync(connection, transaction, sql, ct, positiveOnly: true);
+        var groups = groupType == DataColumnType.Timestamp ? values.Select(DataValues.IsoTimestamp).ToList() : values;
+        var (kept, hasOther) = SeriesDomain.Fold(groups, hasNone, WidgetConfig.MaxSlices);
+        return SeriesDomain.BySize(kept, hasNone, hasOther);
+    }
+
     /// <summary>The series values of a widget by total, largest first, and whether some rows have no series value.</summary>
+    /// <param name="positiveOnly">
+    /// Leaves out the values whose total is not a number above zero, and the missing value when its total is not: a pie draws no slice
+    /// for them, so they take no color and cannot push a slice that has a share into "Other". They sort after every total above zero,
+    /// so the values that remain are the first of the domain's.
+    /// </param>
     private static async Task<(List<string> Values, bool HasNone)> ReadDomainAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, CancellationToken ct)
+        NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, CancellationToken ct, bool positiveOnly = false)
     {
         await using var command = new NpgsqlCommand(sql.Sql, connection, transaction);
         foreach (var parameter in sql.Parameters)
@@ -417,6 +439,11 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
+            if (positiveOnly && !HasPositiveTotal(reader))
+            {
+                continue;
+            }
+
             if (reader.IsDBNull(0))
             {
                 hasNone = true;
@@ -429,6 +456,10 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
 
         return (values, hasNone);
     }
+
+    /// <summary>Whether the total in the second column of a domain's row is a number above zero.</summary>
+    private static bool HasPositiveTotal(NpgsqlDataReader reader) =>
+        !reader.IsDBNull(1) && reader.GetDouble(1) is var total && double.IsFinite(total) && total > 0;
 
     /// <summary>NaN and infinity have no number in JSON.</summary>
     private static double? FiniteOrNull(double value) => double.IsFinite(value) ? value : null;

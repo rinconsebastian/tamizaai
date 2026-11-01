@@ -175,4 +175,159 @@ public sealed class DashboardValidationTests
         Assert.Null(filters[4].Default);
         Assert.Equal(["municipality", "consent", "round", "visit", "zone"], filters.Select(f => f.Column));
     }
+
+    // A dashboard's palette and colors kept by value (dashboard-colors, design D4)
+
+    private static (DashboardColors? Colors, IDictionary<string, string[]> Errors) Colors(string? palette, params ValueColorInput?[] input)
+    {
+        var errors = new Tamiza.Api.Http.FieldErrors();
+        var colors = DashboardValidation.Colors(palette, input, errors);
+        return (colors, errors.ToDictionary());
+    }
+
+    private static ValueColorInput Kept(string column, string value, int color) => new(column, value, color);
+
+    private static string[] ColorErrorsOn(string field, string? palette, params ValueColorInput?[] input)
+    {
+        var (colors, errors) = Colors(palette, input);
+        Assert.Null(colors);
+        return errors[field];
+    }
+
+    [Fact]
+    public void Each_palette_is_accepted_with_no_colors_kept()
+    {
+        foreach (var palette in Palettes.All)
+        {
+            var (colors, errors) = Colors(palette);
+
+            Assert.Empty(errors);
+            Assert.Equal(palette, colors!.Palette);
+            Assert.Empty(colors.ValueColors);
+        }
+    }
+
+    [Theory]
+    [InlineData("neon")]
+    [InlineData("#ff0000")] // No color codes
+    [InlineData("rgb(255, 0, 0)")]
+    [InlineData("Earth")] // an id, not a name
+    [InlineData("")]
+    [InlineData(null)]
+    public void A_palette_that_is_not_one_of_the_four_is_refused_on_the_palette(string? palette) =>
+        Assert.Equal(["Choose one of the palettes: tamiza, institutional, earth, vivid."], ColorErrorsOn("palette", palette));
+
+    [Fact]
+    public void A_palette_error_does_not_hide_the_errors_of_the_entries()
+    {
+        var (colors, errors) = Colors("neon", Kept("sex", "Female", 9));
+
+        Assert.Null(colors);
+        Assert.Equal(["palette", "valueColors[0].color"], errors.Keys.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void A_list_is_required_and_a_dashboard_keeps_at_most_64_colors()
+    {
+        var errors = new Tamiza.Api.Http.FieldErrors();
+        Assert.Null(DashboardValidation.Colors("earth", null, errors));
+        Assert.Equal(["The colors kept by value are required; send an empty list for none."], errors.ToDictionary()["valueColors"]);
+
+        // 64 values of 8 columns, each column using each color once.
+        ValueColorInput[] Entries(int count) =>
+            [.. Enumerable.Range(0, count).Select(i => Kept($"column_{i / 8}", $"value {i}", i % 8 + 1))];
+        Assert.Equal(64, Colors("earth", Entries(64)).Colors!.ValueColors.Count);
+        Assert.Equal(["A dashboard keeps at most 64 colors by value."], ColorErrorsOn("valueColors", "earth", Entries(65)));
+    }
+
+    [Theory]
+    [InlineData("Sex")]
+    [InlineData("1sex")]
+    [InlineData("water source")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void A_column_must_be_a_published_columns_name_on_the_entry(string? column) =>
+        Assert.Single(ColorErrorsOn("valueColors[1].column", "earth", Kept("sex", "Female", 5), new ValueColorInput(column, "Male", 1)));
+
+    [Fact]
+    public void A_column_of_63_characters_or_kobos_own_is_accepted_and_one_of_64_is_not()
+    {
+        Assert.NotNull(Colors("earth", Kept(new string('c', 63), "A", 1), Kept("_version", "B", 1)).Colors);
+        Assert.Single(ColorErrorsOn("valueColors[0].column", "earth", Kept(new string('c', 64), "A", 1)));
+    }
+
+    [Fact]
+    public void A_value_is_text_that_may_be_empty_and_at_most_500_characters()
+    {
+        Assert.Equal(["", new string('v', 500)], Colors("earth", Kept("sex", "", 1), Kept("sex", new string('v', 500), 2)).Colors!.ValueColors.Select(c => c.Value));
+        Assert.Equal(["The value is required; an empty text is a value too."], ColorErrorsOn("valueColors[0].value", "earth", new ValueColorInput("sex", null, 1)));
+        Assert.Equal(["The value is longer than 500 characters."], ColorErrorsOn("valueColors[0].value", "earth", Kept("sex", new string('v', 501), 1)));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(9)]
+    [InlineData(-1)]
+    [InlineData(null)]
+    public void A_color_outside_1_to_8_is_refused_on_the_entry(int? color) =>
+        Assert.Equal(["The color must be a number from 1 to 8."], ColorErrorsOn("valueColors[0].color", "earth", new ValueColorInput("sex", "Female", color)));
+
+    [Fact]
+    public void Colors_1_and_8_are_accepted() =>
+        Assert.Equal([1, 8], Colors("earth", Kept("sex", "Female", 1), Kept("sex", "Male", 8)).Colors!.ValueColors.Select(c => c.Color));
+
+    [Fact]
+    public void A_missing_entry_is_refused_on_its_place() =>
+        Assert.Single(ColorErrorsOn("valueColors[1]", "earth", Kept("sex", "Female", 5), null));
+
+    [Fact]
+    public void A_value_repeated_in_a_column_is_refused_on_the_second_entry() =>
+        Assert.Equal(["sex already keeps a color for Female."], ColorErrorsOn("valueColors[1]", "earth", Kept("sex", "Female", 5), Kept("sex", "Female", 6)));
+
+    [Fact]
+    public void An_empty_value_repeated_in_a_column_is_named_as_an_empty_text() =>
+        Assert.Equal(["sex already keeps a color for an empty text."], ColorErrorsOn("valueColors[1]", "earth", Kept("sex", "", 5), Kept("sex", "", 6)));
+
+    [Fact]
+    public void A_color_used_twice_in_a_column_is_refused_on_the_second_entry() =>
+        Assert.Equal(["sex already uses color 5."], ColorErrorsOn("valueColors[1]", "earth", Kept("sex", "Female", 5), Kept("sex", "Male", 5)));
+
+    [Fact]
+    public void Only_the_entries_that_repeat_are_refused()
+    {
+        var (colors, errors) = Colors("earth",
+            Kept("sex", "Female", 5), Kept("sex", "Male", 5), Kept("sex", "Other", 2), Kept("sex", "Other", 3), Kept("sex", "Unknown", 3));
+
+        Assert.Null(colors);
+        Assert.Equal(["valueColors[1]", "valueColors[3]"], errors.Keys.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void The_same_color_in_two_columns_and_the_same_value_in_two_columns_are_accepted()
+    {
+        var (colors, errors) = Colors("earth", Kept("sex", "Female", 5), Kept("zone", "Rural", 5), Kept("answer", "Female", 1));
+
+        Assert.Empty(errors);
+        Assert.Equal(3, colors!.ValueColors.Count);
+    }
+
+    [Fact]
+    public void Values_are_compared_as_text_so_a_value_in_another_case_is_another_value()
+    {
+        var (colors, errors) = Colors("earth", Kept("water_source", "Piped", 1), Kept("water_source", "piped", 2), Kept("water_source", "Piped ", 3));
+
+        Assert.Empty(errors);
+        Assert.Equal(["Piped", "piped", "Piped "], colors!.ValueColors.Select(c => c.Value)); // not trimmed either
+    }
+
+    [Fact]
+    public void The_colors_are_kept_in_the_order_they_are_sent()
+    {
+        var (colors, _) = Colors("vivid", Kept("zone", "Rural", 3), Kept("sex", "Female", 5), Kept("sex", "Male", 1));
+
+        Assert.Equal("vivid", colors!.Palette);
+        Assert.Equal(
+            [new ValueColor("zone", "Rural", 3), new ValueColor("sex", "Female", 5), new ValueColor("sex", "Male", 1)],
+            colors.ValueColors);
+    }
 }

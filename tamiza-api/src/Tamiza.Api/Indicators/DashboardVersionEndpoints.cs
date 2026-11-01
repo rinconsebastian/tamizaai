@@ -34,14 +34,18 @@ public sealed record DashboardVersionSummary(
     DateTimeOffset CreatedAt,
     DateTimeOffset SavedAt);
 
-/// <summary>A kept version's name, filters and widgets, with what the history shows of it (design D9).</summary>
+/// <summary>A kept version's name, filters, colors and widgets, with what the history shows of it (design D9).</summary>
 /// <param name="Filters">As <c>GET .../dashboards/{id}</c> returns a dashboard's filters.</param>
+/// <param name="Palette">The dashboard's palette in the version; <c>tamiza</c> for a version recorded before palettes existed.</param>
+/// <param name="ValueColors">The colors the dashboard kept by value in the version, in the order they were saved; empty for a version recorded before palettes existed.</param>
 /// <param name="Widgets">In reading order: top to bottom, then left to right, then the older first.</param>
 public sealed record DashboardVersionDetails(
     int Number,
     bool Current,
     string Name,
     IReadOnlyList<DashboardFilter> Filters,
+    string Palette,
+    IReadOnlyList<ValueColor> ValueColors,
     IReadOnlyList<VersionWidget> Widgets,
     IReadOnlyList<DashboardChange> Changes,
     int MoreChanges,
@@ -75,7 +79,7 @@ public sealed record DashboardRestore(
 public sealed record RestoredCopy(Guid OriginalId, Guid CopyId, string Title, Guid DashboardId, string DashboardName);
 
 /// <summary>
-/// The versions of a project's own dashboards (dashboard-versions): the history, one version's name, filters and widgets, and the restore
+/// The versions of a project's own dashboards (dashboard-versions): the history, one version's name, filters, colors and widgets, and the restore
 /// of a kept one (design D9). The routes are mapped with the dashboards' (<see cref="DashboardEndpoints.MapDashboardEndpoints"/>), so one
 /// whose dashboard the project does not have answers 404 <see cref="DashboardEndpoints.NotFoundCode"/>, and one whose version the
 /// dashboard does not keep 404 <see cref="DashboardEndpoints.VersionNotFoundCode"/>.
@@ -89,7 +93,7 @@ public static class DashboardVersionEndpoints
             ? TypedResults.Ok(await DashboardVersions.ListAsync(db, projectId, dashboardId, ct))
             : DashboardEndpoints.DashboardNotFound();
 
-    /// <summary>A kept version's name, filters and widgets, which nothing changes.</summary>
+    /// <summary>A kept version's name, filters, colors and widgets, which nothing changes.</summary>
     internal static async Task<Results<Ok<DashboardVersionDetails>, ProblemHttpResult>> GetAsync(
         Guid projectId, Guid dashboardId, int number, TamizaDbContext db, CancellationToken ct)
     {

@@ -38,6 +38,28 @@ public sealed class SeriesQueryBuilderTests
     }
 
     [Fact]
+    public void The_series_domain_statement_is_the_text_it_was_before_a_pie_shared_it()
+    {
+        var domain = Build(Config(), ChartTypes.Column).Domain!;
+
+        // Pinned as the build before pie domains wrote it (design D8 of dashboard palettes): the statement a pie now builds with
+        // SeriesQueryBuilder.Domain is this one, so a change here changes the series and the pie alike.
+        Assert.Equal(
+            """
+            (SELECT "water_source"::text, (sum("value")::double precision) FROM "p_x_indicators"."households"
+             WHERE "value" IS NOT NULL AND "water_source" <> @f0 AND "water_source" IS NOT NULL
+             GROUP BY "water_source" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap)
+            UNION ALL
+            (SELECT NULL::text, (sum("value")::double precision) FROM "p_x_indicators"."households"
+             WHERE "value" IS NOT NULL AND "water_source" <> @f0 AND "water_source" IS NULL
+             HAVING count(*) > 0)
+            """,
+            domain.Sql);
+        Assert.Equal(["f0", "cap"], domain.Parameters.Select(p => p.Name));
+        Assert.Equal(domain.Sql, SeriesQueryBuilder.Domain("\"water_source\"", From, Aggregate, RowFilter, Own, 9).Sql);
+    }
+
+    [Fact]
     public void The_cells_are_read_through_both_sets_of_filters_and_bind_the_kept_series_and_the_limit()
     {
         var sql = Build(Config(), ChartTypes.Column).Cells(["Piped", "Well"]);
@@ -203,5 +225,27 @@ public sealed class SeriesDomainTests
     public void No_series_is_an_empty_list()
     {
         Assert.Empty(SeriesDomain.Order([], false, false));
+    }
+
+    [Fact]
+    public void A_pies_domain_keeps_the_values_largest_first_then_none_then_other()
+    {
+        // Folded as a pie folds them: 8 entries, none and other included, the largest kept as they come.
+        var (kept, other) = SeriesDomain.Fold(["10", "2", "b", "A", "1", "z", "y", "x", "w"], hasNone: true, limit: 8);
+
+        var domain = SeriesDomain.BySize(kept, hasNone: true, hasOther: other);
+
+        Assert.Equal(
+            [("10", "value"), ("2", "value"), ("b", "value"), ("A", "value"), ("1", "value"), ("z", "value"), (null, "none"), (null, "other")],
+            domain.Select(s => (s.Value, s.Kind)).ToArray());
+        Assert.Equal(["1", "2", "10", "A", "b", "z"], SeriesDomain.Order(kept, true, other).Take(6).Select(s => s.Value!).ToArray());
+    }
+
+    [Fact]
+    public void A_pies_domain_has_neither_none_nor_other_unless_there_is_one_and_is_empty_for_no_values()
+    {
+        Assert.Equal([("b", "value"), ("a", "value")], SeriesDomain.BySize(["b", "a"], false, false).Select(s => (s.Value, s.Kind)).ToArray());
+        Assert.Empty(SeriesDomain.BySize([], false, false));
+        Assert.Equal([(null, "none")], SeriesDomain.BySize([], true, false).Select(s => (s.Value, s.Kind)).ToArray());
     }
 }
