@@ -556,12 +556,22 @@ export class IndicatorsService {
 
   /**
    * The most frequent values of a text column across the indicator tables of the dashboard's widgets, optionally only those that
-   * contain `search`. Empty when no table has the column as text.
+   * contain `search`. Empty when no table has the column as text. `indicators`, when there are some, are the tables read instead:
+   * a version shown names those of its own widgets, which the dashboard may no longer have (add-dashboard-versions, design D11).
    */
-  dashboardValues(projectId: string, dashboardId: string, column: string, search?: string): Observable<{ values: DataValueCount[] }> {
+  dashboardValues(
+    projectId: string,
+    dashboardId: string,
+    column: string,
+    search?: string,
+    indicators?: readonly string[],
+  ): Observable<{ values: DataValueCount[] }> {
     let params = new HttpParams().set('column', column);
     if (search) {
       params = params.set('search', search);
+    }
+    for (const indicator of indicators ?? []) {
+      params = params.append('indicator', indicator);
     }
     return this.http.get<{ values: DataValueCount[] }>(`${this.dashboardUrl(projectId, dashboardId)}/values`, { params });
   }

@@ -1931,6 +1931,8 @@
       "printedAt": "Impreso el {{ time }} ({{ zone }})",
       "publishedAt": "Datos publicados el {{ time }}",
       "notPublished": "Los datos aún no se han publicado.",
+      "version": "Versión {{ number }}, guardada por {{ author }} el {{ time }}",
+      "versionTitle": "{{ name }} (versión {{ number }})",
       "columnsLeftOut": "{{ count }} columnas no se imprimieron.",
       "columnsLeftOutOne": "1 columna no se imprimió."
     },

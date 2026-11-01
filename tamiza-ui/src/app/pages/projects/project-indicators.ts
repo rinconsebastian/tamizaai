@@ -127,6 +127,10 @@ export const layoutSaveDelayMs = 400;
         <!-- The print header (design D7): when the sheet was printed, and when its data was published. -->
         @if (printedAt(); as printedAt) {
           <div class="hidden w-full text-sm text-body paper:block" data-testid="print-header">
+            @if (viewing(); as version) {
+              <!-- The browser's own menu still prints a version shown, whose notice paper leaves out: the sheet says which version it is. -->
+              <p data-testid="print-version">{{ t('dashboards.print.version', { number: version.number, author: version.author.name, time: (version.savedAt | dateTime) }) }}</p>
+            }
             <p data-testid="print-time">{{ t('dashboards.print.printedAt', { time: when(printedAt), zone: timeZone() }) }}</p>
             @if (publishedAt(); as publishedAt) {
               <p data-testid="print-published">{{ t('dashboards.print.publishedAt', { time: when(publishedAt) }) }}</p>
@@ -197,6 +201,7 @@ export const layoutSaveDelayMs = 400;
           [dashboardId]="dashboardId()"
           [filters]="shownFilters()"
           [values]="filterValues()"
+          [indicators]="valueIndicators()"
           [timeZone]="context.project()?.timeZone ?? 'UTC'"
           (changed)="filterChanged($event)"
           (cleared)="clearFilters()"
@@ -475,6 +480,14 @@ export class ProjectIndicators {
   protected readonly shownFilters = computed(() => this.viewing()?.filters ?? this.filters());
   /** The value in force of each filter on the member's screen, never saved. */
   protected readonly filterValues = computed(() => (this.viewing() ? this.viewValues() : this.address().values));
+  /**
+   * The indicators a text filter offers values from: those of the version's widgets while one is shown, which the dashboard may no
+   * longer have; none otherwise, so the API reads those of the dashboard's own widgets.
+   */
+  protected readonly valueIndicators = computed(() => {
+    const version = this.viewing();
+    return version ? [...new Set(version.widgets.map((w) => w.config.indicator))] : undefined;
+  });
   /** The filters with a value, in the bar's order, for the widgets. */
   protected readonly active = computed(() => activeFilters(this.shownFilters(), this.filterValues()));
   /** The filters of an address that no longer apply, named, until the member changes a value or another dashboard opens. */
@@ -510,15 +523,15 @@ export class ProjectIndicators {
 
   // Printing (dashboard printing, design D7, D11).
 
-  /** Every member may print a dashboard once its widgets are read, when it has any; no version shown is printed (design D11). */
+  /** Every member may print a dashboard once its widgets are read, when it has any; the action prints no version shown (design D11). */
   protected readonly canPrint = computed(() => !this.viewing() && !this.loading() && !this.error() && this.widgets().length > 0);
   /** The Print action is getting the dashboard ready: it is busy until the browser's dialog opens. */
   protected readonly preparing = signal(false);
   protected readonly printedAt = this.printer.printedAt;
   protected readonly timeZone = computed(() => this.context.project()?.timeZone ?? 'UTC');
-  /** The latest time one of the widgets' indicators was published, or null when none has. */
+  /** The latest time one of the shown widgets' indicators was published, or null when none has; a version's widgets while one is shown. */
   protected readonly publishedAt = computed(() => {
-    const named = new Set(this.widgets().map((w) => w.config.indicator));
+    const named = new Set(this.shownWidgets().map((w) => w.config.indicator));
     const times = (this.overview()?.indicators ?? [])
       .filter((i) => i.published && i.publishedAt && named.has(i.name))
       .map((i) => new Date(i.publishedAt!).getTime())
@@ -553,9 +566,13 @@ export class ProjectIndicators {
       this.context.notice.set(null);
     });
 
-    // While printing, the page's title names the project, the dashboard and the day (design D10).
-    this.printer.titleSource = () =>
-      printTitle(this.context.project()?.name ?? '', this.name(), this.printer.printedAt() ?? new Date(), this.timeZone());
+    // While printing, the page's title names the project, the dashboard and the day (design D10); the version too while one is
+    // shown, which the browser's own menu still prints, so the PDF's file name does not pass it off as the dashboard as it is.
+    this.printer.titleSource = () => {
+      const version = this.viewing();
+      const shown = version ? this.transloco.translate('dashboards.print.versionTitle', { name: this.shownName(), number: version.number }) : this.shownName();
+      return printTitle(this.context.project()?.name ?? '', shown, this.printer.printedAt() ?? new Date(), this.timeZone());
+    };
     // Back from the browser's dialog, focus returns to the Print action; a wait the page cut short (it opened another dashboard,
     // or left) moves focus nowhere.
     this.printer.restored.pipe(takeUntilDestroyed()).subscribe(({ fromAction }) => {

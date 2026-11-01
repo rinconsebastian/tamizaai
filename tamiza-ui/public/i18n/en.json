@@ -1931,6 +1931,8 @@
       "printedAt": "Printed {{ time }} ({{ zone }})",
       "publishedAt": "Data published {{ time }}",
       "notPublished": "The data has not been published yet.",
+      "version": "Version {{ number }}, saved by {{ author }} on {{ time }}",
+      "versionTitle": "{{ name }} (version {{ number }})",
       "columnsLeftOut": "{{ count }} columns not printed.",
       "columnsLeftOutOne": "1 column not printed."
     },

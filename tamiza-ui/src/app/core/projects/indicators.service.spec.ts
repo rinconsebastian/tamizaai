@@ -79,6 +79,19 @@ describe('IndicatorsService', () => {
     expect(searched.request.params.get('search')).toBe('pal');
   });
 
+  it('names the indicators to read the values from, one parameter each, only when there are some', () => {
+    service.dashboardValues('p1', 'd2', 'municipality', undefined, ['coverage', 'piped_water_rate']).subscribe();
+    service.dashboardValues('p1', 'd2', 'municipality', 'pal', ['coverage']).subscribe();
+    service.dashboardValues('p1', 'd2', 'municipality', undefined, []).subscribe();
+
+    const [two, searched, none] = http.match((r) => r.url === `${dashboards}/d2/values`);
+    expect(two.request.params.getAll('indicator')).toEqual(['coverage', 'piped_water_rate']);
+    expect(two.request.urlWithParams).toBe(`${dashboards}/d2/values?column=municipality&indicator=coverage&indicator=piped_water_rate`);
+    expect(searched.request.params.get('search')).toBe('pal');
+    expect(searched.request.params.getAll('indicator')).toEqual(['coverage']);
+    expect(none.request.params.keys()).toEqual(['column']);
+  });
+
   it('reads, saves and removes a dashboard\'s scheduled email', () => {
     const settings = { recipients: ['ana@partner.org', 'luis@city.gov.co'], days: [1, 4], time: '07:00', active: true, locale: 'es-CO' };
     const report = { settings, timeZone: 'America/Bogota', updatedBy: { name: 'Ada' }, updatedAt: '2026-10-27T10:00:00-05:00', lastSentAt: null, lastFailure: null };

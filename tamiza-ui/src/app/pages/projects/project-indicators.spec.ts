@@ -3011,6 +3011,88 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
       expect(pills(context.root)).toEqual(['Municipality: Cali']);
     });
 
+    it('offers a text filter\'s values from the indicators of the version\'s widgets, each named once, and the dashboard\'s own once back', async () => {
+      const values = (r: { request: { params: { getAll(name: string): string[] | null } } }) => r.request.params.getAll('indicator');
+      const again = widget('w6', { title: 'Coverage by round', layout: { x: 0, y: 4, w: 6, h: 4 } });
+      const context = await open('analyst', [coverage], answer, {}, { filters: [municipality] });
+      await view(context, historyOf([12, 9]), versionOf(9, [coverage, water, again], { filters: [municipality] }));
+      await answerQueries(context, answer);
+
+      all(context.root, 'dashboard-filter')[0].click();
+      await settle(context.harness);
+      const [shown] = context.http.match(isDashboardValues);
+      expect(shown.request.url).toBe(`${dashboardUrlOf('d1')}/values`);
+      expect(shown.request.params.get('column')).toBe('municipality');
+      expect(values(shown)).toEqual(['coverage', 'piped_water_rate']);
+      shown.flush({ values: [{ value: 'Cali', count: 3 }] });
+      await settle(context.harness);
+      overlay().querySelector<HTMLInputElement>('[data-testid="filter-option"]')!.click();
+      overlay().querySelector<HTMLElement>('[data-testid="filter-apply"]')!.click();
+      await settle(context.harness);
+      await answerQueries(context, answer);
+
+      byTestId(context.root, 'dashboard-version-back')!.click();
+      await settle(context.harness);
+      await answerQueries(context, answer);
+      all(context.root, 'dashboard-filter')[0].click();
+      await settle(context.harness);
+      const [current] = context.http.match(isDashboardValues);
+      expect(values(current)).toBeNull(); // the API reads those of the dashboard's widgets
+      current.flush({ values: [] });
+    });
+
+    it('names the version on the sheet and in the page\'s title when the browser\'s menu prints it, and nothing of it once back (Printing from the browser\'s menu)', async () => {
+      document.title = 'Tamiza';
+      // `piped_water_rate`, which only the version's widget shows, was published last.
+      const indicators = defaultIndicators.map((i) => indicator(i.name, { publishedAt: i.name === 'piped_water_rate' ? '2026-10-28T14:00:00Z' : '2026-10-28T09:00:00Z' }));
+      const context = await open('analyst', [coverage], answer, { indicators }, { project: { timeZone: 'America/Bogota' } });
+      await view(context, historyOf([12, 9]), versionOf(9, [coverage, water], { name: 'Water' }));
+      await answerQueries(context, answer);
+
+      window.dispatchEvent(new Event('beforeprint'));
+      await settle(context.harness);
+
+      const header = byTestId(context.root, 'print-header')!;
+      expect(header.classList).toContain('paper:block');
+      expect(plain(text(byTestId(header, 'print-version')))).toBe(`Version 9, saved by Ana Pérez on ${when(savedAt(9))}`);
+      expect(text(byTestId(header, 'print-published'))).toMatch(/^Data published Oct 28, 2026, 9:00\sAM$/);
+      expect(header.querySelector('button')).toBeNull();
+      expect(notice(context.root)!.classList).toContain('paper:hidden');
+      expect(text(byTestId(context.root, 'dashboard-heading'))).toBe('Water');
+      expect(document.title).toMatch(/^Household survey 2026 – Water \(version 9\) – \d{4}-\d{2}-\d{2}$/);
+
+      window.dispatchEvent(new Event('afterprint'));
+      await settle(context.harness);
+      expect(document.title).toBe('Tamiza');
+      expect(byTestId(context.root, 'print-header')).toBeNull();
+
+      byTestId(context.root, 'dashboard-version-back')!.click();
+      await settle(context.harness);
+      await answerQueries(context, answer);
+      window.dispatchEvent(new Event('beforeprint'));
+      await settle(context.harness);
+
+      expect(byTestId(context.root, 'print-version')).toBeNull();
+      expect(text(byTestId(context.root, 'print-published'))).toMatch(/^Data published Oct 28, 2026, 4:00\sAM$/);
+      expect(document.title).toMatch(/^Household survey 2026 – Indicators – \d{4}-\d{2}-\d{2}$/);
+      window.dispatchEvent(new Event('afterprint'));
+      await settle(context.harness);
+    });
+
+    it('names the version on the sheet and in the page\'s title in Spanish', async () => {
+      const context = await open('analyst', [coverage], answer, {}, { lang: 'es' });
+      await view(context, historyOf([12, 9]), versionOf(9, [coverage], { name: 'Agua' }));
+      await answerQueries(context, answer);
+
+      window.dispatchEvent(new Event('beforeprint'));
+      await settle(context.harness);
+
+      expect(plain(text(byTestId(context.root, 'print-version')))).toBe(`Versión 9, guardada por Ana Pérez el ${when(savedAt(9), 'es-CO')}`);
+      expect(document.title).toMatch(/^Household survey 2026 – Agua \(versión 9\) – \d{4}-\d{2}-\d{2}$/);
+      window.dispatchEvent(new Event('afterprint'));
+      await settle(context.harness);
+    });
+
     it('leaves the view when another dashboard opens, which shows as it is', async () => {
       const fieldWidget = widget('w9', { dashboardId: 'd2', title: 'Field progress' });
       const context = await open('analyst', [coverage], answer, {}, { dashboards: indicatorsAndField });

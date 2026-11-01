@@ -20,6 +20,7 @@ const consent: DashboardFilter = { column: 'consent', label: 'Consent', kind: 'b
     timeZone="America/Bogota"
     [filters]="filters()"
     [values]="values()"
+    [indicators]="indicators()"
     (changed)="changes.push($event)"
     (cleared)="events.push('cleared')"
     (reset)="events.push('reset')"
@@ -28,6 +29,7 @@ const consent: DashboardFilter = { column: 'consent', label: 'Consent', kind: 'b
 class Host {
   readonly filters = signal<DashboardFilter[]>([]);
   readonly values = signal<FilterValues>({});
+  readonly indicators = signal<readonly string[] | undefined>(undefined);
   readonly changes: FilterChange[] = [];
   readonly events: string[] = [];
 }
@@ -177,6 +179,7 @@ describe('DashboardFilterBar', () => {
     expect(bar.inDialog('filter-op')).toBeNull();
     const request = bar.http.expectOne((r) => r.url === '/api/v1/projects/p1/dashboards/d1/values');
     expect(request.request.params.get('column')).toBe('municipality');
+    expect(request.request.params.has('indicator')).toBe(false); // those of the dashboard's widgets
     request.flush({ values: [{ value: 'Cali', count: 12 }, { value: 'Palmira', count: 3 }] });
     await bar.settle();
     const options = Array.from(bar.dialog()!.querySelectorAll('[data-testid="filter-option"]'));
@@ -186,6 +189,22 @@ describe('DashboardFilterBar', () => {
     bar.inDialog('filter-apply')!.click();
     await bar.settle();
     expect(bar.host.changes).toEqual([{ column: 'municipality', value: { values: ['Palmira'] } }]);
+  });
+
+  it('reads the values from the indicators it is given, which a version shown names (add-dashboard-versions, design D11)', async () => {
+    const bar = await render([municipality]);
+    bar.host.indicators.set(['coverage', 'piped_water_rate']);
+    await bar.settle();
+
+    bar.pill('municipality').click();
+    await bar.settle();
+
+    const request = bar.http.expectOne((r) => r.url === '/api/v1/projects/p1/dashboards/d1/values');
+    expect(request.request.params.get('column')).toBe('municipality');
+    expect(request.request.params.getAll('indicator')).toEqual(['coverage', 'piped_water_rate']);
+    request.flush({ values: [{ value: 'Cali', count: 12 }] });
+    await bar.settle();
+    expect(Array.from(bar.dialog()!.querySelectorAll('[data-testid="filter-option"]')).map((o) => text(o.closest('label')))).toEqual(['Cali']);
   });
 
   it('offers true and false for a true/false filter without asking the server', async () => {
