@@ -5,9 +5,23 @@ import { RouterLink } from '@angular/router';
 import { TranslocoDirective } from '@jsverse/transloco';
 import { catchError, distinctUntilChanged, map, of, switchMap, tap, timer } from 'rxjs';
 import { ApiErrors } from '../../../core/api-error';
-import { AppliedDashboardFilter, ChartType, IndicatorEntry, IndicatorsService, QueryResult, WidgetConfig, WidgetSort, hasSeries } from '../../../core/projects/indicators.service';
+import {
+  AppliedDashboardFilter,
+  ChartType,
+  DashboardColors,
+  IndicatorEntry,
+  IndicatorsService,
+  QueryResult,
+  WidgetConfig,
+  WidgetDisplay,
+  WidgetSort,
+  emptyConfig,
+  hasSeries,
+  takesSeries,
+} from '../../../core/projects/indicators.service';
 import { Alert, ApiLang, Button, Skeleton } from '../../../shared/ui';
 import { AxisChart, AxisKind } from './axis-chart';
+import { ChartColors, chartColors, defaultColors } from './chart-colors';
 import { CrosstabWidget } from './crosstab-widget';
 import { HeatmapChart } from './heatmap-chart';
 import { LikertChart } from './likert-chart';
@@ -41,8 +55,23 @@ function seriesSettings(type: ChartType, config: WidgetConfig): Partial<WidgetCo
 }
 
 /**
+ * The widget's own color and scale (add-dashboard-palettes, design D3), for the kinds that take them and with only the fields each
+ * takes: a color for a bar, column or line chart with no series and for a histogram, a scale for a map and a heat map. A widget with
+ * nothing to keep has no `display` at all, not an empty one, so a widget saved before palettes saves exactly what it did.
+ */
+function displayFor(type: ChartType, config: WidgetConfig): { display?: WidgetDisplay } {
+  const { color, ramp } = config.display ?? {};
+  const kept: WidgetDisplay = {
+    ...((type === 'histogram' || (takesSeries(type) && !config.seriesBy)) && color != null ? { color } : {}),
+    ...((type === 'map' || type === 'heatmap') && ramp ? { ramp } : {}),
+  };
+  return Object.keys(kept).length ? { display: kept } : {};
+}
+
+/**
  * The query a chart type actually uses: settings that belong to another chart type are not sent, and a stat tile never groups.
- * Twin of `WidgetQuery.For` in tamiza-api (scheduled dashboard emails and the MCP tools); change both together.
+ * Twin of `WidgetQuery.For` in tamiza-api (scheduled dashboard emails and the MCP tools); change both together. The widget's
+ * `display` is not part of it, so choosing a color never queries again.
  */
 export function queryFor(type: ChartType, config: WidgetConfig): WidgetConfig {
   return {
@@ -89,8 +118,8 @@ export function axisKindOf(type: ChartType): AxisKind | null {
 
 /**
  * What a widget is saved with, and what its preview is given: the query, plus (for a map) the whole tooltip items and the basemap,
- * and the dashboard filters it ignores. Any other chart type keeps no tooltip or basemap, so changing a map into one saves no tooltip
- * columns.
+ * the dashboard filters it ignores, and its color or scale where its kind takes one. Any other chart type keeps no tooltip, basemap or
+ * display, so changing a map into one saves no tooltip columns, and a column chart that gains a series saves no color.
  */
 export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig {
   return {
@@ -98,6 +127,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
     tooltip: type === 'map' ? (config.tooltip ?? []) : [],
     basemap: type === 'map' ? (config.basemap ?? null) : null,
     ignoredDashboardFilters: config.ignoredDashboardFilters ?? [],
+    ...displayFor(type, config),
   };
 }
 
@@ -160,10 +190,10 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
                       <app-stat-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" />
                     }
                     @case ('pie') {
-                      <app-pie-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [asTable]="asTable()" />
+                      <app-pie-widget [rows]="result.rows" [domain]="result.domain" [config]="config()!" [label]="label()" [format]="formatter()" [colors]="resolvedColors()" [asTable]="asTable()" />
                     }
                     @case ('map') {
-                      <app-map-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [tooltipTypes]="result.tooltipTypes" [asTable]="asTable()" />
+                      <app-map-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [colors]="resolvedColors()" [tooltipTypes]="result.tooltipTypes" [asTable]="asTable()" />
                     }
                     @case ('bar') {
                       <ng-container *ngTemplateOutlet="axis" />
@@ -178,10 +208,10 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
                       <ng-container *ngTemplateOutlet="axis" />
                     }
                     @case ('heatmap') {
-                      <app-heatmap-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [asTable]="asTable()" />
+                      <app-heatmap-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [colors]="resolvedColors()" [asTable]="asTable()" />
                     }
                     @case ('pyramid') {
-                      <app-pyramid-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [asTable]="asTable()" />
+                      <app-pyramid-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [colors]="resolvedColors()" [asTable]="asTable()" />
                     }
                     @case ('likert') {
                       <app-likert-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [asTable]="asTable()" />
@@ -200,7 +230,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
 
     <!-- A bar, column or line chart with a series is given the whole answer, which holds the series and the totals. -->
     <ng-template #axis>
-      <app-axis-chart [kind]="axisKind()!" [rows]="result()!.rows" [answer]="result()" [config]="config()!" [label]="label()" [format]="formatter()" [asTable]="asTable()" />
+      <app-axis-chart [kind]="axisKind()!" [rows]="result()!.rows" [answer]="result()" [config]="config()!" [label]="label()" [format]="formatter()" [colors]="resolvedColors()" [asTable]="asTable()" />
     </ng-template>
 
     <ng-template #notPublished>
@@ -230,6 +260,8 @@ export class WidgetView {
   /** Wait this long after the last change before asking (a draft being typed); 0 asks at once. */
   readonly debounceMs = input(0);
   readonly placeholder = input('');
+  /** The colors of the dashboard the widget is on, or of the version shown (add-dashboard-palettes, design D7). */
+  readonly colors = input<DashboardColors>(defaultColors);
 
   /** Show the table of the rows instead of the chart. The grid drives it from the tile header; elsewhere the widget's own toggle does. */
   readonly asTable = model(false);
@@ -275,6 +307,11 @@ export class WidgetView {
   protected readonly label = computed(() => this.indicator()?.label ?? this.config()?.indicator ?? '');
   protected readonly formatter = computed(() => valueFormatter(this.indicator() ?? plainIndicator, this.locale));
   protected readonly axisKind = computed(() => axisKindOf(this.chartType()));
+  /**
+   * The colors the widget is drawn in: the dashboard's palette and colors kept by value, and the widget's own color or scale. It reads
+   * the whole config, `display` included, so a color change redraws the chart without a query: the query's key leaves it out.
+   */
+  readonly resolvedColors = computed<ChartColors>(() => chartColors(this.colors(), this.chartType(), this.config() ?? emptyConfig()));
 
   private readonly key = computed(() => {
     const config = this.config();

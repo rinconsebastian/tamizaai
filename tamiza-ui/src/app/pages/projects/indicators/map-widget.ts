@@ -5,7 +5,8 @@ import { BasemapCredits, BasemapEntry, Basemaps, CreditsArea } from '../../../co
 import { DataColumnType } from '../../../core/projects/data.service';
 import { BasemapKind, QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartTooltip, ChartTooltips } from '../../../shared/ui';
-import { sequentialColor, sequentialStep, sequentialSteps } from './chart-scales';
+import { ChartColors } from './chart-colors';
+import { sequentialStep, sequentialSteps } from './chart-scales';
 import { DashboardPrint } from './dashboard-print';
 import { ValueFormatter, plotted } from './format';
 import { BasemapChoice, MapControls } from './map-controls';
@@ -55,6 +56,11 @@ let helpIds = 0;
  * A map widget (design D1 to D6): the rows' own geometry (WKT text) drawn by Leaflet, on a Web Mercator map when the coordinates are
  * degrees and flat otherwise. Polygons are filled regions and points are markers, both colored by the plotted field on a
  * sequential scale of seven steps. A row whose geometry is missing or cannot be read is left out and counted.
+ *
+ * The scale is the widget's own or its dashboard palette's (add-dashboard-palettes, design D1). Leaflet builds its own DOM and writes
+ * presentation attributes, which cannot hold `var()`, so the shapes are colored by the global `.tmz-map path.tmz-seq-n` rules, which
+ * read `--tmz-seq-n`. This component sets those variables on its host, from `colors().rampStyle`: they reach the shapes and the
+ * legend swatches by inheritance, and each `var(--tmz-ramp-…)` is resolved on the element, so the dark values still apply.
  *
  * Leaflet is only the engine (see `map-engine.ts`); the controls, the tooltip, the attribution, the hints and the notices are this
  * template's. The view (zoom and position) and the member's choice of basemap live here, in signals, and are never saved.
@@ -148,7 +154,7 @@ let helpIds = 0;
       }
     </ng-container>
   `,
-  host: { class: 'flex h-full min-h-0 flex-col gap-2' },
+  host: { class: 'flex h-full min-h-0 flex-col gap-2', '[style]': 'colors().rampStyle' },
 })
 export class MapWidget {
   private readonly transloco = inject(TranslocoService);
@@ -166,6 +172,8 @@ export class MapWidget {
   /** The type of each tooltip column, from the query's answer. */
   readonly tooltipTypes = input<readonly DataColumnType[] | undefined>(undefined);
   readonly asTable = input(false);
+  /** The colors of the widget: its sequential scale, from the widget or from its dashboard's palette. */
+  readonly colors = input.required<ChartColors>();
 
   protected readonly steps = Array.from({ length: sequentialSteps }, (_, i) => i + 1);
   protected readonly helpId = `map-help-${++helpIds}`;
@@ -501,8 +509,9 @@ export class MapWidget {
 
   // --- Template helpers -------------------------------------------------------------------------------------------------
 
+  /** The fill of a step: the variable the host sets to the step of the widget's scale (it is the blue scale where none is set). */
   protected color(step: number): string {
-    return sequentialColor(step);
+    return `var(--tmz-seq-${step})`;
   }
 
   protected key(base: string, count: number): string {

@@ -1,12 +1,13 @@
 import { MapStub, stubMap } from '../../../../testing/leaflet';
 import { details, projectId, settle, typeInto } from '../../../../testing/project-harness';
 import { BasemapList } from '../../../core/basemaps.service';
-import { ChartType, DashboardFilter, IndicatorColumns, IndicatorEntry, Widget, WidgetConfig, chartTypes } from '../../../core/projects/indicators.service';
+import { ChartType, DashboardColors, DashboardFilter, IndicatorColumns, IndicatorEntry, Widget, WidgetConfig, chartTypes } from '../../../core/projects/indicators.service';
 import { DashboardEntry } from '../../../core/projects/projects.service';
 import { valueSearchDelayMs } from '../data-filter-dialog';
 import { encodeFilters } from '../data-view';
 import {
   Context,
+  OpenAt,
   all,
   catalog,
   cell,
@@ -48,14 +49,20 @@ interface Setup {
   /** The open dashboard's filters, and the query string of its address (`f=…`). */
   filters?: DashboardFilter[];
   query?: string;
+  /** The open dashboard's palette and colors kept by value, when it has any. */
+  colors?: DashboardColors;
+  /** The interface language; English unless said. */
+  lang?: OpenAt['lang'];
 }
 
 /** Opens the dialog to add a widget, or to edit `existing`, and answers the request for the columns of the indicator it starts on. */
-async function openDialog({ existing = null, columns = catalog(), indicators, dashboards, filters, query }: Setup = {}) {
+async function openDialog({ existing = null, columns = catalog(), indicators, dashboards, filters, query, colors, lang }: Setup = {}) {
   const context = await open('analyst', existing ? [existing] : [], existing ? result([row('Cali', 75)]) : null, indicators ? { indicators } : {}, {
     ...(dashboards ? { dashboards } : {}),
     ...(filters ? { filters } : {}),
     ...(query ? { query } : {}),
+    ...(colors ? { colors } : {}),
+    ...(lang ? { lang } : {}),
   });
   if (existing) {
     // Edit is an item of the widget's actions menu.
@@ -2142,6 +2149,426 @@ describe('the widget dialog with a series (design D7)', () => {
       // The value of the data that the scale does not hold is offered, left out, after the scale's.
       expect(valuesOf()).toEqual(['Disagree', 'Agree', "Don't know"]);
       expect(sidesOf()).toEqual(['negative', 'positive', 'out']);
+    });
+  });
+});
+
+// A widget's color and scale are part of what it is saved with, not of its query (add-dashboard-palettes, design D3). The form keeps
+// what the widget was saved with, for the kinds that take it, and saves nothing new for a widget that has neither.
+describe('the widget dialog and a widget\'s display', () => {
+  afterEach(clearOverlay);
+
+  const twoDimensions = catalog({ columns: [...catalog().columns, { name: 'water_source', type: 'text', label: null }] });
+  const saveEdited = async (context: Context) => {
+    await click(context, field('dialog-save'));
+    return context.http.expectOne(isPatch).request.body as { title: string; chartType: ChartType; config: WidgetConfig };
+  };
+
+  it('saves a widget saved before palettes with exactly the config it was saved with (Widget form saved unchanged)', async () => {
+    const context = await openDialog({ existing: widget('w1') });
+
+    const body = await saveEdited(context);
+
+    expect(body.config).toEqual(config());
+    expect('display' in body.config).toBe(false);
+  });
+
+  it('keeps the color of a chart with no series when it saves, and the preview is not asked again for it', async () => {
+    const context = await openDialog({ existing: widget('w1', { config: config({ display: { color: 3 } }) }) });
+    await wait(previewDelayMs + 100);
+    await settle(context.harness);
+    const previews = context.http.match(isQuery).filter((r) => !r.cancelled);
+    expect(previews).toHaveLength(1);
+    expect(previews[0].request.body.config).not.toHaveProperty('display');
+    previews[0].flush(result([row('Cali', 75)]));
+    await settle(context.harness);
+
+    const body = await saveEdited(context);
+
+    expect(body.config.display).toEqual({ color: 3 });
+  });
+
+  it('saves only the fields of the widget\'s kind: a column chart keeps no scale', async () => {
+    const context = await openDialog({ existing: widget('w1', { config: config({ display: { color: 3, ramp: 'green' } }) }) });
+
+    const body = await saveEdited(context);
+
+    expect(body.config.display).toEqual({ color: 3 });
+  });
+
+  it('saves no color for a chart that gains a series', async () => {
+    const context = await openDialog({ existing: widget('w1', { config: config({ display: { color: 3 } }) }), columns: twoDimensions });
+    await change(context, field('dialog-series-by'), 'water_source');
+
+    const body = await saveEdited(context);
+
+    expect(body.config.seriesBy).toBe('water_source');
+    expect('display' in body.config).toBe(false);
+  });
+
+  it('saves no color for a chart that changes into a pie', async () => {
+    const context = await openDialog({ existing: widget('w1', { config: config({ display: { color: 3 } }) }) });
+    await change(context, field('dialog-chart-type'), 'pie');
+
+    const body = await saveEdited(context);
+
+    expect(body.chartType).toBe('pie');
+    expect('display' in body.config).toBe(false);
+  });
+
+  it('is given the dashboard\'s colors for its preview', async () => {
+    const colors: DashboardColors = { palette: 'earth', valueColors: [{ column: 'municipality', value: 'Cali', color: 4 }] };
+    await openDialog({ existing: widget('w1'), colors });
+
+    const preview = (globalThis as unknown as { ng: { getComponent(element: Element): { resolvedColors(): { accent: string; kept(column: string, value: string): string | null } } } }).ng.getComponent(
+      field('dialog-preview').querySelector('app-widget-view')!,
+    );
+
+    expect(preview.resolvedColors().accent).toBe('var(--tmz-pal-earth-1)');
+    expect(preview.resolvedColors().kept('municipality', 'Cali')).toBe('var(--tmz-pal-earth-4)');
+  });
+});
+
+// The Color and Scale choices of the widget form (add-dashboard-palettes, design D3, D9; dashboard-colors "Color choice in the widget form").
+describe('the widget dialog\'s color and scale', () => {
+  afterEach(clearOverlay);
+
+  const optionsOfGroup = (group: string, option: string) => Array.from(field(group).querySelectorAll<HTMLInputElement>(`[data-testid="${option}"]`));
+  const colorRadios = () => optionsOfGroup('dialog-color', 'dialog-color-option');
+  const rampRadios = () => optionsOfGroup('dialog-ramp', 'dialog-ramp-option');
+  const colorChosen = () => colorRadios().filter((radio) => radio.checked).map((radio) => Number(radio.dataset['color']));
+  const rampChosen = () => rampRadios().filter((radio) => radio.checked).map((radio) => radio.dataset['ramp']);
+  const colorNamed = (n: number) => colorRadios().find((radio) => radio.dataset['color'] === String(n))!;
+  const rampNamed = (id: string) => rampRadios().find((radio) => radio.dataset['ramp'] === id)!;
+  /** The name a radio in a label has for a screen reader: the label's own text, since the radio has no aria-label. */
+  const labelText = (radio: HTMLInputElement) => text(radio.closest('label'));
+  const marks = () => all(field('dialog-preview'), 'chart-mark');
+  const colorOf = (element: Element | null) => /var\(--[\w-]+\)/.exec(element?.getAttribute('style') ?? '')?.[0] ?? null;
+  const previewColors = () =>
+    (globalThis as unknown as { ng: { getComponent(element: Element): { resolvedColors(): { accent: string; ramp: string; rampStyle: Record<string, string> } } } }).ng
+      .getComponent(field('dialog-preview').querySelector('app-widget-view')!)
+      .resolvedColors();
+  const twoDimensions = catalog({ columns: [...catalog().columns, { name: 'water_source', type: 'text', label: null }] });
+  const withColors = (palette: DashboardColors['palette'], valueColors: DashboardColors['valueColors'] = []): DashboardColors => ({ palette, valueColors });
+  const groups = result([row('Cali', 75), row('Bogotá', 60), row('Pasto', 35)]);
+  const isCreate = (r: { url: string; method: string }) => r.method === 'POST' && r.url === widgetsUrl;
+  const saved = async (context: Context) => {
+    await click(context, field('dialog-save'));
+    return context.http.expectOne((r) => isCreate(r) || isPatch(r)).request.body as { title: string; chartType: ChartType; config: WidgetConfig };
+  };
+
+  describe('which chart types take which', () => {
+    it.each(chartTypes)('offers %s the choices of its kind and no other', async (type) => {
+      const context = await openDialog();
+      await change(context, field('dialog-chart-type'), type);
+
+      const takesColor = ['bar', 'column', 'line', 'histogram'].includes(type);
+      const takesScale = ['map', 'heatmap'].includes(type);
+      expect(fields('dialog-color')).toHaveLength(takesColor ? 1 : 0);
+      expect(fields('dialog-color-option')).toHaveLength(takesColor ? 8 : 0);
+      expect(fields('dialog-ramp')).toHaveLength(takesScale ? 1 : 0);
+      expect(fields('dialog-ramp-option')).toHaveLength(takesScale ? 8 : 0);
+      expect(context.http.match(isCreate)).toHaveLength(0);
+    });
+
+    it.each(['bar', 'column', 'line'])('takes the color of a %s back when it has a series, and gives it again without one', async (type) => {
+      const context = await openDialog({ columns: twoDimensions });
+      await change(context, field('dialog-chart-type'), type);
+      expect(fields('dialog-color')).toHaveLength(1);
+
+      await change(context, field('dialog-series-by'), 'water_source');
+      expect(fields('dialog-color')).toHaveLength(0);
+      expect(fields('dialog-ramp')).toHaveLength(0);
+
+      await change(context, field('dialog-series-by'), '');
+      expect(fields('dialog-color')).toHaveLength(1);
+    });
+
+    it('offers a heat map its scale with the series it needs', async () => {
+      const context = await openDialog({ columns: twoDimensions });
+      await change(context, field('dialog-chart-type'), 'heatmap');
+      await change(context, field('dialog-series-by'), 'water_source');
+
+      expect(fields('dialog-ramp')).toHaveLength(1);
+      expect(fields('dialog-color')).toHaveLength(0);
+    });
+  });
+
+  describe('the color', () => {
+    it('offers the eight colors of the dashboard\'s palette by number, with the first chosen for a widget with no color (Widget saved before colors)', async () => {
+      await openDialog({ colors: withColors('earth') });
+
+      expect(text(field('dialog-color').querySelector('legend'))).toBe('Color');
+      expect(colorRadios().map((radio) => radio.dataset['color'])).toEqual(['1', '2', '3', '4', '5', '6', '7', '8']);
+      expect(colorChosen()).toEqual([1]);
+      expect(colorRadios().map((radio) => colorOf(radio.closest('label')!.querySelector('[data-testid="dialog-color-swatch"]')))).toEqual(
+        [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `var(--tmz-pal-earth-${n})`),
+      );
+    });
+
+    it('shows the preview in the color picked before the widget is saved, and asks nothing again for it (Color picked)', async () => {
+      const context = await openDialog({ colors: withColors('tamiza') });
+      await previewAnswer(context, groups);
+      expect(marks().map(colorOf)).toEqual(Array(3).fill('var(--tmz-pal-tamiza-1)'));
+
+      await click(context, colorNamed(3));
+      expect(colorChosen()).toEqual([3]);
+      expect(marks().map(colorOf)).toEqual(Array(3).fill('var(--tmz-pal-tamiza-3)'));
+
+      await wait(previewDelayMs + 100);
+      await settle(context.harness);
+      expect(context.http.match(isQuery)).toHaveLength(0);
+      expect(marks()).toHaveLength(3); // the answer stayed on screen: no loading state in between
+      await change(context, field('dialog-title'), 'Coverage');
+      expect((await saved(context)).config.display).toEqual({ color: 3 });
+    });
+
+    it('draws the preview in the dashboard\'s palette and its colors kept by value, the widget\'s color for the other bars', async () => {
+      const context = await openDialog({ colors: withColors('earth', [{ column: 'municipality', value: 'Bogotá', color: 7 }]) });
+      await previewAnswer(context, groups);
+      expect(marks().map(colorOf)).toEqual(['var(--tmz-pal-earth-1)', 'var(--tmz-pal-earth-7)', 'var(--tmz-pal-earth-1)']);
+
+      await click(context, colorNamed(4));
+
+      expect(marks().map(colorOf)).toEqual(['var(--tmz-pal-earth-4)', 'var(--tmz-pal-earth-7)', 'var(--tmz-pal-earth-4)']);
+    });
+
+    it('names each color by its number and its hue for a screen reader, in the interface\'s language (Named choices)', async () => {
+      await openDialog({ colors: withColors('earth') });
+      expect(colorRadios().map((radio) => radio.getAttribute('aria-label'))).toEqual([
+        'Color 1, terracotta',
+        'Color 2, indigo',
+        'Color 3, ochre',
+        'Color 4, wine',
+        'Color 5, moss',
+        'Color 6, brown',
+        'Color 7, plum',
+        'Color 8, olive',
+      ]);
+    });
+
+    it('names them in Spanish too', async () => {
+      await openDialog({ colors: withColors('vivid'), lang: 'es' });
+
+      expect(text(field('dialog-color').querySelector('legend'))).toBe('Color');
+      expect(colorRadios().map((radio) => radio.getAttribute('aria-label'))).toEqual([
+        'Color 1, púrpura',
+        'Color 2, cian',
+        'Color 3, lima',
+        'Color 4, fucsia',
+        'Color 5, verde',
+        'Color 6, azul',
+        'Color 7, carmesí',
+        'Color 8, naranja',
+      ]);
+    });
+
+    it('also says the name of the color chosen in text', async () => {
+      const context = await openDialog({ colors: withColors('tamiza') });
+      expect(text(field('dialog-color-chosen'))).toBe('Color 1, blue');
+
+      await click(context, colorNamed(3));
+
+      expect(text(field('dialog-color-chosen'))).toBe('Color 3, aqua');
+    });
+
+    it('is a group of native radio inputs under one legend, reachable from the keyboard', async () => {
+      await openDialog();
+
+      expect(field('dialog-color').tagName).toBe('FIELDSET');
+      const radios = colorRadios();
+      expect(radios.every((radio) => radio.tagName === 'INPUT' && radio.type === 'radio')).toBe(true);
+      expect(new Set(radios.map((radio) => radio.name)).size).toBe(1); // one group: the arrow keys move through it with no code of ours
+      expect(radios.every((radio) => !radio.disabled && radio.tabIndex >= 0)).toBe(true);
+      radios[2].focus();
+      expect(document.activeElement).toBe(radios[2]);
+    });
+
+    it('opens a widget saved in a color on that color, and saves it unchanged (Widget form saved unchanged)', async () => {
+      const context = await openDialog({ existing: widget('w1', { config: config({ display: { color: 5 } }) }) });
+      expect(colorChosen()).toEqual([5]);
+
+      expect((await saved(context)).config.display).toEqual({ color: 5 });
+    });
+
+    it('saves what was saved when a color is tried and the widget goes back to color 1', async () => {
+      const context = await openDialog({ existing: widget('w1') });
+      await click(context, colorNamed(3));
+      await click(context, colorNamed(1));
+
+      const body = await saved(context);
+
+      expect(colorChosen()).toEqual([1]);
+      expect(body.config).toEqual(config());
+      expect('display' in body.config).toBe(false);
+    });
+
+    it('keeps color 1 when the widget was saved with it', async () => {
+      const context = await openDialog({ existing: widget('w1', { config: config({ display: { color: 1 } }) }) });
+      await click(context, colorNamed(3));
+      await click(context, colorNamed(1));
+
+      expect((await saved(context)).config.display).toEqual({ color: 1 });
+    });
+
+    it('sends the color of a new widget with it', async () => {
+      const context = await openDialog();
+      await change(context, field('dialog-title'), 'Coverage');
+      await click(context, colorNamed(6));
+
+      const body = await saved(context);
+
+      expect(body.config.display).toEqual({ color: 6 });
+    });
+
+    it('keeps the color while the kind changes, and saves it only for a kind that takes one', async () => {
+      const context = await openDialog();
+      await change(context, field('dialog-title'), 'Coverage');
+      await click(context, colorNamed(3));
+
+      await change(context, field('dialog-chart-type'), 'pie');
+      expect(fields('dialog-color')).toHaveLength(0);
+      await change(context, field('dialog-chart-type'), 'histogram');
+      expect(colorChosen()).toEqual([3]); // still there: the member can change back
+
+      expect((await saved(context)).config.display).toEqual({ color: 3 });
+    });
+
+    it('saves no color for a kind that takes none, nor for a chart with a series', async () => {
+      const context = await openDialog({ columns: twoDimensions });
+      await change(context, field('dialog-title'), 'Coverage');
+      await click(context, colorNamed(3));
+      await change(context, field('dialog-series-by'), 'water_source');
+
+      const body = await saved(context);
+
+      expect(body.config.seriesBy).toBe('water_source');
+      expect('display' in body.config).toBe(false);
+    });
+
+    it('shows next to the group what the server refused about the color, and clears it when another is picked', async () => {
+      const context = await openDialog();
+      await change(context, field('dialog-title'), 'Coverage');
+      await click(context, colorNamed(3));
+      await click(context, field('dialog-save'));
+
+      context.http
+        .expectOne(isCreate)
+        .flush({ title: 'x', errors: { 'config.display.color': ['A column widget has no color of its own.'] } }, { status: 400, statusText: 'Bad Request' });
+      await settle(context.harness);
+
+      expect(text(field('dialog-color').querySelector('[data-testid="field-error"]'))).toBe('A column widget has no color of its own.');
+      expect(field('dialog-color').getAttribute('aria-describedby')).toBe('widgetColor-error');
+      expect(fields('dialog-error')).toHaveLength(0); // it is on the group, not repeated in the alert
+      await click(context, colorNamed(4));
+      expect(field('dialog-color').querySelector('[data-testid="field-error"]')).toBeNull();
+    });
+  });
+
+  describe('the scale', () => {
+    const map = (display?: WidgetConfig['display']) =>
+      widget('w1', { chartType: 'map', config: config({ geometryColumn: 'geometry', ...(display ? { display } : {}) }) });
+
+    it('offers the palette\'s scale first, then the seven scales as their steps, each named in text (Named choices)', async () => {
+      await openDialog({ existing: map(), colors: withColors('earth') });
+
+      expect(text(field('dialog-ramp').querySelector('legend'))).toBe('Scale');
+      expect(rampRadios().map((radio) => radio.dataset['ramp'])).toEqual(['palette', 'blue', 'teal', 'green', 'orange', 'red', 'purple', 'gray']);
+      expect(rampRadios().map(labelText)).toEqual(["Palette's scale Orange", 'Blue', 'Teal', 'Green', 'Orange', 'Red', 'Purple', 'Gray']);
+      const gradients = all(field('dialog-ramp'), 'dialog-ramp-gradient').map((g) => g.style.backgroundImage);
+      expect(gradients[0]).toBe(gradients[4]); // the palette's own scale is orange on Earth
+      expect(gradients[3]).toBe(`linear-gradient(to right, ${[1, 2, 3, 4, 5, 6, 7].map((n) => `var(--tmz-ramp-green-${n})`).join(', ')})`);
+      expect(gradients.every((g) => g.startsWith('linear-gradient'))).toBe(true);
+    });
+
+    it('names them in Spanish too', async () => {
+      await openDialog({ existing: map(), colors: withColors('institutional'), lang: 'es' });
+
+      expect(text(field('dialog-ramp').querySelector('legend'))).toBe('Escala');
+      expect(rampRadios().map(labelText)).toEqual(['Escala de la paleta Verde azulado', 'Azul', 'Verde azulado', 'Verde', 'Naranja', 'Rojo', 'Morado', 'Gris']);
+    });
+
+    it('starts on the palette\'s scale for a widget with none (Palette\'s scale)', async () => {
+      await openDialog({ existing: map(), colors: withColors('vivid') });
+
+      expect(rampChosen()).toEqual(['palette']);
+      expect(previewColors().ramp).toBe('purple');
+    });
+
+    it('redraws the preview on the scale picked without asking again, and saves it (Map on the green scale)', async () => {
+      const context = await openDialog({ existing: map(), colors: withColors('tamiza') });
+      await wait(previewDelayMs + 100);
+      await settle(context.harness);
+      context.http.match(isQuery).forEach((request) => request.flush(result([row('Cali', 75)])));
+      await settle(context.harness);
+      expect(previewColors().rampStyle['--tmz-seq-3']).toBe('var(--tmz-ramp-blue-3)');
+
+      await click(context, rampNamed('green'));
+
+      expect(rampChosen()).toEqual(['green']);
+      expect(previewColors().ramp).toBe('green');
+      expect(previewColors().rampStyle['--tmz-seq-3']).toBe('var(--tmz-ramp-green-3)');
+      expect(previewColors().rampStyle['--tmz-seq-ink-5']).toBe('var(--tmz-ramp-green-ink-5)');
+      await wait(previewDelayMs + 100);
+      await settle(context.harness);
+      expect(context.http.match(isQuery)).toHaveLength(0);
+      expect((await saved(context)).config.display).toEqual({ ramp: 'green' });
+    });
+
+    it('goes back to the palette\'s scale, and then saves no scale at all', async () => {
+      const context = await openDialog({ existing: map({ ramp: 'green' }), colors: withColors('tamiza') });
+      expect(rampChosen()).toEqual(['green']);
+
+      await click(context, rampNamed('palette'));
+      const body = await saved(context);
+
+      expect(rampChosen()).toEqual(['palette']);
+      expect('display' in body.config).toBe(false);
+    });
+
+    it('keeps a scale chosen when the palette\'s own is chosen by name (the widget stays on that scale if the palette changes)', async () => {
+      const context = await openDialog({ existing: map(), colors: withColors('tamiza') });
+
+      await click(context, rampNamed('blue'));
+
+      expect((await saved(context)).config.display).toEqual({ ramp: 'blue' });
+    });
+
+    it('opens a widget saved on a scale on that scale, and saves it unchanged (Widget form saved unchanged)', async () => {
+      const context = await openDialog({ existing: map({ ramp: 'red' }) });
+      expect(rampChosen()).toEqual(['red']);
+
+      expect((await saved(context)).config.display).toEqual({ ramp: 'red' });
+    });
+
+    it('saves a map\'s scale and drops it for a kind that takes none', async () => {
+      const context = await openDialog({ existing: map({ ramp: 'red' }) });
+      await change(context, field('dialog-chart-type'), 'pie');
+
+      expect('display' in (await saved(context)).config).toBe(false);
+    });
+
+    it('is a group of native radio inputs under one legend, reachable from the keyboard', async () => {
+      await openDialog({ existing: map() });
+
+      expect(field('dialog-ramp').tagName).toBe('FIELDSET');
+      const radios = rampRadios();
+      expect(radios).toHaveLength(8);
+      expect(radios.every((radio) => radio.type === 'radio' && !radio.disabled && radio.tabIndex >= 0)).toBe(true);
+      expect(new Set(radios.map((radio) => radio.name)).size).toBe(1);
+    });
+
+    it('shows next to the group what the server refused about the scale', async () => {
+      const context = await openDialog({ existing: map({ ramp: 'green' }) });
+      await click(context, field('dialog-save'));
+
+      context.http
+        .expectOne(isPatch)
+        .flush({ title: 'x', errors: { 'config.display.ramp': ['Choose one of the scales.'] } }, { status: 400, statusText: 'Bad Request' });
+      await settle(context.harness);
+
+      expect(text(field('dialog-ramp').querySelector('[data-testid="field-error"]'))).toBe('Choose one of the scales.');
+      expect(fields('dialog-error')).toHaveLength(0);
     });
   });
 });

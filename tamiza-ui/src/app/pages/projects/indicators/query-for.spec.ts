@@ -1,4 +1,4 @@
-import { LikertStep, WidgetConfig, WidgetSort, WidgetTooltipItem, chartTypes, emptyConfig } from '../../../core/projects/indicators.service';
+import { LikertStep, WidgetConfig, WidgetDisplay, WidgetSort, WidgetTooltipItem, chartTypes, emptyConfig } from '../../../core/projects/indicators.service';
 import { queryFor, savedConfig } from './widget-view';
 
 const byColumn: WidgetSort = { by: 'column', column: 'round', compareAs: 'number', direction: 'asc' };
@@ -196,6 +196,84 @@ describe('queryFor and savedConfig with a series (design D1, D7)', () => {
       const saved = savedConfig(type, full());
       expect(keys.filter((key) => key in saved)).toEqual(kept[type]);
       expect(saved.tooltip).toEqual([]);
+    }
+  });
+});
+
+describe('queryFor and savedConfig with a display (add-dashboard-palettes, design D3)', () => {
+  /** A config with both fields of the widget's display filled in, as a draft that was switched between kinds would hold. */
+  const displayed = (overrides: Partial<WidgetConfig> = {}): WidgetConfig => ({ ...config(null), display: { color: 3, ramp: 'green' }, ...overrides });
+  /** What each kind keeps of the display: a color for bar, column and line with no series and for a histogram, a scale for a map and a heat map. */
+  const kept: Record<(typeof chartTypes)[number], WidgetDisplay | undefined> = {
+    stat: undefined,
+    bar: { color: 3 },
+    column: { color: 3 },
+    line: { color: 3 },
+    histogram: { color: 3 },
+    pie: undefined,
+    map: { ramp: 'green' },
+    heatmap: { ramp: 'green' },
+    pyramid: undefined,
+    likert: undefined,
+    crosstab: undefined,
+  };
+
+  it('leaves the display out of the query of every kind, so choosing a color never queries again', () => {
+    expect(Object.keys(kept)).toEqual([...chartTypes]);
+    for (const type of chartTypes) {
+      const query = queryFor(type, displayed({ seriesBy: type === 'heatmap' ? 'water_source' : undefined }));
+      expect('display' in query).toBe(false);
+      expect(JSON.stringify(query)).toBe(JSON.stringify(queryFor(type, { ...displayed({ seriesBy: type === 'heatmap' ? 'water_source' : undefined }), display: { color: 7, ramp: 'gray' } })));
+      expect(JSON.stringify(query)).toBe(JSON.stringify(queryFor(type, { ...displayed({ seriesBy: type === 'heatmap' ? 'water_source' : undefined }), display: undefined })));
+    }
+  });
+
+  it('keeps, for each of the eleven kinds, exactly the fields of the display that kind takes', () => {
+    for (const type of chartTypes) {
+      const saved = savedConfig(type, displayed());
+      expect(saved.display).toEqual(kept[type]);
+      expect('display' in saved).toBe(kept[type] !== undefined);
+    }
+  });
+
+  it('saves no color for a bar, column or line chart that has a series', () => {
+    for (const type of ['bar', 'column', 'line'] as const) {
+      const saved = savedConfig(type, displayed({ seriesBy: 'water_source' }));
+      expect(saved.seriesBy).toBe('water_source');
+      expect('display' in saved).toBe(false);
+    }
+  });
+
+  it('keeps the color again when the series is cleared', () => {
+    expect(savedConfig('column', displayed({ seriesBy: '' })).display).toEqual({ color: 3 });
+    expect(savedConfig('column', displayed({ seriesBy: null })).display).toEqual({ color: 3 });
+  });
+
+  it('keeps the scale of a heat map, which always has a series', () => {
+    expect(savedConfig('heatmap', displayed({ seriesBy: 'water_source' })).display).toEqual({ ramp: 'green' });
+  });
+
+  it('keeps the color 1 a member chose, which is not the same as no color', () => {
+    expect(savedConfig('column', displayed({ display: { color: 1 } })).display).toEqual({ color: 1 });
+  });
+
+  it('saves no display at all, not an empty one, when there is nothing to keep (a widget saved before palettes)', () => {
+    for (const type of chartTypes) {
+      for (const display of [undefined, null, {}, { color: undefined }]) {
+        const saved = savedConfig(type, { ...config(null), display });
+        expect('display' in saved).toBe(false);
+      }
+    }
+    expect(Object.keys(savedConfig('column', config(null))).sort()).toEqual(Object.keys(emptyConfig()).sort());
+  });
+
+  it('saves the same config as before palettes for a widget saved before them', () => {
+    const before = config(null);
+
+    for (const type of chartTypes) {
+      const withoutDisplay = JSON.stringify(savedConfig(type, before));
+      expect(withoutDisplay).toBe(JSON.stringify(savedConfig(type, { ...before, display: undefined })));
+      expect(withoutDisplay).not.toContain('display');
     }
   });
 });

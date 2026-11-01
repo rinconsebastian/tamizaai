@@ -2,7 +2,7 @@ import en from '../../../../../public/i18n/en.json';
 import es from '../../../../../public/i18n/es.json';
 import { pressKey } from '../../../../testing/cdk';
 import { byTestId, settle } from '../../../../testing/project-harness';
-import { ChartType, IndicatorEntry, LikertStep, QueryResult, WidgetConfig, chartTypes } from '../../../core/projects/indicators.service';
+import { ChartType, DashboardColors, IndicatorEntry, LikertStep, PaletteId, QueryResult, ValueColor, WidgetConfig, chartTypes } from '../../../core/projects/indicators.service';
 import { Context, all, cell, clearOverlay, config, indicator, isQuery, open, overlay, result, seriesResult, text, widget } from './indicators-testing';
 import { valueFormatter } from './format';
 import { armSteps, scaleColors } from './likert-chart';
@@ -17,8 +17,8 @@ interface Query {
   chartType: ChartType;
 }
 
-async function show(chartType: ChartType, settings: Partial<WidgetConfig>, answer: QueryResult, indicators?: IndicatorEntry[]) {
-  const context = await open('viewer', [widget('w1', { chartType, config: config(settings) })], null, indicators ? { indicators } : {});
+async function show(chartType: ChartType, settings: Partial<WidgetConfig>, answer: QueryResult, indicators?: IndicatorEntry[], colors?: DashboardColors) {
+  const context = await open('viewer', [widget('w1', { chartType, config: config(settings) })], null, indicators ? { indicators } : {}, colors ? { colors } : {});
   const requests = context.http.match(isQuery);
   expect(requests).toHaveLength(1);
   requests[0].flush(answer);
@@ -46,6 +46,17 @@ async function toggle(context: Context) {
   byTestId(context.root, 'widget-table-toggle')!.click();
   await settle(context.harness);
 }
+
+/** The color token a mark is drawn in: the `var(--tmz-…)` of its style, whichever property holds it (fill, stroke, background). */
+const colorOf = (element: Element | null) => /var\(--[\w-]+\)/.exec(element?.getAttribute('style') ?? '')?.[0] ?? null;
+/** The colors of a dashboard: a palette and the values it keeps a color for. */
+const palette = (name: PaletteId, valueColors: ValueColor[] = []): DashboardColors => ({ palette: name, valueColors });
+const pal = (name: PaletteId, n: number) => `var(--tmz-pal-${name}-${n})`;
+/** The step `--tmz-seq-n` and its label color that a map or a heat map sets on its own element, by the scale they are set to. */
+const rampSet = (element: Element | null, step: number) => {
+  const style = (element as HTMLElement | null)?.style;
+  return { step: style?.getPropertyValue(`--tmz-seq-${step}`), ink: style?.getPropertyValue(`--tmz-seq-ink-${step}`) };
+};
 
 const households = indicator('households_visited');
 const sources = { indicator: 'households_visited', groupBy: 'municipality', seriesBy: 'water_source' } as const;
@@ -166,6 +177,45 @@ describe('heat map', () => {
     expect(tableHeaders(context)).toHaveLength(32); // the group, 30 series and the total
   }, 20000);
 
+  describe('scale (add-dashboard-palettes)', () => {
+    const host = (context: Context) => context.root.querySelector('app-heatmap-chart');
+
+    it('uses the default scale of its dashboard\'s palette when it names none (Palette\'s scale)', async () => {
+      const context = await show('heatmap', sources, grid(), [households], palette('earth'));
+
+      for (const step of [1, 4, 7]) {
+        expect(rampSet(host(context), step)).toEqual({ step: `var(--tmz-ramp-orange-${step})`, ink: `var(--tmz-ramp-orange-ink-${step})` });
+      }
+    });
+
+    it('uses the blue scale on the palette Tamiza, as it always did', async () => {
+      const context = await show('heatmap', sources, grid(), [households]);
+
+      expect(rampSet(host(context), 3)).toEqual({ step: 'var(--tmz-ramp-blue-3)', ink: 'var(--tmz-ramp-blue-ink-3)' });
+    });
+
+    it('uses the scale the widget chooses, whatever its palette\'s (Heat map on the green scale)', async () => {
+      const context = await show('heatmap', { ...sources, display: { ramp: 'green' } }, grid(), [households], palette('vivid'));
+
+      expect(rampSet(host(context), 5)).toEqual({ step: 'var(--tmz-ramp-green-5)', ink: 'var(--tmz-ramp-green-ink-5)' });
+    });
+
+    it('sets the scale on the widget, so its cells, their labels and its legend swatches read it by inheritance', async () => {
+      const context = await show('heatmap', { ...sources, display: { ramp: 'red' } }, grid(), [households]);
+
+      const legendOf = byTestId(context.root, 'heatmap-legend')!;
+      expect(host(context)!.contains(legendOf)).toBe(true);
+      expect(Array.from(legendOf.querySelectorAll('[style*="--tmz-seq-"]')).map(colorOf)).toEqual([1, 2, 3, 4, 5, 6, 7].map((n) => `var(--tmz-seq-${n})`));
+      expect(marks(context).filter((m) => !m.hasAttribute('data-empty')).every((m) => host(context)!.contains(m))).toBe(true);
+    });
+
+    it('sends the same query whatever the scale', async () => {
+      const context = await show('heatmap', { ...sources, display: { ramp: 'green' } }, grid(), [households]);
+
+      expect(context.query.config).not.toHaveProperty('display');
+    });
+  });
+
   it('draws a cell with no value empty, hatched and outlined, and says so in its tooltip (Empty cell)', async () => {
     const context = await show('heatmap', sources, grid(), [households]);
 
@@ -275,18 +325,41 @@ describe('population pyramid', () => {
     expect(context.query.chartType).toBe('pyramid');
   });
 
-  it('colors the left in series color 1 and the right in color 2, and names them in a legend', async () => {
+  it('colors the left in the first color of the palette and the right in the second when none is kept, and names them in a legend', async () => {
     const context = await show('pyramid', population, rows(), [households]);
 
     expect(legend(context)).toEqual(['Female', 'Male']);
-    expect(marks(context).map((m) => m.getAttribute('style'))).toEqual([
-      expect.stringContaining('var(--tmz-series-1)'),
-      expect.stringContaining('var(--tmz-series-2)'),
-      expect.stringContaining('var(--tmz-series-1)'),
-      expect.stringContaining('var(--tmz-series-2)'),
-      expect.stringContaining('var(--tmz-series-1)'),
-      expect.stringContaining('var(--tmz-series-2)'),
+    expect(marks(context).map(colorOf)).toEqual([pal('tamiza', 1), pal('tamiza', 2), pal('tamiza', 1), pal('tamiza', 2), pal('tamiza', 1), pal('tamiza', 2)]);
+    expect(all(context.root, 'legend-swatch').map(colorOf)).toEqual([pal('tamiza', 1), pal('tamiza', 2)]);
+  });
+
+  it('colors each side by the color its dashboard keeps for its value, in its bars and in its legend (Pyramid sides)', async () => {
+    const kept = palette('tamiza', [
+      { column: 'sex', value: 'Female', color: 5 },
+      { column: 'sex', value: 'Male', color: 1 },
     ]);
+    const context = await show('pyramid', population, rows(), [households], kept);
+
+    // The marks run from the top row down, the left bar before the right one.
+    expect(marks(context).map(colorOf)).toEqual([pal('tamiza', 5), pal('tamiza', 1), pal('tamiza', 5), pal('tamiza', 1), pal('tamiza', 5), pal('tamiza', 1)]);
+    expect(all(context.root, 'legend-swatch').map(colorOf)).toEqual([pal('tamiza', 5), pal('tamiza', 1)]);
+  });
+
+  it('keeps the sides in two colors when only the right one is kept, setting that color aside for the left', async () => {
+    const kept = palette('earth', [{ column: 'sex', value: 'Male', color: 1 }]);
+    const context = await show('pyramid', population, rows(), [households], kept);
+
+    expect(all(context.root, 'legend-swatch').map(colorOf)).toEqual([pal('earth', 2), pal('earth', 1)]);
+    expect(marks(context).slice(0, 2).map(colorOf)).toEqual([pal('earth', 2), pal('earth', 1)]);
+  });
+
+  it('gives a tooltip line the color of its bar', async () => {
+    const kept = palette('vivid', [{ column: 'sex', value: 'Female', color: 6 }]);
+    const context = await show('pyramid', population, rows(), [households], kept);
+
+    await hover(context, hits(context)[0]);
+    expect(colorOf(overlay().querySelector('[data-testid="tooltip-key"]'))).toBe(colorOf(marks(context)[0]));
+    expect(colorOf(marks(context)[0])).toBe(pal('vivid', 6));
   });
 
   it('labels the axis on both sides without signs', async () => {
@@ -525,6 +598,19 @@ describe('diverging Likert bars', () => {
     pressKey(chart, 'ArrowDown');
     await settle(context.harness);
     expect(spoken(context)).toContain('Buga. Agree: 50%');
+  });
+
+  it('keeps its negative, neutral and positive colors on every palette and whatever the dashboard keeps by value (Likert unchanged)', async () => {
+    const kept = palette('earth', [
+      { column: 'opinion', value: 'Disagree', color: 8 },
+      { column: 'municipality', value: 'Armenia', color: 3 },
+    ]);
+    const context = await show('likert', likert, answer(), [households], kept);
+
+    const expected = scaleColors(['negative', 'negative', 'neutral', 'positive', 'positive']);
+    expect(marks(context).slice(0, 5).map(colorOf)).toEqual(expected);
+    expect(all(context.root, 'legend-swatch').map(colorOf)).toEqual(expected);
+    expect(expected.every((color) => color.startsWith('var(--tmz-div-'))).toBe(true);
   });
 
   it('leaves out the values outside the scale and says how many rows it left out (Value outside the scale)', async () => {

@@ -3,7 +3,8 @@ import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { observeSize } from './chart-data';
-import { bandScale, charWidth, linearScale, niceAxis, seriesColor, truncate } from './chart-scales';
+import { ChartColors } from './chart-colors';
+import { bandScale, charWidth, linearScale, niceAxis, truncate } from './chart-scales';
 import { CrosstabWidget } from './crosstab-widget';
 import { ValueFormatter, plotted } from './format';
 import { MarkPoint, markTooltips } from './mark-tooltips';
@@ -134,9 +135,10 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
 
 /**
  * A population pyramid (design D5): the groups (age bands) as rows in natural order, the first at the bottom, with the bars of one
- * series value to the left of a central axis and another to the right, on one scale, labelled without signs. The left side is in
- * series color 1 and the right in color 2; the legend names them. Rows of any other series value are left out and counted, and the
- * widget says how many (see `SeriesNotes`). Values read as the indicator formats them.
+ * series value to the left of a central axis and another to the right, on one scale, labelled without signs. Each side has the color
+ * of its value (add-dashboard-palettes, design D7): the one kept for it on the dashboard, else the palette's next free color, so the
+ * two sides never share one; the legend names them. Rows of any other series value are left out and counted, and the widget says how
+ * many (see `SeriesNotes`). Values read as the indicator formats them.
  */
 @Component({
   selector: 'app-pyramid-chart',
@@ -228,6 +230,8 @@ export class PyramidChart {
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
   readonly asTable = input(false);
+  /** The colors of the widget, from the dashboard's palette and its colors kept by value. */
+  readonly colors = input.required<ChartColors>();
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private readonly svg = viewChild<ElementRef<SVGElement>>('chartSvg');
@@ -255,9 +259,16 @@ export class PyramidChart {
     const [a, b] = this.sides();
     return [columns[a] ? seriesName(columns[a], this.tr) : '', columns[b] ? seriesName(columns[b], this.tr) : ''];
   });
-  /** The left side is series color 1 and the right is color 2. */
-  private readonly colors: readonly [string, string] = [seriesColor(0), seriesColor(1)];
-  protected readonly legend = computed<LegendEntry[]>(() => this.names().map((name, i) => ({ name, color: this.colors[i] })));
+  /** Each side's color, by the value it shows (the sides are `forValues` of the series column in the order left, right). */
+  private readonly sideColors = computed<readonly [string, string]>(() => {
+    const columns = this.table().columns;
+    const [left, right] = this.colors().forValues(
+      this.config().seriesBy ?? '',
+      this.sides().map((at) => ({ value: columns[at]?.series ?? null, kind: columns[at]?.kind ?? 'value' })),
+    );
+    return [left, right];
+  });
+  protected readonly legend = computed<LegendEntry[]>(() => this.names().map((name, i) => ({ name, color: this.sideColors()[i] })));
 
   protected readonly plot = computed(() =>
     pyramidPlot({
@@ -266,7 +277,7 @@ export class PyramidChart {
       width: Math.max(160, this.size().width),
       height: Math.max(120, this.size().height),
       names: this.names(),
-      colors: this.colors,
+      colors: this.sideColors(),
       groupLabel: (group) => group ?? this.tr('indicators.chart.noGroup'),
       value: this.format(),
     }),

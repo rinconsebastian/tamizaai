@@ -150,6 +150,48 @@ export type BasemapKind = 'streets' | 'satellite';
 
 export const basemapKinds: readonly BasemapKind[] = ['streets', 'satellite'];
 
+// Mirrors Tamiza.Api/Indicators/Palettes.cs (add-dashboard-palettes, design D2, D3): a dashboard has one palette of eight categorical
+// colors, a widget names its color by its place in it (1 to 8) and a map or a heat map names a sequential scale. Neither is a color code:
+// the colors themselves are the CSS custom properties of styles.css, which `chart-colors.ts` names.
+
+/** The palettes a dashboard offers, `tamiza` being today's colors and the default (`Palettes.All`). */
+export type PaletteId = 'tamiza' | 'institutional' | 'earth' | 'vivid';
+
+export const paletteIds: readonly PaletteId[] = ['tamiza', 'institutional', 'earth', 'vivid'];
+
+/** The sequential scales a map or a heat map can be drawn on (`Palettes.Scales`). */
+export type ScaleId = 'blue' | 'teal' | 'green' | 'orange' | 'red' | 'purple' | 'gray';
+
+export const scaleIds: readonly ScaleId[] = ['blue', 'teal', 'green', 'orange', 'red', 'purple', 'gray'];
+
+/** The categorical colors of a palette, numbered 1 to `paletteSize`; a color kept by value or a widget's color is one of these numbers. */
+export const paletteSize = 8;
+/** The most colors kept by value a dashboard holds (`Palettes.MaxValueColors`). */
+export const maxValueColors = 64;
+
+/** A color kept for a value of a column: wherever that column decides a color on the dashboard, the value has color `color` (1 to 8). */
+export interface ValueColor {
+  column: string;
+  value: string;
+  color: number;
+}
+
+/** What a dashboard colors its widgets with: its palette, and the colors kept by value, in the order they were saved. */
+export interface DashboardColors {
+  palette: PaletteId;
+  valueColors: ValueColor[];
+}
+
+/**
+ * A widget's own color setting (design D3), kept apart from its query so that changing it never queries again. `color` is the place in
+ * the dashboard's palette (1 to 8; 1 when unset) of a bar, column or line chart with no series and of a histogram; `ramp` the
+ * sequential scale of a map or a heat map (the palette's own scale when unset). A key with no value is left out.
+ */
+export interface WidgetDisplay {
+  color?: number;
+  ramp?: ScaleId;
+}
+
 /** A widget's query. At most one of `measure` and `ratio` is set; with neither, the table's default measure is plotted. */
 export interface WidgetConfig {
   indicator: string;
@@ -179,6 +221,12 @@ export interface WidgetConfig {
   scale?: LikertStep[];
   /** Maps only; null draws none. Saved with the widget, never part of the query. */
   basemap: BasemapKind | null;
+  /**
+   * The widget's color and sequential scale (add-dashboard-palettes, design D3). Saved with the widget for the kinds that take them,
+   * never part of the query: the page leaves it out of what it sends, so a color change never queries. (A config from an API that
+   * predates palettes has none.)
+   */
+  display?: WidgetDisplay | null;
   /**
    * The columns of the dashboard filters the widget ignores, kept by column on any dashboard. Saved with the widget, never part of the
    * query: the page leaves those filters out of what it sends. (A config from an API that predates it has none.)
@@ -216,8 +264,11 @@ export interface IndicatorsOverview {
   limits: { maxWidgets: number; maxQueryRows: number; maxDashboards: number };
 }
 
-/** One of the project's dashboards with its filters, in order, and its widgets, ordered top to bottom then left to right. */
-export interface Dashboard extends DashboardEntry {
+/**
+ * One of the project's dashboards with its filters, in order, its colors (absent from an API that predates palettes, add-dashboard-palettes
+ * design D5: read as `tamiza` and none) and its widgets, ordered top to bottom then left to right.
+ */
+export interface Dashboard extends DashboardEntry, Partial<DashboardColors> {
   filters: DashboardFilter[];
   widgets: Widget[];
   /** The number of its newest version, null while it has none (add-dashboard-versions, design D9). */
@@ -238,6 +289,7 @@ export type DashboardChangeKind =
   | 'duplicated'
   | 'renamed'
   | 'filtersChanged'
+  | 'colorsChanged'
   | 'widgetAdded'
   | 'widgetChanged'
   | 'widgetRemoved'
@@ -253,6 +305,7 @@ export const dashboardChangeKinds: readonly DashboardChangeKind[] = [
   'duplicated',
   'renamed',
   'filtersChanged',
+  'colorsChanged',
   'widgetAdded',
   'widgetChanged',
   'widgetRemoved',
@@ -317,8 +370,11 @@ export interface VersionWidget {
   layout: Layout;
 }
 
-/** A kept version with what it holds: its name, its filters as a dashboard returns them and its widgets in reading order. */
-export interface DashboardVersionDetails extends Omit<DashboardVersionSummary, 'widgetCount' | 'filterCount'> {
+/**
+ * A kept version with what it holds: its name, its filters as a dashboard returns them, its colors (absent from an API that predates
+ * palettes: `tamiza` and none) and its widgets in reading order.
+ */
+export interface DashboardVersionDetails extends Omit<DashboardVersionSummary, 'widgetCount' | 'filterCount'>, Partial<DashboardColors> {
   filters: DashboardFilter[];
   widgets: VersionWidget[];
 }
@@ -406,6 +462,12 @@ export interface QueryResult {
   tooltipTypes?: DataColumnType[];
   /** A widget with a series only (design D12): the series in display order, the totals, and for a pyramid or a Likert widget the rows left out. */
   series?: QuerySeries[];
+  /**
+   * A pie only (add-dashboard-palettes, design D8): the group values of the widget's own rows, not the dashboard filters', largest total
+   * first, then `none`, then `other` when some were folded. It decides each slice's color and which slices fold into "Other". Absent from
+   * an API that predates it.
+   */
+  domain?: QuerySeries[];
   totals?: QueryTotals;
   leftOut?: number;
   /**
@@ -552,6 +614,14 @@ export class IndicatorsService {
     return this.http
       .put<{ filters: DashboardFilter[] }>(`${this.dashboardUrl(projectId, dashboardId)}/filters`, { filters })
       .pipe(map((answer) => answer.filters));
+  }
+
+  /**
+   * Replaces the dashboard's palette and colors kept by value, the whole list, and answers them as saved (add-dashboard-palettes,
+   * design D5). Saving what is stored changes nothing and makes no version.
+   */
+  saveColors(projectId: string, dashboardId: string, colors: DashboardColors): Observable<DashboardColors> {
+    return this.http.put<DashboardColors>(`${this.dashboardUrl(projectId, dashboardId)}/colors`, { palette: colors.palette, valueColors: colors.valueColors });
   }
 
   /**

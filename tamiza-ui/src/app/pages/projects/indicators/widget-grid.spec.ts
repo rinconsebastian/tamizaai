@@ -2,10 +2,10 @@ import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { vi } from 'vitest';
 import { configureApp, projectId, settle } from '../../../../testing/project-harness';
-import { DashboardFilter } from '../../../core/projects/indicators.service';
+import { DashboardFilter, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartTooltips } from '../../../shared/ui';
 import { encodeFilters } from '../data-view';
-import { Context, all, answerLoad, answerQueries, clearOverlay, config, flushLayout, isLayout, isQuery, layoutUrlOf, layoutsOf, open, paperOn, result, row, text, wait, widget } from './indicators-testing';
+import { Context, all, answerLoad, answerQueries, clearOverlay, colorsOfWidgets, config, flushLayout, isLayout, isQuery, layoutUrlOf, layoutsOf, open, paperOn, result, row, text, wait, widget } from './indicators-testing';
 import { layoutSaveDelayMs } from '../project-indicators';
 import { WidgetGrid } from './widget-grid';
 
@@ -446,5 +446,52 @@ describe('the widget grid on paper (dashboard printing)', () => {
     await fixture.whenStable();
 
     expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="widget-grid"]')!.classList).not.toContain('tmz-paper');
+  });
+});
+
+// The colors of the dashboard shown reach every widget (add-dashboard-palettes, design D7): the charts do not read them yet, so
+// these check what each widget resolves.
+describe('the colors of the dashboard shown', () => {
+  afterEach(clearOverlay);
+
+  const water = (id: string, display?: WidgetConfig['display']) => widget(id, { config: config({ display }) });
+
+  it('draws a widget of a dashboard with the palette Earth in the first color of Earth, and on its scale (Palette changed)', async () => {
+    const context = await open('viewer', [left], rows, {}, { colors: { palette: 'earth', valueColors: [] } });
+
+    const [colors] = colorsOfWidgets(context);
+    expect(colors.accent).toBe('var(--tmz-pal-earth-1)');
+    expect(colors.ramp).toBe('orange');
+  });
+
+  it('draws a widget in the color of its own place in the palette (Column chart in color 3)', async () => {
+    const context = await open('viewer', [water('w1', { color: 3 }), water('w2')], rows, {}, { colors: { palette: 'vivid', valueColors: [] } });
+
+    expect(colorsOfWidgets(context).map((colors) => colors.accent)).toEqual(['var(--tmz-pal-vivid-3)', 'var(--tmz-pal-vivid-1)']);
+  });
+
+  it('gives every widget the colors kept by value of the dashboard', async () => {
+    const colors = { palette: 'tamiza' as const, valueColors: [{ column: 'sex', value: 'Female', color: 5 }] };
+    const context = await open('viewer', [left, right], rows, {}, { colors });
+
+    for (const widgetColors of colorsOfWidgets(context)) {
+      expect(widgetColors.forValues('sex', [{ value: 'Male', kind: 'value' }, { value: 'Female', kind: 'value' }])).toEqual(['var(--tmz-pal-tamiza-1)', 'var(--tmz-pal-tamiza-5)']);
+    }
+  });
+
+  it('draws a dashboard saved before palettes in the colors it has today (Dashboard saved before palettes)', async () => {
+    const context = await open('viewer', [left], rows);
+
+    const [colors] = colorsOfWidgets(context);
+    expect(colors.accent).toBe('var(--tmz-pal-tamiza-1)');
+    expect(colors.ramp).toBe('blue');
+    expect(colors.kept('municipality', 'Cali')).toBeNull();
+  });
+
+  it('sends no query for a color: the widget\'s query leaves its display out (Widget saved before colors)', async () => {
+    const context = await open('viewer', [water('w1', { color: 3 })], null, {}, { colors: { palette: 'earth', valueColors: [] } });
+
+    const [request] = context.http.match(isQuery);
+    expect(request.request.body.config).not.toHaveProperty('display');
   });
 });

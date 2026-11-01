@@ -3,11 +3,12 @@ import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { QueryResult, QueryRow, WidgetConfig, defaultBuckets } from '../../../core/projects/indicators.service';
 
 import { histogram, observeSize, pivot } from './chart-data';
-import { bandScale, charWidth, compactNumber, linePath, linearScale, niceAxis, seriesColor, truncate, Point } from './chart-scales';
+import { bandScale, charWidth, compactNumber, linePath, linearScale, niceAxis, truncate, Point } from './chart-scales';
+import { ChartColors } from './chart-colors';
 import { CrosstabWidget } from './crosstab-widget';
 import { ValueFormatter, plotted } from './format';
 import { MarkGrid, markTooltips } from './mark-tooltips';
-import { LegendEntry, SeriesLegend, SeriesNotes, seriesFill, seriesName } from './series-legend';
+import { LegendEntry, SeriesLegend, SeriesNotes, seriesName } from './series-legend';
 import { Dot, Hit, Label, Line, Path, Rect, SeriesPlot, seriesPlot } from './series-plot';
 import { SeriesTable, buildSeriesTable, isSeriesAnswer } from './series-table';
 import { TableModel, WidgetTable } from './widget-table';
@@ -30,6 +31,9 @@ const noMarks: MarkGrid = [];
  * A bar, column or line widget with a series (design D5) is drawn grouped, stacked or stacked to 100%, or as one line per series,
  * under a legend of its series; each mark has a tooltip on hover and on the keyboard, and the chart is one Tab stop
  * (`role="application"`, as the map). "Show as table" is then its cross table.
+ *
+ * Its colors are never chosen here (add-dashboard-palettes, design D7): a series takes the color `colors` gives its value, a chart
+ * with no series draws in the widget's own color, and a bar or column with a color kept for its group value in that one.
  */
 @Component({
   selector: 'app-axis-chart',
@@ -155,6 +159,8 @@ export class AxisChart {
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
   readonly asTable = input(false);
+  /** The colors of the widget, from the dashboard's palette and the widget's own color. */
+  readonly colors = input.required<ChartColors>();
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private readonly svg = viewChild<ElementRef<SVGElement>>('chartSvg');
@@ -165,11 +171,21 @@ export class AxisChart {
     const kind = this.kind();
     return kind !== 'histogram' && isSeriesAnswer(this.answer()) ? buildSeriesTable(this.answer()!, kind, this.config().layout) : null;
   });
-  /** The series in their order with the names and colors the legend, the tooltips and the marks share (the color is the series' place). */
+  /**
+   * The series in their order with the names and colors the legend, the tooltips and the marks share. The color follows the series'
+   * value (a color kept for it, else the next free color of the palette), and "Other" is the neutral.
+   */
   protected readonly legend = computed<LegendEntry[]>(() => {
     const table = this.seriesTable();
+    if (!table) {
+      return [];
+    }
     const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
-    return table ? table.columns.map((column, i) => ({ name: seriesName(column, t), color: seriesFill(column.kind, i) })) : [];
+    const colors = this.colors().forValues(
+      this.config().seriesBy ?? '',
+      table.columns.map((column) => ({ value: column.series, kind: column.kind })),
+    );
+    return table.columns.map((column, i) => ({ name: seriesName(column, t), color: colors[i] }));
   });
   private readonly seriesMarks = computed<SeriesPlot | null>(() => {
     const table = this.seriesTable();
@@ -214,6 +230,8 @@ export class AxisChart {
         ranges: true,
         categories: buckets.map((b) => `${format.plain(b.from)}–${format.plain(b.to)}`),
         values: buckets.map((b) => b.count),
+        // A range is no group value, so no color kept by value can match it.
+        groups: buckets.map(() => null),
       };
     }
     const empty = this.transloco.translate('indicators.chart.noGroup');
@@ -228,7 +246,7 @@ export class AxisChart {
 
   private readonly plain = computed(() => {
     const kind = this.kind();
-    const { categories, values, ranges } = this.data();
+    const { categories, values, groups, ranges } = this.data();
     const format = this.format();
     const tickText = (value: number) => (ranges ? this.compact(value) : format.tick(value));
     const valueText = (value: number) => (ranges ? this.transloco.translate(isSingular(value, this.transloco.getActiveLang()) ? 'indicators.chart.rowCountOne' : 'indicators.chart.rowCount', { count: this.whole.format(value) }) : format(value));
@@ -244,7 +262,12 @@ export class AxisChart {
     const rects: Rect[] = [];
     const lines: Path[] = [];
     const dots: Dot[] = [];
-    const color = seriesColor(0);
+    // The widget's own color; a bar or a column whose group value has a color kept for it is drawn in that one (spec "One bar
+    // highlighted"). A line and a histogram always use the widget's color.
+    const colors = this.colors();
+    const color = colors.accent;
+    const groupBy = this.config().groupBy ?? '';
+    const markColor = (i: number) => (kind === 'bar' || kind === 'column' ? (colors.kept(groupBy, groups[i]) ?? color) : color);
     const titleOf = (category: string, value: number) => `${category}: ${valueText(value)}`;
     const top = 8;
     const right = 14;
@@ -273,7 +296,7 @@ export class AxisChart {
           y: bands.start(i) + (bands.bandwidth - thickness) / 2,
           width: Math.max(1, Math.abs(end - zero)),
           height: thickness,
-          color,
+          color: markColor(i),
           title: titleOf(category, values[i]),
         });
       });
@@ -318,7 +341,7 @@ export class AxisChart {
         y: Math.min(zero, end),
         width: thickness,
         height: Math.max(1, Math.abs(end - zero)),
-        color,
+        color: markColor(i),
         title: titleOf(category, values[i]),
       });
     });

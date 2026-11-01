@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { IndicatorsService, WidgetConfig, chartTypes, emptyConfig, hasSeries, needsGroup, needsSeries, takesSeries } from './indicators.service';
+import { DashboardColors, IndicatorsService, WidgetConfig, chartTypes, dashboardChangeKinds, emptyConfig, hasSeries, needsGroup, needsSeries, paletteIds, scaleIds, takesSeries } from './indicators.service';
 
 const base = '/api/v1/projects/p1/indicators';
 const dashboards = '/api/v1/projects/p1/dashboards';
@@ -66,6 +66,25 @@ describe('IndicatorsService', () => {
     expect(request.request.body).toEqual({ filters });
     request.flush({ filters: [{ ...filters[0], label: 'Municipality' }] });
     expect(saved).toEqual(filters);
+  });
+
+  it('replaces a dashboard\'s palette and colors kept by value with a put to its colors, and answers them as saved', () => {
+    const colors: DashboardColors = { palette: 'earth', valueColors: [{ column: 'sex', value: 'Female', color: 5 }] };
+    let saved: unknown;
+    service.saveColors('p1', 'd2', colors).subscribe((answer) => (saved = answer));
+
+    const request = http.expectOne(`${dashboards}/d2/colors`);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.body).toEqual(colors);
+    request.flush(colors);
+    expect(saved).toEqual(colors);
+  });
+
+  it('sends the palette and the colors kept by value of a colors save, and nothing else the object it was given holds', () => {
+    const dashboard = { id: 'd2', name: 'Housing', palette: 'vivid' as const, valueColors: [], filters: [], widgets: [], version: 3 };
+    service.saveColors('p1', 'd2', dashboard).subscribe();
+
+    expect(http.expectOne(`${dashboards}/d2/colors`).request.body).toEqual({ palette: 'vivid', valueColors: [] });
   });
 
   it('reads the values a dashboard\'s text filter offers, with the search only when there is one', () => {
@@ -317,5 +336,15 @@ describe('IndicatorsService', () => {
 
   it('lists the eleven chart types the API knows, in its order', () => {
     expect(chartTypes).toEqual(['stat', 'bar', 'column', 'line', 'histogram', 'pie', 'map', 'heatmap', 'pyramid', 'likert', 'crosstab']);
+  });
+
+  it('lists the four palettes and the seven sequential scales the API knows, in its order', () => {
+    expect(paletteIds).toEqual(['tamiza', 'institutional', 'earth', 'vivid']);
+    expect(scaleIds).toEqual(['blue', 'teal', 'green', 'orange', 'red', 'purple', 'gray']);
+  });
+
+  it('names the change that saves a dashboard\'s colors among the kinds of change a version records', () => {
+    expect(dashboardChangeKinds).toContain('colorsChanged');
+    expect(new Set(dashboardChangeKinds).size).toBe(dashboardChangeKinds.length);
   });
 });

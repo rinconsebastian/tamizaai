@@ -18,6 +18,7 @@ import {
   answerQueries,
   catalog,
   clearOverlay,
+  colorsOfWidgets,
   config,
   dashboard,
   dashboardUrlOf,
@@ -104,6 +105,26 @@ describe('ProjectIndicators', () => {
 
       expect(titles(context.root)).toEqual(['Field progress']);
       expect(text(byTestId(context.root, 'dashboard-heading'))).toBe('Field');
+    });
+
+    it('draws each dashboard in its own palette, and Tamiza while its colors are not read (Palette chosen)', async () => {
+      const context = await open('viewer', two, answer, {}, { dashboards: indicatorsAndField, colors: { palette: 'earth', valueColors: [] } });
+      expect(colorsOfWidgets(context).map((colors) => colors.accent)).toEqual(['var(--tmz-pal-earth-1)', 'var(--tmz-pal-earth-1)']);
+
+      await go(context, 'd2');
+      await answerLoad(context, [fieldWidget], {}, 'd2', [], { palette: 'vivid', valueColors: [{ column: 'sex', value: 'Female', color: 5 }] });
+      await answerQueries(context, answer);
+
+      const [colors] = colorsOfWidgets(context);
+      expect(colorsOfWidgets(context)).toHaveLength(1);
+      expect(colors.accent).toBe('var(--tmz-pal-vivid-1)');
+      expect(colors.forValues('sex', [{ value: 'Female', kind: 'value' }])).toEqual(['var(--tmz-pal-vivid-5)']);
+
+      // A dashboard that sends neither field (an API that predates palettes) is not drawn in the colors of the one left.
+      await go(context, 'd1');
+      await answerLoad(context, two, {}, 'd1');
+      await answerQueries(context, answer);
+      expect(colorsOfWidgets(context).map((widgetColors) => widgetColors.accent)).toEqual(['var(--tmz-pal-tamiza-1)', 'var(--tmz-pal-tamiza-1)']);
     });
 
     it('drops the answer for a dashboard left before it came', async () => {
@@ -2497,6 +2518,236 @@ describe('ProjectIndicators editing a dashboard\'s filters (dashboard filters, d
   });
 });
 
+describe('ProjectIndicators dashboard colors (add-dashboard-palettes, design D9)', () => {
+  beforeEach(() => downloader.start.mockClear());
+  afterEach(clearOverlay);
+
+  const colorsUrl = `${dashboardUrlOf('d1')}/colors`;
+  const projectUrl = `/api/v1/projects/${projectId}`;
+  const item = (testId: string) => document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  const form = () => document.querySelector<HTMLElement>('[data-testid="dashboard-colors-dialog"]');
+  const menuItems = () => Array.from(document.querySelectorAll<HTMLElement>('[cdkmenuitem]')).map((i) => i.dataset['testid']);
+  const toasts = () => TestBed.inject(ToastService).toasts().map((t) => t.message);
+  const palettes = () => Array.from(form()!.querySelectorAll<HTMLInputElement>('[data-testid="dashboard-colors-palette"]'));
+  const accents = (context: Context) => colorsOfWidgets(context).map((c) => c.accent);
+
+  /** Opens the dashboard's actions with a click; returns its trigger. */
+  async function openMenu(context: Context): Promise<HTMLElement> {
+    const trigger = byTestId(context.root, 'dashboard-menu')!;
+    trigger.click();
+    await settle(context.harness);
+    return trigger;
+  }
+
+  /** Opens the dashboard's actions from the keyboard, chooses Colors, and answers the columns the form reads. */
+  async function openColors(context: Context): Promise<HTMLElement> {
+    const trigger = byTestId(context.root, 'dashboard-menu')!;
+    trigger.focus();
+    pressKey(trigger, 'ArrowDown');
+    await settle(context.harness);
+    // Rename, Duplicate, Move left, Move right, Filters, Colors.
+    for (let i = 0; i < 5; i++) {
+      pressKey(document.activeElement!, 'ArrowDown');
+    }
+    expect(document.activeElement).toBe(item('dashboard-colors'));
+    pressKey(document.activeElement!, 'Enter');
+    await settle(context.harness);
+    context.http.match(isColumns).forEach((r) => r.flush(catalog()));
+    await settle(context.harness);
+    return trigger;
+  }
+
+  /** Clicks, and lets the page draw. */
+  async function click(context: Context, element: HTMLElement): Promise<void> {
+    element.click();
+    await settle(context.harness);
+  }
+
+  it.each<ProjectRole>(['analyst', 'admin'])('offers Colors right after Filters to an %s (Colors action)', async (role) => {
+    const context = await open(role, two, answer, {}, { dashboards: indicatorsAndField });
+
+    await openMenu(context);
+
+    expect(menuItems()).toEqual([
+      'dashboard-rename',
+      'dashboard-duplicate',
+      'dashboard-move-left',
+      'dashboard-move-right',
+      'dashboard-filters',
+      'dashboard-colors',
+      'dashboard-versions',
+      'dashboard-remove',
+    ]);
+    expect(text(item('dashboard-colors'))).toBe('Colors');
+    // Nothing is read until it is chosen.
+    context.http.expectNone(isColumns);
+    context.http.expectNone(colorsUrl);
+  });
+
+  it('names the action in Spanish', async () => {
+    const context = await open('analyst', two, answer, {}, { lang: 'es' });
+
+    await openMenu(context);
+
+    expect(text(item('dashboard-colors'))).toBe('Colores');
+  });
+
+  it('offers a viewer no Colors action and asks for nothing it needs (Viewer has no Colors action)', async () => {
+    const context = await open('viewer', two, answer, {}, { colors: { palette: 'earth', valueColors: [] } });
+
+    expect(byTestId(context.root, 'dashboard-menu')).toBeNull();
+    expect(item('dashboard-colors')).toBeNull();
+    expect(accents(context)).toEqual(['var(--tmz-pal-earth-1)', 'var(--tmz-pal-earth-1)']);
+    context.http.expectNone(isColumns);
+    context.http.expectNone(colorsUrl);
+  });
+
+  it('opens with the dashboard\'s palette selected and the columns of its tables', async () => {
+    const context = await open('analyst', two, answer, {}, { colors: { palette: 'vivid', valueColors: [{ column: 'municipality', value: 'Cali', color: 3 }] } });
+
+    await openColors(context);
+
+    expect(text(form()!.querySelector('h2'))).toBe('Dashboard colors');
+    expect(palettes().map((p) => p.checked)).toEqual([false, false, false, true]);
+    expect(form()!.querySelectorAll('[data-testid="dashboard-colors-row"]')).toHaveLength(1);
+    expect(form()!.querySelector<HTMLSelectElement>('[data-testid="dashboard-colors-column"]')!.value).toBe('municipality');
+  });
+
+  it('draws the widgets in the palette chosen without querying them again, and says so (Palette chosen, UI part)', async () => {
+    const context = await open('analyst', two, answer);
+    expect(accents(context)).toEqual(['var(--tmz-pal-tamiza-1)', 'var(--tmz-pal-tamiza-1)']);
+    const trigger = await openColors(context);
+
+    await click(context, palettes()[2]);
+    await click(context, byTestId(form()!, 'dashboard-colors-save')!);
+    const request = context.http.expectOne(colorsUrl);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.body).toEqual({ palette: 'earth', valueColors: [] });
+    request.flush({ palette: 'earth', valueColors: [] });
+    await settle(context.harness);
+
+    expect(form()).toBeNull();
+    expect(accents(context)).toEqual(['var(--tmz-pal-earth-1)', 'var(--tmz-pal-earth-1)']);
+    expect(toasts()).toContain('Colors saved.');
+    expect(document.activeElement).toBe(trigger);
+    // Only the colors changed: neither the widgets' data nor the dashboard is read again.
+    expect(context.http.match(isQuery)).toEqual([]);
+    expect(context.http.match(isDashboard)).toEqual([]);
+    expect(context.http.match(isOverview)).toEqual([]);
+  });
+
+  it('opens again with the colors just saved', async () => {
+    const context = await open('analyst', two, answer);
+    await openColors(context);
+    await click(context, palettes()[1]);
+    await click(context, byTestId(form()!, 'dashboard-colors-save')!);
+    context.http.expectOne(colorsUrl).flush({ palette: 'institutional', valueColors: [] });
+    await settle(context.harness);
+
+    await openColors(context);
+
+    expect(palettes().map((p) => p.checked)).toEqual([false, true, false, false]);
+  });
+
+  it('applies a color kept for a value to the widgets at once (Color kept for a value)', async () => {
+    const context = await open('analyst', two, answer);
+    const [chart] = colorsOfWidgets(context);
+    expect(chart.kept('municipality', 'Cali')).toBeNull();
+    await openColors(context);
+
+    await click(context, byTestId(form()!, 'dashboard-colors-add')!);
+    // The first text column of the tables is `geometry`; the bars are grouped by `municipality`.
+    typeInto(form()!.querySelector<HTMLSelectElement>('[data-testid="dashboard-colors-column"]')!, 'municipality');
+    await settle(context.harness);
+    typeInto(form()!.querySelector<HTMLInputElement>('[data-testid="dashboard-colors-value"]')!, 'Cali');
+    await settle(context.harness);
+    await click(context, form()!.querySelector<HTMLElement>('[data-testid="dashboard-colors-color"][data-color="5"]')!);
+    await click(context, byTestId(form()!, 'dashboard-colors-save')!);
+    const request = context.http.expectOne(colorsUrl);
+    expect(request.request.body).toEqual({ palette: 'tamiza', valueColors: [{ column: 'municipality', value: 'Cali', color: 5 }] });
+    request.flush(request.request.body);
+    await settle(context.harness);
+
+    expect(colorsOfWidgets(context)[0].kept('municipality', 'Cali')).toBe('var(--tmz-pal-tamiza-5)');
+    expect(colorsOfWidgets(context)[0].kept('municipality', 'Palmira')).toBeNull();
+    expect(context.http.match(isQuery)).toEqual([]);
+  });
+
+  it('sends no request and changes nothing when the form is saved as it was (Colors saved unchanged)', async () => {
+    const context = await open('analyst', two, answer, {}, { colors: { palette: 'earth', valueColors: [{ column: 'municipality', value: 'Cali', color: 3 }] } });
+    const trigger = await openColors(context);
+
+    await click(context, byTestId(form()!, 'dashboard-colors-save')!);
+
+    expect(form()).toBeNull();
+    context.http.expectNone(colorsUrl);
+    expect(toasts()).toEqual([]);
+    expect(accents(context)).toEqual(['var(--tmz-pal-earth-1)', 'var(--tmz-pal-earth-1)']);
+    expect(context.http.match((r) => r.method !== 'GET')).toEqual([]);
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('changes nothing when the form is cancelled, and returns focus to the actions', async () => {
+    const context = await open('analyst', two, answer);
+    const trigger = await openColors(context);
+
+    await click(context, palettes()[3]);
+    await click(context, byTestId(form()!, 'dashboard-colors-cancel')!);
+
+    expect(form()).toBeNull();
+    context.http.expectNone(colorsUrl);
+    expect(accents(context)).toEqual(['var(--tmz-pal-tamiza-1)', 'var(--tmz-pal-tamiza-1)']);
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('keeps what the page has when the server refuses the colors', async () => {
+    const context = await open('analyst', two, answer);
+    await openColors(context);
+
+    await click(context, palettes()[3]);
+    await click(context, byTestId(form()!, 'dashboard-colors-save')!);
+    context.http.expectOne(colorsUrl).flush({ title: 'x', status: 400, errors: { palette: ['Choose one of the palettes.'] } }, { status: 400, statusText: 'Bad Request' });
+    await settle(context.harness);
+
+    expect(form()).not.toBeNull();
+    expect(accents(context)).toEqual(['var(--tmz-pal-tamiza-1)', 'var(--tmz-pal-tamiza-1)']);
+    expect(toasts()).toEqual([]);
+  });
+
+  it('takes the member to the first dashboard when the dashboard was removed meanwhile (Colors saved on a removed dashboard)', async () => {
+    const context = await open('analyst', two, answer, {}, { dashboards: indicatorsAndField });
+    await openColors(context);
+
+    await click(context, palettes()[1]);
+    await click(context, byTestId(form()!, 'dashboard-colors-save')!);
+    context.http.expectOne(colorsUrl).flush({ title: 'x', code: 'dashboards.notFound' }, { status: 404, statusText: 'Not Found' });
+    await settle(context.harness);
+    context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: [{ id: 'd2', name: 'Field' }] }));
+    await settle(context.harness);
+    await answerLoad(context, [], {}, 'd2');
+
+    expect(form()).toBeNull();
+    expect(TestBed.inject(Router).url).toBe(`/projects/${projectId}/dashboards/d2`);
+    expect(text(byTestId(context.root, 'dashboard-notice'))).toContain('"Indicators" no longer exists');
+  });
+
+  it('draws another dashboard in its own colors, not the ones just saved', async () => {
+    const context = await open('analyst', two, answer, {}, { dashboards: indicatorsAndField });
+    await openColors(context);
+    await click(context, palettes()[2]);
+    await click(context, byTestId(form()!, 'dashboard-colors-save')!);
+    context.http.expectOne(colorsUrl).flush({ palette: 'earth', valueColors: [] });
+    await settle(context.harness);
+    expect(accents(context)[0]).toBe('var(--tmz-pal-earth-1)');
+
+    await go(context, 'd2');
+    await answerLoad(context, two, {}, 'd2');
+    await answerQueries(context, answer);
+
+    expect(accents(context)[0]).toBe('var(--tmz-pal-tamiza-1)');
+  });
+});
+
 describe('ProjectIndicators scheduled email (dashboard reports, design D14)', () => {
   beforeEach(() => downloader.start.mockClear());
   afterEach(clearOverlay);
@@ -2541,6 +2792,7 @@ describe('ProjectIndicators scheduled email (dashboard reports, design D14)', ()
       'dashboard-move-left',
       'dashboard-move-right',
       'dashboard-filters',
+      'dashboard-colors',
       'dashboard-report',
       'dashboard-versions',
       'dashboard-remove',
@@ -2693,7 +2945,7 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
 
     await openMenu(context);
 
-    expect(menuItems()).toEqual(['dashboard-rename', 'dashboard-duplicate', 'dashboard-move-left', 'dashboard-move-right', 'dashboard-filters', 'dashboard-versions', 'dashboard-remove']);
+    expect(menuItems()).toEqual(['dashboard-rename', 'dashboard-duplicate', 'dashboard-move-left', 'dashboard-move-right', 'dashboard-filters', 'dashboard-colors', 'dashboard-versions', 'dashboard-remove']);
     expect(text(item('dashboard-versions'))).toBe('Version history');
     expect(item('dashboard-versions')!.getAttribute('aria-disabled')).toBeNull();
     // Nothing is read until it is chosen.
@@ -2952,6 +3204,36 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
       expect(context.http.match((r) => r.method !== 'GET' && !isQuery(r))).toHaveLength(0);
     });
 
+    it('draws the version in its own palette and colors kept by value, and the dashboard in its own once back (Colors of a version)', async () => {
+      const current = { palette: 'earth' as const, valueColors: [{ column: 'sex', value: 'Female', color: 2 }] };
+      const context = await open('analyst', [coverage], answer, {}, { colors: current });
+      expect(colorsOfWidgets(context)[0].accent).toBe('var(--tmz-pal-earth-1)');
+
+      await view(context, historyOf([12, 4]), versionOf(4, [coverage], { palette: 'tamiza', valueColors: [{ column: 'sex', value: 'Female', color: 5 }] }));
+      await answerQueries(context, answer);
+      const [shown] = colorsOfWidgets(context);
+      expect(shown.accent).toBe('var(--tmz-pal-tamiza-1)');
+      expect(shown.forValues('sex', [{ value: 'Female', kind: 'value' }])).toEqual(['var(--tmz-pal-tamiza-5)']);
+
+      byTestId(context.root, 'dashboard-version-back')!.click();
+      await settle(context.harness);
+      await answerQueries(context, answer);
+      const [back] = colorsOfWidgets(context);
+      expect(back.accent).toBe('var(--tmz-pal-earth-1)');
+      expect(back.forValues('sex', [{ value: 'Female', kind: 'value' }])).toEqual(['var(--tmz-pal-earth-2)']);
+    });
+
+    it('draws a version recorded before palettes in Tamiza with no colors kept, whatever the dashboard has now (Version recorded before palettes)', async () => {
+      const context = await open('analyst', [coverage], answer, {}, { colors: { palette: 'earth', valueColors: [{ column: 'sex', value: 'Female', color: 2 }] } });
+
+      await view(context, historyOf([12, 4]), versionOf(4, [coverage]));
+      await answerQueries(context, answer);
+
+      const [shown] = colorsOfWidgets(context);
+      expect(shown.accent).toBe('var(--tmz-pal-tamiza-1)');
+      expect(shown.forValues('sex', [{ value: 'Female', kind: 'value' }])).toEqual(['var(--tmz-pal-tamiza-1)']);
+    });
+
     it('writes the notice in Spanish, in the interface\'s regional format', async () => {
       const context = await open('analyst', [coverage], answer, {}, { lang: 'es' });
 
@@ -3188,7 +3470,7 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
       expect(history()).toBeNull();
       expect(text(confirmation()!.querySelector('h2'))).toBe('Restore version 7?');
       expect(plain(text(confirmation()!.querySelector('#tmz-confirm-message')))).toBe(
-        `The name, filters and widgets of “Indicators” go back to how they were on ${when(savedAt(7))}. The current state stays in the history.`,
+        `The name, filters, colors and widgets of “Indicators” go back to how they were on ${when(savedAt(7))}. The current state stays in the history.`,
       );
       expect(text(confirmation()!.querySelector('[data-testid="confirm"]'))).toBe('Restore');
       context.http.expectNone(isRestore(7));
@@ -3297,6 +3579,78 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
 
       expect(titles(context.root)).toEqual(['Coverage']);
       expect(toasts()).toEqual([{ tone: 'success', message: 'Restored version 7 as version 9. “Coverage” came back as a copy: the original is still on “Field”.' }]);
+    });
+
+    describe('colors', () => {
+      const earth = { palette: 'earth' as const, valueColors: [{ column: 'sex', value: 'Female', color: 5 }] };
+      const tamiza = { palette: 'tamiza' as const, valueColors: [{ column: 'sex', value: 'Male', color: 3 }] };
+      const females = [{ value: 'Female', kind: 'value' as const }];
+      const males = [{ value: 'Male', kind: 'value' as const }];
+
+      it('draws the dashboard in the palette and colors kept by value the restore brought back, before it is read again (Colors restored)', async () => {
+        const context = await open('analyst', [coverage], answer, {}, { colors: earth });
+        expect(colorsOfWidgets(context)[0].accent).toBe('var(--tmz-pal-earth-1)');
+
+        await restore(context, historyOf([6, 5]), 5, restoreOf(7, 5, [coverage], { dashboard: dashboard([coverage], { version: 7, ...tamiza }) }));
+
+        // The restore has answered and the dashboard is still being read: the widgets are already in the restored colors.
+        const [before] = colorsOfWidgets(context);
+        expect(before.accent).toBe('var(--tmz-pal-tamiza-1)');
+        expect(before.forValues('sex', males)).toEqual(['var(--tmz-pal-tamiza-3)']);
+        expect(before.forValues('sex', females)).toEqual(['var(--tmz-pal-tamiza-1)']);
+
+        await answerLoad(context, [coverage], {}, 'd1', [], tamiza);
+        await answerQueries(context, answer);
+        const [after] = colorsOfWidgets(context);
+        expect(after.accent).toBe('var(--tmz-pal-tamiza-1)');
+        expect(after.forValues('sex', males)).toEqual(['var(--tmz-pal-tamiza-3)']);
+        expect(after.forValues('sex', females)).toEqual(['var(--tmz-pal-tamiza-1)']);
+      });
+
+      it('draws the palette Tamiza with no color kept after restoring a version recorded before palettes (Version recorded before palettes)', async () => {
+        const context = await open('analyst', [coverage], answer, {}, { colors: earth });
+
+        await restore(context, historyOf([6, 2]), 2, restoreOf(7, 2, [coverage], { dashboard: dashboard([coverage], { version: 7, palette: 'tamiza', valueColors: [] }) }));
+        await answerLoad(context, [coverage], {}, 'd1', [], { palette: 'tamiza', valueColors: [] });
+        await answerQueries(context, answer);
+
+        const [colors] = colorsOfWidgets(context);
+        expect(colors.accent).toBe('var(--tmz-pal-tamiza-1)');
+        expect(colors.forValues('sex', females)).toEqual(['var(--tmz-pal-tamiza-1)']);
+      });
+
+      it('leaves the view of a version for the colors restored, not for the ones the restore replaced, when it restores the version shown', async () => {
+        const context = await open('analyst', [coverage], answer, {}, { colors: earth });
+        await view(context, historyOf([6, 5]), versionOf(5, [coverage], tamiza));
+        await answerQueries(context, answer);
+        expect(colorsOfWidgets(context)[0].accent).toBe('var(--tmz-pal-tamiza-1)'); // the version's own, with Male in color 3
+        expect(colorsOfWidgets(context)[0].forValues('sex', males)).toEqual(['var(--tmz-pal-tamiza-3)']);
+
+        byTestId(context.root, 'dashboard-version-restore-shown')!.click();
+        await settle(context.harness);
+        await confirmRestore(context);
+        context.http.expectOne(isRestore(5)).flush(restoreOf(7, 5, [coverage], { dashboard: dashboard([coverage], { version: 7, ...tamiza }) }), { status: 201, statusText: 'Created' });
+        await settle(context.harness);
+
+        // The view is gone and the dashboard is not yet read again: never in Earth, the colors being replaced.
+        expect(notice(context.root)).toBeNull();
+        const [restored] = colorsOfWidgets(context);
+        expect(restored.accent).toBe('var(--tmz-pal-tamiza-1)');
+        expect(restored.forValues('sex', males)).toEqual(['var(--tmz-pal-tamiza-3)']);
+        await answerLoad(context, [coverage], {}, 'd1', [], tamiza);
+        await answerQueries(context, answer);
+        expect(colorsOfWidgets(context)[0].forValues('sex', males)).toEqual(['var(--tmz-pal-tamiza-3)']);
+      });
+
+      it('keeps the colors it has when the restore finds the dashboard already as in the version', async () => {
+        const context = await open('analyst', [coverage], answer, {}, { colors: earth });
+
+        await restore(context, historyOf([6, 5]), 5, restoreOf(6, 5, [coverage], { restored: false, version: summary(6, { current: true }), dashboard: dashboard([coverage], { version: 6, ...earth }) }));
+
+        expect(colorsOfWidgets(context)[0].accent).toBe('var(--tmz-pal-earth-1)');
+        expect(colorsOfWidgets(context)[0].forValues('sex', females)).toEqual(['var(--tmz-pal-earth-5)']);
+        context.http.expectNone(isDashboard);
+      });
     });
 
     it('says the dashboard already is as in the version, and changes nothing on the page (Version equal to the current one)', async () => {

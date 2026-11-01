@@ -49,10 +49,20 @@
 }
 
 /*
- * Chart colors for the indicator widgets: eight categorical hues in a fixed order (a series keeps its color) and one sequential
- * ramp of seven steps for magnitude, the map's and the heat map's fill (--tmz-seq-ink-n is the label that sits on step n: white or
- * near-black, whichever reads better on it). The dark values are stepped for the dark surface, not an inversion; the sequential
- * ramp runs light to dark on the light theme and dark to light on the dark one, so the low end recedes in both.
+ * Chart colors for the indicator widgets (add-dashboard-palettes, design D1 and D2). A dashboard has one palette: eight categorical
+ * colors in a fixed order, --tmz-pal-<palette>-<1..8> (a series keeps its color), for the palettes tamiza (the colors the charts had
+ * before palettes), institutional, earth and vivid. --tmz-series-other is the neutral of "Other", the same in every palette. A
+ * sequential scale has seven steps for magnitude, --tmz-ramp-<scale>-<1..7>, for the scales blue (the ramp the charts had before),
+ * teal, green, orange, red, purple and gray, and --tmz-ramp-<scale>-ink-<n> is the label that sits on step n: white or near-black,
+ * whichever reads better on it. The categorical colors are named, not scoped by a class on the dashboard, because a tooltip lives in
+ * the CDK overlay, outside the widget, and has to resolve to the same color. The map's and the heat map's fill is read from
+ * --tmz-seq-<n> and --tmz-seq-ink-<n>, which are the blue scale until a map or a heat map sets the steps of its own scale on its
+ * container. The dark values are stepped for the dark surface, not an inversion; a scale runs light to dark on the light theme and
+ * dark to light on the dark one, so the low end recedes in both.
+ *
+ * Every palette was validated as a categorical palette and every scale as an ordinal ramp with the palette validator, against white
+ * and against the dark chart surface (#101828); the commands and results are in the Verification Results of
+ * openspec/changes/add-dashboard-palettes/design.md, and chart-tokens.spec.ts keeps the tokens at the values that were validated.
  *
  * The diverging Likert scale has two arms of five steps, a red one for the negative side and a blue one (the sequential hue) for the
  * positive, each stepped by its distance from the neutral midpoint, which reads as "nothing" (--tmz-div-neutral). The steps nearest the
@@ -61,29 +71,164 @@
  * the commands and results are in the Verification Results of openspec/changes/add-two-dimension-widgets/design.md.
  */
 :root {
-  --tmz-series-1: #2a78d6;
-  --tmz-series-2: #eb6834;
-  --tmz-series-3: #1baf7a;
-  --tmz-series-4: #eda100;
-  --tmz-series-5: #e87ba4;
-  --tmz-series-6: #008300;
-  --tmz-series-7: #6250d6;
-  --tmz-series-8: #e34948;
+  /* tamiza: today's colors, and the default palette */
+  --tmz-pal-tamiza-1: #2a78d6;
+  --tmz-pal-tamiza-2: #eb6834;
+  --tmz-pal-tamiza-3: #1baf7a;
+  --tmz-pal-tamiza-4: #eda100;
+  --tmz-pal-tamiza-5: #e87ba4;
+  --tmz-pal-tamiza-6: #008300;
+  --tmz-pal-tamiza-7: #6250d6;
+  --tmz-pal-tamiza-8: #e34948;
+  /* institutional: sober: navy, turquoise and slate, with muted warm accents */
+  --tmz-pal-institutional-1: #1f5398;
+  --tmz-pal-institutional-2: #18aec2;
+  --tmz-pal-institutional-3: #893747;
+  --tmz-pal-institutional-4: #52ade3;
+  --tmz-pal-institutional-5: #be9922;
+  --tmz-pal-institutional-6: #4a5e9f;
+  --tmz-pal-institutional-7: #e5957b;
+  --tmz-pal-institutional-8: #076392;
+  /* earth: terracotta, ochre, olive and moss, with indigo and plum as the cool counterpoints */
+  --tmz-pal-earth-1: #af4a1b;
+  --tmz-pal-earth-2: #345895;
+  --tmz-pal-earth-3: #b88a01;
+  --tmz-pal-earth-4: #82344e;
+  --tmz-pal-earth-5: #669929;
+  --tmz-pal-earth-6: #7e4701;
+  --tmz-pal-earth-7: #934791;
+  --tmz-pal-earth-8: #676e02;
+  /* vivid: saturated: electric purple, cyan, lime and fuchsia */
+  --tmz-pal-vivid-1: #9d32e5;
+  --tmz-pal-vivid-2: #00c5ec;
+  --tmz-pal-vivid-3: #95c500;
+  --tmz-pal-vivid-4: #f22dbd;
+  --tmz-pal-vivid-5: #009d1f;
+  --tmz-pal-vivid-6: #5485ff;
+  --tmz-pal-vivid-7: #c4134d;
+  --tmz-pal-vivid-8: #ff8210;
+  /* "Other", the same in every palette and theme */
   --tmz-series-other: #898781;
-  --tmz-seq-1: #cde2fb;
-  --tmz-seq-2: #9ec5f4;
-  --tmz-seq-3: #6da7ec;
-  --tmz-seq-4: #3987e5;
-  --tmz-seq-5: #256abf;
-  --tmz-seq-6: #184f95;
-  --tmz-seq-7: #0d366b;
-  --tmz-seq-ink-1: #0b0b0b;
-  --tmz-seq-ink-2: #0b0b0b;
-  --tmz-seq-ink-3: #0b0b0b;
-  --tmz-seq-ink-4: #0b0b0b;
-  --tmz-seq-ink-5: #ffffff;
-  --tmz-seq-ink-6: #ffffff;
-  --tmz-seq-ink-7: #ffffff;
+  /* blue scale and the label on each step */
+  --tmz-ramp-blue-1: #cde2fb;
+  --tmz-ramp-blue-2: #9ec5f4;
+  --tmz-ramp-blue-3: #6da7ec;
+  --tmz-ramp-blue-4: #3987e5;
+  --tmz-ramp-blue-5: #256abf;
+  --tmz-ramp-blue-6: #184f95;
+  --tmz-ramp-blue-7: #0d366b;
+  --tmz-ramp-blue-ink-1: #0b0b0b;
+  --tmz-ramp-blue-ink-2: #0b0b0b;
+  --tmz-ramp-blue-ink-3: #0b0b0b;
+  --tmz-ramp-blue-ink-4: #0b0b0b;
+  --tmz-ramp-blue-ink-5: #ffffff;
+  --tmz-ramp-blue-ink-6: #ffffff;
+  --tmz-ramp-blue-ink-7: #ffffff;
+  /* teal scale and the label on each step */
+  --tmz-ramp-teal-1: #adeee9;
+  --tmz-ramp-teal-2: #75d5cf;
+  --tmz-ramp-teal-3: #3fb9b2;
+  --tmz-ramp-teal-4: #149a95;
+  --tmz-ramp-teal-5: #0a7b76;
+  --tmz-ramp-teal-6: #065d59;
+  --tmz-ramp-teal-7: #05403e;
+  --tmz-ramp-teal-ink-1: #0b0b0b;
+  --tmz-ramp-teal-ink-2: #0b0b0b;
+  --tmz-ramp-teal-ink-3: #0b0b0b;
+  --tmz-ramp-teal-ink-4: #0b0b0b;
+  --tmz-ramp-teal-ink-5: #ffffff;
+  --tmz-ramp-teal-ink-6: #ffffff;
+  --tmz-ramp-teal-ink-7: #ffffff;
+  /* green scale and the label on each step */
+  --tmz-ramp-green-1: #bfeebf;
+  --tmz-ramp-green-2: #92d593;
+  --tmz-ramp-green-3: #61bb67;
+  --tmz-ramp-green-4: #359f41;
+  --tmz-ramp-green-5: #1e802c;
+  --tmz-ramp-green-6: #12611e;
+  --tmz-ramp-green-7: #074411;
+  --tmz-ramp-green-ink-1: #0b0b0b;
+  --tmz-ramp-green-ink-2: #0b0b0b;
+  --tmz-ramp-green-ink-3: #0b0b0b;
+  --tmz-ramp-green-ink-4: #0b0b0b;
+  --tmz-ramp-green-ink-5: #ffffff;
+  --tmz-ramp-green-ink-6: #ffffff;
+  --tmz-ramp-green-ink-7: #ffffff;
+  /* orange scale and the label on each step */
+  --tmz-ramp-orange-1: #fcd7c0;
+  --tmz-ramp-orange-2: #f2b185;
+  --tmz-ramp-orange-3: #e68942;
+  --tmz-ramp-orange-4: #ca6907;
+  --tmz-ramp-orange-5: #a15306;
+  --tmz-ramp-orange-6: #7b3e06;
+  --tmz-ramp-orange-7: #572a02;
+  --tmz-ramp-orange-ink-1: #0b0b0b;
+  --tmz-ramp-orange-ink-2: #0b0b0b;
+  --tmz-ramp-orange-ink-3: #0b0b0b;
+  --tmz-ramp-orange-ink-4: #0b0b0b;
+  --tmz-ramp-orange-ink-5: #ffffff;
+  --tmz-ramp-orange-ink-6: #ffffff;
+  --tmz-ramp-orange-ink-7: #ffffff;
+  /* red scale and the label on each step */
+  --tmz-ramp-red-1: #fdd4d6;
+  --tmz-ramp-red-2: #f7aaaa;
+  --tmz-ramp-red-3: #ef7d79;
+  --tmz-ramp-red-4: #e24a48;
+  --tmz-ramp-red-5: #b93432;
+  --tmz-ramp-red-6: #8f2420;
+  --tmz-ramp-red-7: #651714;
+  --tmz-ramp-red-ink-1: #0b0b0b;
+  --tmz-ramp-red-ink-2: #0b0b0b;
+  --tmz-ramp-red-ink-3: #0b0b0b;
+  --tmz-ramp-red-ink-4: #0b0b0b;
+  --tmz-ramp-red-ink-5: #ffffff;
+  --tmz-ramp-red-ink-6: #ffffff;
+  --tmz-ramp-red-ink-7: #ffffff;
+  /* purple scale and the label on each step */
+  --tmz-ramp-purple-1: #e9d7fb;
+  --tmz-ramp-purple-2: #d0b2f4;
+  --tmz-ramp-purple-3: #b68bf0;
+  --tmz-ramp-purple-4: #9d61ea;
+  --tmz-ramp-purple-5: #8041cc;
+  --tmz-ramp-purple-6: #602fa0;
+  --tmz-ramp-purple-7: #421f72;
+  --tmz-ramp-purple-ink-1: #0b0b0b;
+  --tmz-ramp-purple-ink-2: #0b0b0b;
+  --tmz-ramp-purple-ink-3: #0b0b0b;
+  --tmz-ramp-purple-ink-4: #0b0b0b;
+  --tmz-ramp-purple-ink-5: #ffffff;
+  --tmz-ramp-purple-ink-6: #ffffff;
+  --tmz-ramp-purple-ink-7: #ffffff;
+  /* gray scale and the label on each step */
+  --tmz-ramp-gray-1: #dde0e3;
+  --tmz-ramp-gray-2: #bdc2c8;
+  --tmz-ramp-gray-3: #9ea4ad;
+  --tmz-ramp-gray-4: #818791;
+  --tmz-ramp-gray-5: #646c74;
+  --tmz-ramp-gray-6: #4b515a;
+  --tmz-ramp-gray-7: #32383f;
+  --tmz-ramp-gray-ink-1: #0b0b0b;
+  --tmz-ramp-gray-ink-2: #0b0b0b;
+  --tmz-ramp-gray-ink-3: #0b0b0b;
+  --tmz-ramp-gray-ink-4: #0b0b0b;
+  --tmz-ramp-gray-ink-5: #ffffff;
+  --tmz-ramp-gray-ink-6: #ffffff;
+  --tmz-ramp-gray-ink-7: #ffffff;
+  /* what the map and the heat map read: the blue scale, unless the widget sets another on its container */
+  --tmz-seq-1: var(--tmz-ramp-blue-1);
+  --tmz-seq-2: var(--tmz-ramp-blue-2);
+  --tmz-seq-3: var(--tmz-ramp-blue-3);
+  --tmz-seq-4: var(--tmz-ramp-blue-4);
+  --tmz-seq-5: var(--tmz-ramp-blue-5);
+  --tmz-seq-6: var(--tmz-ramp-blue-6);
+  --tmz-seq-7: var(--tmz-ramp-blue-7);
+  --tmz-seq-ink-1: var(--tmz-ramp-blue-ink-1);
+  --tmz-seq-ink-2: var(--tmz-ramp-blue-ink-2);
+  --tmz-seq-ink-3: var(--tmz-ramp-blue-ink-3);
+  --tmz-seq-ink-4: var(--tmz-ramp-blue-ink-4);
+  --tmz-seq-ink-5: var(--tmz-ramp-blue-ink-5);
+  --tmz-seq-ink-6: var(--tmz-ramp-blue-ink-6);
+  --tmz-seq-ink-7: var(--tmz-ramp-blue-ink-7);
   --tmz-div-neg-1: #ea9a93;
   --tmz-div-neg-2: #dd716a;
   --tmz-div-neg-3: #c74845;
@@ -98,28 +243,162 @@
 }
 
 .dark {
-  --tmz-series-1: #3987e5;
-  --tmz-series-2: #d95926;
-  --tmz-series-3: #199e70;
-  --tmz-series-4: #c98500;
-  --tmz-series-5: #d55181;
-  --tmz-series-6: #008300;
-  --tmz-series-7: #9085e9;
-  --tmz-series-8: #e66767;
-  --tmz-seq-1: #184f95;
-  --tmz-seq-2: #256abf;
-  --tmz-seq-3: #3987e5;
-  --tmz-seq-4: #5598e7;
-  --tmz-seq-5: #6da7ec;
-  --tmz-seq-6: #9ec5f4;
-  --tmz-seq-7: #cde2fb;
-  --tmz-seq-ink-1: #ffffff;
-  --tmz-seq-ink-2: #ffffff;
-  --tmz-seq-ink-3: #0b0b0b;
-  --tmz-seq-ink-4: #0b0b0b;
-  --tmz-seq-ink-5: #0b0b0b;
-  --tmz-seq-ink-6: #0b0b0b;
-  --tmz-seq-ink-7: #0b0b0b;
+  /* tamiza: today's colors, and the default palette */
+  --tmz-pal-tamiza-1: #3987e5;
+  --tmz-pal-tamiza-2: #d95926;
+  --tmz-pal-tamiza-3: #199e70;
+  --tmz-pal-tamiza-4: #c98500;
+  --tmz-pal-tamiza-5: #d55181;
+  --tmz-pal-tamiza-6: #008300;
+  --tmz-pal-tamiza-7: #9085e9;
+  --tmz-pal-tamiza-8: #e66767;
+  /* institutional: sober: navy, turquoise and slate, with muted warm accents */
+  --tmz-pal-institutional-1: #3f6cbb;
+  --tmz-pal-institutional-2: #00a5b6;
+  --tmz-pal-institutional-3: #a94d58;
+  --tmz-pal-institutional-4: #26a0ca;
+  --tmz-pal-institutional-5: #a98900;
+  --tmz-pal-institutional-6: #6473bd;
+  --tmz-pal-institutional-7: #cf785c;
+  --tmz-pal-institutional-8: #357cb1;
+  /* earth: terracotta, ochre, olive and moss, with indigo and plum as the cool counterpoints */
+  --tmz-pal-earth-1: #b34027;
+  --tmz-pal-earth-2: #506cad;
+  --tmz-pal-earth-3: #988904;
+  --tmz-pal-earth-4: #984e6b;
+  --tmz-pal-earth-5: #65a84b;
+  --tmz-pal-earth-6: #8e5a01;
+  --tmz-pal-earth-7: #a860b0;
+  --tmz-pal-earth-8: #677401;
+  /* vivid: saturated: electric purple, cyan, lime and fuchsia */
+  --tmz-pal-vivid-1: #b054ff;
+  --tmz-pal-vivid-2: #00a5c1;
+  --tmz-pal-vivid-3: #7ca400;
+  --tmz-pal-vivid-4: #c500a7;
+  --tmz-pal-vivid-5: #009f20;
+  --tmz-pal-vivid-6: #485edf;
+  --tmz-pal-vivid-7: #cc004f;
+  --tmz-pal-vivid-8: #df7100;
+  /* blue scale and the label on each step */
+  --tmz-ramp-blue-1: #184f95;
+  --tmz-ramp-blue-2: #256abf;
+  --tmz-ramp-blue-3: #3987e5;
+  --tmz-ramp-blue-4: #5598e7;
+  --tmz-ramp-blue-5: #6da7ec;
+  --tmz-ramp-blue-6: #9ec5f4;
+  --tmz-ramp-blue-7: #cde2fb;
+  --tmz-ramp-blue-ink-1: #ffffff;
+  --tmz-ramp-blue-ink-2: #ffffff;
+  --tmz-ramp-blue-ink-3: #0b0b0b;
+  --tmz-ramp-blue-ink-4: #0b0b0b;
+  --tmz-ramp-blue-ink-5: #0b0b0b;
+  --tmz-ramp-blue-ink-6: #0b0b0b;
+  --tmz-ramp-blue-ink-7: #0b0b0b;
+  /* teal scale and the label on each step */
+  --tmz-ramp-teal-1: #095d59;
+  --tmz-ramp-teal-2: #117772;
+  --tmz-ramp-teal-3: #1b938d;
+  --tmz-ramp-teal-4: #2bada7;
+  --tmz-ramp-teal-5: #4bc5bf;
+  --tmz-ramp-teal-6: #78dbd5;
+  --tmz-ramp-teal-7: #abefea;
+  --tmz-ramp-teal-ink-1: #ffffff;
+  --tmz-ramp-teal-ink-2: #ffffff;
+  --tmz-ramp-teal-ink-3: #0b0b0b;
+  --tmz-ramp-teal-ink-4: #0b0b0b;
+  --tmz-ramp-teal-ink-5: #0b0b0b;
+  --tmz-ramp-teal-ink-6: #0b0b0b;
+  --tmz-ramp-teal-ink-7: #0b0b0b;
+  /* green scale and the label on each step */
+  --tmz-ramp-green-1: #12611e;
+  --tmz-ramp-green-2: #197c28;
+  --tmz-ramp-green-3: #279936;
+  --tmz-ramp-green-4: #38b447;
+  --tmz-ramp-green-5: #55cd5f;
+  --tmz-ramp-green-6: #82e186;
+  --tmz-ramp-green-7: #bdefbd;
+  --tmz-ramp-green-ink-1: #ffffff;
+  --tmz-ramp-green-ink-2: #ffffff;
+  --tmz-ramp-green-ink-3: #0b0b0b;
+  --tmz-ramp-green-ink-4: #0b0b0b;
+  --tmz-ramp-green-ink-5: #0b0b0b;
+  --tmz-ramp-green-ink-6: #0b0b0b;
+  --tmz-ramp-green-ink-7: #0b0b0b;
+  /* orange scale and the label on each step */
+  --tmz-ramp-orange-1: #793f0d;
+  --tmz-ramp-orange-2: #9a5111;
+  --tmz-ramp-orange-3: #be6517;
+  --tmz-ramp-orange-4: #e0791f;
+  --tmz-ramp-orange-5: #fb903c;
+  --tmz-ramp-orange-6: #fab688;
+  --tmz-ramp-orange-7: #fbd8c1;
+  --tmz-ramp-orange-ink-1: #ffffff;
+  --tmz-ramp-orange-ink-2: #ffffff;
+  --tmz-ramp-orange-ink-3: #0b0b0b;
+  --tmz-ramp-orange-ink-4: #0b0b0b;
+  --tmz-ramp-orange-ink-5: #0b0b0b;
+  --tmz-ramp-orange-ink-6: #0b0b0b;
+  --tmz-ramp-orange-ink-7: #0b0b0b;
+  /* red scale and the label on each step */
+  --tmz-ramp-red-1: #982622;
+  --tmz-ramp-red-2: #bc2e2e;
+  --tmz-ramp-red-3: #e34746;
+  --tmz-ramp-red-4: #f16c6a;
+  --tmz-ramp-red-5: #f49190;
+  --tmz-ramp-red-6: #f7b4b4;
+  --tmz-ramp-red-7: #fdd4d6;
+  --tmz-ramp-red-ink-1: #ffffff;
+  --tmz-ramp-red-ink-2: #ffffff;
+  --tmz-ramp-red-ink-3: #0b0b0b;
+  --tmz-ramp-red-ink-4: #0b0b0b;
+  --tmz-ramp-red-ink-5: #0b0b0b;
+  --tmz-ramp-red-ink-6: #0b0b0b;
+  --tmz-ramp-red-ink-7: #0b0b0b;
+  /* purple scale and the label on each step */
+  --tmz-ramp-purple-1: #6436a6;
+  --tmz-ramp-purple-2: #7d45c8;
+  --tmz-ramp-purple-3: #9a62e9;
+  --tmz-ramp-purple-4: #ae80f1;
+  --tmz-ramp-purple-5: #c09ef0;
+  --tmz-ramp-purple-6: #d4bbf3;
+  --tmz-ramp-purple-7: #e8d8f9;
+  --tmz-ramp-purple-ink-1: #ffffff;
+  --tmz-ramp-purple-ink-2: #ffffff;
+  --tmz-ramp-purple-ink-3: #0b0b0b;
+  --tmz-ramp-purple-ink-4: #0b0b0b;
+  --tmz-ramp-purple-ink-5: #0b0b0b;
+  --tmz-ramp-purple-ink-6: #0b0b0b;
+  --tmz-ramp-purple-ink-7: #0b0b0b;
+  /* gray scale and the label on each step */
+  --tmz-ramp-gray-1: #51565f;
+  --tmz-ramp-gray-2: #656b74;
+  --tmz-ramp-gray-3: #80878f;
+  --tmz-ramp-gray-4: #959da5;
+  --tmz-ramp-gray-5: #abb2b9;
+  --tmz-ramp-gray-6: #c5c8cd;
+  --tmz-ramp-gray-7: #dde0e3;
+  --tmz-ramp-gray-ink-1: #ffffff;
+  --tmz-ramp-gray-ink-2: #ffffff;
+  --tmz-ramp-gray-ink-3: #0b0b0b;
+  --tmz-ramp-gray-ink-4: #0b0b0b;
+  --tmz-ramp-gray-ink-5: #0b0b0b;
+  --tmz-ramp-gray-ink-6: #0b0b0b;
+  --tmz-ramp-gray-ink-7: #0b0b0b;
+  /* resolved again here, so a .dark on any element, not only on <html>, swaps them */
+  --tmz-seq-1: var(--tmz-ramp-blue-1);
+  --tmz-seq-2: var(--tmz-ramp-blue-2);
+  --tmz-seq-3: var(--tmz-ramp-blue-3);
+  --tmz-seq-4: var(--tmz-ramp-blue-4);
+  --tmz-seq-5: var(--tmz-ramp-blue-5);
+  --tmz-seq-6: var(--tmz-ramp-blue-6);
+  --tmz-seq-7: var(--tmz-ramp-blue-7);
+  --tmz-seq-ink-1: var(--tmz-ramp-blue-ink-1);
+  --tmz-seq-ink-2: var(--tmz-ramp-blue-ink-2);
+  --tmz-seq-ink-3: var(--tmz-ramp-blue-ink-3);
+  --tmz-seq-ink-4: var(--tmz-ramp-blue-ink-4);
+  --tmz-seq-ink-5: var(--tmz-ramp-blue-ink-5);
+  --tmz-seq-ink-6: var(--tmz-ramp-blue-ink-6);
+  --tmz-seq-ink-7: var(--tmz-ramp-blue-ink-7);
   --tmz-div-neg-1: #892b2a;
   --tmz-div-neg-2: #b13f3c;
   --tmz-div-neg-3: #d75853;

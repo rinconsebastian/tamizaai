@@ -9,15 +9,18 @@ import { DataFilter } from '../../../core/projects/data.service';
 import {
   BasemapKind,
   ChartType,
+  DashboardColors,
   IndicatorColumns,
   IndicatorEntry,
   DashboardFilter,
   IndicatorsService,
   LikertSide,
   LikertStep,
+  ScaleId,
   SeriesLayout,
   Widget,
   WidgetConfig,
+  WidgetDisplay,
   WidgetPatch,
   chartTypes,
   emptyConfig,
@@ -33,7 +36,10 @@ import {
   minLikertValues,
   needsGroup,
   needsSeries,
+  paletteSize,
+  scaleIds,
   seriesLayouts,
+  takesSeries,
   TooltipFormat,
   WidgetSort,
   WidgetTooltipItem,
@@ -46,6 +52,7 @@ import { describeFilter, normalizeFilter } from '../data-view';
 import { FilterValues, activeFilters } from './dashboard-filters';
 import { WidgetView, queryFor, savedConfig } from './widget-view';
 import { naturalCompare } from './chart-scales';
+import { colorsOf, defaultScale, paletteColor, rampGradient } from './chart-colors';
 
 export interface WidgetDialogData {
   projectId: string;
@@ -64,6 +71,8 @@ export interface WidgetDialogData {
   filters?: DashboardFilter[];
   /** Their values in force on the member's screen when the form opened, which the preview applies (design D9). */
   values?: FilterValues;
+  /** The dashboard's palette and colors kept by value: the preview draws the widget in them (add-dashboard-palettes, design D7, D9). */
+  colors: DashboardColors;
 }
 
 /** The widget saved, or `gone` when its dashboard no longer exists (`dashboards.notFound`), for the page to catch up. */
@@ -100,7 +109,9 @@ type Problems = Partial<
     | 'layout'
     | 'pyramidLeft'
     | 'pyramidRight'
-    | 'scale',
+    | 'scale'
+    | 'color'
+    | 'ramp',
     string
   >
 >;
@@ -116,6 +127,11 @@ const sideRank: Record<LikertSide, number> = { negative: 0, neutral: 1, positive
 type ItemProblems = Partial<Record<'column' | 'label' | 'format', string>>;
 
 const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent'];
+
+/** The places in a palette, in order: the choices of a widget's color. */
+const places = Array.from({ length: paletteSize }, (_, i) => i + 1);
+/** The choices of a map's or heat map's scale: the palette's own (null), then each scale. */
+const rampChoices: readonly (ScaleId | null)[] = [null, ...scaleIds];
 
 /**
  * Adds or edits a widget (design D6, D8): its chart type and title, its query (the indicator, a measure or a ratio of two numeric
@@ -399,6 +415,82 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
         </fieldset>
       }
 
+      @if (offersColor()) {
+        <!-- The dashboard's eight colors by their numbers. Native radios, so the arrow keys move through them with no code of ours. -->
+        <fieldset class="min-w-0" [attr.aria-describedby]="shown().color ? 'widgetColor-error' : null" data-testid="dialog-color">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.color.legend') }}</legend>
+          <p class="mb-2 text-sm text-body">{{ t('indicators.dialog.color.help') }}</p>
+          <div class="flex flex-wrap gap-1.5">
+            @for (n of places; track n) {
+              <label class="relative">
+                <input
+                  type="radio"
+                  name="widgetColor"
+                  class="peer sr-only"
+                  [value]="n"
+                  [checked]="chosenColor() === n"
+                  [attr.aria-label]="t('dashboardColors.kept.colorOption', { number: n, hue: t('colors.hues.' + palette + '.' + n) })"
+                  (change)="setColor(n)"
+                  [attr.data-color]="n"
+                  data-testid="dialog-color-option"
+                />
+                <span
+                  class="flex min-h-10 min-w-12 cursor-pointer items-center justify-center gap-1.5 rounded-base border border-default-medium bg-neutral-secondary-medium px-2 text-sm text-heading peer-checked:border-brand peer-checked:bg-brand-softer peer-checked:ring-2 peer-checked:ring-brand peer-focus-visible:ring-4 peer-focus-visible:ring-brand-medium"
+                  [title]="t('colors.hues.' + palette + '.' + n)"
+                >
+                  <span class="size-4 shrink-0 rounded-full border border-default" aria-hidden="true" [style.background-color]="swatch(n)" data-testid="dialog-color-swatch"></span>
+                  <span class="tabular-nums" aria-hidden="true">{{ n }}</span>
+                </span>
+              </label>
+            }
+          </div>
+          <!-- The name of the color chosen, in text for those who do not see the swatches' names; the checked radio already says it. -->
+          @if (places.includes(chosenColor())) {
+            <p class="mt-2 text-sm text-body" aria-hidden="true" data-testid="dialog-color-chosen">{{ t('dashboardColors.kept.colorOption', { number: chosenColor(), hue: t('colors.hues.' + palette + '.' + chosenColor()) }) }}</p>
+          }
+          @if (shown().color; as message) {
+            <p id="widgetColor-error" class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
+          }
+        </fieldset>
+      }
+
+      @if (offersRamp()) {
+        <!-- The palette's own scale first, then each scale as its steps. A scale is named in text, never by its gradient alone. -->
+        <fieldset class="min-w-0" [attr.aria-describedby]="shown().ramp ? 'widgetRamp-error' : null" data-testid="dialog-ramp">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.ramp.legend') }}</legend>
+          <p class="mb-2 text-sm text-body">{{ t('indicators.dialog.ramp.help') }}</p>
+          <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            @for (choice of rampChoices; track choice) {
+              <label class="relative block">
+                <input
+                  type="radio"
+                  name="widgetRamp"
+                  class="peer sr-only"
+                  [value]="choice ?? ''"
+                  [checked]="ramp() === choice"
+                  (change)="setRamp(choice)"
+                  [attr.data-ramp]="choice ?? 'palette'"
+                  data-testid="dialog-ramp-option"
+                />
+                <span
+                  class="flex h-full min-h-10 cursor-pointer flex-col justify-center gap-1 rounded-base border border-default-medium bg-neutral-secondary-medium p-2 text-sm text-heading peer-checked:border-brand peer-checked:bg-brand-softer peer-checked:ring-2 peer-checked:ring-brand peer-focus-visible:ring-4 peer-focus-visible:ring-brand-medium"
+                >
+                  <span class="h-3 rounded-sm border border-default" aria-hidden="true" [style.background-image]="gradient(choice)" data-testid="dialog-ramp-gradient"></span>
+                  <span>{{ choice === null ? t('indicators.dialog.ramp.palette') : t('colors.scales.' + choice) }}</span>
+                  @if (choice === null) {
+                    <!-- The space keeps the name a screen reader builds from the label ("Palette's scale Orange") in two words. -->
+                    &ngsp;<span class="text-xs text-body" data-testid="dialog-ramp-palette-scale">{{ t('colors.scales.' + paletteScale) }}</span>
+                  }
+                </span>
+              </label>
+            }
+          </div>
+          @if (shown().ramp; as message) {
+            <p id="widgetRamp-error" class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
+          }
+        </fieldset>
+      }
+
       @if (chartType() === 'pyramid') {
         <fieldset class="flex flex-col gap-3" data-testid="dialog-pyramid">
           <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.pyramid.legend') }}</legend>
@@ -538,6 +630,7 @@ const tooltipFormats: readonly TooltipFormat[] = ['count', 'decimal', 'percent']
             [debounceMs]="previewDelayMs"
             [placeholder]="t('indicators.dialog.previewIncomplete')"
             [dashboardFilters]="previewFilters()"
+            [colors]="data.colors"
           />
         </div>
         @if (previewFilteredBy().length) {
@@ -637,6 +730,22 @@ export class WidgetDialog {
   protected readonly scaleItemProblems = signal<Record<number, string>>({});
   /** The values of the series column in the data, in natural order: what the pyramid's sides and the Likert scale offer. */
   protected readonly seriesValues = signal<string[]>([]);
+  /** The dashboard's palette, whose eight colors the form offers (an unknown one is Tamiza, as the charts read it). */
+  protected readonly palette = colorsOf(this.data.colors).palette;
+  /** The scale a map or a heat map is drawn on when it names none: the palette's own. */
+  protected readonly paletteScale = defaultScale(this.palette);
+  protected readonly places = places;
+  protected readonly rampChoices = rampChoices;
+  /** The widget's own color, a place in the palette (1 to 8); null is unset, which is color 1 (design D3). */
+  protected readonly color = signal<number | null>(this.start.display?.color ?? null);
+  /** The widget's own scale; null is the palette's own. */
+  protected readonly ramp = signal<ScaleId | null>(this.start.display?.ramp ?? null);
+  /** The color the group shows as chosen. */
+  protected readonly chosenColor = computed(() => this.color() ?? 1);
+  /** A bar, column or line chart with no series, and a histogram, take a color; any other chart takes its colors from its values. */
+  protected readonly offersColor = computed(() => this.chartType() === 'histogram' || (takesSeries(this.chartType()) && !this.seriesBy()));
+  /** A map and a heat map take a scale. */
+  protected readonly offersRamp = computed(() => this.chartType() === 'map' || this.chartType() === 'heatmap');
   /** The open dashboard's filters, each offered with a box to ignore it. */
   protected readonly dashboardFilters = this.data.filters ?? [];
   /**
@@ -759,8 +868,20 @@ export class WidgetDialog {
       layout: this.offersLayout() ? this.layout() : null,
       pyramid: this.pyramidLeft() || this.pyramidRight() ? { left: this.pyramidLeft(), right: this.pyramidRight() } : null,
       scale: this.scaleSteps(),
+      ...this.displayDraft(),
     };
   });
+
+  /**
+   * The widget's color and scale as the form holds them, kept while the member changes the kind or the series back and forth: `savedConfig`
+   * keeps them only for the kinds that take them. A widget with neither has no `display` at all, so one saved before palettes saves
+   * exactly what it did.
+   */
+  private displayDraft(): { display?: WidgetDisplay } {
+    const color = this.color();
+    const ramp = this.ramp();
+    return color === null && ramp === null ? {} : { display: { ...(color !== null ? { color } : {}), ...(ramp !== null ? { ramp } : {}) } };
+  }
 
   /** The scale to save: the values that are in it, in order. */
   private scaleSteps(): LikertStep[] {
@@ -1068,6 +1189,31 @@ export class WidgetDialog {
   protected setLayout(option: SeriesLayout): void {
     this.layout.set(option);
     this.serverFieldErrors.update(({ layout: _layout, ...others }) => others);
+  }
+
+  /**
+   * The widget's color. Color 1 is the default: picking it on a widget saved without a color leaves it without one, so trying a color
+   * and coming back saves what was saved. The preview redraws from the draft; the query does not change, so nothing is asked again.
+   */
+  protected setColor(n: number): void {
+    this.color.set(n === 1 && this.start.display?.color == null ? null : n);
+    this.serverFieldErrors.update(({ color: _color, ...others }) => others);
+  }
+
+  /** The widget's scale; null is the palette's own. */
+  protected setRamp(scale: ScaleId | null): void {
+    this.ramp.set(scale);
+    this.serverFieldErrors.update(({ ramp: _ramp, ...others }) => others);
+  }
+
+  /** The CSS value of the n-th color of the dashboard's palette: the same custom property the charts read. */
+  protected swatch(n: number): string {
+    return paletteColor(this.palette, n);
+  }
+
+  /** A scale's steps, lightest to darkest; the palette's own (null) shows the scale it stands for. */
+  protected gradient(scale: ScaleId | null): string {
+    return rampGradient(scale ?? this.paletteScale);
   }
 
   /** Stacked and 100% add the values of a bar, so they cannot plot a ratio. */
@@ -1396,6 +1542,8 @@ export class WidgetDialog {
   private fieldFor(path: string): keyof Problems | null {
     const name = path.toLowerCase();
     if (name === 'dashboardid') return 'dashboardId';
+    if (name.includes('display.color')) return 'color';
+    if (name.includes('display.ramp')) return 'ramp';
     if (name.includes('seriesby')) return 'seriesBy';
     if (name.includes('layout')) return 'layout';
     if (name.includes('pyramid.left')) return 'pyramidLeft';

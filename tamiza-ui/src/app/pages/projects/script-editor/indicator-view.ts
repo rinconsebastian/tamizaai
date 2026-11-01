@@ -5,6 +5,7 @@ import { QueryRow, WidgetConfig, emptyConfig } from '../../../core/projects/indi
 import type { IndicatorMetadata, IndicatorTestView } from '../../../core/projects/pipeline.service';
 import { Alert, Badge, Button, Input } from '../../../shared/ui';
 import { AxisChart } from '../indicators/axis-chart';
+import { chartColors, defaultColors } from '../indicators/chart-colors';
 import { ValueFormatter, valueFormatter } from '../indicators/format';
 import { StatWidget } from '../indicators/stat-widget';
 
@@ -146,7 +147,7 @@ export function viewWarnings(facts: IndicatorTestView, format: ValueFormatter, i
             }
           </div>
           <div class="h-72" data-testid="view-chart">
-            <app-axis-chart kind="bar" [rows]="chartRows()" [config]="plot() === 'ratio' ? ratioConfig() : measureConfig()" [label]="label()" [format]="format()" />
+            <app-axis-chart kind="bar" [rows]="chartRows()" [config]="plot() === 'ratio' ? ratioConfig() : measureConfig()" [label]="label()" [format]="format()" [colors]="colors" />
           </div>
         </div>
       }
@@ -192,6 +193,8 @@ export class IndicatorView {
 
   protected readonly measureConfig = computed<WidgetConfig>(() => this.config({ measure: this.facts().defaultMeasure, ratio: null }));
   protected readonly ratioConfig = computed<WidgetConfig>(() => this.config({ measure: null, ratio: { numerator: 'numerator', denominator: 'denominator' } }));
+  /** The preview is no dashboard's: its bars are drawn in the default palette's first color. */
+  protected readonly colors = chartColors(defaultColors, 'bar', emptyConfig(''));
 
   /** The default measure summed over the whole table, as a stat tile shows it. */
   protected readonly measureTotal = computed<QueryRow[]>(() => {

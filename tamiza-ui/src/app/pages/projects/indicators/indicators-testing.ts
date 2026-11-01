@@ -5,6 +5,7 @@ import { Downloader } from '../../../core/download.service';
 import {
   AppliedDashboardFilter,
   Dashboard,
+  DashboardColors,
   DashboardFilter,
   IndicatorColumns,
   IndicatorEntry,
@@ -22,7 +23,9 @@ import { DashboardEntry, ProjectDetails, ProjectRole } from '../../../core/proje
 import { InterfaceLanguage } from '../../../core/i18n/interface-language';
 import { openProjectSection, projectId, settle } from '../../../../testing/project-harness';
 import { ProjectIndicators } from '../project-indicators';
+import { ChartColors } from './chart-colors';
 import { DashboardPrint } from './dashboard-print';
+import { WidgetView } from './widget-view';
 
 // Shared by the specs of the indicators dashboard: factories for the API's answers and a way to open the page.
 
@@ -178,13 +181,15 @@ export const all = (root: ParentNode, id: string) => Array.from(root.querySelect
 export type Answer = QueryResult | ((body: { config: WidgetConfig; chartType?: string; dashboardFilters?: AppliedDashboardFilter[] }) => QueryResult);
 
 /**
- * Which dashboard `open()` opens, and the project's dashboards when they are not just "Indicators" (`d1`); the dashboard's filters,
- * and a query string for the address (`f=…`, without the `?`); other project details (its time zone), and the interface language.
+ * Which dashboard `open()` opens, and the project's dashboards when they are not just "Indicators" (`d1`); the dashboard's filters and
+ * its colors (the palette Tamiza with none kept by value when left out), and a query string for the address (`f=…`, without the `?`);
+ * other project details (its time zone), and the interface language.
  */
 export interface OpenAt {
   dashboardId?: string;
   dashboards?: DashboardEntry[];
   filters?: DashboardFilter[];
+  colors?: DashboardColors;
   query?: string;
   project?: Partial<ProjectDetails>;
   lang?: InterfaceLanguage;
@@ -196,7 +201,7 @@ export async function open(role: ProjectRole, widgets: Widget[], answer: Answer 
   const address = `dashboards/${id}${at.query ? `?${at.query}` : ''}`;
   const project = { ...(at.dashboards ? { dashboards: at.dashboards } : {}), ...at.project };
   const context = await openProjectSection(address, role, project, [{ provide: Downloader, useValue: downloader }], at.lang);
-  await answerLoad(context, widgets, extra, id, at.filters);
+  await answerLoad(context, widgets, extra, id, at.filters, at.colors);
   if (answer) {
     await answerQueries(context, answer);
   }
@@ -205,16 +210,17 @@ export async function open(role: ProjectRole, widgets: Widget[], answer: Answer 
 
 export type Context = Awaited<ReturnType<typeof open>>;
 
-/** Answers what the page reads to draw a dashboard (`d1` by default): the project's indicators and the dashboard's filters and widgets. */
+/** Answers what the page reads to draw a dashboard (`d1` by default): the project's indicators and the dashboard's filters, colors and widgets. */
 export async function answerLoad(
   context: Pick<Context, 'http' | 'harness'>,
   widgets: Widget[],
   extra: Partial<IndicatorsOverview> = {},
   id = dashboardId,
   filters: DashboardFilter[] = [],
+  colors?: DashboardColors,
 ): Promise<void> {
   context.http.expectOne(isOverview).flush(overview(extra));
-  context.http.expectOne(isDashboardOf(id)).flush(dashboard(widgets, { id, filters }));
+  context.http.expectOne(isDashboardOf(id)).flush(dashboard(widgets, { id, filters, ...colors }));
   await settle(context.harness);
 }
 
@@ -243,4 +249,9 @@ export async function paperOn(context: Pick<Context, 'harness'>): Promise<Dashbo
   print.prepare();
   await settle(context.harness);
   return print;
+}
+
+/** The colors each widget of the open dashboard is drawn in, in the page's reading order (add-dashboard-palettes, design D7). */
+export function colorsOfWidgets(context: Pick<Context, 'harness'>): ChartColors[] {
+  return context.harness.fixture.debugElement.queryAll(By.directive(WidgetView)).map((view) => (view.componentInstance as WidgetView).resolvedColors());
 }

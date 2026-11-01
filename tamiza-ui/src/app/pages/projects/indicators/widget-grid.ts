@@ -1,8 +1,9 @@
 import { CdkDrag, CdkDragEnd, CdkDragHandle, CdkDragMove } from '@angular/cdk/drag-drop';
 import { Component, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
-import { IndicatorEntry, Layout, Widget } from '../../../core/projects/indicators.service';
+import { DashboardColors, IndicatorEntry, Layout, Widget } from '../../../core/projects/indicators.service';
 import { ChartTooltips, DropdownMenu, MenuItem } from '../../../shared/ui';
+import { defaultColors } from './chart-colors';
 import { ActiveDashboardFilter } from './dashboard-filters';
 import { DashboardPrint } from './dashboard-print';
 import { Placed, changed, movedBy, readingOrder, reflow, resizedBy, unitsFor } from './grid-layout';
@@ -89,6 +90,7 @@ const fallbackWidth = 1200;
                 [showToggle]="false"
                 [asTable]="shownAsTable(widget)"
                 [dashboardFilters]="filtersOf().get(widget.id) ?? none"
+                [colors]="colors()"
                 (tableAvailable)="setDrawable(widget.id, $event)"
               />
             </div>
@@ -201,6 +203,8 @@ export class WidgetGrid {
   readonly allTables = input(false);
   /** The dashboard filters with a value in force on the member's screen, in the bar's order (dashboard filters, design D7). */
   readonly dashboardFilters = input<ActiveDashboardFilter[]>([]);
+  /** The palette and the colors kept by value of the dashboard shown, or of the version shown: each widget is drawn in them (add-dashboard-palettes, design D7). */
+  readonly colors = input<DashboardColors>(defaultColors);
 
   /** Every layout a move or resize changed, the dropped widget's and those it pushed down. */
   readonly layoutsChange = output<Placed[]>();
