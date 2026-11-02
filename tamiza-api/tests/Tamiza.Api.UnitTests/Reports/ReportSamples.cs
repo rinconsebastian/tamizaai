@@ -42,4 +42,16 @@ internal static class ReportSamples
                  new ReportCell((double)(g * series), $"{g * series}")]),
              [new ReportCell("Total", "Total"), .. Enumerable.Range(1, series).Select(i => new ReportCell((double)i, $"{i}")), new ReportCell(series, $"{series}")]],
             null, null, [], series);
+
+    /// <summary>A box plot's table: the group, the number of values, six figures and the number of outliers, one row per box.</summary>
+    public static ReportWidget BoxTable(int position, string title, int boxes) =>
+        new(position, title, ChartTypes.Boxplot, "Household size: value", WidgetOutcome.Shown,
+            [new ReportColumn("municipality"), new ReportColumn("Values", "#,##0"),
+             .. new[] { "Minimum", "Q1", "Median", "Q3", "Maximum", "Mean" }.Select(h => new ReportColumn(h, "#,##0.00", "people")),
+             new ReportColumn("Outliers", "#,##0")],
+            Enumerable.Range(1, boxes).Select(b => (IReadOnlyList<ReportCell>)
+                [new ReportCell($"Municipality {b}", $"Municipality {b}"), new ReportCell(40d, "40"),
+                 .. Enumerable.Range(1, 6).Select(f => new ReportCell((double)(b + f) / 2, $"{(b + f) / 2d:0.00} people")),
+                 new ReportCell(2d, "2")]).ToList(),
+            null, null, []);
 }

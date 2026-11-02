@@ -8,6 +8,7 @@ import { Basemaps } from '../../../core/basemaps.service';
 import { DataFilter } from '../../../core/projects/data.service';
 import {
   BasemapKind,
+  BoxOrientation,
   ChartType,
   DashboardColors,
   IndicatorColumns,
@@ -21,6 +22,7 @@ import {
   Widget,
   WidgetConfig,
   WidgetDisplay,
+  boxOrientations,
   WidgetPatch,
   chartTypes,
   emptyConfig,
@@ -111,7 +113,8 @@ type Problems = Partial<
     | 'pyramidRight'
     | 'scale'
     | 'color'
-    | 'ramp',
+    | 'ramp'
+    | 'orientation',
     string
   >
 >;
@@ -233,7 +236,7 @@ const rampChoices: readonly (ScaleId | null)[] = [null, ...scaleIds];
               }
             </select>
           </tmz-form-field>
-          <tmz-form-field [label]="t('indicators.dialog.denominator')" fieldId="widgetDenominator" [hint]="t('indicators.dialog.ratioHelp')">
+          <tmz-form-field [label]="t('indicators.dialog.denominator')" fieldId="widgetDenominator" [hint]="t(chartType() === 'boxplot' ? 'indicators.dialog.ratioHelpBoxplot' : 'indicators.dialog.ratioHelp')">
             <select tmzInput id="widgetDenominator" (change)="denominator.set($any($event.target).value)" data-testid="dialog-denominator">
               <option value="" [selected]="!denominator()">{{ t('indicators.dialog.columnChoose') }}</option>
               @for (column of numericColumns(); track column) {
@@ -246,7 +249,7 @@ const rampChoices: readonly (ScaleId | null)[] = [null, ...scaleIds];
 
       <div class="grid gap-4 sm:grid-cols-2">
         @if (chartType() !== 'stat') {
-          <tmz-form-field [label]="t('indicators.dialog.groupBy')" fieldId="widgetGroupBy" [error]="shown().groupBy" [hint]="groups() ? null : t('indicators.dialog.groupByOptional')">
+          <tmz-form-field [label]="t('indicators.dialog.groupBy')" fieldId="widgetGroupBy" [error]="shown().groupBy" [hint]="groups() ? null : t(chartType() === 'boxplot' ? 'indicators.dialog.groupByOptionalBoxplot' : 'indicators.dialog.groupByOptional')">
             <select tmzInput id="widgetGroupBy" (change)="groupBy.set($any($event.target).value)" data-testid="dialog-group-by">
               <option value="" [selected]="!groupBy()">{{ groups() ? t('indicators.dialog.columnChoose') : t('indicators.dialog.groupByNone') }}</option>
               @for (column of allColumns(); track column) {
@@ -268,19 +271,27 @@ const rampChoices: readonly (ScaleId | null)[] = [null, ...scaleIds];
         }
 
         @if (sortable()) {
-          <tmz-form-field [label]="t('indicators.dialog.sortBy')" fieldId="widgetSortBy" [error]="shown().sort">
-            <select tmzInput id="widgetSortBy" (change)="setSortKey($any($event.target).value)" data-testid="dialog-sort-by">
-              <option value="" [selected]="sortKey() === ''">{{ t('indicators.dialog.sortDefault') }}</option>
-              <option value="value" [selected]="sortKey() === 'value'">{{ t('indicators.dialog.sortValue') }}</option>
-              @for (column of sortColumns(); track column) {
-                <option [value]="'column:' + column" [selected]="sortKey() === 'column:' + column">{{ column }}</option>
+          <!-- A box plot is ordered by its median only, and only with a group column; a bar or column by the value or a column. -->
+          <tmz-form-field
+            [label]="t(chartType() === 'boxplot' ? 'indicators.dialog.sortByBoxes' : 'indicators.dialog.sortBy')"
+            fieldId="widgetSortBy"
+            [error]="shown().sort"
+            [hint]="orderBlocked() ? t('indicators.dialog.sortNeedsGroup') : null"
+          >
+            <select tmzInput id="widgetSortBy" [disabled]="orderBlocked()" (change)="setSortKey($any($event.target).value)" data-testid="dialog-sort-by">
+              <option value="" [selected]="effectiveSortKey() === ''">{{ t('indicators.dialog.sortDefault') }}</option>
+              <option value="value" [selected]="effectiveSortKey() === 'value'">{{ t(chartType() === 'boxplot' ? 'indicators.dialog.sortMedian' : 'indicators.dialog.sortValue') }}</option>
+              @if (chartType() !== 'boxplot') {
+                @for (column of sortColumns(); track column) {
+                  <option [value]="'column:' + column" [selected]="sortKey() === 'column:' + column">{{ column }}</option>
+                }
               }
             </select>
           </tmz-form-field>
 
-          @if (sortKey() !== '') {
+          @if (effectiveSortKey() !== '') {
             <tmz-form-field [label]="t('indicators.dialog.sortDirection')" fieldId="widgetSortDirection">
-              <select tmzInput id="widgetSortDirection" (change)="sortDirection.set($any($event.target).value)" data-testid="dialog-sort-direction">
+              <select tmzInput id="widgetSortDirection" [disabled]="orderBlocked()" (change)="sortDirection.set($any($event.target).value)" data-testid="dialog-sort-direction">
                 <option value="asc" [selected]="sortDirection() === 'asc'">{{ t('indicators.dialog.sortAsc') }}</option>
                 <option value="desc" [selected]="sortDirection() === 'desc'">{{ t('indicators.dialog.sortDesc') }}</option>
               </select>
@@ -411,6 +422,32 @@ const rampChoices: readonly (ScaleId | null)[] = [null, ...scaleIds];
           }
           @if (shown().layout; as message) {
             <p class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
+          }
+        </fieldset>
+      }
+
+      @if (chartType() === 'boxplot') {
+        <fieldset class="min-w-0" [attr.aria-describedby]="shown().orientation ? 'widgetOrientation-error' : null" data-testid="dialog-orientation">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.orientation.legend') }}</legend>
+          <div class="flex flex-wrap gap-x-6 gap-y-1">
+            @for (option of orientations; track option) {
+              <label class="flex min-h-10 cursor-pointer items-center gap-2 text-sm text-heading">
+                <input
+                  type="radio"
+                  name="widgetOrientation"
+                  class="size-4 shrink-0"
+                  [value]="option"
+                  [checked]="chosenOrientation() === option"
+                  (change)="setOrientation(option)"
+                  [attr.data-testid]="'dialog-orientation-' + option"
+                />
+                {{ t('indicators.dialog.orientation.' + option) }}
+              </label>
+            }
+          </div>
+          <p class="mt-1 text-sm text-body">{{ t('indicators.dialog.orientation.help') }}</p>
+          @if (shown().orientation; as message) {
+            <p id="widgetOrientation-error" class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
           }
         </fieldset>
       }
@@ -743,8 +780,14 @@ export class WidgetDialog {
   protected readonly ramp = signal<ScaleId | null>(this.start.display?.ramp ?? null);
   /** The color the group shows as chosen. */
   protected readonly chosenColor = computed(() => this.color() ?? 1);
-  /** A bar, column or line chart with no series, and a histogram, take a color; any other chart takes its colors from its values. */
-  protected readonly offersColor = computed(() => this.chartType() === 'histogram' || (takesSeries(this.chartType()) && !this.seriesBy()));
+  /** A box plot's direction; null is unset, which draws it vertical (design D1 of add-boxplot-widget). */
+  protected readonly orientation = signal<BoxOrientation | null>(this.start.display?.orientation ?? null);
+  protected readonly orientations = boxOrientations;
+  protected readonly chosenOrientation = computed(() => this.orientation() ?? 'vertical');
+  /** A bar, column or line chart with no series, a histogram and a box plot take a color; any other chart takes its colors from its values. */
+  protected readonly offersColor = computed(
+    () => this.chartType() === 'histogram' || this.chartType() === 'boxplot' || (takesSeries(this.chartType()) && !this.seriesBy()),
+  );
   /** A map and a heat map take a scale. */
   protected readonly offersRamp = computed(() => this.chartType() === 'map' || this.chartType() === 'heatmap');
   /** The open dashboard's filters, each offered with a box to ignore it. */
@@ -828,11 +871,18 @@ export class WidgetDialog {
   protected readonly sortColumn = computed(() => (this.sortKey().startsWith('column:') ? this.sortKey().slice('column:'.length) : ''));
   /** A saved sort column the table no longer has is kept in front here only, not in the group-by or filter lists. */
   protected readonly sortColumns = computed(() => this.columnsWith(this.catalog()?.columns.map((c) => c.name) ?? [], [this.sortColumn()]));
-  protected readonly sortable = computed(() => this.chartType() === 'bar' || this.chartType() === 'column');
+  protected readonly sortable = computed(() => this.chartType() === 'bar' || this.chartType() === 'column' || this.chartType() === 'boxplot');
+  /**
+   * The order the select shows. A box plot is ordered by its median only: an order by a column left from a bar or a column chart reads
+   * as the default one, and is not sent (see `queryFor`).
+   */
+  protected readonly effectiveSortKey = computed(() => (this.chartType() === 'boxplot' && this.sortKey().startsWith('column:') ? '' : this.sortKey()));
+  /** A box plot cannot be ordered without a group column: the API refuses it, so the field says why it is off. */
+  protected readonly orderBlocked = computed(() => this.chartType() === 'boxplot' && !this.groupBy());
   /** The sort column's type; null while the table loads, when it cannot be read and when the table no longer has the column. */
   private readonly sortType = computed(() => this.catalog()?.columns.find((c) => c.name === this.sortColumn())?.type ?? null);
   /** Only a text, integer or decimal column is compared as text or as a number; a date, timestamp or true/false column is not. */
-  protected readonly showCompareAs = computed(() => this.sortable() && ['text', 'integer', 'decimal'].includes(this.sortType() ?? ''));
+  protected readonly showCompareAs = computed(() => this.chartType() !== 'boxplot' && this.sortable() && ['text', 'integer', 'decimal'].includes(this.sortType() ?? ''));
   /**
    * How the sort column is compared, as it is shown and sent. A date, timestamp or true/false column sends none, which also clears
    * a value left from a previous column. For a text, integer or decimal column, a missing value shows the type's own way. While the
@@ -881,7 +931,10 @@ export class WidgetDialog {
   private displayDraft(): { display?: WidgetDisplay } {
     const color = this.color();
     const ramp = this.ramp();
-    return color === null && ramp === null ? {} : { display: { ...(color !== null ? { color } : {}), ...(ramp !== null ? { ramp } : {}) } };
+    const orientation = this.orientation();
+    return color === null && ramp === null && orientation === null
+      ? {}
+      : { display: { ...(color !== null ? { color } : {}), ...(ramp !== null ? { ramp } : {}), ...(orientation !== null ? { orientation } : {}) } };
   }
 
   /** The scale to save: the values that are in it, in order. */
@@ -1199,6 +1252,15 @@ export class WidgetDialog {
   protected setColor(n: number): void {
     this.color.set(n === 1 && this.start.display?.color == null ? null : n);
     this.serverFieldErrors.update(({ color: _color, ...others }) => others);
+  }
+
+  /**
+   * The widget's orientation. Vertical is the default: picking it on a widget saved without one leaves it without one, as color 1 does,
+   * so a form saved unchanged saves what was saved. The preview redraws from the draft; the query does not change.
+   */
+  protected setOrientation(orientation: BoxOrientation): void {
+    this.orientation.set(orientation === 'vertical' && this.start.display?.orientation == null ? null : orientation);
+    this.serverFieldErrors.update(({ orientation: _orientation, ...others }) => others);
   }
 
   /** The widget's scale; null is the palette's own. */
@@ -1543,6 +1605,7 @@ export class WidgetDialog {
   private fieldFor(path: string): keyof Problems | null {
     const name = path.toLowerCase();
     if (name === 'dashboardid') return 'dashboardId';
+    if (name.includes('display.orientation')) return 'orientation';
     if (name.includes('display.color')) return 'color';
     if (name.includes('display.ramp')) return 'ramp';
     if (name.includes('seriesby')) return 'seriesBy';

@@ -42,7 +42,20 @@ public sealed class WidgetQueryTests
     [InlineData(ChartTypes.Histogram)]
     [InlineData(ChartTypes.Pie)]
     [InlineData(ChartTypes.Map)]
+    [InlineData(ChartTypes.Boxplot)]
     public void Every_other_chart_type_has_no_order(string type) => Assert.Null(WidgetQuery.For(type, Config(ByColumn)).Sort);
+
+    [Fact]
+    public void A_box_plot_keeps_only_an_order_by_its_median_and_only_with_a_group_column()
+    {
+        var byMedian = new WidgetSort(SortValues.ByValue, "round", SortValues.Text, SortValues.Desc);
+
+        Assert.Equal(new WidgetSort(SortValues.ByValue, null, null, SortValues.Desc), WidgetQuery.For(ChartTypes.Boxplot, Config(byMedian)).Sort);
+        Assert.Null(WidgetQuery.For(ChartTypes.Boxplot, Config(ByColumn)).Sort);
+        Assert.Null(WidgetQuery.For(ChartTypes.Boxplot, Config(byMedian) with { GroupBy = null }).Sort);
+        Assert.Null(WidgetQuery.For(ChartTypes.Boxplot, Config(byMedian)).SeriesBy);
+        Assert.Equal("municipality", WidgetQuery.For(ChartTypes.Boxplot, Config(byMedian)).GroupBy);
+    }
 
     [Fact]
     public void Sorting_by_the_value_sends_no_column_or_comparison()
@@ -59,6 +72,7 @@ public sealed class WidgetQueryTests
     [InlineData(ChartTypes.Line)]
     [InlineData(ChartTypes.Histogram)]
     [InlineData(ChartTypes.Pie)]
+    [InlineData(ChartTypes.Boxplot)]
     public void Only_a_map_keeps_its_geometry_and_tooltip_columns(string type)
     {
         var query = WidgetQuery.For(type, Config());

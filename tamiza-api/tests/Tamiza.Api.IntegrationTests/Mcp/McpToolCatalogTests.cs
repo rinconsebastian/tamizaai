@@ -82,10 +82,10 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         await using var h = await McpProjectHarness.CreateAsync(postgres);
         var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
 
-        const string warning = "To change the chart type of a widget that has a color or a scale, also send a config without the display fields the new type does not take: a new chartType alone keeps the old config";
+        const string warning = "To change the chart type of a widget that has a color, a scale or an orientation, also send a config without the display fields the new type does not take: a new chartType alone keeps the old config";
         var update = tools["update_widget"].Description;
         Assert.Contains(warning, update);
-        Assert.Contains("config.display.color or config.display.ramp", update);
+        Assert.Contains("config.display.color, config.display.ramp or config.display.orientation", update);
         // update_widget says what a new config replaces, which is why the chart type alone is not enough.
         Assert.Contains("What you leave out keeps its value; a new config replaces the old one whole", update);
 
@@ -95,7 +95,7 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         Assert.DoesNotContain("a new chartType alone keeps the old config", create);
         foreach (var description in new[] { create, update })
         {
-            Assert.Contains("config.display = { color, ramp } sets how the widget is drawn", description);
+            Assert.Contains("config.display = { color, ramp, orientation } sets how the widget is drawn", description);
             Assert.Contains("ramp is a sequential scale", description);
         }
     }

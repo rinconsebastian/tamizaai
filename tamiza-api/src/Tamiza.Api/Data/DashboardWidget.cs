@@ -13,7 +13,7 @@ public sealed class DashboardWidget
     /// <summary>The <see cref="Dashboard"/> the widget is on, always one of <see cref="ProjectId"/>'s.</summary>
     public Guid DashboardId { get; set; }
 
-    /// <summary><c>stat</c>, <c>bar</c>, <c>column</c>, <c>line</c>, <c>histogram</c>, <c>pie</c> or <c>map</c>.</summary>
+    /// <summary><c>stat</c>, <c>bar</c>, <c>column</c>, <c>line</c>, <c>histogram</c>, <c>pie</c>, <c>map</c>, <c>heatmap</c>, <c>pyramid</c>, <c>likert</c>, <c>crosstab</c> or <c>boxplot</c>.</summary>
     public required string ChartType { get; set; }
 
     public required string Title { get; set; }

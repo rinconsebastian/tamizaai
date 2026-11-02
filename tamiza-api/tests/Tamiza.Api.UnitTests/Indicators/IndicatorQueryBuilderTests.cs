@@ -772,4 +772,157 @@ public sealed class IndicatorQueryBuilderTests
         // A pie that names a column the table no longer has plans nothing.
         Assert.Null(Of(ChartTypes.Pie, Config(groupBy: "gone")).Domain);
     }
+
+    // Box plot (design D3 of add-boxplot-widget)
+
+    private static IndicatorQueryPlan BoxPlan(WidgetConfigInput input, int maxRows = 5000, TableColumn[]? columns = null) =>
+        IndicatorQueryBuilder.Plan(input.Normalize(), columns ?? Columns, "UTC", From, maxRows, chartType: ChartTypes.Boxplot);
+
+    [Fact]
+    public void A_box_plot_is_one_statement_and_neither_a_row_statement_nor_a_series()
+    {
+        var plan = BoxPlan(Config());
+
+        Assert.Null(plan.Sql);
+        Assert.Null(plan.Series);
+        Assert.NotNull(plan.Boxes);
+        Assert.Empty(plan.MissingColumns);
+    }
+
+    [Fact]
+    public void A_box_plot_groups_by_the_typed_column_and_takes_no_aggregate_over_it()
+    {
+        var text = BoxPlan(Config()).Boxes!.Sql;
+        var flag = BoxPlan(Config(groupBy: "flag")).Boxes!.Sql;
+
+        Assert.Contains("SELECT \"municipality\" AS g, (\"value\"::double precision) AS x", text);
+        Assert.Contains("SELECT \"flag\" AS g,", flag);
+        // PostgreSQL has no min(boolean): the group is grouped on, never aggregated.
+        Assert.DoesNotContain("min(g)", flag);
+        Assert.DoesNotContain("max(g)", flag);
+        Assert.Contains("FROM src GROUP BY g", flag);
+    }
+
+    [Fact]
+    public void A_box_plot_with_no_group_has_one_box()
+    {
+        var sql = BoxPlan(Config(groupBy: null)).Boxes!.Sql;
+
+        Assert.Contains("SELECT NULL::text AS g,", sql);
+    }
+
+    [Fact]
+    public void A_box_plot_keeps_only_finite_values_and_takes_each_rows_value_without_summing()
+    {
+        var sql = BoxPlan(Config(measure: "numerator")).Boxes!.Sql;
+
+        Assert.Contains("(\"numerator\"::double precision) AS x", sql);
+        Assert.Contains("> '-Infinity'::double precision", sql);
+        Assert.Contains("< 'Infinity'::double precision", sql);
+        Assert.Contains("\"numerator\" IS NOT NULL", sql);
+        Assert.DoesNotContain("sum(\"numerator\")", sql);
+    }
+
+    [Fact]
+    public void A_box_plot_ratio_is_each_rows_numerator_over_its_own_denominator()
+    {
+        var sql = BoxPlan(Config(ratio: new WidgetRatio("numerator", "denominator"))).Boxes!.Sql;
+
+        Assert.Contains("(\"numerator\"::double precision / nullif(\"denominator\", 0)) AS x", sql);
+        Assert.DoesNotContain("sum(\"numerator\")", sql);
+    }
+
+    [Fact]
+    public void A_box_plot_filters_apply_before_the_statistics_and_share_their_parameters()
+    {
+        var filters = new[] { new DataFilter("municipality", "equals", "Cali") };
+        var plan = BoxPlan(Config(filters: filters));
+        var sql = plan.Boxes!.Sql;
+
+        Assert.True(sql.IndexOf("WHERE", StringComparison.Ordinal) < sql.IndexOf("percentile_cont", StringComparison.Ordinal));
+        Assert.Contains(plan.Boxes.Parameters, p => p.Name == "f0");
+        Assert.Contains(plan.Boxes.Parameters, p => p.Name == BoxQueryBuilder.MaxOutliersParameter && Equals(p.Value, WidgetConfig.MaxBoxOutliers));
+        Assert.Contains(plan.Boxes.Parameters, p => p.Name == IndicatorSql.LimitParameter && Equals(p.Value, 5001));
+    }
+
+    [Fact]
+    public void A_box_plot_computes_the_quartiles_the_fences_and_the_whiskers_in_the_statement()
+    {
+        var sql = BoxPlan(Config()).Boxes!.Sql;
+
+        Assert.Contains("percentile_cont(ARRAY[0.25, 0.5, 0.75]) WITHIN GROUP (ORDER BY x)", sql);
+        Assert.Contains("q[1] - 1.5 * (q[3] - q[1]) AS lf", sql);
+        Assert.Contains("q[3] + 1.5 * (q[3] - q[1]) AS uf", sql);
+        Assert.Contains("sum(x) / count(*) AS mean", sql);
+        Assert.DoesNotContain("avg(", sql);
+        Assert.Contains("r <= @maxoutliers", sql);
+    }
+
+    [Fact]
+    public void A_box_plot_joins_without_distinct_from_so_that_every_join_can_hash()
+    {
+        var sql = BoxPlan(Config()).Boxes!.Sql;
+
+        Assert.DoesNotContain("IS NOT DISTINCT FROM", sql);
+        Assert.Contains("JOIN ends e USING (b) LEFT JOIN shown s USING (b)", sql);
+        Assert.Contains("WITH src AS MATERIALIZED", sql);
+        Assert.Contains("fence AS MATERIALIZED", sql);
+        Assert.Contains("marked AS MATERIALIZED", sql);
+    }
+
+    [Fact]
+    public void A_box_plot_without_an_order_follows_the_group_columns_own_order_and_limits_the_boxes()
+    {
+        var sql = BoxPlan(Config(), maxRows: 40).Boxes!.Sql;
+
+        Assert.Matches(@"ORDER BY f\.g NULLS LAST\s+LIMIT @limit", sql);
+        Assert.Contains(BoxPlan(Config(), maxRows: 40).Boxes!.Parameters, p => p.Name == "limit" && Equals(p.Value, 41));
+    }
+
+    [Theory]
+    [InlineData(SortValues.Asc, "ASC")]
+    [InlineData(SortValues.Desc, "DESC")]
+    public void A_box_plot_ordered_by_median_sorts_by_the_second_quartile_then_the_group(string direction, string sql)
+    {
+        var input = Config() with { Sort = new WidgetSort(SortValues.ByValue, null, null, direction) };
+
+        Assert.Contains($"ORDER BY f.q[2] {sql}, f.g NULLS LAST", BoxPlan(input).Boxes!.Sql);
+    }
+
+    [Fact]
+    public void A_box_plot_with_no_group_ignores_an_order()
+    {
+        var input = Config(groupBy: null) with { Sort = new WidgetSort(SortValues.ByValue, null, null, SortValues.Desc) };
+
+        Assert.Contains("ORDER BY f.g NULLS LAST", BoxPlan(input).Boxes!.Sql);
+    }
+
+    [Fact]
+    public void A_box_plot_over_a_column_the_table_lost_runs_no_statement()
+    {
+        var columns = Columns.Where(c => c.Name != "municipality").ToArray();
+        var plan = BoxPlan(Config(), columns: columns);
+
+        Assert.Null(plan.Boxes);
+        Assert.Null(plan.Sql);
+        Assert.Equal(["municipality"], plan.MissingColumns);
+    }
+
+    [Fact]
+    public void A_box_plot_over_a_text_measure_is_an_error()
+    {
+        var plan = BoxPlan(Config(measure: "municipality"));
+
+        Assert.Null(plan.Boxes);
+        Assert.Contains("measure", plan.Errors!.Keys);
+    }
+
+    [Fact]
+    public void Without_the_box_plot_chart_type_a_query_is_planned_as_before()
+    {
+        var plan = Plan(Config());
+
+        Assert.NotNull(plan.Sql);
+        Assert.Null(plan.Boxes);
+    }
 }

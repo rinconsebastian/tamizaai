@@ -6,7 +6,7 @@ Keep a short history of each of a project's own dashboards, recorded automatical
 ## Requirements
 
 ### Requirement: Dashboard versions
-Each of a project's own dashboards SHALL have a history of versions. A version SHALL hold the dashboard's name, its filters with their defaults, its palette and colors kept by value, and its widgets with their title, chart type, query, color or scale, the dashboard filters they ignore, position and size. It SHALL record its number, who made it, when its last change was saved, where it was made (Tamiza or an AI client), and what changed. The newest version SHALL be the dashboard as it is.
+Each of a project's own dashboards SHALL have a history of versions. A version SHALL hold the dashboard's name, its filters with their defaults, its palette and colors kept by value, and its widgets with their title, chart type, query, color or scale, orientation, the dashboard filters they ignore, position and size. It SHALL record its number, who made it, when its last change was saved, where it was made (Tamiza or an AI client), and what changed. The newest version SHALL be the dashboard as it is.
 
 #### Scenario: Widget added
 - **WHEN** an `analyst` adds the widget "Water source" to "Housing", whose newest version is 4
@@ -15,6 +15,10 @@ Each of a project's own dashboards SHALL have a history of versions. A version S
 #### Scenario: Numbers never reused
 - **WHEN** "Housing" has versions 3 to 12 and an `analyst` restores version 9
 - **THEN** the restore is version 13
+
+#### Scenario: Orientation restored
+- **WHEN** an `analyst` changes a box plot of "Housing" from vertical to horizontal, and then restores the version before that change
+- **THEN** the box plot is vertical again, and the restore is a new version
 
 ### Requirement: Changes that make a version
 Every change a person saves to a dashboard in Tamiza SHALL make a new version, however small: adding, renaming or duplicating the dashboard, saving its filters, saving its colors, and adding, editing, removing, moving or resizing a widget, or moving one between dashboards. One action SHALL make one version of each dashboard it changes. A save that leaves a dashboard as its newest version holds SHALL make none. An AI client's changes follow `mcp-server` "One version per request".

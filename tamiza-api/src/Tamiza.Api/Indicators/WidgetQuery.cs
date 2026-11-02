@@ -19,7 +19,7 @@ public static class WidgetQuery
         config.Filters,
         chartType == ChartTypes.Map ? config.GeometryColumn : null,
         chartType == ChartTypes.Histogram ? config.Buckets : null,
-        chartType is ChartTypes.Bar or ChartTypes.Column && config.Sort is { } sort ? SortFor(sort) : null,
+        SortOf(chartType, config),
         // A label and a format change nothing in the rows; the query needs only the columns.
         chartType == ChartTypes.Map ? config.Tooltip.Select(item => new WidgetTooltipItem(item.Column)).ToList() : [],
         null,
@@ -28,6 +28,17 @@ public static class WidgetQuery
         chartType is ChartTypes.Bar or ChartTypes.Column ? config.Layout : null,
         chartType == ChartTypes.Pyramid ? config.Pyramid : null,
         chartType == ChartTypes.Likert ? config.Scale : []);
+
+    /// <summary>
+    /// A bar or column keeps its order. A box plot keeps only an order by median, and only with a group column: an order the form keeps
+    /// while the group is cleared is not sent, so the query is not refused for it. Twin of the sort rule of <c>queryFor</c>.
+    /// </summary>
+    private static WidgetSort? SortOf(string chartType, WidgetConfig config) => chartType switch
+    {
+        ChartTypes.Bar or ChartTypes.Column => config.Sort is { } sort ? SortFor(sort) : null,
+        ChartTypes.Boxplot => config.GroupBy is not null && config.Sort is { By: SortValues.ByValue } sort ? SortFor(sort) : null,
+        _ => null,
+    };
 
     /// <summary>Plotting the value is always by number, and which column it is makes no sense then.</summary>
     private static WidgetSort SortFor(WidgetSort sort) => sort.By == SortValues.ByValue ? sort with { Column = null, CompareAs = null } : sort;

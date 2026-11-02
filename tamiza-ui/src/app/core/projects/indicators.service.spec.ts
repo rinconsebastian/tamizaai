@@ -315,6 +315,7 @@ describe('IndicatorsService', () => {
       ['pyramid', true],
       ['likert', true],
       ['crosstab', true],
+      ['boxplot', false],
     ]);
   });
 
@@ -331,11 +332,12 @@ describe('IndicatorsService', () => {
       ['pyramid', false, true, true],
       ['likert', false, true, true],
       ['crosstab', false, true, true],
+      ['boxplot', false, false, false],
     ]);
   });
 
-  it('lists the eleven chart types the API knows, in its order', () => {
-    expect(chartTypes).toEqual(['stat', 'bar', 'column', 'line', 'histogram', 'pie', 'map', 'heatmap', 'pyramid', 'likert', 'crosstab']);
+  it('lists the twelve chart types the API knows, in its order', () => {
+    expect(chartTypes).toEqual(['stat', 'bar', 'column', 'line', 'histogram', 'pie', 'map', 'heatmap', 'pyramid', 'likert', 'crosstab', 'boxplot']);
   });
 
   it('lists the four palettes and the seven sequential scales the API knows, in its order', () => {

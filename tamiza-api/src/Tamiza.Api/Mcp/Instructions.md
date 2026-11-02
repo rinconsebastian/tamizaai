@@ -6,8 +6,8 @@ Tamiza turns the answers of a KoboToolbox survey into indicators and dashboards.
 
 1. Cleaning script (script 1, `clean`) turns the flattened submissions (`raw` tables) into the `clean` tables.
 2. Output script (script 2, `output`, optional) prepares the tables of the clean data dashboard.
-3. One indicator script per indicator (`indicator`) turns the clean tables into one small table: dimensions as text columns and numeric measures (`value`, and `numerator` and `denominator` for a rate).
-4. A run publishes all of it. Dashboards hold widgets (stat, bar, column, line, histogram, pie, map, heatmap, pyramid, likert, crosstab), each a saved query over one indicator's table.
+3. One indicator script per indicator (`indicator`) turns the clean tables into one table: dimensions as text columns and numeric measures (`value`, and `numerator` and `denominator` for a rate).
+4. A run publishes all of it. Dashboards hold widgets (stat, bar, column, line, histogram, pie, map, heatmap, pyramid, likert, crosstab, boxplot), each a saved query over one indicator's table.
 
 ## Describing a situation
 
@@ -27,11 +27,12 @@ A widget groups an indicator table by one column (`groupBy`) and may split each 
 
 - One number: `stat`. One dimension: `bar`, `column` (compare groups), `line` (a trend over ordered groups such as rounds or months), `pie` (shares of a whole, few groups), `histogram` (a distribution), `map` (shapes with a geometry column).
 - Composition of each group by a second dimension (water source by municipality): `column` or `bar` with a `seriesBy` and `layout` `stacked`, or `percent` to compare shares. Compare the series side by side: `layout` `grouped`. A trend per series: `line` with a `seriesBy`.
+- The spread of a value across units in each group (income by municipality): `boxplot`, over a table with one row per unit and its id as text; `sort` by `value` orders the boxes by median.
 - A magnitude over two dimensions: `heatmap`. The same as a table with row and column totals: `crosstab`.
 - Two groups compared across ordered bands, such as women and men by age band: `pyramid` with `seriesBy` and `pyramid` = `{ left, right }`.
 - An agreement scale (strongly disagree to strongly agree): `likert` with `seriesBy` on the answer column and a `scale` that orders its values and marks each negative, neutral or positive. It shows each group's composition in percent.
 - `stacked`, `percent` and `likert` need a measure (counts), not a ratio: rates do not add up. A rate by two dimensions goes in `grouped`, `line`, `heatmap`, `pyramid` or `crosstab`.
-- With `seriesBy`, `query_indicator` and `get_widget_data` return `series`, `cells`, `totals` and `notes` instead of `rows`. Check them before and after you create the widget.
+- With `seriesBy`, `query_indicator` and `get_widget_data` return `series`, `cells`, `totals` and `notes` instead of `rows`; a `boxplot` returns `boxes` (each with its `values`, `min`, `q1`, `median`, `q3`, `max`, `mean`, whisker ends and `outlierCount`) instead of `rows`. Check them before and after you create the widget.
 
 ## Colors
 
@@ -39,7 +40,7 @@ A dashboard draws all its widgets in one palette: `tamiza` (the default), `insti
 
 - Keep the default palette unless the person asks for another look. Do not change a dashboard's palette on your own.
 - Keep colors by value, `valueColors` = `[{ column, value, color }]` with `color` 1 to 8, for categories that recur across widgets, such as sex or yes/no, so a value has the same color in every widget that colors by that column. The list you send replaces the current one, so read it with `get_dashboard` and send it whole. A column keeps each value once and each color once.
-- Keep color 1 for a widget unless it should stand out. `display` = `{ color, ramp }` in the widget's `config` is a `color` (1 to 8) for a `bar`, `column` or `line` with no `seriesBy` and for a `histogram`, or a `ramp` (`blue`, `teal`, `green`, `orange`, `red`, `purple` or `gray`) for a `map` or a `heatmap`. A widget with a series takes its colors from its series. `update_widget` replaces the whole `config`, so send the `display` again when you change the query.
+- Keep color 1 for a widget unless it should stand out. `display` = `{ color, ramp, orientation }` in the widget's `config` is a `color` (1 to 8) for a `bar`, `column` or `line` with no `seriesBy`, for a `histogram` and for a `boxplot`, or a `ramp` (`blue`, `teal`, `green`, `orange`, `red`, `purple` or `gray`) for a `map` or a `heatmap`; a `boxplot` also takes an `orientation`, `vertical` (the default) or `horizontal`, which suits long group names. A widget with a series takes its colors from its series. `update_widget` replaces the whole `config`, so send the `display` again when you change the query.
 
 ## Rules
 

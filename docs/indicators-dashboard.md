@@ -129,7 +129,7 @@ The **unit**, when there is one, goes after the value (`12,450 households`). A s
 
 ## Widget types
 
-Every widget has a title, a type, one **indicator**, what to **plot** (a measure or a ratio, see below), the column to **group by**, for many types a second column to split each group by (the [series](#widgets-with-a-series)), up to 50 **filters**, and for a map its **geometry column** and up to 5 [**tooltip columns**](#tooltip-and-tooltip-columns) and a [**basemap**](#basemap). A bar, column or line chart with no series and a histogram also have a [**color**](#widget-color-and-scale), and a map and a heat map a [**scale**](#widget-color-and-scale). A widget form shows a live preview while you edit.
+Every widget has a title, a type, one **indicator**, what to **plot** (a measure or a ratio, see below), the column to **group by**, for many types a second column to split each group by (the [series](#widgets-with-a-series)), up to 50 **filters**, and for a map its **geometry column** and up to 5 [**tooltip columns**](#tooltip-and-tooltip-columns) and a [**basemap**](#basemap). A bar, column or line chart with no series, a histogram and a box plot also have a [**color**](#widget-color-and-scale), a map and a heat map a [**scale**](#widget-color-and-scale), and a box plot an [**orientation**](#box-plot). A widget form shows a live preview while you edit.
 
 | Type | Shows | Group by | Notes |
 |---|---|---|---|
@@ -144,6 +144,7 @@ Every widget has a title, a type, one **indicator**, what to **plot** (a measure
 | **Population pyramid** | Two series values as bars to the left and to the right of a central axis, one row per group. | Required | Needs a series column and its two sides; see [Population pyramid](#population-pyramid). |
 | **Likert bars** | Each group's composition over an agreement scale, centered on the neutral value. | Required | Needs a series column and a scale; see [Likert bars](#likert-bars). |
 | **Cross table** | A table of groups by series, with totals. | Required | Needs a series column; see [Cross table](#cross-table). |
+| **Box plot** | How the rows of each group are spread: a box from the first to the third quartile, the median, the mean, whiskers and outliers. | Optional | Each row of the table is one value; see [Box plot](#box-plot). |
 
 - **Rows with no value** in the plotted measure are left out of every widget.
 - A group with no value in the group column is shown as **(none)**.
@@ -154,10 +155,11 @@ Every widget has a title, a type, one **indicator**, what to **plot** (a measure
 
 - A **measure** is a numeric column of the table. `value` is chosen when the table has it, otherwise its first numeric column. Rows that share a group value are **summed**.
 - A **ratio** is a numerator column and a denominator column. Rows that share a group value are summed in each, and the widget plots `sum(numerator) / sum(denominator)`. A group whose denominator sums to zero has **no value**.
+- A [box plot](#box-plot) is the exception: it sums nothing. Each row is one value, and for a ratio that value is the row's own numerator divided by its own denominator (a row whose denominator is 0 has no value and is left out).
 
 ### Duplicate rows are summed
 
-Rows that share the same group value are **summed** before they are plotted, in the database. A table that has one row per form version, for example, still charts as one bar per municipality: two rows for `Cali`, with values 40 and 35, plot 75. Summing is right for counts and wrong for rates, which is why a rate should carry its `numerator` and `denominator` and be plotted as a **ratio**: three rows for `Cali` with numerators 40, 10 and 50 and denominators 100, 50 and 50 plot 0.5, not the sum of three rates.
+Rows that share the same group value are **summed** before they are plotted, in the database (except in a [box plot](#box-plot), which takes each row as one value and never sums). A table that has one row per form version, for example, still charts as one bar per municipality: two rows for `Cali`, with values 40 and 35, plot 75. Summing is right for counts and wrong for rates, which is why a rate should carry its `numerator` and `denominator` and be plotted as a **ratio**: three rows for `Cali` with numerators 40, 10 and 50 and denominators 100, 50 and 50 plot 0.5, not the sum of three rates.
 
 ### Bar and column order
 
@@ -174,7 +176,7 @@ A bar or column widget can instead be ordered with **Order bars by** and **Direc
 - A date, timestamp or true/false column is always compared in its own order, so it has no *Compare as*.
 - If a script change removes the order column, the widget names it, as it does for a removed group column.
 
-Line charts keep their natural order (`2` before `10`) and, like pie, histogram and map widgets, have no order setting.
+Line charts keep their natural order (`2` before `10`) and, like pie, histogram and map widgets, have no order setting. A [box plot](#box-plot) can be ordered by its **median** only.
 
 ### Filters
 
@@ -188,7 +190,7 @@ A widget groups its indicator's table by one column. A **series column** splits 
 |---|---|
 | Bar, column and line chart | Optional |
 | Heat map, population pyramid, Likert bars and cross table | Required |
-| Stat tile, histogram, pie chart and map | Not allowed |
+| Stat tile, histogram, pie chart, map and box plot | Not allowed |
 
 The series column has to be another column than the group column. Everything else about the query is the same: the measure or ratio, the widget's filters and the dashboard's filters.
 
@@ -249,6 +251,40 @@ def compute(clean, ctx):
 - Order bands so that they sort naturally as text: `0-4`, `5-9`, `10-14` sort right (a run of digits compares as a number), `Under 5` does not. To order bars by something else, publish a sort column (see [Bar and column order](#bar-and-column-order)).
 - For a Likert widget, keep the answers as their **choice labels** and publish a count per group and answer; the scale in the widget names the values and their sides.
 - For a rate by two dimensions, also publish `numerator` and `denominator`, as for any rate.
+
+## Box plot
+
+A box plot shows **how the values of each group are spread**: household income by municipality, travel time by zone. Where a bar adds the rows of a group up, a box plot takes **each row of the table as one value** of its group (its measure, or for a ratio its numerator divided by its own denominator) and never sums them. It draws one box per value of the group column, or one box over every row when it has no group column.
+
+- **The box** runs from the first quartile (Q1) to the third (Q3), so it holds the middle half of the values. A line across it is the **median** and a cross is the **mean**.
+- **The whiskers** reach the smallest and the largest value within 1.5 times the box's length (Q3 − Q1) beyond it, as in a Tukey box plot. Values beyond them are **outliers**, drawn as points.
+- **The figures** are computed in the database over every row the widget matches, with the quartile method pandas' `quantile` uses by default (linear interpolation), so `df.groupby("municipality")["value"].quantile([0.25, 0.5, 0.75])` on the published table gives the same numbers. Rows with no value, a ratio row whose denominator is 0, and values that are not finite numbers are left out of every box.
+- **At most 100 outliers** are drawn for each box, the ones farthest from its median; the widget says how many it did not draw, and the tooltip and **Show as table** count them all. A box of a single value is drawn as one line.
+- **Order.** Boxes follow the natural order of the group (2 before 10, `0-4`, `5-9`, `10-14`), the missing group last. **Order boxes by** **Median**, ascending or descending, sorts them by their median; a box plot cannot be ordered by a column, nor ordered without a group column.
+- **Orientation.** **Vertical** (the default) puts the first box on the left; **Horizontal** puts it at the top and suits long group names. The orientation is saved with the widget and changing it does not read the table again. A duplicated widget, a widget moved to another dashboard and a restored version keep their orientation.
+- **Color.** A box plot is drawn in one of the dashboard palette's colors, like a histogram (see [Widget color and scale](#widget-color-and-scale)), and a box takes the color [kept for its group value](#colors-kept-by-value).
+- **Numbers.** The figures are written in the indicator's format and unit, except that a `count` indicator's figures have **two decimals**, because a median or a mean falls between whole numbers; a box's number of values and of outliers are whole numbers.
+- **A box plot has no series**: saving one with a series column is refused.
+- **Show as table** lists one row per box in the chart's order, with the group, the number of values, the minimum, Q1, the median, Q3, the maximum, the mean and the number of outliers. The scheduled emails list the same table in the body and in the workbook, and the printed dashboard shows the chart or the table as the member left it.
+- **The row limit counts boxes**, not the table's rows: a box plot over a table of 200,000 rows with 40 groups draws 40 boxes and reads every row.
+
+### Preparing an indicator for a box plot
+
+A box plot reads a table with **one row per unit** (household, person, visit), its value, and the dimensions to group and filter by. Do not group the units in the script: the widget computes the statistics, and applies dashboard filters to the rows first.
+
+```python
+def compute(clean, ctx):
+    households = clean["main"]
+    return pd.DataFrame({
+        "municipality": households["municipality"],
+        "household_id": households["_id"].astype(str),
+        "value": households["income"],
+    })
+```
+
+- Return the unit's **id as text**, after the dimensions. It keeps every row unique, so the dashboard view does not warn that rows share their dimensions and will be added up; and a column that follows the dimensions keeps new widgets from starting grouped by the id.
+- The same table also feeds bars that count or sum and [dashboard filters](#dashboard-filters), since the widgets add its rows up.
+- Publish only the units the dashboard needs: every box plot reads all the rows of the table each time it is drawn, and the statement has a time limit (see [Limits](#limits)).
 
 ## Maps
 
@@ -377,11 +413,11 @@ A dashboard draws its widgets in one **palette**: eight categorical colors in a 
 
 ### Widget color and scale
 
-A bar, column or line chart with no series, a histogram, a map and a heat map can be given a color or a scale in the widget form, from the dashboard's palette. The preview shows the choice in the dashboard's colors before the widget is saved, and choosing asks the server for nothing: the data is not loaded again.
+A bar, column or line chart with no series, a histogram, a box plot, a map and a heat map can be given a color or a scale in the widget form, from the dashboard's palette. The preview shows the choice in the dashboard's colors before the widget is saved, and choosing asks the server for nothing: the data is not loaded again.
 
 | Widget | Choice in the form | When nothing is chosen |
 |---|---|---|
-| Bar, column or line chart with **no series**, and histogram | **Color**: one of the palette's eight colors | Color 1 |
+| Bar, column or line chart with **no series**, histogram and box plot | **Color**: one of the palette's eight colors | Color 1 |
 | Map and heat map | **Scale**: one of seven sequential scales | **Palette's scale** |
 | Any other widget, and a bar, column or line chart **with a series** | None: the colors follow the values (see [Colors kept by value](#colors-kept-by-value)) | |
 
@@ -398,7 +434,8 @@ A color kept for a value of a column gives that value one of the palette's eight
 - the series of a bar, column or line chart with a series, in the bars, the lines, the legend and the tooltips;
 - the two sides of a population pyramid;
 - the slices of a pie chart;
-- the bars or columns of a bar or column chart with no series, by its group column, so one value can be highlighted: the bar of `Rionegro` in color 2 while the others keep the widget's color.
+- the bars or columns of a bar or column chart with no series, by its group column, so one value can be highlighted: the bar of `Rionegro` in color 2 while the others keep the widget's color;
+- the boxes of a box plot, by its group column, in the same way.
 
 A color kept does not change maps, heat maps, Likert bars, cross tables, histograms, stat tiles or a line chart with no series.
 
@@ -443,7 +480,7 @@ When the project has more than one dashboard, **Edit widget** shows a **Dashboar
 
 ### The grid
 
-Each dashboard has its own grid of 12 columns. A new widget goes below the existing widgets of its dashboard, 3 columns by 2 rows for a stat tile, 6 by 6 for a map and 6 by 4 for the other types; a widget is at most 40 rows high.
+Each dashboard has its own grid of 12 columns. A new widget goes below the existing widgets of its dashboard, 3 columns by 2 rows for a stat tile, 6 by 6 for a map, 6 by 5 for a heat map, a population pyramid and a cross table, and 6 by 4 for the other types; a widget is at most 40 rows high.
 
 - **Drag** a widget by the handle at the left of its title to move it, and drag the corner at the bottom right to resize it. A dashed outline shows where it will land. A widget dropped on others pushes them down; widgets that do not overlap stay where they are.
 - **Keyboard.** Focus the move handle and press the arrow keys to move the widget one cell; hold **Shift** with the arrow keys to resize it. On the resize handle, the arrow keys resize. The new place is announced to screen readers. The handles are hidden on narrow screens.
@@ -452,7 +489,7 @@ Each dashboard has its own grid of 12 columns. A new widget goes below the exist
 
 ## Show as table
 
-Every widget except the stat tile has a table button in its header (shown once the widget has rows to draw) that replaces the picture with the numbers it plots, formatted like the chart (a histogram lists its ranges and their counts, a map its groups with their tooltip columns, written as in the tooltip, and the kind of shape each has). The button above the grid, **Show all as tables**, does the same for every widget of the dashboard at once, in reading order, and resets the choice made on single widgets. Each chart also carries a text description for assistive technology. A widget with a [series](#widgets-with-a-series) shows its cross table: groups as rows, series as columns, and a **Total** column and row; for bars stacked to 100% and for Likert bars the cells are shares.
+Every widget except the stat tile has a table button in its header (shown once the widget has rows to draw) that replaces the picture with the numbers it plots, formatted like the chart (a histogram lists its ranges and their counts, a box plot its boxes with their figures, a map its groups with their tooltip columns, written as in the tooltip, and the kind of shape each has). The button above the grid, **Show all as tables**, does the same for every widget of the dashboard at once, in reading order, and resets the choice made on single widgets. Each chart also carries a text description for assistive technology. A widget with a [series](#widgets-with-a-series) shows its cross table: groups as rows, series as columns, and a **Total** column and row; for bars stacked to 100% and for Likert bars the cells are shares.
 
 ## Export
 
@@ -540,7 +577,8 @@ The other widgets keep working. A dashboard filter on a column the new table no 
 | Limit | Default |
 |---|---|
 | Widgets in a dashboard | 50 |
-| Rows one widget plots (group values, after summing) | 5,000 |
+| Rows one widget plots (group values, after summing; a box plot's boxes) | 5,000 |
+| Outliers a box of a box plot draws | 100 (the ones farthest from its median; all are counted) |
 | Dashboards of a project's own | 7, and at least 1 |
 | Length of a dashboard's name | 40 characters |
 | Filters in a widget | 50 |

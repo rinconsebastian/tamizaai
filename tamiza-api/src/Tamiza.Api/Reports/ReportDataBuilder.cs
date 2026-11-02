@@ -132,7 +132,8 @@ public sealed class ReportDataBuilder(
 
         if (response.RowLimitReached)
         {
-            notes.Add(text.Format("rowLimit", response.Rows.Count));
+            // A box plot reads every row of the table: what it counts, and what the limit cuts, is boxes.
+            notes.Add(text.Format(widget.ChartType == ChartTypes.Boxplot ? "rowLimitBoxes" : "rowLimit", response.Rows.Count));
         }
 
         if (response.LeftOut is > 0 and var leftOut)
@@ -170,6 +171,7 @@ public sealed class ReportDataBuilder(
             ChartTypes.Map => MapTable(response, widget.Config, caption, meta, format, text),
             ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line =>
                 AxisTable(response.Rows, widget.Config, caption, meta, format, text, natural: widget.ChartType == ChartTypes.Line),
+            ChartTypes.Boxplot => BoxplotTable(response.Boxes ?? [], widget.Config, meta, format, text),
             _ => throw new InvalidOperationException($"A {widget.ChartType} widget has no table."),
         };
         return new(position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, columns, rows, null, null, notes);
@@ -243,6 +245,44 @@ public sealed class ReportDataBuilder(
 
         var notes = table.NegativeLeftOut > 0 ? new[] { text.NegativeLeftOut(table.NegativeLeftOut) } : [];
         return (columns, rows, table.Columns.Count, notes);
+    }
+
+    /// <summary>
+    /// The format a box plot shows its figures in: a count is written as a decimal, because quartiles, medians and means can fall between
+    /// whole numbers. A box's numbers of values and of outliers are always whole. Twin of <c>boxFormat</c> in tamiza-ui <c>indicators/format.ts</c>.
+    /// </summary>
+    public static string? BoxFormat(string? format) => format == ReportFormat.Count ? ReportFormat.Decimal : format;
+
+    /// <summary>
+    /// A box plot, as its "Show as table" view lists it (design D6, D8): one row per box, in the chart's order, with its number of values,
+    /// its five figures, its mean and its number of outliers. The box of rows with no group value reads "(none)", and the one box of a
+    /// widget with no group column "All rows".
+    /// </summary>
+    private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>) BoxplotTable(
+        IReadOnlyList<IndicatorBox> boxes, WidgetConfig config, IndicatorMeta meta, ReportFormat format, ReportText text)
+    {
+        var boxMeta = meta with { Format = BoxFormat(meta.Format) ?? ReportFormat.Decimal };
+        ReportColumn Figure(string key) => ValueColumn(text[key], boxMeta);
+        ReportCell Number(double value) => ValueCell(value, boxMeta, format);
+        ReportCell Whole(long value) => new((double)value, format.Whole(value));
+        var columns = new List<ReportColumn>
+        {
+            new(config.GroupBy ?? text["group"]),
+            new(text["values"], "#,##0"),
+            Figure("minimum"), Figure("q1"), Figure("median"), Figure("q3"), Figure("maximum"), Figure("mean"),
+            new(text["outliers"], "#,##0"),
+        };
+        var rows = boxes.Select(box =>
+        {
+            var label = box.Group ?? text[config.GroupBy is null ? "allRows" : "noGroup"];
+            return (IReadOnlyList<ReportCell>)
+            [
+                new(label, label), Whole(box.Values),
+                Number(box.Min), Number(box.Q1), Number(box.Median), Number(box.Q3), Number(box.Max), Number(box.Mean),
+                Whole(box.OutlierCount),
+            ];
+        }).ToList();
+        return (columns, rows);
     }
 
     /// <summary>A histogram: each range of the plotted value and how many rows fall in it.</summary>

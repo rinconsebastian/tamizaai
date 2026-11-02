@@ -639,6 +639,194 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         Assert.Contains("series", tools["get_widget_data"].Description, StringComparison.OrdinalIgnoreCase);
     }
 
+    // Box plots (mcp-server "Indicator queries and widget data", "Dashboards and widgets through MCP")
+
+    // Like any row, a box with no group value has no group in the result: the result leaves out what is null.
+    private static string GroupOf(JsonElement box) => box.TryGetProperty("group", out var group) && group.ValueKind != JsonValueKind.Null ? group.GetString()! : "-";
+
+    private static async Task SeedHouseholdSizesAsync(McpProjectHarness h)
+    {
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "household_size", "municipality text, value numeric",
+            "('Cali', 3), ('Cali', 4), ('Cali', 5), ('Cali', 6), ('Cali', 40), ('Buga', 2), ('Buga', 2), (NULL, 7)");
+        await TestData.ExecuteAsync(h.Db,
+            "INSERT INTO tamiza.script_versions (id, project_id, kind, name, number, code, label, unit, format, author_id, created_at) VALUES (gen_random_uuid(), @p, 'indicator', 'household_size', 1, 'x', 'Household size', 'people', 'count', @a, now())",
+            ("p", h.ProjectId), ("a", h.Users["analyst"]));
+    }
+
+    [Fact]
+    public async Task Checking_a_box_plot_gives_each_box_with_its_figures_formatted_as_decimals_and_no_rows_and_no_outlier_values()
+    {
+        await using var h = await CreateAsync();
+        await SeedHouseholdSizesAsync(h);
+
+        using var body = (await h.CallAsync("viewer", "query_indicator", new
+        {
+            chartType = "boxplot",
+            config = new { indicator = "household_size", groupBy = "municipality", sort = new { by = "value", direction = "desc" } },
+        })).Json();
+
+        var root = body.RootElement;
+        Assert.False(root.TryGetProperty("rows", out _));
+        Assert.False(root.TryGetProperty("cells", out _));
+        var boxes = root.GetProperty("boxes").EnumerateArray().ToArray();
+        // By median, largest first: the box with no group (7), Cali (5) and Buga (2).
+        Assert.Equal(["-", "Cali", "Buga"], boxes.Select(b => GroupOf(b)));
+        var cali = boxes[1];
+        Assert.Equal(5, cali.GetProperty("values").GetInt64());
+        Assert.Equal([3.0, 4.0, 5.0, 6.0, 40.0], new[] { "min", "q1", "median", "q3", "max" }.Select(n => cali.GetProperty(n).GetDouble()));
+        Assert.Equal([3.0, 6.0], new[] { cali.GetProperty("lowerWhisker").GetDouble(), cali.GetProperty("upperWhisker").GetDouble() });
+        Assert.Equal(1, cali.GetProperty("outlierCount").GetInt64());
+        // A count's figures have two decimals. The result lists no outliers: the maximum is one box's figure, which here is also its one outlier.
+        Assert.Equal("5.00 people", cali.GetProperty("formatted").GetProperty("median").GetString());
+        Assert.Equal("40.00 people", cali.GetProperty("formatted").GetProperty("max").GetString());
+        Assert.False(cali.TryGetProperty("outliers", out _));
+        Assert.DoesNotContain("outliers\"", root.GetRawText());
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+    }
+
+    [Fact]
+    public async Task A_saved_box_plot_is_read_with_get_widget_data_and_a_plain_widget_has_no_boxes()
+    {
+        await using var h = await CreateAsync();
+        await SeedHouseholdSizesAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+        await AddWidgetAsync(h, dashboard, "Spread", "boxplot", new { indicator = "household_size", groupBy = "municipality" });
+        await AddWidgetAsync(h, dashboard, "Bars", "bar", new { indicator = "household_size", groupBy = "municipality" });
+
+        using var body = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard })).Json();
+
+        var spread = body.RootElement.GetProperty("widgets").EnumerateArray().Single(w => w.GetProperty("title").GetString() == "Spread");
+        var bars = body.RootElement.GetProperty("widgets").EnumerateArray().Single(w => w.GetProperty("title").GetString() == "Bars");
+        Assert.Equal("shown", spread.GetProperty("status").GetString());
+        Assert.Equal(["Buga", "Cali", "-"], spread.GetProperty("boxes").EnumerateArray().Select(b => GroupOf(b)));
+        Assert.False(spread.TryGetProperty("rows", out _));
+        Assert.False(bars.TryGetProperty("boxes", out _));
+        Assert.True(bars.GetProperty("rows").GetArrayLength() > 0);
+    }
+
+    [Fact]
+    public async Task A_box_result_longer_than_the_size_is_cut_in_its_boxes_and_names_the_filter_that_asks_for_less()
+    {
+        await using var h = await CreateAsync(new Dictionary<string, string?> { ["Mcp:MaxResultCharacters"] = "10000" });
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "household_size", "municipality text, value numeric",
+            string.Join(", ", Enumerable.Range(1, 200).Select(i => $"('Municipality number {i:000}', {i}), ('Municipality number {i:000}', {i + 1})")));
+
+        var result = await h.CallAsync("viewer", "query_indicator", new { chartType = "boxplot", config = new { indicator = "household_size", groupBy = "municipality" } });
+
+        Assert.True(result.Text().Length <= 10_000, $"{result.Text().Length} characters");
+        using var body = result.Json();
+        var note = body.RootElement.GetProperty("truncated");
+        Assert.Equal("boxes", note.GetProperty("list").GetString());
+        Assert.True(note.GetProperty("omitted").GetInt32() > 0);
+        Assert.Contains("filter", note.GetProperty("hint").GetString());
+    }
+
+    [Fact]
+    public async Task A_horizontal_box_plot_ordered_by_median_is_saved_and_read_back_with_get_dashboard()
+    {
+        await using var h = await CreateAsync();
+        await SeedHouseholdSizesAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+
+        var widget = await AddWidgetAsync(h, dashboard, "Spread", "boxplot", new
+        {
+            indicator = "household_size", groupBy = "municipality", sort = new { by = "value", direction = "desc" }, display = new { color = 4, orientation = "horizontal" },
+        });
+
+        using var body = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = dashboard })).Json();
+        var saved = body.RootElement.GetProperty("widgets").EnumerateArray().Single(w => w.GetProperty("id").GetGuid() == widget);
+        Assert.Equal("boxplot", saved.GetProperty("chartType").GetString());
+        Assert.Equal("horizontal", saved.GetProperty("config").GetProperty("display").GetProperty("orientation").GetString());
+        Assert.Equal(4, saved.GetProperty("config").GetProperty("display").GetProperty("color").GetInt32());
+        Assert.Equal("desc", saved.GetProperty("config").GetProperty("sort").GetProperty("direction").GetString());
+    }
+
+    [Theory]
+    [InlineData("boxplot", """{"indicator":"household_size","groupBy":"municipality","seriesBy":"municipality2"}""", "seriesBy")]
+    [InlineData("boxplot", """{"indicator":"household_size","groupBy":"municipality","display":{"orientation":"sideways"}}""", "display.orientation")]
+    [InlineData("column", """{"indicator":"household_size","groupBy":"municipality","display":{"orientation":"horizontal"}}""", "display.orientation")]
+    public async Task A_box_plot_that_breaks_a_rule_is_refused_with_the_key_and_nothing_is_saved(string chartType, string config, string key)
+    {
+        await using var h = await CreateAsync();
+        await SeedHouseholdSizesAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+
+        var result = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = dashboard, title = "Bad", chartType, config = JsonDocument.Parse(config).RootElement, change = Request,
+        });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains(key, result.Text());
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+    }
+
+    [Theory]
+    [InlineData("""{"indicator":"household_size","groupBy":"municipality","seriesBy":"municipality2"}""", "seriesBy")]
+    [InlineData("""{"indicator":"household_size","groupBy":"municipality","display":{"orientation":"diagonal"}}""", "display.orientation")]
+    public async Task A_saved_box_plot_updated_into_one_that_breaks_a_rule_is_refused_with_the_key_and_stays_as_it_was(string config, string key)
+    {
+        await using var h = await CreateAsync();
+        await SeedHouseholdSizesAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+        var widget = await AddWidgetAsync(h, dashboard, "Spread", "boxplot", new { indicator = "household_size", groupBy = "municipality", display = new { orientation = "horizontal" } });
+
+        var result = await h.CallAsync("analyst", "update_widget", new { dashboardId = dashboard, widgetId = widget, config = JsonDocument.Parse(config).RootElement, change = Request });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains(key, result.Text());
+        Assert.Contains("\"orientation\": \"horizontal\"", await TestData.ScalarAsync<string>(h.Db, "SELECT config::text FROM tamiza.dashboard_widgets"));
+    }
+
+    [Fact]
+    public async Task A_bare_chart_type_change_of_a_horizontal_box_plot_is_refused_on_the_orientation()
+    {
+        await using var h = await CreateAsync();
+        await SeedHouseholdSizesAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+        var widget = await AddWidgetAsync(h, dashboard, "Spread", "boxplot", new { indicator = "household_size", groupBy = "municipality", display = new { orientation = "horizontal" } });
+
+        var result = await h.CallAsync("analyst", "update_widget", new { dashboardId = dashboard, widgetId = widget, chartType = "column", change = Request });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("display.orientation", result.Text());
+    }
+
+    [Fact]
+    public async Task The_row_limit_note_of_a_box_plot_counts_boxes()
+    {
+        await using var h = await CreateAsync(new Dictionary<string, string?> { ["IndicatorDashboard:MaxWidgetQueryRows"] = "2" });
+        await SeedHouseholdSizesAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+        await AddWidgetAsync(h, dashboard, "Spread", "boxplot", new { indicator = "household_size", groupBy = "municipality" });
+        await AddWidgetAsync(h, dashboard, "Bars", "bar", new { indicator = "household_size", groupBy = "municipality" });
+
+        using var body = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard })).Json();
+
+        var widgets = body.RootElement.GetProperty("widgets").EnumerateArray().ToList();
+        var notes = (string title) => widgets.Single(w => w.GetProperty("title").GetString() == title).GetProperty("notes").EnumerateArray().Select(n => n.GetString()).ToArray();
+        Assert.Contains("The row limit was reached (2 boxes).", notes("Spread"));
+        Assert.Contains("The row limit was reached (2 rows).", notes("Bars"));
+    }
+
+    [Fact]
+    public async Task The_tool_descriptions_name_the_box_plot_and_its_orientation()
+    {
+        await using var h = await CreateAsync();
+        var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
+
+        foreach (var tool in new[] { "query_indicator", "create_widget" })
+        {
+            foreach (var word in new[] { "boxplot", "boxes", "outlierCount", "orientation", "median" })
+            {
+                Assert.Contains(word, tools[tool].Description);
+            }
+        }
+
+        Assert.Contains("boxplot returns boxes", tools["get_widget_data"].Description);
+        Assert.Contains("orientation", tools["update_widget"].Description);
+    }
+
     // Versions of the dashboards a request changes (mcp-server "Request given with dashboard changes", "One version per request")
 
     private const string AddWaterWidgets = "Add water widgets";

@@ -90,6 +90,31 @@ public sealed class WidgetDisplayTests
     }
 
     [Fact]
+    public void A_display_with_an_orientation_is_written_with_only_its_orientation_and_read_back()
+    {
+        var config = new WidgetConfigInput("household_income", GroupBy: "municipality", Display: new WidgetDisplay(Orientation: BoxOrientations.Horizontal)).Normalize();
+
+        var json = JsonSerializer.Serialize(config, Json);
+
+        Assert.Contains(""","display":{"orientation":"horizontal"},""", json);
+        Assert.Equal(new WidgetDisplay(Orientation: "horizontal"), Read(json).Display);
+        Assert.Equal(json, JsonSerializer.Serialize(Read(json), Json));
+    }
+
+    [Fact]
+    public void A_saved_vertical_orientation_is_kept_as_it_is_and_an_empty_one_is_none()
+    {
+        var vertical = Read("""{"indicator":"household_income","display":{"orientation":"vertical"}}""");
+        var blank = Read("""{"indicator":"household_income","display":{"orientation":""}}""");
+        var all = Read("""{"indicator":"household_income","display":{"color":4,"ramp":"green","orientation":"horizontal"}}""");
+
+        Assert.Equal("vertical", vertical.Display?.Orientation);
+        Assert.Contains("\"display\":{\"orientation\":\"vertical\"}", JsonSerializer.Serialize(vertical, Json));
+        Assert.Null(blank.Display);
+        Assert.Equal(new WidgetDisplay(4, "green", "horizontal"), Read(JsonSerializer.Serialize(all, Json)).Display);
+    }
+
+    [Fact]
     public void A_display_set_to_null_in_the_json_is_none()
     {
         var config = Read("""{"indicator":"coverage","display":null}""");
@@ -110,6 +135,7 @@ public sealed class WidgetDisplayTests
     [InlineData(ChartTypes.Pyramid)]
     [InlineData(ChartTypes.Likert)]
     [InlineData(ChartTypes.Crosstab)]
+    [InlineData(ChartTypes.Boxplot)]
     public void A_query_never_carries_the_display(string chartType)
     {
         var config = new WidgetConfigInput(

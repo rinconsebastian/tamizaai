@@ -328,7 +328,7 @@ public sealed class IndicatorSortTests(PostgresFixture postgres)
         var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal("Only bar and column widgets can be sorted.", IndicatorsHarness.Errors(problem, "config.sort")[0]);
+        Assert.Equal("Only bar, column and box plot widgets can be sorted.", IndicatorsHarness.Errors(problem, "config.sort")[0]);
     }
 
     [Fact]

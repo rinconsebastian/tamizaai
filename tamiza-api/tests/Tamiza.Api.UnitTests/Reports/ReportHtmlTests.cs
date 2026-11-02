@@ -51,6 +51,27 @@ public sealed class ReportHtmlTests
     }
 
     [Fact]
+    public void A_box_table_shows_its_nine_columns_whole_and_ten_rows_in_the_body_and_the_text()
+    {
+        var model = Model([BoxTable(1, "Household size", 12)]);
+
+        var (html, shown) = ReportHtml.Write(model, true, Options);
+        var text = ReportPlainText.Write(model, true, shown, Options);
+
+        foreach (var header in new[] { "municipality", "Values", "Minimum", "Q1", "Median", "Q3", "Maximum", "Mean", "Outliers" })
+        {
+            Assert.Contains($">{header}</th>", html);
+        }
+
+        Assert.Contains("Municipality 10<", html);
+        Assert.DoesNotContain("Municipality 11<", html);
+        Assert.Contains("2 more rows", html);
+        Assert.DoesNotContain("more columns", html);
+        Assert.Contains("municipality | Values | Minimum | Q1 | Median | Q3 | Maximum | Mean | Outliers", text);
+        Assert.Contains("2 more rows", text);
+    }
+
+    [Fact]
     public void Large_dashboard()
     {
         var widgets = Enumerable.Range(1, 50).Select(i => Bars(i, $"Widget {i}", 10)).ToList();

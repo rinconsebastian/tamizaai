@@ -22,7 +22,7 @@ public static class IndicatorValidation
         ChartTypes.Stat => (3, 2),
         ChartTypes.Map => (6, 6),
         ChartTypes.Heatmap or ChartTypes.Pyramid or ChartTypes.Crosstab => (6, 5),
-        ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line or ChartTypes.Histogram or ChartTypes.Pie or ChartTypes.Likert => (6, 4),
+        ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line or ChartTypes.Histogram or ChartTypes.Pie or ChartTypes.Likert or ChartTypes.Boxplot => (6, 4),
         _ => throw new ArgumentOutOfRangeException(nameof(chartType), chartType, "Not a chart type."),
     };
 
@@ -174,13 +174,25 @@ public static class IndicatorValidation
             {
                 errors.Add(prefix + "display.color", $"The color must be a number from 1 to {Palettes.ColorCount}.");
             }
-            else if (chartType is not null && chartType != ChartTypes.Histogram && !ChartTypes.TakesSeries(chartType))
+            else if (chartType is not null && chartType is not (ChartTypes.Histogram or ChartTypes.Boxplot) && !ChartTypes.TakesSeries(chartType))
             {
                 errors.Add(prefix + "display.color", $"A {chartType} widget has no color of its own.");
             }
             else if (chartType is not null && config.SeriesBy is not null && ChartTypes.TakesSeries(chartType))
             {
                 errors.Add(prefix + "display.color", "A widget with a series takes its colors from its series.");
+            }
+        }
+
+        if (display.Orientation is { } orientation)
+        {
+            if (!BoxOrientations.IsKnown(orientation))
+            {
+                errors.Add(prefix + "display.orientation", $"The orientation must be '{BoxOrientations.Vertical}' or '{BoxOrientations.Horizontal}'.");
+            }
+            else if (chartType is not null && chartType != ChartTypes.Boxplot)
+            {
+                errors.Add(prefix + "display.orientation", "Only a box plot has an orientation.");
             }
         }
 
@@ -476,9 +488,9 @@ public static class IndicatorValidation
             return;
         }
 
-        if (chartType is not null && chartType is not (ChartTypes.Bar or ChartTypes.Column))
+        if (chartType is not null && chartType is not (ChartTypes.Bar or ChartTypes.Column or ChartTypes.Boxplot))
         {
-            errors.Add(prefix + "sort", "Only bar and column widgets can be sorted.");
+            errors.Add(prefix + "sort", "Only bar, column and box plot widgets can be sorted.");
             return;
         }
 
@@ -490,6 +502,10 @@ public static class IndicatorValidation
         if (sort.By is not (SortValues.ByValue or SortValues.ByColumn))
         {
             errors.Add(prefix + "sort.by", "Sort by 'value' or by 'column'.");
+        }
+        else if (sort.By == SortValues.ByColumn && chartType == ChartTypes.Boxplot)
+        {
+            errors.Add(prefix + "sort.by", "A box plot can only be ordered by its median ('value').");
         }
 
         if (sort.Direction is not (SortValues.Asc or SortValues.Desc))

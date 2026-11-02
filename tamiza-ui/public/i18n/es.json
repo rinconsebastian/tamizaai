@@ -1539,7 +1539,8 @@
       "heatmap": "Mapa de calor",
       "pyramid": "Pirámide de población",
       "likert": "Barras Likert divergentes",
-      "crosstab": "Tabla cruzada"
+      "crosstab": "Tabla cruzada",
+      "boxplot": "Diagrama de caja"
     },
     "grid": {
       "move": "Mover {{ title }}",
@@ -1559,7 +1560,8 @@
       "rowLimit": "Solo se muestran las primeras {{ count }} filas: la consulta coincide con más. Agrega un filtro para reducirlas.",
       "empty": "Ninguna fila coincide con la consulta de este widget.",
       "showTable": "Mostrar como tabla",
-      "showChart": "Mostrar como gráfico"
+      "showChart": "Mostrar como gráfico",
+      "rowLimitBoxes": "Solo se muestran las primeras {{ count }} cajas: la consulta coincide con más. Agrega un filtro para acotarla."
     },
     "missing": {
       "title": "Este widget no se puede dibujar",
@@ -1780,6 +1782,17 @@
         "addLabel": "Agregar un valor de la escala",
         "addPlaceholder": "Otro valor",
         "add": "Agregar"
+      },
+      "groupByOptionalBoxplot": "Opcional. Sin ella, un diagrama de caja dibuja una caja sobre todas las filas.",
+      "ratioHelpBoxplot": "El numerador de cada fila se divide por su propio denominador, y las cajas resumen esos valores.",
+      "sortByBoxes": "Ordenar las cajas por",
+      "sortMedian": "Mediana",
+      "sortNeedsGroup": "Elige una columna para agrupar y poder ordenar las cajas.",
+      "orientation": {
+        "legend": "Orientación",
+        "vertical": "Vertical",
+        "horizontal": "Horizontal",
+        "help": "Vertical pone la primera caja a la izquierda; horizontal la pone arriba y sirve para nombres largos."
       }
     },
     "series": {
@@ -1809,7 +1822,8 @@
         "line": "Gráfico de líneas con una línea por serie"
       },
       "negativeLeftOut": "{{ count }} valores negativos no entran en las proporciones.",
-      "negativeLeftOutOne": "{{ count }} valor negativo no entra en las proporciones."
+      "negativeLeftOutOne": "{{ count }} valor negativo no entra en las proporciones.",
+      "keyHelpGroupsDown": "Las flechas arriba y abajo se mueven entre los grupos. Inicio y Fin van al primero y al último, y Escape sale de las marcas."
     },
     "heatmap": {
       "summary": "Mapa de calor de {{ what }}, {{ group }} por {{ series }}: {{ groups }}, {{ seriesCount }}, de {{ min }} a {{ max }}. Más alto: {{ top }}.",
@@ -1831,6 +1845,35 @@
       },
       "toLeft": "A la izquierda: {{ share }}",
       "toRight": "A la derecha: {{ share }}"
+    },
+    "boxplot": {
+      "roleDescription": "diagrama de caja",
+      "group": "Grupo",
+      "allRows": "Todas las filas",
+      "values": "Valores",
+      "minimum": "Mínimo",
+      "q1": "Q1",
+      "median": "Mediana",
+      "q3": "Q3",
+      "maximum": "Máximo",
+      "mean": "Media",
+      "outliers": "Atípicos",
+      "outlier": "Atípico",
+      "lowerWhisker": "Bigote inferior",
+      "upperWhisker": "Bigote superior",
+      "key": {
+        "box": "La mitad central (Q1 a Q3)",
+        "median": "Mediana",
+        "mean": "Media",
+        "whiskers": "Bigotes: hasta 1,5 × la caja más allá de ella",
+        "outliers": "Atípicos"
+      },
+      "notDrawn": "{{ count }} atípicos sin dibujar",
+      "notDrawnOne": "{{ count }} atípico sin dibujar",
+      "summary": "Diagrama de caja de {{ what }} por {{ group }}: {{ count }} cajas, medianas de {{ min }} a {{ max }}.",
+      "summaryOne": "Diagrama de caja de {{ what }} por {{ group }}: {{ count }} caja, mediana {{ min }}.",
+      "summaryAll": "Diagrama de caja de {{ what }}: una caja sobre todas las filas, mediana {{ median }}, de {{ min }} a {{ max }}.",
+      "summarySame": "Diagrama de caja de {{ what }} por {{ group }}: {{ count }} cajas, todas con la mediana {{ median }}."
     }
   },
   "dashboards": {

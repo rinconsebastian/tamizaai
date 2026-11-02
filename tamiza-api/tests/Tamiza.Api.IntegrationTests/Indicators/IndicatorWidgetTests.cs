@@ -159,6 +159,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
     [InlineData("histogram", 6, 4)]
     [InlineData("pie", 6, 4)]
     [InlineData("map", 6, 6)]
+    [InlineData("boxplot", 6, 4)]
     public async Task A_widget_without_a_layout_gets_the_default_size_of_its_chart_type_at_the_left_edge(string chartType, int w, int height)
     {
         await using var h = await PublishedAsync();

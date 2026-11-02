@@ -19,12 +19,13 @@ public static class ChartTypes
     public const string Pyramid = "pyramid";
     public const string Likert = "likert";
     public const string Crosstab = "crosstab";
+    public const string Boxplot = "boxplot";
 
-    public static readonly IReadOnlyList<string> All = [Stat, Bar, Column, Line, Histogram, Pie, Map, Heatmap, Pyramid, Likert, Crosstab];
+    public static readonly IReadOnlyList<string> All = [Stat, Bar, Column, Line, Histogram, Pie, Map, Heatmap, Pyramid, Likert, Crosstab, Boxplot];
 
     public static bool IsKnown(string? chartType) => chartType is not null && All.Contains(chartType);
 
-    /// <summary>The charts that group their rows: they need a column to group by. A stat tile and a histogram may plot the rows as they are.</summary>
+    /// <summary>The charts that group their rows: they need a column to group by. A stat tile, a histogram and a box plot may plot the rows as they are.</summary>
     public static bool NeedsGroup(string chartType) => chartType is Bar or Column or Line or Pie or Map or Heatmap or Pyramid or Likert or Crosstab;
 
     /// <summary>The charts that may split each group by a series column.</summary>
@@ -65,6 +66,17 @@ public static class SeriesLayouts
 
     /// <summary>The layouts that add the series up inside a bar: they plot a measure, never a ratio.</summary>
     public static bool Adds(string? layout) => layout is Stacked or Percent;
+}
+
+/// <summary>The orientations of a box plot (<see cref="WidgetDisplay.Orientation"/>), stored as strings. Vertical is what a widget with none is drawn as.</summary>
+public static class BoxOrientations
+{
+    public const string Vertical = "vertical";
+    public const string Horizontal = "horizontal";
+
+    public static readonly IReadOnlyList<string> All = [Vertical, Horizontal];
+
+    public static bool IsKnown(string? orientation) => orientation is not null && All.Contains(orientation);
 }
 
 /// <summary>The side of a Likert scale's value (<see cref="LikertStep.Side"/>), stored as strings.</summary>
@@ -139,20 +151,24 @@ public sealed record WidgetTooltipItem(string Column, string? Label = null, stri
 /// description and not in an enum: the fields are nullable, and a schema whose enum leaves out null would refuse the null that the
 /// server accepts for "not set".
 /// </summary>
-/// <param name="Color">Bar, column and line with no series, and histogram only: the number, 1 to <see cref="Palettes.ColorCount"/>, of the dashboard palette's color the widget is drawn in; left out, color 1.</param>
+/// <param name="Color">Bar, column and line with no series, histogram and box plot only: the number, 1 to <see cref="Palettes.ColorCount"/>, of the dashboard palette's color the widget is drawn in; left out, color 1.</param>
 /// <param name="Ramp">Map and heat map only: one of <see cref="Palettes.Scales"/>; left out, the dashboard palette's own scale.</param>
+/// <param name="Orientation">Box plot only: one of <see cref="BoxOrientations"/>; left out, vertical. A saved <c>vertical</c> is kept as it is, so a form saved unchanged stays unchanged.</param>
 public sealed record WidgetDisplay(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("A place in the dashboard's palette, 1 to 8, never a color code. For a bar, column or line chart with no seriesBy and for a histogram; left out, color 1."),
+     Description("A place in the dashboard's palette, 1 to 8, never a color code. For a bar, column or line chart with no seriesBy, for a histogram and for a boxplot; left out, color 1."),
      Range(1, Palettes.ColorCount)] int? Color = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("A sequential scale: blue, teal, green, orange, red, purple or gray, matched exactly in lower case. For a map or heatmap only; left out, the palette's own scale.")] string? Ramp = null)
+     Description("A sequential scale: blue, teal, green, orange, red, purple or gray, matched exactly in lower case. For a map or heatmap only; left out, the palette's own scale.")] string? Ramp = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("The direction a boxplot is drawn in: vertical or horizontal, matched exactly in lower case. For a boxplot only; left out, vertical.")] string? Orientation = null)
 {
-    /// <summary>The display as saved: an empty scale is none, and a display that sets nothing is no display (null).</summary>
+    /// <summary>The display as saved: an empty scale or orientation is none, and a display that sets nothing is no display (null).</summary>
     public WidgetDisplay? Normalize()
     {
         var ramp = string.IsNullOrEmpty(Ramp) ? null : Ramp;
-        return Color is null && ramp is null ? null : this with { Ramp = ramp };
+        var orientation = string.IsNullOrEmpty(Orientation) ? null : Orientation;
+        return Color is null && ramp is null && orientation is null ? null : this with { Ramp = ramp, Orientation = orientation };
     }
 }
 
@@ -196,7 +212,7 @@ public sealed record WidgetConfigInput(
     WidgetPyramid? Pyramid = null,
     IReadOnlyList<LikertStep>? Scale = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("How the widget is drawn: its color or its scale. It never changes the rows.")] WidgetDisplay? Display = null)
+     Description("How the widget is drawn: its color, its scale or its orientation. It never changes the rows.")] WidgetDisplay? Display = null)
 {
     public WidgetConfig Normalize() => new(
         Indicator ?? "",
@@ -253,6 +269,12 @@ public sealed record WidgetConfig(
     public const int MaxSlices = Palettes.ColorCount;
 
     public const int MaxBuckets = 100;
+
+    /// <summary>The most outlier values a box plot's box returns and draws; the ones farthest from its median, the rest only counted.</summary>
+    public const int MaxBoxOutliers = 100;
+
+    /// <summary>How many interquartile ranges beyond its quartiles a box's whiskers may reach (Tukey's fences).</summary>
+    public const double WhiskerRange = 1.5;
 
     /// <summary>The most tooltip columns a map has.</summary>
     public const int MaxTooltipItems = 5;
@@ -341,6 +363,19 @@ public sealed record IndicatorRow(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Series = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SeriesKind = null);
 
+/// <summary>
+/// One box of a box plot (design D4 of add-boxplot-widget), computed over every value of the group that the query matches.
+/// </summary>
+/// <param name="Group">The group column's value as text; null for the rows with no value in it, and for the one box of a widget with no group column.</param>
+/// <param name="Values">How many values the box summarizes.</param>
+/// <param name="LowerWhisker">The smallest value at or above the first quartile minus <see cref="WidgetConfig.WhiskerRange"/> times the interquartile range.</param>
+/// <param name="UpperWhisker">The largest value at or below the third quartile plus that range.</param>
+/// <param name="OutlierCount">How many values lie beyond the whiskers.</param>
+/// <param name="Outliers">At most <see cref="WidgetConfig.MaxBoxOutliers"/> of them, the ones farthest from the median, in ascending order.</param>
+public sealed record IndicatorBox(
+    string? Group, long Values, double Min, double Q1, double Median, double Q3, double Max, double Mean, double LowerWhisker, double UpperWhisker,
+    long OutlierCount, IReadOnlyList<double> Outliers);
+
 /// <summary>What a widget's query names that the published table does not have.</summary>
 /// <param name="Indicator">True when the indicator has not published a table.</param>
 public sealed record MissingReferences(bool Indicator, IReadOnlyList<string> Columns)
@@ -358,6 +393,7 @@ public sealed record MissingReferences(bool Indicator, IReadOnlyList<string> Col
 /// <param name="Series">A widget with a series only: its series in display order. <see cref="Rows"/> then holds one <see cref="SeriesCell"/> per group and series value that has a value.</param>
 /// <param name="Totals">A widget with a series only: the totals of its groups, its series and all its rows.</param>
 /// <param name="LeftOut">A population pyramid or a Likert widget only: the rows it left out because their group or series value does not belong.</param>
+/// <param name="Boxes">A box plot only: its boxes in display order. <see cref="Rows"/> then holds one row per box, its value the box's median and its <c>rows</c> its number of values.</param>
 /// <param name="Domain">
 /// A pie chart only (design D8 of dashboard palettes): the groups its colors and its "Other" slice follow, read from the rows that
 /// match the widget's own filters, not the dashboard's. Every group with a total above zero is ranked by total, largest first, the
@@ -376,7 +412,8 @@ public sealed record IndicatorQueryResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SeriesInfo>? Series = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SeriesTotals? Totals = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? LeftOut = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SeriesInfo>? Domain = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SeriesInfo>? Domain = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<IndicatorBox>? Boxes = null);
 
 /// <summary>The outcome of a query: the response, or the validation errors of the request.</summary>
 public sealed record IndicatorQueryOutcome(IndicatorQueryResponse? Response, IDictionary<string, string[]>? Errors);

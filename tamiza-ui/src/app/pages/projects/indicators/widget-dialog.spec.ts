@@ -1609,10 +1609,11 @@ describe('the widget dialog with a series (design D7)', () => {
       pyramid: { series: 'Choose a column', own: ['dialog-pyramid'], sort: false },
       likert: { series: 'Choose a column', own: ['dialog-scale'], sort: false },
       crosstab: { series: 'Choose a column', own: [], sort: false },
+      boxplot: { series: null, own: ['dialog-orientation'], sort: true },
     };
-    const settings = ['dialog-buckets', 'dialog-geometry', 'dialog-tooltip', 'dialog-pyramid', 'dialog-scale', 'dialog-layout'];
+    const settings = ['dialog-buckets', 'dialog-geometry', 'dialog-tooltip', 'dialog-pyramid', 'dialog-scale', 'dialog-layout', 'dialog-orientation'];
 
-    it('lists the eleven kinds in the chart type select', async () => {
+    it('lists the twelve kinds in the chart type select', async () => {
       await openDialog({ columns: twoDimensions() });
 
       expect(optionsOf('dialog-chart-type')).toEqual([...chartTypes]);
@@ -1628,6 +1629,7 @@ describe('the widget dialog with a series (design D7)', () => {
         'Population pyramid',
         'Diverging Likert bars',
         'Cross table',
+        'Box plot',
       ]);
     });
 
@@ -2262,7 +2264,7 @@ describe('the widget dialog\'s color and scale', () => {
       const context = await openDialog();
       await change(context, field('dialog-chart-type'), type);
 
-      const takesColor = ['bar', 'column', 'line', 'histogram'].includes(type);
+      const takesColor = ['bar', 'column', 'line', 'histogram', 'boxplot'].includes(type);
       const takesScale = ['map', 'heatmap'].includes(type);
       expect(fields('dialog-color')).toHaveLength(takesColor ? 1 : 0);
       expect(fields('dialog-color-option')).toHaveLength(takesColor ? 8 : 0);
@@ -2589,5 +2591,184 @@ describe('the widget dialog\'s color and scale', () => {
       expect(text(field('dialog-ramp').querySelector('[data-testid="field-error"]'))).toBe('Choose one of the scales.');
       expect(fields('dialog-error')).toHaveLength(0);
     });
+  });
+});
+
+describe('the widget dialog for a box plot (add-boxplot-widget, design D7)', () => {
+  afterEach(clearOverlay);
+
+  const sized = indicator('household_size', { label: 'Household size', format: 'count', unit: 'people' });
+  const box = (overrides: Partial<WidgetConfig> = {}) => config({ indicator: 'household_size', groupBy: 'municipality', ...overrides });
+  const boxplot = (overrides: Partial<WidgetConfig> = {}) => widget('w1', { chartType: 'boxplot', config: box(overrides) });
+  const orientationRadios = () => Array.from(field('dialog-orientation').querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+  const orientationChosen = () => orientationRadios().filter((radio) => radio.checked).map((radio) => radio.value);
+  const saved = async (context: Context) => {
+    await click(context, field('dialog-save'));
+    return context.http.expectOne((r) => isCreate(r) || isPatch(r)).request.body as { title: string; chartType: ChartType; config: WidgetConfig };
+  };
+  const open_ = (existing?: Widget) => openDialog({ existing, indicators: [sized], columns: catalog({ columns: [...catalog().columns, { name: 'round', type: 'integer', label: null }] }) });
+  const median = { by: 'value', column: null, compareAs: null, direction: 'desc' } as const;
+
+  it('offers the group as optional, and says what it does without one', async () => {
+    const context = await open_();
+    await change(context, field('dialog-chart-type'), 'boxplot');
+
+    expect(text(field('dialog-group-by').closest('tmz-form-field'))).toContain('Optional. Without it, a box plot draws one box over every row.');
+    expect(field('dialog-series-by')).toBeNull();
+  });
+
+  it('says that a ratio is taken row by row', async () => {
+    const context = await open_();
+    await change(context, field('dialog-chart-type'), 'boxplot');
+    await change(context, field('dialog-mode'), 'ratio');
+
+    expect(text(field('dialog-denominator').closest('tmz-form-field'))).toContain('Each row’s numerator is divided by its own denominator');
+  });
+
+  it('orders the boxes by median only: the default or the median, a direction, and no column and no comparison', async () => {
+    const context = await open_();
+    await change(context, field('dialog-chart-type'), 'boxplot');
+
+    expect(text(field('dialog-sort-by').closest('tmz-form-field'))).toContain('Order boxes by');
+    expect(optionsOf('dialog-sort-by')).toEqual(['', 'value']);
+    expect(optionTexts('dialog-sort-by')).toEqual(['Default order', 'Median']);
+    expect(field('dialog-sort-direction')).toBeNull();
+    await change(context, field('dialog-sort-by'), 'value');
+    expect(field('dialog-sort-direction')).not.toBeNull();
+    expect(field('dialog-sort-compare-as')).toBeNull();
+    expect((field('dialog-sort-direction') as HTMLSelectElement).value).toBe('desc');
+  });
+
+  it('saves an order by median descending as the plotted value, with no column', async () => {
+    const context = await open_();
+    await change(context, field('dialog-title'), 'Spread');
+    await change(context, field('dialog-chart-type'), 'boxplot');
+    await change(context, field('dialog-sort-by'), 'value');
+
+    const body = await saved(context);
+
+    expect(body.chartType).toBe('boxplot');
+    expect(body.config.sort).toEqual(median);
+  });
+
+  it('reads an order by a column left from a bar as the default order, and saves no order', async () => {
+    const context = await open_(widget('w1', { chartType: 'bar', config: box({ sort: { by: 'column', column: 'round', compareAs: 'number', direction: 'asc' } }) }));
+    await change(context, field('dialog-chart-type'), 'boxplot');
+
+    expect((field('dialog-sort-by') as HTMLSelectElement).value).toBe('');
+    expect(field('dialog-sort-direction')).toBeNull();
+    expect(field('dialog-sort-compare-as')).toBeNull();
+    expect((await saved(context)).config.sort).toBeNull();
+  });
+
+  it('clears the group after an order by median: the field says why it is off, and the preview and the save carry no order', async () => {
+    const context = await open_(boxplot({ sort: median }));
+    expect((field('dialog-sort-by') as HTMLSelectElement).value).toBe('value');
+
+    await change(context, field('dialog-group-by'), '');
+
+    expect((field('dialog-sort-by') as HTMLSelectElement).disabled).toBe(true);
+    expect(text(field('dialog-sort-by').closest('tmz-form-field'))).toContain('Choose a column to group by to order the boxes.');
+    const query = await previewAnswer(context, result([row(null, 4.5)]));
+    expect(query.chartType).toBe('boxplot');
+    expect(query.config.sort).toBeNull();
+    expect((await saved(context)).config.sort).toBeNull();
+  });
+
+  it('asks for the preview with the box plot chart type', async () => {
+    const context = await open_();
+    await change(context, field('dialog-chart-type'), 'boxplot');
+
+    const query = await previewAnswer(context, result([row('Cali', 4.5)]));
+
+    expect(query.chartType).toBe('boxplot');
+  });
+
+  it('opens a box plot with no orientation on Vertical, and leaves it without one when Vertical is picked again', async () => {
+    const context = await open_(boxplot());
+    expect(orientationChosen()).toEqual(['vertical']);
+
+    await click(context, field('dialog-orientation-horizontal'));
+    expect(orientationChosen()).toEqual(['horizontal']);
+    await click(context, field('dialog-orientation-vertical'));
+
+    const body = await saved(context);
+    expect(orientationChosen()).toEqual(['vertical']);
+    expect('display' in body.config).toBe(false);
+  });
+
+  it('saves the orientation of a new box plot', async () => {
+    const context = await open_();
+    await change(context, field('dialog-title'), 'Spread');
+    await change(context, field('dialog-chart-type'), 'boxplot');
+    await click(context, field('dialog-orientation-horizontal'));
+
+    expect((await saved(context)).config.display).toEqual({ orientation: 'horizontal' });
+  });
+
+  it('opens a horizontal box plot on Horizontal and saves it unchanged', async () => {
+    const config_ = box({ display: { color: 4, orientation: 'horizontal' } });
+    const context = await open_(widget('w1', { chartType: 'boxplot', config: config_ }));
+    expect(orientationChosen()).toEqual(['horizontal']);
+
+    expect((await saved(context)).config).toEqual(config_);
+  });
+
+  it('keeps a saved Vertical when it is picked again, so a form saved unchanged stays unchanged', async () => {
+    const config_ = box({ display: { orientation: 'vertical' } });
+    const context = await open_(widget('w1', { chartType: 'boxplot', config: config_ }));
+    await click(context, field('dialog-orientation-horizontal'));
+    await click(context, field('dialog-orientation-vertical'));
+
+    expect((await saved(context)).config.display).toEqual({ orientation: 'vertical' });
+  });
+
+  it('redraws the preview when the orientation changes and asks for no rows again', async () => {
+    const context = await open_(boxplot());
+    const boxes = [{ group: 'Cali', values: 5, min: 3, q1: 4, median: 4.5, q3: 5, max: 6, mean: 4.5, lowerWhisker: 3, upperWhisker: 6, outlierCount: 0, outliers: [] }];
+    await previewAnswer(context, result([row('Cali', 4.5)], { boxes }));
+
+    const median = () => field('dialog-preview').querySelector('[data-testid="box-median"]')!;
+    expect(median().getAttribute('y1')).toBe(median().getAttribute('y2')); // vertical: the median runs across
+
+    await click(context, field('dialog-orientation-horizontal'));
+    await wait(previewDelayMs + 100);
+    await settle(context.harness);
+
+    expect(context.http.match(isQuery).filter((r) => !r.cancelled)).toHaveLength(0);
+    expect(median().getAttribute('x1')).toBe(median().getAttribute('x2')); // horizontal: redrawn from the same rows
+  });
+
+  it('drops the orientation when the kind changes away from a box plot', async () => {
+    const context = await open_(widget('w1', { chartType: 'boxplot', config: box({ display: { orientation: 'horizontal' } }) }));
+    await change(context, field('dialog-chart-type'), 'column');
+
+    expect(field('dialog-orientation')).toBeNull();
+    const body = await saved(context);
+    expect(body.chartType).toBe('column');
+    expect('display' in body.config).toBe(false);
+  });
+
+  it('offers the eight colors of the palette to a box plot', async () => {
+    const context = await open_();
+    await change(context, field('dialog-chart-type'), 'boxplot');
+
+    expect(fields('dialog-color-option')).toHaveLength(8);
+  });
+
+  it('shows next to the orientation what the server refused about it, and clears it when another is picked', async () => {
+    const context = await open_(boxplot({ display: { orientation: 'horizontal' } }));
+    await click(context, field('dialog-save'));
+
+    context.http
+      .expectOne(isPatch)
+      .flush({ title: 'x', errors: { 'config.display.orientation': ['The orientation must be vertical or horizontal.'] } }, { status: 400, statusText: 'Bad Request' });
+    await settle(context.harness);
+
+    expect(text(field('dialog-orientation').querySelector('[data-testid="field-error"]'))).toBe('The orientation must be vertical or horizontal.');
+    expect(field('dialog-orientation').getAttribute('aria-describedby')).toBe('widgetOrientation-error');
+    expect(fields('dialog-error')).toHaveLength(0);
+    await click(context, field('dialog-orientation-vertical'));
+    expect(field('dialog-orientation').querySelector('[data-testid="field-error"]')).toBeNull();
   });
 });

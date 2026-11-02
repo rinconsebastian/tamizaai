@@ -29,6 +29,7 @@ export function defaultSize(type: ChartType): { w: number; h: number } {
     case 'histogram':
     case 'pie':
     case 'likert':
+    case 'boxplot':
       return { w: 6, h: 4 };
   }
 }

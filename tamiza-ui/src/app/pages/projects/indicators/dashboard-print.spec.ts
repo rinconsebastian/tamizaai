@@ -2,7 +2,7 @@ import { ApplicationRef, EnvironmentInjector, createEnvironmentInjector, signal 
 import { TestBed } from '@angular/core/testing';
 import { MapStub, stubMap } from '../../../../testing/leaflet';
 import { byTestId, settle } from '../../../../testing/project-harness';
-import { ChartType, DashboardColors, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
+import { ChartType, DashboardColors, QueryBox, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { DashboardPrint, printDeadlineMs, printTitle, printingClass } from './dashboard-print';
 import { all, cell, clearOverlay, config, indicator, isQuery, open, paperOn, result, row, seriesResult, text, wait, widget } from './indicators-testing';
 import { loadLeaflet } from './map-engine';
@@ -400,4 +400,64 @@ describe('the dashboard\'s colors on paper (dashboard printing, "Colors on paper
 
     expect(colorsPrinted(context.root)).toEqual(onScreen);
   });
+
+  describe('a box plot', () => {
+    const box = (group: string, median: number, extra: Partial<QueryBox> = {}): QueryBox => ({
+      group, values: 12, min: median - 3, q1: median - 1, median, q3: median + 1, max: median + 3, mean: median, lowerWhisker: median - 3, upperWhisker: median + 3, outlierCount: 0, outliers: [], ...extra,
+    });
+    const answer = (boxes: QueryBox[]): QueryResult => result(boxes.map((b) => row(b.group, b.median, null, { rows: b.values })), { boxes });
+
+    async function showBoxes(boxes: QueryBox[], settings: Partial<WidgetConfig> = {}) {
+      const context = await open('viewer', [widget('w1', { chartType: 'boxplot', config: config({ indicator: 'households_visited', groupBy: 'municipality', ...settings }) })], null, { indicators: [households] });
+      const requests = context.http.match(isQuery);
+      expect(requests).toHaveLength(1);
+      requests[0].flush(answer(boxes));
+      await settle(context.harness);
+      return context;
+    }
+
+    it('prints whole: its boxes, medians, means, whiskers and outliers, its labels and its key, with the note on the outliers it did not draw (Box plot)', async () => {
+      const outliers = Array.from({ length: 100 }, (_, i) => 1000 + i);
+      const context = await showBoxes(
+        [box('Cali', 20, { outlierCount: 130, outliers, max: 1200 }), box('Buga', 30), box('Pasto', 40), box('Tumaco', 50), box('Quibdó', 60), box('Leticia', 70)],
+        { display: { orientation: 'horizontal' } },
+      );
+
+      await paperOn(context);
+
+      expect(all(context.root, 'chart-mark')).toHaveLength(6);
+      expect(all(context.root, 'box-median')).toHaveLength(6);
+      expect(all(context.root, 'box-mean')).toHaveLength(12);
+      expect(all(context.root, 'box-outlier')).toHaveLength(100);
+      const key = byTestId(context.root, 'boxplot-key')!;
+      expect(key.closest('.paper\\:hidden')).toBeNull();
+      expect(text(key)).toContain('Middle half (Q1 to Q3)');
+      expect(text(key)).toContain('Outliers');
+      const note = byTestId(context.root, 'boxplot-not-drawn')!;
+      expect(note.closest('.paper\\:hidden')).toBeNull();
+      expect(text(note)).toBe('30 outliers not drawn');
+      expect(byTestId(context.root, 'chart-svg')!.getAttribute('class')).toContain('tmz-chart-svg');
+      expect(byTestId(context.root, 'chart-svg')!.getAttribute('viewBox')).toMatch(/^0 0 \d+ \d+$/);
+    });
+
+    it('prints the rows of its table that fit and says how many it left out when it is shown as a table (Box plot as a table)', async () => {
+      const boxes = Array.from({ length: 10 }, (_, i) => box(`Place ${i + 1}`, 10 + i));
+      const context = await showBoxes(boxes);
+      byTestId(context.root, 'widget-table-toggle')!.click();
+      await settle(context.harness);
+      const table = context.root.querySelector('app-widget-table')!;
+      vi.spyOn(table, 'getBoundingClientRect').mockReturnValue({ bottom: 130 } as DOMRect);
+      table.querySelectorAll<HTMLElement>('tbody > tr').forEach((tr, i) => vi.spyOn(tr, 'getBoundingClientRect').mockReturnValue({ bottom: 40 + (i + 1) * 24 } as DOMRect));
+
+      await paperOn(context);
+
+      const printedRows = Array.from(table.querySelectorAll('tbody > tr')).filter((tr) => !tr.classList.contains('paper:hidden'));
+      expect(printedRows).toHaveLength(2);
+      expect(text(printedRows[0].children[0])).toBe('Place 1');
+      expect(text(byTestId(context.root, 'widget-table-left-out'))).toBe('8 rows not printed.');
+      // The table's nine columns are all in it.
+      expect(Array.from(table.querySelectorAll('thead th')).map(text)).toEqual(['municipality', 'Values', 'Minimum', 'Q1', 'Median', 'Q3', 'Maximum', 'Mean', 'Outliers']);
+    });
+  });
+
 });

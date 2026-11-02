@@ -18,6 +18,19 @@ export interface ValueFormatter {
   tick(value: number): string;
 }
 
+/**
+ * The format a box plot writes its figures in: a count is written as a decimal, because quartiles, medians and means can fall between
+ * whole numbers. A box's numbers of values and of outliers are always whole. Twin of `BoxFormat` in tamiza-api (`ReportDataBuilder`).
+ */
+export function boxFormat(format: IndicatorFormat): IndicatorFormat {
+  return format === 'count' ? 'decimal' : format;
+}
+
+/** The indicator as a box plot writes its figures. */
+export function boxIndicator(indicator: IndicatorUnit): IndicatorUnit {
+  return { ...indicator, format: boxFormat(indicator.format) };
+}
+
 /** What a widget shows for an indicator the project does not list (a removed one): numbers with two decimals. */
 export const plainIndicator: IndicatorUnit = { format: 'decimal', unit: null };
 

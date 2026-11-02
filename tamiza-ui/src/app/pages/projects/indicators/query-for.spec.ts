@@ -155,9 +155,10 @@ describe('queryFor and savedConfig with a series (design D1, D7)', () => {
     pyramid: ['seriesBy', 'pyramid'],
     likert: ['seriesBy', 'scale'],
     crosstab: ['seriesBy'],
+    boxplot: [],
   };
 
-  it('keeps, for each of the eleven kinds, exactly the settings of the second dimension that kind uses', () => {
+  it('keeps, for each of the twelve kinds, exactly the settings of the second dimension that kind uses', () => {
     expect(Object.keys(kept)).toEqual([...chartTypes]);
     for (const type of chartTypes) {
       const query = queryFor(type, full());
@@ -203,7 +204,7 @@ describe('queryFor and savedConfig with a series (design D1, D7)', () => {
 describe('queryFor and savedConfig with a display (add-dashboard-palettes, design D3)', () => {
   /** A config with both fields of the widget's display filled in, as a draft that was switched between kinds would hold. */
   const displayed = (overrides: Partial<WidgetConfig> = {}): WidgetConfig => ({ ...config(null), display: { color: 3, ramp: 'green' }, ...overrides });
-  /** What each kind keeps of the display: a color for bar, column and line with no series and for a histogram, a scale for a map and a heat map. */
+  /** What each kind keeps of the display: a color for bar, column and line with no series, a histogram and a box plot, a scale for a map and a heat map, an orientation for a box plot. */
   const kept: Record<(typeof chartTypes)[number], WidgetDisplay | undefined> = {
     stat: undefined,
     bar: { color: 3 },
@@ -216,6 +217,7 @@ describe('queryFor and savedConfig with a display (add-dashboard-palettes, desig
     pyramid: undefined,
     likert: undefined,
     crosstab: undefined,
+    boxplot: { color: 3 },
   };
 
   it('leaves the display out of the query of every kind, so choosing a color never queries again', () => {
@@ -228,7 +230,7 @@ describe('queryFor and savedConfig with a display (add-dashboard-palettes, desig
     }
   });
 
-  it('keeps, for each of the eleven kinds, exactly the fields of the display that kind takes', () => {
+  it('keeps, for each of the twelve kinds, exactly the fields of the display that kind takes', () => {
     for (const type of chartTypes) {
       const saved = savedConfig(type, displayed());
       expect(saved.display).toEqual(kept[type]);
@@ -275,5 +277,58 @@ describe('queryFor and savedConfig with a display (add-dashboard-palettes, desig
       expect(withoutDisplay).toBe(JSON.stringify(savedConfig(type, { ...before, display: undefined })));
       expect(withoutDisplay).not.toContain('display');
     }
+  });
+});
+
+describe('queryFor and savedConfig for a box plot (add-boxplot-widget, design D7)', () => {
+  const boxed = (overrides: Partial<WidgetConfig> = {}): WidgetConfig => ({
+    ...emptyConfig('household_income'),
+    groupBy: 'municipality',
+    seriesBy: 'sex',
+    sort: byValue,
+    display: { color: 3, ramp: 'green', orientation: 'horizontal' },
+    ...overrides,
+  });
+
+  it('sends an order by median, with a group column, and no series', () => {
+    const query = queryFor('boxplot', boxed());
+
+    expect(query.sort).toEqual(byValue);
+    expect(query.groupBy).toBe('municipality');
+    expect('seriesBy' in query).toBe(false);
+    expect('display' in query).toBe(false);
+  });
+
+  it('sends no order that is by a column, and none without a group column, so the query is not refused for the form\'s choice', () => {
+    expect(queryFor('boxplot', boxed({ sort: byColumn })).sort).toBeNull();
+    expect(queryFor('boxplot', boxed({ groupBy: null })).sort).toBeNull();
+    expect(queryFor('boxplot', boxed({ sort: null })).sort).toBeNull();
+    expect(savedConfig('boxplot', boxed({ groupBy: null })).sort).toBeNull();
+  });
+
+  it('does not send a column or a comparison with an order by median', () => {
+    const sort: WidgetSort = { by: 'value', column: 'round', compareAs: 'text', direction: 'asc' };
+
+    expect(queryFor('boxplot', boxed({ sort })).sort).toEqual({ by: 'value', column: null, compareAs: null, direction: 'asc' });
+  });
+
+  it('saves its color and its orientation, and no scale', () => {
+    expect(savedConfig('boxplot', boxed()).display).toEqual({ color: 3, orientation: 'horizontal' });
+    expect(savedConfig('boxplot', boxed({ display: { orientation: 'vertical' } })).display).toEqual({ orientation: 'vertical' });
+    expect('display' in savedConfig('boxplot', boxed({ display: undefined }))).toBe(false);
+  });
+
+  it('is the only kind that saves an orientation, so changing the kind away drops it', () => {
+    for (const type of chartTypes.filter((t) => t !== 'boxplot')) {
+      const saved = savedConfig(type, boxed({ seriesBy: type === 'heatmap' || type === 'pyramid' || type === 'likert' || type === 'crosstab' ? 'sex' : null }));
+      expect(saved.display?.orientation, type).toBeUndefined();
+    }
+  });
+
+  it('sends the same query whatever its orientation, so switching it never queries again', () => {
+    const horizontal = JSON.stringify(queryFor('boxplot', boxed()));
+
+    expect(JSON.stringify(queryFor('boxplot', boxed({ display: { orientation: 'vertical' } })))).toBe(horizontal);
+    expect(JSON.stringify(queryFor('boxplot', boxed({ display: undefined })))).toBe(horizontal);
   });
 });
