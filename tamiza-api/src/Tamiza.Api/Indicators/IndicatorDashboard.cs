@@ -143,12 +143,19 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
                 return new IndicatorQueryOutcome(null, plan.Errors);
             }
 
-            if (plan.Sql is null && plan.Series is null)
+            if (plan.Sql is null && plan.Series is null && plan.Boxes is null)
             {
                 return new IndicatorQueryOutcome(new IndicatorQueryResponse(true, [], false, new MissingReferences(false, plan.MissingColumns)), null);
             }
 
             await data.SleepForTestsAsync(connection, transaction, ct);
+            if (plan.Boxes is { } boxesPlan)
+            {
+                var boxGroupType = columns.FirstOrDefault(c => c.Name == config.GroupBy)?.Type;
+                var boxNotFiltered = dashboardFilters is { Count: > 0 } ? plan.NotFiltered : null;
+                return new IndicatorQueryOutcome(await ReadBoxesAsync(connection, transaction, boxesPlan, boxGroupType, config.Sort, maxRows, boxNotFiltered, ct), null);
+            }
+
             if (plan.Series is { } seriesPlan)
             {
                 var seriesGroupType = columns.First(c => c.Name == config.GroupBy).Type;
@@ -439,6 +446,60 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
         }
 
         return values;
+    }
+
+    /// <summary>
+    /// A box plot's boxes (design D3 of add-boxplot-widget). The statement cuts at the row limit in the group column's own order, or in the
+    /// order by median; the boxes it kept are then listed as the spec says: in natural order, or by median with natural order between equal
+    /// medians. A box with a figure that is not a number is skipped, as a row with one is.
+    /// </summary>
+    private static async Task<IndicatorQueryResponse> ReadBoxesAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, DataColumnType? groupType, WidgetSort? sort, int maxRows,
+        IReadOnlyList<string>? notFiltered, CancellationToken ct)
+    {
+        await using var command = new NpgsqlCommand(sql.Sql, connection, transaction);
+        foreach (var parameter in sql.Parameters)
+        {
+            command.Parameters.Add(parameter.ToParameter());
+        }
+
+        var boxes = new List<IndicatorBox>();
+        var limitReached = false;
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            if (boxes.Count == maxRows)
+            {
+                limitReached = true;
+                break;
+            }
+
+            var quartiles = reader.GetFieldValue<double[]>(BoxColumns.Quartiles);
+            var outliers = reader.IsDBNull(BoxColumns.OutlierValues) ? [] : reader.GetFieldValue<double[]>(BoxColumns.OutlierValues);
+            double[] figures =
+            [
+                reader.GetDouble(BoxColumns.Min), quartiles[0], quartiles[1], quartiles[2], reader.GetDouble(BoxColumns.Max), reader.GetDouble(BoxColumns.Mean),
+                reader.GetDouble(BoxColumns.LowerWhisker), reader.GetDouble(BoxColumns.UpperWhisker),
+            ];
+            if (!figures.All(double.IsFinite) || !outliers.All(double.IsFinite))
+            {
+                continue; // NaN and infinity have no number in JSON
+            }
+
+            var group = reader.IsDBNull(BoxColumns.Group) ? null : reader.GetString(BoxColumns.Group);
+            boxes.Add(new IndicatorBox(
+                group is not null && groupType == DataColumnType.Timestamp ? DataValues.IsoTimestamp(group) : group,
+                reader.GetInt64(BoxColumns.Values), figures[0], figures[1], figures[2], figures[3], figures[4], figures[5], figures[6], figures[7],
+                reader.GetInt64(BoxColumns.Outliers), outliers));
+        }
+
+        // OrderBy is stable, so the natural order of the groups holds between equal medians.
+        var natural = boxes.OrderBy(box => box.Group, NaturalOrder.ByText.Instance);
+        var shown = sort is { By: SortValues.ByValue }
+            ? (sort.Direction == SortValues.Desc ? natural.OrderByDescending(box => box.Median) : natural.OrderBy(box => box.Median)).ToList()
+            : natural.ToList();
+        var rows = shown.Select(box => new IndicatorRow(box.Group, box.Median, null, box.Values)).ToList();
+        return new IndicatorQueryResponse(true, rows, limitReached, MissingReferences.None, null, notFiltered, Boxes: shown);
     }
 
     /// <summary>NaN and infinity have no number in JSON.</summary>

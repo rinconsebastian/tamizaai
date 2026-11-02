@@ -245,3 +245,35 @@ def test_a_chained_script_receives_what_the_server_would_give_it(download):
     tz.check(compute, "indicator", "x", tables=tz.check(clean, "clean", folder=folder).tables, folder=folder)
 
     assert seen == {"index": [0, 1], "dtype": "Int64"}
+
+
+def test_a_table_with_one_row_per_unit_and_its_id_as_text_has_no_rows_that_share_their_dimensions(download):
+    """The box plot example of docs/indicators-dashboard.md: the id keeps the rows unique."""
+
+    def compute(cleaned, ctx):
+        households = cleaned["main"]
+        return pd.DataFrame(
+            {
+                "municipality": households["municipality"],
+                "household_id": households["_id"].astype(str),
+                "value": households["age"],
+            }
+        )
+
+    result = tz.check(compute, "indicator", "household_income", folder=download())
+
+    assert result.dashboard["duplicateRows"] == 0
+    assert result.dashboard["dimensions"] == ["municipality", "household_id"]
+    assert "household_id" not in result.dashboard["measures"]
+    assert result.dashboard["defaultDimension"] == "municipality"
+    assert result.dashboard["rows"] == 3
+
+
+def test_the_same_units_without_their_id_share_their_dimensions(download):
+    def compute(cleaned, ctx):
+        households = cleaned["main"]
+        return pd.DataFrame({"municipality": households["municipality"], "value": households["age"]})
+
+    result = tz.check(compute, "indicator", "household_income", folder=download())
+
+    assert result.dashboard["duplicateRows"] == 1

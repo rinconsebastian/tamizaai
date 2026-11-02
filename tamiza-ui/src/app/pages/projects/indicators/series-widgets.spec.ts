@@ -802,14 +802,15 @@ describe('every kind of chart', () => {
     pyramid: 'app-pyramid-chart',
     likert: 'app-likert-chart',
     crosstab: 'app-crosstab-widget',
+    boxplot: 'app-boxplot-chart',
   };
 
-  it('lists the eleven kinds', () => {
+  it('lists the twelve kinds', () => {
     expect(Object.keys(drawnBy)).toEqual([...chartTypes]);
   });
 
   it.each(chartTypes)('draws a %s widget with its own component and no other', async (type) => {
-    const plain = type === 'stat' || type === 'histogram' || type === 'pie' || type === 'map';
+    const plain = type === 'stat' || type === 'histogram' || type === 'pie' || type === 'map' || type === 'boxplot';
     const context = await show(type, settings[type] ?? {}, plain ? result([{ group: type === 'stat' ? null : 'Armenia', value: 5, geometry: null }]) : answer(), [households]);
     context.http.match((r) => r.method === 'GET' && r.url === '/api/v1/basemaps').forEach((r) => r.flush({ provider: 'none', basemaps: [] }));
     await settle(context.harness);
@@ -823,7 +824,7 @@ describe('every kind of chart', () => {
 describe('the new kinds in both languages', () => {
   afterEach(clearOverlay);
 
-  it('names each of the eleven kinds in English and in Spanish', () => {
+  it('names each of the twelve kinds in English and in Spanish', () => {
     for (const type of chartTypes) {
       expect(en.indicators.chartTypes[type], `en ${type}`).toBeTruthy();
       expect(es.indicators.chartTypes[type], `es ${type}`).toBeTruthy();

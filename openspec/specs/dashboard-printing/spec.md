@@ -118,7 +118,7 @@ A widget that fits on one sheet SHALL NOT be split between two: when it would cr
 - **THEN** nothing of that widget, not even a line of its border, shows at the foot of the previous sheet
 
 ### Requirement: Charts on paper
-Every chart, pie chart, heat map, population pyramid, Likert widget and stat tile SHALL print whole inside its widget's box, with all its marks, labels and legend. Each widget SHALL print as the member shows it at that moment, as a chart or as a table.
+Every chart, pie chart, heat map, population pyramid, Likert widget, box plot and stat tile SHALL print whole inside its widget's box, with all its marks, labels and legend. Each widget SHALL print as the member shows it at that moment, as a chart or as a table.
 
 #### Scenario: Column chart
 - **WHEN** a member prints a column chart with 12 columns
@@ -135,6 +135,10 @@ Every chart, pie chart, heat map, population pyramid, Likert widget and stat til
 #### Scenario: Stacked chart
 - **WHEN** a member prints a stacked column chart with 4 series
 - **THEN** the sheet shows every segment and the legend naming the 4 series
+
+#### Scenario: Box plot
+- **WHEN** a member prints a horizontal box plot with 6 boxes, some of them with outliers
+- **THEN** the sheet shows the 6 boxes with their medians, means, whiskers and outliers, their group labels, the scale and the key inside the widget's box
 
 ### Requirement: Maps on paper
 A map SHALL print its shapes, its basemap and its legend, with the basemap's attribution. A map the member has not zoomed or moved SHALL show all its shapes; one they have zoomed or moved SHALL show the area they were looking at.

@@ -21,11 +21,12 @@ import {
 } from '../../../core/projects/indicators.service';
 import { Alert, ApiLang, Button, Skeleton } from '../../../shared/ui';
 import { AxisChart, AxisKind } from './axis-chart';
+import { BoxplotChart } from './boxplot-chart';
 import { ChartColors, chartColors, defaultColors } from './chart-colors';
 import { CrosstabWidget } from './crosstab-widget';
 import { HeatmapChart } from './heatmap-chart';
 import { LikertChart } from './likert-chart';
-import { plainIndicator, valueFormatter } from './format';
+import { boxIndicator, plainIndicator, valueFormatter } from './format';
 import { ActiveDashboardFilter, appliedOf } from './dashboard-filters';
 import { DashboardPrint } from './dashboard-print';
 import { MapWidget } from './map-widget';
@@ -56,16 +57,29 @@ function seriesSettings(type: ChartType, config: WidgetConfig): Partial<WidgetCo
 
 /**
  * The widget's own color and scale (add-dashboard-palettes, design D3), for the kinds that take them and with only the fields each
- * takes: a color for a bar, column or line chart with no series and for a histogram, a scale for a map and a heat map. A widget with
- * nothing to keep has no `display` at all, not an empty one, so a widget saved before palettes saves exactly what it did.
+ * takes: a color for a bar, column or line chart with no series, for a histogram and for a box plot, a scale for a map and a heat map,
+ * an orientation for a box plot. A widget with nothing to keep has no `display` at all, not an empty one, so a widget saved before palettes saves exactly what it did.
  */
 function displayFor(type: ChartType, config: WidgetConfig): { display?: WidgetDisplay } {
-  const { color, ramp } = config.display ?? {};
+  const { color, ramp, orientation } = config.display ?? {};
   const kept: WidgetDisplay = {
-    ...((type === 'histogram' || (takesSeries(type) && !config.seriesBy)) && color != null ? { color } : {}),
+    ...((type === 'histogram' || type === 'boxplot' || (takesSeries(type) && !config.seriesBy)) && color != null ? { color } : {}),
     ...((type === 'map' || type === 'heatmap') && ramp ? { ramp } : {}),
+    ...(type === 'boxplot' && orientation ? { orientation } : {}),
   };
   return Object.keys(kept).length ? { display: kept } : {};
+}
+
+/**
+ * The order a chart type sends. A bar or column keeps its order. A box plot keeps only an order by its median, and only with a group
+ * column: the form keeps the choice while the group is cleared, but the query is not sent it, so it is not refused for it. Twin of
+ * `SortOf` in `WidgetQuery` (tamiza-api).
+ */
+function sortOf(type: ChartType, config: WidgetConfig): WidgetSort | null {
+  if ((type === 'bar' || type === 'column') && config.sort) {
+    return sortFor(config.sort);
+  }
+  return type === 'boxplot' && config.groupBy && config.sort?.by === 'value' ? sortFor(config.sort) : null;
 }
 
 /**
@@ -82,7 +96,7 @@ export function queryFor(type: ChartType, config: WidgetConfig): WidgetConfig {
     filters: config.filters,
     geometryColumn: type === 'map' ? config.geometryColumn : null,
     buckets: type === 'histogram' ? config.buckets : null,
-    sort: (type === 'bar' || type === 'column') && config.sort ? sortFor(config.sort) : null,
+    sort: sortOf(type, config),
     // The query needs the columns' names to fetch them; a label, a format and the basemap change nothing in the rows, so they stay out
     // of it (and out of the re-query key), and editing them never blanks the preview.
     // (A config from an API that predates the tooltip has neither field; it reads as none.)
@@ -112,6 +126,7 @@ export function axisKindOf(type: ChartType): AxisKind | null {
     case 'pyramid':
     case 'likert':
     case 'crosstab':
+    case 'boxplot':
       return null;
   }
 }
@@ -138,7 +153,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
  */
 @Component({
   selector: 'app-widget-view',
-  imports: [NgTemplateOutlet, RouterLink, TranslocoDirective, Alert, ApiLang, Button, Skeleton, AxisChart, CrosstabWidget, HeatmapChart, LikertChart, MapWidget, PieWidget, PyramidChart, StatWidget],
+  imports: [NgTemplateOutlet, RouterLink, TranslocoDirective, Alert, ApiLang, Button, Skeleton, AxisChart, BoxplotChart, CrosstabWidget, HeatmapChart, LikertChart, MapWidget, PieWidget, PyramidChart, StatWidget],
   template: `
     <div class="flex h-full min-h-0 flex-col gap-2" *transloco="let t" [attr.aria-busy]="state().kind === 'loading'">
       @switch (state().kind) {
@@ -172,7 +187,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
                 <p class="shrink-0 text-xs text-body" data-testid="widget-not-filtered">{{ t('dashboardFilters.notFiltered', { names: notFiltered().join(', ') }) }}</p>
               }
               @if (result.rowLimitReached) {
-                <p class="shrink-0 text-xs text-fg-warning" data-testid="widget-row-limit">{{ t('indicators.widget.rowLimit', { count: result.rows.length }) }}</p>
+                <p class="shrink-0 text-xs text-fg-warning" data-testid="widget-row-limit">{{ t(chartType() === 'boxplot' ? 'indicators.widget.rowLimitBoxes' : 'indicators.widget.rowLimit', { count: result.rows.length }) }}</p>
               }
               @if (result.rows.length === 0) {
                 <p class="text-sm text-body" data-testid="widget-empty">{{ t('indicators.widget.empty') }}</p>
@@ -218,6 +233,9 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
                     }
                     @case ('crosstab') {
                       <app-crosstab-widget [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" chartType="crosstab" />
+                    }
+                    @case ('boxplot') {
+                      <app-boxplot-chart [answer]="result" [config]="config()!" [label]="label()" [format]="boxFormatter()" [percent]="isPercent()" [colors]="resolvedColors()" [asTable]="asTable()" />
                     }
                   }
                 </div>
@@ -306,6 +324,9 @@ export class WidgetView {
   /** What the widget calls its indicator: the label, or the name when the project lists none. */
   protected readonly label = computed(() => this.indicator()?.label ?? this.config()?.indicator ?? '');
   protected readonly formatter = computed(() => valueFormatter(this.indicator() ?? plainIndicator, this.locale));
+  /** A box plot's figures are written as a decimal for a count (quartiles and means fall between whole numbers). */
+  protected readonly boxFormatter = computed(() => valueFormatter(boxIndicator(this.indicator() ?? plainIndicator), this.locale));
+  protected readonly isPercent = computed(() => (this.indicator() ?? plainIndicator).format === 'percent');
   protected readonly axisKind = computed(() => axisKindOf(this.chartType()));
   /**
    * The colors the widget is drawn in: the dashboard's palette and colors kept by value, and the widget's own color or scale. It reads

@@ -239,7 +239,7 @@ After the header, the email body SHALL show the value of each stat tile. Then it
 - **THEN** the body shows `42%`
 
 ### Requirement: Widget tables in a scheduled email
-A widget's table in the body and in the workbook SHALL have the same columns and rows as its "Show as table" view, in the same order. The one exception is a map's table, which SHALL NOT include the kind of geometry. A histogram's table SHALL list each range with the number of values in it. A pie chart's table SHALL list every group value with its share. A widget with a series SHALL be shown as its cross table, with its "Total" column and "Total" row; a 100% layout and a Likert widget SHALL show shares in place of values and have the "Total" column but no "Total" row; and a widget that left rows out SHALL say how many in its note.
+A widget's table in the body and in the workbook SHALL have the same columns and rows as its "Show as table" view, in the same order. The one exception is a map's table, which SHALL NOT include the kind of geometry. A histogram's table SHALL list each range with the number of values in it. A pie chart's table SHALL list every group value with its share. A box plot's table SHALL list each box with its number of values, minimum, first quartile, median, third quartile, maximum, mean and number of outliers. A widget with a series SHALL be shown as its cross table, with its "Total" column and "Total" row; a 100% layout and a Likert widget SHALL show shares in place of values and have the "Total" column but no "Total" row; and a widget that left rows out SHALL say how many in its note.
 
 #### Scenario: Histogram
 - **WHEN** a histogram of "Housing" has 10 buckets over the values of 80 municipalities
@@ -264,6 +264,10 @@ A widget's table in the body and in the workbook SHALL have the same columns and
 #### Scenario: Population pyramid
 - **WHEN** a population pyramid with `Female` on the left and `Male` on the right left out 15 rows
 - **THEN** its table lists each age band with a `Female`, a `Male` and a "Total" column, and its note says that 15 rows were left out
+
+#### Scenario: Box plot
+- **WHEN** a box plot of "Housing" is grouped by `municipality`, which has 12 values, and is ordered by median descending
+- **THEN** its table lists the 12 municipalities from the largest median to the smallest, each with its number of values, minimum, first quartile, median, third quartile, maximum, mean and number of outliers
 
 ### Requirement: Missing values in widget tables
 A missing group value SHALL read as the interface's text for no group, such as "(none)". A missing value SHALL read as "—" in the body and be an empty cell in the workbook. A widget whose indicator the project no longer lists SHALL use the `decimal` format with no unit, and the indicator's name as its label, as the dashboard does.
@@ -335,7 +339,7 @@ After the "Summary" sheet, the workbook SHALL have one sheet per widget that is 
 - **THEN** its sheet's name is shortened to 31 characters, without the `/`, and is unique in the workbook
 
 ### Requirement: Numbers in the workbook
-In each widget's sheet, plotted values, row counts, pie shares, the shares of a 100% layout or a Likert widget, totals and numeric tooltip values SHALL be numbers, not text. Plotted values and totals SHALL follow the indicator's format: `count` a whole number with thousands separators, `decimal` and `currency` two decimals, `percent` a percentage. Row counts SHALL be whole numbers, and shares percentages. A tooltip value SHALL follow its tooltip column's format, as in its tooltip. A unit SHALL be written in the column's header.
+In each widget's sheet, plotted values, row counts, pie shares, the shares of a 100% layout or a Likert widget, totals, the figures of a box plot and numeric tooltip values SHALL be numbers, not text. Plotted values, totals and the figures of a box plot SHALL follow the indicator's format: `count` a whole number with thousands separators, `decimal` and `currency` two decimals, `percent` a percentage; the figures of a box plot over a `count` indicator SHALL instead have two decimals, as in the dashboard. Row counts, and a box plot's numbers of values and of outliers, SHALL be whole numbers, and shares percentages. A tooltip value SHALL follow its tooltip column's format, as in its tooltip. A unit SHALL be written in the column's header.
 
 #### Scenario: Percentage cell
 - **WHEN** a column chart over `piped_water_rate`, whose format is `percent`, has the value 0.42 for `Cali`
@@ -352,6 +356,10 @@ In each widget's sheet, plotted values, row counts, pie shares, the shares of a 
 #### Scenario: Shares of a Likert widget
 - **WHEN** a Likert widget's `Cali` row has 30% `Agree`
 - **THEN** that cell holds the number 0.3, shown as a percentage, whatever the indicator's format
+
+#### Scenario: Median of a count in the workbook
+- **WHEN** a box plot over `household_size`, whose format is `count`, has a box of 1,200 values whose median is 4.5
+- **THEN** that box's median cell holds the number 4.5, shown with two decimals, and its number of values cell holds 1,200, shown as a whole number
 
 ### Requirement: Attachment size
 When the workbook would be larger than 7 MB, the email SHALL be sent without it. The body SHALL then say that the attachment was too large and that members can export the indicator tables from the dashboard.

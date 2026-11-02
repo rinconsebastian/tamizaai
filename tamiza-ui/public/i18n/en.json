@@ -1539,7 +1539,8 @@
       "heatmap": "Heat map",
       "pyramid": "Population pyramid",
       "likert": "Diverging Likert bars",
-      "crosstab": "Cross table"
+      "crosstab": "Cross table",
+      "boxplot": "Box plot"
     },
     "grid": {
       "move": "Move {{ title }}",
@@ -1559,7 +1560,8 @@
       "rowLimit": "Only the first {{ count }} rows are shown: the query matches more. Add a filter to narrow it down.",
       "empty": "No rows match this widget’s query.",
       "showTable": "Show as table",
-      "showChart": "Show as chart"
+      "showChart": "Show as chart",
+      "rowLimitBoxes": "Only the first {{ count }} boxes are shown: the query matches more. Add a filter to narrow it down."
     },
     "missing": {
       "title": "This widget cannot be drawn",
@@ -1780,6 +1782,17 @@
         "addLabel": "Add a value of the scale",
         "addPlaceholder": "Another value",
         "add": "Add"
+      },
+      "groupByOptionalBoxplot": "Optional. Without it, a box plot draws one box over every row.",
+      "ratioHelpBoxplot": "Each row’s numerator is divided by its own denominator, and the boxes summarize those values.",
+      "sortByBoxes": "Order boxes by",
+      "sortMedian": "Median",
+      "sortNeedsGroup": "Choose a column to group by to order the boxes.",
+      "orientation": {
+        "legend": "Orientation",
+        "vertical": "Vertical",
+        "horizontal": "Horizontal",
+        "help": "Vertical puts the first box on the left; horizontal puts it at the top and suits long names."
       }
     },
     "series": {
@@ -1809,7 +1822,8 @@
         "line": "Line chart with one line per series"
       },
       "negativeLeftOut": "{{ count }} negative values are left out of the shares.",
-      "negativeLeftOutOne": "{{ count }} negative value is left out of the shares."
+      "negativeLeftOutOne": "{{ count }} negative value is left out of the shares.",
+      "keyHelpGroupsDown": "Up and down arrows move between the groups. Home and End go to the first and the last, and Escape leaves the marks."
     },
     "heatmap": {
       "summary": "Heat map of {{ what }}, {{ group }} by {{ series }}: {{ groups }}, {{ seriesCount }}, from {{ min }} to {{ max }}. Highest: {{ top }}.",
@@ -1831,6 +1845,35 @@
       },
       "toLeft": "To the left: {{ share }}",
       "toRight": "To the right: {{ share }}"
+    },
+    "boxplot": {
+      "roleDescription": "box plot",
+      "group": "Group",
+      "allRows": "All rows",
+      "values": "Values",
+      "minimum": "Minimum",
+      "q1": "Q1",
+      "median": "Median",
+      "q3": "Q3",
+      "maximum": "Maximum",
+      "mean": "Mean",
+      "outliers": "Outliers",
+      "outlier": "Outlier",
+      "lowerWhisker": "Lower whisker",
+      "upperWhisker": "Upper whisker",
+      "key": {
+        "box": "Middle half (Q1 to Q3)",
+        "median": "Median",
+        "mean": "Mean",
+        "whiskers": "Whiskers: up to 1.5 × the box beyond it",
+        "outliers": "Outliers"
+      },
+      "notDrawn": "{{ count }} outliers not drawn",
+      "notDrawnOne": "{{ count }} outlier not drawn",
+      "summary": "Box plot of {{ what }} by {{ group }}: {{ count }} boxes, medians from {{ min }} to {{ max }}.",
+      "summaryOne": "Box plot of {{ what }} by {{ group }}: {{ count }} box, median {{ min }}.",
+      "summaryAll": "Box plot of {{ what }}: one box over every row, median {{ median }}, from {{ min }} to {{ max }}.",
+      "summarySame": "Box plot of {{ what }} by {{ group }}: {{ count }} boxes, all with the median {{ median }}."
     }
   },
   "dashboards": {

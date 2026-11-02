@@ -269,6 +269,27 @@ public sealed class ScriptConventionTests
     }
 
     [Fact]
+    public void The_box_plot_script_widens_one_check_to_twelve_kinds()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0020_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0020_add_boxplot_widget.sql", resource);
+        Assert.Contains("DROP CONSTRAINT ck_dashboard_widgets_chart_type;", sql);
+        Assert.Contains("ADD CONSTRAINT ck_dashboard_widgets_chart_type", sql);
+        var kinds = new[] { "stat", "bar", "column", "line", "histogram", "pie", "map", "heatmap", "pyramid", "likert", "crosstab", "boxplot" };
+        foreach (var kind in kinds)
+        {
+            Assert.Contains($"'{kind}'", sql);
+        }
+
+        Assert.Equal(kinds.Length, System.Text.RegularExpressions.Regex.Matches(sql, @"'[a-z]+'").Count);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"\bCHECK\b"));
+        Assert.Empty(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|INDEX|CREATE TABLE)\b"));
+    }
+
+    [Fact]
     public void The_dashboard_versions_script_names_every_constraint_and_index()
     {
         var resource = Resources.Single(name => name.StartsWith("0018_", StringComparison.Ordinal));

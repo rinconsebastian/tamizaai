@@ -34,6 +34,7 @@ public sealed class IndicatorDocsTests
         [ChartTypes.Pyramid] = "Population pyramid",
         [ChartTypes.Likert] = "Likert bars",
         [ChartTypes.Crosstab] = "Cross table",
+        [ChartTypes.Boxplot] = "Box plot",
     };
 
     [Fact]
@@ -107,9 +108,9 @@ public sealed class IndicatorDocsTests
 
         var text = File.ReadAllText(mcp);
 
-        Assert.Contains("Changing the `chartType` of a widget that has a color or a scale also needs a `config` without the `display` fields the new type does not take", text, StringComparison.Ordinal);
+        Assert.Contains("Changing the `chartType` of a widget that has a color, a scale or an orientation also needs a `config` without the `display` fields the new type does not take", text, StringComparison.Ordinal);
         Assert.Contains("a new `chartType` alone keeps the old `config`", text, StringComparison.Ordinal);
-        Assert.Contains("`config.display.color` or `config.display.ramp`", text, StringComparison.Ordinal);
+        Assert.Contains("`config.display.color`, `config.display.ramp` or `config.display.orientation`", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -191,7 +192,7 @@ public sealed class IndicatorDocsTests
 
         // A widget that is created has no earlier config to keep, so only the change of one carries the sentence.
         Assert.DoesNotContain("To change the chart type", Description("create_widget"), StringComparison.Ordinal);
-        Assert.Contains("To change the chart type of a widget that has a color or a scale", Description("update_widget"), StringComparison.Ordinal);
+        Assert.Contains("To change the chart type of a widget that has a color, a scale or an orientation", Description("update_widget"), StringComparison.Ordinal);
         Assert.Contains("Only `update_widget` changes the `chartType` of a widget.", text, StringComparison.Ordinal);
         Assert.DoesNotContain("`create_widget` changes the `chartType`", text, StringComparison.Ordinal);
     }

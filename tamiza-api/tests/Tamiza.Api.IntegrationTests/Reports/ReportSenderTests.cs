@@ -90,6 +90,42 @@ public sealed class ReportSenderTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Sends_a_box_plot_and_its_sheet_holds_every_box_with_numbers_in_the_formats_of_its_figures()
+    {
+        await using var h = await ReportsHarness.CreateAsync(postgres);
+        await h.Indicators.PublishAsync(
+            "household_size", "municipality text, value numeric",
+            string.Join(", ", Enumerable.Range(1, 12).SelectMany(m => Enumerable.Range(1, 5).Select(v => $"('M{m:00}', {m + v})"))),
+            label: "Household size", format: "count", unit: "people");
+        await h.Indicators.AddWidgetAsync(new
+        {
+            title = "Spread", chartType = "boxplot", config = new { indicator = "household_size", groupBy = "municipality" }, layout = new { x = 0, y = 0, w = 12, h = 4 },
+        });
+        await h.SaveReportAsync();
+
+        await SendAsync(h);
+
+        var sent = Assert.Single(h.Email.Sent);
+        Assert.Null(await FailureAsync(h));
+        // Ten rows in the body, as for any table, and all nine columns.
+        Assert.Contains(">Median</th>", sent.Message.HtmlBody);
+        Assert.Contains(">Outliers</th>", sent.Message.HtmlBody);
+        Assert.Contains("2 more rows", sent.Message.HtmlBody);
+        var attachment = Assert.IsType<MimePart>(Assert.Single(sent.Message.Attachments));
+        using var content = new MemoryStream();
+        await attachment.Content.DecodeToAsync(content);
+        content.Position = 0;
+        Assert.Equal(["Summary", "1. Spread"], MiniExcelLibs.MiniExcel.GetSheetNames(content));
+        content.Position = 0;
+        var sheet = MiniExcelLibs.MiniExcel.Query(content, useHeaderRow: true, sheetName: "1. Spread").Cast<IDictionary<string, object?>>().ToList();
+        Assert.Equal(12, sheet.Count);
+        Assert.Equal(9, sheet[0].Count);
+        // M01 holds 2, 3, 4, 5, 6: the median is 4, written as a number.
+        Assert.Equal(5, Convert.ToInt32(sheet[0]["Values"], System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(4d, Convert.ToDouble(sheet[0]["Median (people)"], System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
     public async Task Empty_dashboard()
     {
         await using var h = await ReportsHarness.CreateAsync(postgres);

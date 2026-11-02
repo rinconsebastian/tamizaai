@@ -424,6 +424,7 @@ public sealed class ReportDataTests(PostgresFixture postgres)
             ["heatmap"] = new { indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source" },
             ["crosstab"] = new { indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source" },
             ["pyramid"] = new { indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source", pyramid = new { left = "Piped", right = "Well" } },
+            ["boxplot"] = new { indicator = "households_by_source", measure = "value", groupBy = "municipality" },
             ["likert"] = new
             {
                 indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source",
@@ -444,5 +445,76 @@ public sealed class ReportDataTests(PostgresFixture postgres)
         Assert.All(model.Widgets.Where(w => !w.IsStat), w => Assert.NotEmpty(w.Rows));
         // The map needs a geometry column, and is covered by the test of the shapes; every other kind is here.
         Assert.Equal(ChartTypes.All.Where(t => t != ChartTypes.Map).Order(), model.Widgets.Select(w => w.ChartType).Order());
+    }
+
+    [Fact]
+    public async Task A_box_plot_lists_each_box_in_the_charts_order_with_a_decimal_format_for_a_count_and_whole_numbers_for_its_counts()
+    {
+        await using var h = await HarnessAsync();
+        await h.PublishAsync(
+            "household_size", "municipality text, value numeric", "('Cali', 3), ('Cali', 4), ('Cali', 5), ('Cali', 6), ('Pasto', 2), (NULL, 7)",
+            label: "Household size", format: "count", unit: "people");
+        await h.AddWidgetAsync(Widget("Size", "boxplot", new
+        {
+            indicator = "household_size", groupBy = "municipality", sort = new { by = "value", direction = "desc" }, display = new { orientation = "horizontal" },
+        }, y: 0));
+        await h.AddWidgetAsync(Widget("Size of all", "boxplot", new { indicator = "household_size" }, y: 2));
+
+        var model = await BuildAsync(h);
+        var grouped = model.Widgets[0];
+        var all = model.Widgets[1];
+
+        Assert.Equal(WidgetOutcome.Shown, grouped.Outcome);
+        Assert.Equal(
+            ["municipality", "Values", "Minimum", "Q1", "Median", "Q3", "Maximum", "Mean", "Outliers"], grouped.Columns.Select(c => c.Header));
+        // By median, largest first; a missing group reads "(none)".
+        Assert.Equal(["(none)", "Cali", "Pasto"], Texts(grouped, 0));
+        var cali = grouped.Rows.Single(r => r[0].Text == "Cali");
+        Assert.Equal(["Cali", "4", "3.00 people", "3.75 people", "4.50 people", "5.25 people", "6.00 people", "4.50 people", "0"], cali.Select(c => c.Text));
+        Assert.Equal(4.5, cali[4].Value);
+        Assert.Equal(4d, cali[1].Value);
+        // A count's figures have two decimals, and the box's counts are whole numbers.
+        Assert.Equal(["#,##0", "#,##0.00", "#,##0.00", "#,##0.00", "#,##0.00", "#,##0.00", "#,##0.00", "#,##0"], grouped.Columns.Skip(1).Select(c => c.ExcelFormat));
+        Assert.All(grouped.Columns.Skip(2).Take(6), c => Assert.Equal("people", c.Unit));
+        Assert.Null(grouped.Columns[1].Unit);
+
+        // No group column: the one box is "All rows", under the header "Group".
+        Assert.Equal("Group", all.Columns[0].Header);
+        Assert.Equal(["All rows"], Texts(all, 0));
+        Assert.Equal("6", all.Rows[0][1].Text);
+    }
+
+    [Fact]
+    public async Task A_box_plot_that_reaches_the_limit_says_boxes_and_not_rows()
+    {
+        await using var h = await HarnessAsync(new() { ["IndicatorDashboard:MaxWidgetQueryRows"] = "2" });
+        await h.AddWidgetAsync(Widget("Households", "boxplot", new { indicator = "households", measure = "value", groupBy = "municipality" }, y: 0));
+        await h.AddWidgetAsync(Widget("Bars", "bar", new { indicator = "households", measure = "value", groupBy = "municipality" }, y: 2));
+
+        var model = await BuildAsync(h);
+
+        Assert.Equal(["Only the first 2 boxes are shown: the query matches more."], model.Widgets[0].Notes);
+        Assert.Equal(["Only the first 2 rows are shown: the query matches more."], model.Widgets[1].Notes);
+
+        var spanish = await BuildAsync(h, "es-CO");
+        Assert.Equal(["Solo se muestran las primeras 2 cajas: la consulta coincide con más."], spanish.Widgets[0].Notes);
+    }
+
+    [Fact]
+    public async Task A_box_of_1200_values_writes_its_number_of_values_with_a_thousands_separator_and_as_a_whole_number()
+    {
+        await using var h = await HarnessAsync();
+        await h.PublishAsync("household_size", "municipality text, value numeric", "", label: "Household size", format: "count", unit: "people");
+        await h.ExecuteAsync($"INSERT INTO \"{h.Schema}\".household_size SELECT 'Cali', 3 + (g % 4) FROM generate_series(1, 1200) g");
+        await h.AddWidgetAsync(Widget("Size", "boxplot", new { indicator = "household_size", groupBy = "municipality" }, y: 0));
+
+        var model = await BuildAsync(h);
+        var cali = Assert.Single(model.Widgets[0].Rows);
+
+        Assert.Equal("1,200", cali[1].Text);
+        Assert.Equal(1200d, cali[1].Value);
+        Assert.Equal("0", cali[8].Text);
+        // 3, 4, 5 and 6 in equal numbers: the median falls between whole numbers and is written with two decimals.
+        Assert.Equal("4.50 people", cali[4].Text);
     }
 }

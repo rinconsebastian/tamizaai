@@ -101,4 +101,40 @@ describe('WidgetView colors (add-dashboard-palettes, design D3, D7)', () => {
 
     expect(view.resolvedColors().accent).toBe('var(--tmz-pal-tamiza-1)');
   });
+
+  it('asks for the boxes of a box plot with its chart type, and never again when its orientation or color changes', async () => {
+    const { host, http, settle, view, queries } = await render();
+    host.type.set('boxplot');
+    host.config.set(config({ groupBy: 'municipality' }));
+    await settle();
+    const [draw] = queries();
+    expect(draw.request.body.chartType).toBe('boxplot');
+    draw.flush(result([row('Cali', 4.5)], { boxes: [{ group: 'Cali', values: 5, min: 3, q1: 4, median: 4.5, q3: 5, max: 6, mean: 4.5, lowerWhisker: 3, upperWhisker: 6, outlierCount: 0, outliers: [] }] }));
+    await settle();
+
+    host.config.set(config({ groupBy: 'municipality', display: { orientation: 'horizontal' } }));
+    await settle();
+    host.config.set(config({ groupBy: 'municipality', display: { orientation: 'vertical', color: 4 } }));
+    await settle();
+
+    expect(queries()).toHaveLength(0);
+    expect(view.resolvedColors().accent).toBe('var(--tmz-pal-tamiza-4)');
+    http.verify();
+  });
+
+  it('asks again when what a box plot is ordered by changes', async () => {
+    const { host, settle, queries } = await render();
+    host.type.set('boxplot');
+    host.config.set(config({ groupBy: 'municipality' }));
+    await settle();
+    queries().forEach((request) => request.flush(result([row('Cali', 4.5)])));
+    await settle();
+
+    host.config.set(config({ groupBy: 'municipality', sort: { by: 'value', column: null, compareAs: null, direction: 'desc' } }));
+    await settle();
+
+    const requests = queries();
+    expect(requests).toHaveLength(1);
+    expect(requests[0].request.body.config.sort).toEqual({ by: 'value', column: null, compareAs: null, direction: 'desc' });
+  });
 });

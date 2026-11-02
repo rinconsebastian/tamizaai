@@ -22,9 +22,10 @@ public sealed record IndicatorSql(string Sql, IReadOnlyList<SqlParam> Parameters
 /// A pie chart only (design D8 of dashboard palettes): next to <paramref name="Sql"/>, the statement that ranks its groups, the missing
 /// one included, by total over the widget's own filters, at most <see cref="WidgetConfig.MaxSlices"/> + 1 of them. Null for every other kind.
 /// </param>
+/// <param name="Boxes">A box plot only (design D3 of add-boxplot-widget): the one statement that returns a row per box, set instead of <paramref name="Sql"/>.</param>
 public sealed record IndicatorQueryPlan(
     IndicatorSql? Sql, IReadOnlyList<string> MissingColumns, IDictionary<string, string[]>? Errors, IReadOnlyList<string>? NotFiltered = null,
-    SeriesQueryPlan? Series = null, IndicatorSql? Domain = null);
+    SeriesQueryPlan? Series = null, IndicatorSql? Domain = null, IndicatorSql? Boxes = null);
 
 /// <summary>Validates a widget query against the indicator table's columns and turns it into SQL.</summary>
 public static class IndicatorQueryBuilder
@@ -244,6 +245,16 @@ public static class IndicatorQueryBuilder
             aggregate = $"sum({Q(ratio.Numerator)})::double precision / nullif(sum({Q(ratio.Denominator)}), 0)";
             plotted = $"{Q(ratio.Numerator)}::double precision / nullif({Q(ratio.Denominator)}, 0)";
             rowFilter = $"({Q(ratio.Numerator)} IS NOT NULL OR {Q(ratio.Denominator)} IS NOT NULL)";
+        }
+
+        if (chartType == ChartTypes.Boxplot)
+        {
+            // A box plot summarizes the rows of each group as they are: no sum, and no series (validation refuses one).
+            var boxParameters = new List<SqlParam>(query.Parameters);
+            boxParameters.AddRange(dashboard.Parameters.Where(p => !boxParameters.Any(q => q.Name == p.Name)));
+            var median = config.Sort is { By: SortValues.ByValue } && grouped ? (config.Sort.Direction == SortValues.Desc ? "DESC" : "ASC") : null;
+            var boxes = BoxQueryBuilder.Build(grouped ? Q(config.GroupBy!) : null, from, plotted, rowFilter, filters, boxParameters, median, maxRows);
+            return new IndicatorQueryPlan(null, missing, null, notFiltered, Boxes: boxes);
         }
 
         if (config.SeriesBy is not null && grouped)

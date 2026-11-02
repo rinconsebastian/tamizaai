@@ -119,7 +119,7 @@ export function chartColors(colors: DashboardColors, type: ChartType, config: Wi
     keptBy.set(entry.column, values);
   }
   const placeKept = (column: string, value: string | null): number | null => (value === null ? null : (keptBy.get(column)?.get(value) ?? null));
-  const keepsByValue = (type === 'bar' || type === 'column') && !config.seriesBy;
+  const keepsByValue = ((type === 'bar' || type === 'column') && !config.seriesBy) || type === 'boxplot';
 
   return {
     accent: paletteColor(palette, place),

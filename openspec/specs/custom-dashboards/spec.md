@@ -116,7 +116,7 @@ An `analyst` or `admin` SHALL be able to move a dashboard one place to the left 
 - **THEN** it ends up third of 4
 
 ### Requirement: Duplicating a dashboard
-An `analyst` or `admin` SHALL be able to duplicate a dashboard under a new name, proposed as the original's name followed by " (copy)" and shortened to fit 40 characters. The copy SHALL be placed right after the original and SHALL hold a copy of each of its widgets, with the same title, chart type, query, ignored filters, color, position and size, a copy of its filters, in the same order with the same defaults, and its palette and colors kept by value. Later changes to one SHALL NOT change the other. The copy SHALL have no scheduled email (see `dashboard-reports`). Duplicating SHALL be refused when the project already has 7 dashboards.
+An `analyst` or `admin` SHALL be able to duplicate a dashboard under a new name, proposed as the original's name followed by " (copy)" and shortened to fit 40 characters. The copy SHALL be placed right after the original and SHALL hold a copy of each of its widgets, with the same title, chart type, query, ignored filters, color, orientation, position and size, a copy of its filters, in the same order with the same defaults, and its palette and colors kept by value. Later changes to one SHALL NOT change the other. The copy SHALL have no scheduled email (see `dashboard-reports`). Duplicating SHALL be refused when the project already has 7 dashboards.
 
 #### Scenario: Dashboard duplicated
 - **WHEN** an `analyst` duplicates "Housing", which holds 8 widgets, as "Housing 2026"
@@ -165,6 +165,10 @@ An `analyst` or `admin` SHALL be able to duplicate a dashboard under a new name,
 #### Scenario: Colors of a copy are independent
 - **WHEN** the `analyst` then changes the palette of "Housing (copy)" to *Vivid*
 - **THEN** "Housing" keeps the palette *Earth*
+
+#### Scenario: Orientation duplicated
+- **WHEN** an `analyst` duplicates "Housing", which holds a horizontal box plot
+- **THEN** the copy of the box plot in "Housing (copy)" is horizontal
 
 ### Requirement: Removing a dashboard
 An `analyst` or `admin` SHALL be able to remove a dashboard together with all its widgets, after confirming a message that says how many widgets will be removed. The last dashboard of a project SHALL NOT be removable. After a removal the member SHALL be told what was removed and taken to the dashboard now in its place, or to the new last dashboard when the removed one was last.

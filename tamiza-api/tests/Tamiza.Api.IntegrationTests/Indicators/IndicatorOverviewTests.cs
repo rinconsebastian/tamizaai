@@ -429,4 +429,24 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
         Assert.Equal(["all", "groups", "series"], schemas.GetProperty("SeriesTotals").GetProperty("properties").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
         Assert.Equal(["value", "none", "other"], [Tamiza.Api.Indicators.SeriesKinds.Value, Tamiza.Api.Indicators.SeriesKinds.None, Tamiza.Api.Indicators.SeriesKinds.Other]);
     }
+
+    [Fact]
+    public async Task The_openapi_document_describes_the_boxes_of_a_box_plot_and_its_orientation()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        using var anonymous = h.Factory.CreateClient();
+
+        var document = await anonymous.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        Assert.True(schemas.GetProperty("IndicatorQueryResponse").GetProperty("properties").TryGetProperty("boxes", out _));
+        Assert.Equal(
+            ["group", "lowerWhisker", "max", "mean", "median", "min", "outlierCount", "outliers", "q1", "q3", "upperWhisker", "values"],
+            schemas.GetProperty("IndicatorBox").GetProperty("properties").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.True(schemas.GetProperty("WidgetDisplay").GetProperty("properties").TryGetProperty("orientation", out var orientation));
+        Assert.Contains("vertical", orientation.GetProperty("description").GetString());
+        Assert.Contains("horizontal", orientation.GetProperty("description").GetString());
+        // A response of another kind has no boxes, and the widget kinds the API accepts end with the box plot.
+        Assert.Equal("boxplot", Tamiza.Api.Indicators.ChartTypes.All[^1]);
+    }
 }

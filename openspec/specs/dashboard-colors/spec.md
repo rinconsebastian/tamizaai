@@ -54,7 +54,7 @@ An `analyst` or `admin` SHALL be able to choose the palette of a dashboard. Ever
 - **THEN** it has the palette *Tamiza* and its widgets look as before
 
 ### Requirement: Widget color
-A bar, column or line chart with no series, and a histogram, SHALL be drawn in one of its dashboard's eight palette colors, chosen in the widget form by its number. Color 1 is the default. A widget of any other kind, and a bar, column or line chart with a series, SHALL be refused a color with an error on the color.
+A bar, column or line chart with no series, a histogram and a box plot SHALL be drawn in one of its dashboard's eight palette colors, chosen in the widget form by its number. Color 1 is the default. A widget of any other kind, and a bar, column or line chart with a series, SHALL be refused a color with an error on the color.
 
 #### Scenario: Column chart in color 3
 - **WHEN** an `analyst` saves a column chart with no series in color 3 on a dashboard with the palette *Tamiza*
@@ -67,6 +67,10 @@ A bar, column or line chart with no series, and a histogram, SHALL be drawn in o
 #### Scenario: Color with a series
 - **WHEN** an `analyst` saves a stacked column chart with the series `water_source` and color 3
 - **THEN** the API responds 400 with an error on the color
+
+#### Scenario: Box plot in color 4
+- **WHEN** an `analyst` saves a box plot in color 4 on a dashboard with the palette *Earth*
+- **THEN** its boxes, whiskers and outliers are drawn in the fourth color of *Earth*
 
 ### Requirement: Widget sequential scale
 A map or a heat map SHALL be drawn on one sequential scale. The scale is chosen in the widget form from blue, teal, green, orange, red, purple and gray, or left to its dashboard palette's default. A widget of any other kind SHALL be refused a scale with an error on the scale.
@@ -114,7 +118,8 @@ A color kept for a value of a column SHALL be used wherever the column decides a
 - the series of a bar, column or line chart with a series;
 - the sides of a population pyramid;
 - the slices of a pie chart;
-- the bars or columns of a chart with no series, by its group column.
+- the bars or columns of a chart with no series, by its group column;
+- the boxes of a box plot, by its group column.
 
 It SHALL NOT change a map, a heat map, a Likert widget, a cross table, a histogram, a stat tile, or a line chart with no series.
 
@@ -134,8 +139,12 @@ It SHALL NOT change a map, a heat map, a Likert widget, a cross table, a histogr
 - **WHEN** "Housing" keeps color 8 for `Disagree` of `answer`, and holds a Likert widget with the series `answer`
 - **THEN** the Likert widget keeps its negative, neutral and positive colors
 
+#### Scenario: One box highlighted
+- **WHEN** "Housing" keeps color 5 for `Female` of `sex`, and holds a box plot grouped by `sex` in color 1
+- **THEN** the box of `Female` is drawn in color 5 and every other box in color 1
+
 ### Requirement: Colors of values with no color kept
-In a widget whose colors follow a column, a value with no color kept SHALL take the palette's colors in the widget's series order, after the colors kept by value in that widget are set aside. Two values of one widget SHALL never share a color. "Other" SHALL keep the neutral color. In a chart with no series, a bar with no color kept SHALL be drawn in the widget's color.
+In a widget whose colors follow a column, a value with no color kept SHALL take the palette's colors in the widget's series order, after the colors kept by value in that widget are set aside. Two values of one widget SHALL never share a color. "Other" SHALL keep the neutral color. In a chart with no series, a bar with no color kept SHALL be drawn in the widget's color, and so SHALL a box with no color kept in a box plot.
 
 #### Scenario: Colors set aside
 - **WHEN** a stacked column chart has the series `Piped`, `River` and `Well`, and its dashboard keeps color 1 for `Well`

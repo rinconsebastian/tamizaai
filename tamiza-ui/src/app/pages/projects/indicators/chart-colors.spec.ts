@@ -242,7 +242,7 @@ describe('chartColors for a chart with no series', () => {
     expect(bar).toBe(pie);
   });
 
-  it('keeps a color for a bar or a column chart only, not for a line, a histogram or a chart that has a series', () => {
+  it('keeps a color for a bar, a column chart or a box plot only, not for a line, a histogram or a chart that has a series', () => {
     const answers = Object.fromEntries(chartTypes.map((type) => [type, chartColors(dash, type, widget()).kept('municipality', 'Rionegro')]));
 
     expect(answers).toEqual({
@@ -257,6 +257,7 @@ describe('chartColors for a chart with no series', () => {
       pyramid: null,
       likert: null,
       crosstab: null,
+      boxplot: tamiza(2),
     });
     expect(chartColors(dash, 'column', widget({ seriesBy: 'water_source' })).kept('municipality', 'Rionegro')).toBeNull();
   });

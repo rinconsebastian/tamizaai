@@ -9,13 +9,16 @@ import { DashboardEntry } from './projects.service';
 // table one indicator script published (config) and a place on the 12-column grid (layout). It belongs to one of the project's
 // own dashboards (tamiza.dashboards), each a grid of its own.
 
-export type ChartType = 'stat' | 'bar' | 'column' | 'line' | 'histogram' | 'pie' | 'map' | 'heatmap' | 'pyramid' | 'likert' | 'crosstab';
+export type ChartType = 'stat' | 'bar' | 'column' | 'line' | 'histogram' | 'pie' | 'map' | 'heatmap' | 'pyramid' | 'likert' | 'crosstab' | 'boxplot';
 
-export const chartTypes: readonly ChartType[] = ['stat', 'bar', 'column', 'line', 'histogram', 'pie', 'map', 'heatmap', 'pyramid', 'likert', 'crosstab'];
+export const chartTypes: readonly ChartType[] = ['stat', 'bar', 'column', 'line', 'histogram', 'pie', 'map', 'heatmap', 'pyramid', 'likert', 'crosstab', 'boxplot'];
 
-/** Every kind but a stat tile and a histogram plots one value per group (or per pair of group and series), so it needs a column to group by. */
+/**
+ * Every kind but a stat tile, a histogram and a box plot plots one value per group (or per pair of group and series), so it needs a
+ * column to group by. Those three may take the rows as they are: a box plot without a group is one box over every row.
+ */
 export function needsGroup(type: ChartType): boolean {
-  return type !== 'stat' && type !== 'histogram';
+  return type !== 'stat' && type !== 'histogram' && type !== 'boxplot';
 }
 
 /** Bar, column and line widgets may have a series column (`ChartTypes.TakesSeries` in tamiza-api). */
@@ -61,6 +64,14 @@ export interface WidgetPyramid {
   left: string;
   right: string;
 }
+
+/** How a box plot is drawn: its first box on the left (the default) or at the top (`BoxOrientations`). */
+export type BoxOrientation = 'vertical' | 'horizontal';
+
+export const boxOrientations: readonly BoxOrientation[] = ['vertical', 'horizontal'];
+
+/** The most outliers a box draws: the ones farthest from its median, the rest only counted (`WidgetConfig.MaxBoxOutliers`). */
+export const maxBoxOutliers = 100;
 
 export const gridColumns = 12;
 export const maxWidgetHeight = 40;
@@ -184,12 +195,14 @@ export interface DashboardColors {
 
 /**
  * A widget's own color setting (design D3), kept apart from its query so that changing it never queries again. `color` is the place in
- * the dashboard's palette (1 to 8; 1 when unset) of a bar, column or line chart with no series and of a histogram; `ramp` the
- * sequential scale of a map or a heat map (the palette's own scale when unset). A key with no value is left out.
+ * the dashboard's palette (1 to 8; 1 when unset) of a bar, column or line chart with no series, of a histogram and of a box plot;
+ * `ramp` the sequential scale of a map or a heat map (the palette's own scale when unset); `orientation` the direction of a box plot
+ * (vertical when unset; a saved `vertical` is kept as it is). A key with no value is left out.
  */
 export interface WidgetDisplay {
   color?: number;
   ramp?: ScaleId;
+  orientation?: BoxOrientation;
 }
 
 /** A widget's query. At most one of `measure` and `ratio` is set; with neither, the table's default measure is plotted. */
@@ -203,7 +216,7 @@ export interface WidgetConfig {
   geometryColumn: string | null;
   /** Histograms only; 10 when null. */
   buckets: number | null;
-  /** Bar and column only; null is the group column's own order. */
+  /** Bar and column (by the plotted value or a column), and box plot (by its median only, with a group column); null is the group column's own order. */
   sort: WidgetSort | null;
   /** Maps only: up to `maxTooltipItems` columns shown in the tooltip. A query sends their names only (see `queryFor`). */
   tooltip: WidgetTooltipItem[];
@@ -439,6 +452,24 @@ export interface QueryTotals {
   all: { value: number | null; rows: number };
 }
 
+/** One box of a box plot, computed over every value of its group (`IndicatorBox` in tamiza-api). */
+export interface QueryBox {
+  /** The group's value; null for the rows with no value in it, and for the one box of a widget with no group column. */
+  group: string | null;
+  values: number;
+  min: number;
+  q1: number;
+  median: number;
+  q3: number;
+  max: number;
+  mean: number;
+  lowerWhisker: number;
+  upperWhisker: number;
+  outlierCount: number;
+  /** At most `maxBoxOutliers` of them, the ones farthest from the median, in ascending order. */
+  outliers: number[];
+}
+
 export interface QueryRow {
   group: string | null;
   value: number;
@@ -460,6 +491,8 @@ export interface QueryResult {
   missing: { indicator: boolean; columns: string[] };
   /** Maps only: the type of each tooltip column, so a value is written without asking the catalog. */
   tooltipTypes?: DataColumnType[];
+  /** A box plot only: its boxes in display order. `rows` then holds one row per box, its value the median and its `rows` the box's number of values. */
+  boxes?: QueryBox[];
   /** A widget with a series only (design D12): the series in display order, the totals, and for a pyramid or a Likert widget the rows left out. */
   series?: QuerySeries[];
   /**

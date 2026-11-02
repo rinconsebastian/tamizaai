@@ -68,6 +68,7 @@ public sealed class IndicatorValidationTests
     [InlineData("pyramid", 6, 5)]
     [InlineData("crosstab", 6, 5)]
     [InlineData("likert", 6, 4)]
+    [InlineData("boxplot", 6, 4)]
     public void Each_chart_type_has_a_default_size(string chartType, int w, int h) =>
         Assert.Equal((w, h), IndicatorValidation.DefaultSize(chartType));
 
@@ -365,7 +366,7 @@ public sealed class IndicatorValidationTests
     {
         var errors = Check(new WidgetConfigInput("a", GroupBy: "g", GeometryColumn: "geometry", Sort: ByColumn).Normalize(), chartType);
 
-        Assert.Equal("Only bar and column widgets can be sorted.", errors["config.sort"][0]);
+        Assert.Equal("Only bar, column and box plot widgets can be sorted.", errors["config.sort"][0]);
     }
 
     [Fact]
@@ -650,9 +651,10 @@ public sealed class IndicatorValidationTests
     // Every chart type
 
     [Fact]
-    public void There_are_eleven_chart_types_and_each_has_a_default_size()
+    public void There_are_twelve_chart_types_and_each_has_a_default_size()
     {
-        Assert.Equal(11, ChartTypes.All.Count);
+        Assert.Equal(12, ChartTypes.All.Count);
+        Assert.Equal("boxplot", ChartTypes.All[^1]);
         Assert.All(ChartTypes.All, chartType => Assert.True(IndicatorValidation.DefaultSize(chartType).W > 0));
         Assert.Throws<ArgumentOutOfRangeException>(() => IndicatorValidation.DefaultSize("radar"));
     }
@@ -676,6 +678,95 @@ public sealed class IndicatorValidationTests
     [InlineData("likert")]
     [InlineData("crosstab")]
     public void The_new_charts_group_their_rows(string chartType) => Assert.True(ChartTypes.NeedsGroup(chartType));
+
+// Box plot (design D2 of add-boxplot-widget)
+
+    private static WidgetConfig Boxed(WidgetDisplay? display = null, WidgetSort? sort = null, string? groupBy = "municipality") =>
+        new WidgetConfigInput("household_income", GroupBy: groupBy, Sort: sort, Display: display).Normalize();
+
+    [Fact]
+    public void A_box_plot_needs_no_group_and_is_not_a_chart_that_groups_its_rows()
+    {
+        Assert.False(ChartTypes.NeedsGroup("boxplot"));
+        Assert.False(ChartTypes.HasSeries("boxplot"));
+        Assert.Empty(Check(Boxed(groupBy: null), "boxplot"));
+        Assert.Empty(Check(Boxed(), "boxplot"));
+    }
+
+    [Theory]
+    [InlineData("vertical")]
+    [InlineData("horizontal")]
+    public void An_orientation_is_accepted_on_a_box_plot(string orientation) =>
+        Assert.Empty(Check(Boxed(new WidgetDisplay(Orientation: orientation)), "boxplot"));
+
+    [Theory]
+    [InlineData("Vertical")]
+    [InlineData("sideways")]
+    [InlineData("h")]
+    public void An_unknown_orientation_is_refused_on_the_orientation(string orientation)
+    {
+        var errors = Check(Boxed(new WidgetDisplay(Orientation: orientation)), "boxplot");
+
+        Assert.Equal("The orientation must be 'vertical' or 'horizontal'.", Assert.Single(errors["config.display.orientation"]));
+        Assert.Contains("config.display.orientation", Check(Boxed(new WidgetDisplay(Orientation: orientation)), null).Keys);
+    }
+
+    [Theory]
+    [InlineData("stat")]
+    [InlineData("bar")]
+    [InlineData("column")]
+    [InlineData("line")]
+    [InlineData("histogram")]
+    [InlineData("pie")]
+    [InlineData("map")]
+    [InlineData("heatmap")]
+    [InlineData("pyramid")]
+    [InlineData("likert")]
+    [InlineData("crosstab")]
+    public void An_orientation_on_any_other_kind_is_refused_on_the_orientation(string chartType)
+    {
+        var errors = Check(Drawn(new WidgetDisplay(Orientation: "horizontal")), chartType);
+
+        Assert.Equal("Only a box plot has an orientation.", Assert.Single(errors["config.display.orientation"]));
+    }
+
+    [Fact]
+    public void An_orientation_is_not_checked_against_a_kind_when_there_is_none()
+    {
+        Assert.Empty(Check(Boxed(new WidgetDisplay(Orientation: "horizontal")), null));
+    }
+
+    [Fact]
+    public void A_box_plot_is_refused_a_series_a_ramp_and_a_layout()
+    {
+        var series = new WidgetConfigInput("household_income", GroupBy: "municipality", SeriesBy: "sex").Normalize();
+
+        Assert.Equal("A boxplot widget cannot have a series.", Assert.Single(Check(series, "boxplot")["config.seriesBy"]));
+        Assert.Equal("Only map and heatmap widgets have a scale.", Assert.Single(Check(Boxed(new WidgetDisplay(Ramp: "green")), "boxplot")["config.display.ramp"]));
+        Assert.Contains("config.layout", Check(new WidgetConfigInput("household_income", GroupBy: "municipality", Layout: "stacked").Normalize(), "boxplot").Keys);
+    }
+
+    [Theory]
+    [InlineData("asc")]
+    [InlineData("desc")]
+    public void A_box_plot_can_be_ordered_by_its_median(string direction) =>
+        Assert.Empty(Check(Boxed(sort: new WidgetSort(SortValues.ByValue, null, null, direction)), "boxplot"));
+
+    [Fact]
+    public void A_box_plot_cannot_be_ordered_by_a_column()
+    {
+        var errors = Check(Boxed(sort: new WidgetSort(SortValues.ByColumn, "round", SortValues.Number, SortValues.Asc)), "boxplot");
+
+        Assert.Equal("A box plot can only be ordered by its median ('value').", Assert.Single(errors["config.sort.by"]));
+    }
+
+    [Fact]
+    public void A_box_plot_with_no_group_cannot_be_ordered()
+    {
+        var errors = Check(Boxed(sort: new WidgetSort(SortValues.ByValue, null, null, SortValues.Desc), groupBy: null), "boxplot");
+
+        Assert.Equal("Sorting needs a column to group by.", Assert.Single(errors["config.sort"]));
+    }
 
     // Series (design D2)
 
@@ -743,6 +834,7 @@ public sealed class IndicatorValidationTests
     [InlineData("stat")]
     [InlineData("histogram")]
     [InlineData("pie")]
+    [InlineData("boxplot")]
     public void Some_charts_cannot_have_a_series(string chartType)
     {
         var errors = Check(WithSeries(), chartType);
@@ -934,6 +1026,7 @@ public sealed class IndicatorValidationTests
     [InlineData("column")]
     [InlineData("line")]
     [InlineData("histogram")]
+    [InlineData("boxplot")]
     public void A_color_is_accepted_on_the_charts_that_draw_one_color(string chartType)
     {
         foreach (var color in new[] { 1, 3, 8 })
@@ -1010,6 +1103,7 @@ public sealed class IndicatorValidationTests
     [InlineData("pyramid")]
     [InlineData("likert")]
     [InlineData("crosstab")]
+    [InlineData("boxplot")]
     public void A_scale_on_any_other_kind_is_refused_on_the_scale(string chartType)
     {
         var errors = Check(Drawn(new WidgetDisplay(Ramp: "green")), chartType);

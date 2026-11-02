@@ -8,7 +8,7 @@ describe('grid layout', () => {
   it('sizes a new widget by its chart type', () => {
     expect(defaultSize('stat')).toEqual({ w: 3, h: 2 });
     expect(defaultSize('map')).toEqual({ w: 6, h: 6 });
-    for (const type of ['bar', 'column', 'line', 'histogram', 'pie'] as const) expect(defaultSize(type)).toEqual({ w: 6, h: 4 });
+    for (const type of ['bar', 'column', 'line', 'histogram', 'pie', 'boxplot'] as const) expect(defaultSize(type)).toEqual({ w: 6, h: 4 });
   });
 
   it('sizes the new kinds: heat map, pyramid and cross table 6x5, Likert 6x4 (twin of DefaultSize)', () => {
@@ -16,7 +16,7 @@ describe('grid layout', () => {
     expect(defaultSize('likert')).toEqual({ w: 6, h: 4 });
   });
 
-  it('gives each of the eleven kinds a size inside the grid, none by a default branch', () => {
+  it('gives each of the twelve kinds a size inside the grid, none by a default branch', () => {
     const sizes = chartTypes.map((type) => [type, defaultSize(type)] as const);
 
     expect(sizes).toEqual([
@@ -31,6 +31,7 @@ describe('grid layout', () => {
       ['pyramid', { w: 6, h: 5 }],
       ['likert', { w: 6, h: 4 }],
       ['crosstab', { w: 6, h: 5 }],
+      ['boxplot', { w: 6, h: 4 }],
     ]);
   });
 

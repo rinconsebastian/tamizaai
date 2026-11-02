@@ -24,14 +24,21 @@ public sealed class McpDashboardTools(
 
     private const string ChartTypeHelp =
         "stat, bar, column, line, histogram, pie, map, heatmap (groups as rows, series as columns, cells shaded), pyramid (two series values drawn left and right), " +
-        "likert (agreement scale as bars centered on the neutral value) or crosstab (a table of groups by series with totals).";
+        "likert (agreement scale as bars centered on the neutral value), crosstab (a table of groups by series with totals) or " +
+        "boxplot (the spread of each row's value per group: quartiles, whiskers and outliers).";
 
     private const string SeriesHelp =
         "seriesBy is a second column that splits each group into series. It is optional for bar, column and line and required for heatmap, pyramid, likert and crosstab; " +
         "it must differ from groupBy. For bar and column, layout is grouped (side by side, the default), stacked or percent (each bar's shares of its total); stacked and percent need a measure, not a ratio. " +
         "Past 8 series (30 for heatmap and crosstab) the smallest are combined as Other. A pyramid needs pyramid = { left, right }, two values of the series column. " +
         "A likert needs scale = 2 to 11 values of the series column in order, each with a side of negative, neutral or positive (negatives first, at most one neutral, at most 5 per side) and a measure, not a ratio. " +
-        "With a series the result lists series, cells ({ group, series, value, formatted, share? }), totals of every group, series and all rows, and notes; rows are not sent.";
+        "With a series the result lists series, cells ({ group, series, value, formatted, share? }), totals of every group, series and all rows, and notes; rows are not sent. " +
+        "A boxplot is not a widget with a series: it takes no seriesBy, and its result lists boxes instead (see the boxplot paragraph).";
+
+    private const string BoxplotHelp =
+        "A boxplot summarizes the rows of each group as they are: every row is one value (its measure, or its numerator over its own denominator), never summed, so it needs a table with one row per unit, and groupBy is optional (without it there is one box over every row). " +
+        "Its result lists boxes: { group, values, min, q1, median, q3, max, mean, lowerWhisker, upperWhisker, outlierCount, formatted }, with Tukey's whiskers (1.5 times the interquartile range) and the quartiles pandas' quantile gives; the outliers' own values are not returned. " +
+        "sort = { by: \"value\", direction } orders the boxes by median; the figures of a count indicator have two decimals. config.display.orientation draws it vertical or horizontal.";
     private const string DashboardHelp = "The dashboard's id, from list_dashboards.";
 
     private const string ColorsHelp =
@@ -41,15 +48,16 @@ public sealed class McpDashboardTools(
         "and value is matched as exact text, case and spaces included, so female does not color Female.";
 
     private const string DisplayHelp =
-        "config.display = { color, ramp } sets how the widget is drawn, both optional. color is a place in the dashboard's palette, 1 to 8 (not a color code; 1 when left out), " +
-        "for a bar, column or line chart with no seriesBy and for a histogram. ramp is a sequential scale, one of blue, teal, green, orange, red, purple or gray, " +
+        "config.display = { color, ramp, orientation } sets how the widget is drawn, all optional. color is a place in the dashboard's palette, 1 to 8 (not a color code; 1 when left out), " +
+        "for a bar, column or line chart with no seriesBy, for a histogram and for a boxplot. ramp is a sequential scale, one of blue, teal, green, orange, red, purple or gray, " +
         "for a map or heatmap only; left out, the palette's own scale. The scale is matched exactly, in lower case: Green is refused. " +
+        "orientation is vertical (the default) or horizontal, matched exactly in lower case, for a boxplot only. " +
         "A widget with a series takes its colors from its series, and no other kind has a color of its own.";
 
     /// <summary>What only a change of an existing widget needs: a new chart type alone keeps the old config, display included.</summary>
     private const string ChartTypeChangeHelp =
-        "To change the chart type of a widget that has a color or a scale, also send a config without the display fields the new type does not take: " +
-        "a new chartType alone keeps the old config, so it is refused, with an error on config.display.color or config.display.ramp, when the new type does not take them.";
+        "To change the chart type of a widget that has a color, a scale or an orientation, also send a config without the display fields the new type does not take: " +
+        "a new chartType alone keeps the old config, so it is refused, with an error on config.display.color, config.display.ramp or config.display.orientation, when the new type does not take them.";
 
     /// <summary>The most characters of a request's <c>change</c>, as <c>dashboard_versions.note</c> keeps it (design D1, D10 of dashboard versions).</summary>
     internal const int MaxChangeLength = 120;
@@ -81,9 +89,9 @@ public sealed class McpDashboardTools(
         });
 
     [McpServerTool(Name = "query_indicator", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Preview what a widget would plot"),
-     Description("Runs a widget query without saving anything and returns what the widget would plot: the measure summed (or the ratio of two columns' sums) per group, formatted with the indicator's format and unit. " +
-                 "Use it before create_widget. config = { indicator, measure | ratio: { numerator, denominator }, groupBy, seriesBy, layout, pyramid: { left, right }, scale: [{ value, side }], filters: [{ column, op, value | values | min | max }], geometryColumn, buckets }. " +
-                 "A bar, column, line, pie, map, heatmap, pyramid, likert or crosstab needs groupBy; a stat tile and a histogram do not. " + SeriesHelp + " " +
+     Description("Runs a widget query without saving anything and returns what the widget would plot: the measure summed (or the ratio of two columns' sums) per group, or for a boxplot the spread of the rows of each group, formatted with the indicator's format and unit. " +
+                 "Use it before create_widget. config = { indicator, measure | ratio: { numerator, denominator }, groupBy, seriesBy, layout, pyramid: { left, right }, scale: [{ value, side }], filters: [{ column, op, value | values | min | max }], geometryColumn, buckets, sort: { by: \"value\", direction } for a boxplot }. " +
+                 "A bar, column, line, pie, map, heatmap, pyramid, likert or crosstab needs groupBy; a stat tile, a histogram and a boxplot do not. " + SeriesHelp + " " + BoxplotHelp + " " +
                  "At most the widget row limit of rows come back and the result says when it is reached.")]
     public Task<CallToolResult> QueryIndicator(
         [Description(ProjectHelp)] Guid projectId,
@@ -98,6 +106,7 @@ public sealed class McpDashboardTools(
             var meta = await MetaAsync(projectId, ct);
             var info = meta.GetValueOrDefault(config.Indicator ?? "");
             var series = response.Series is null ? null : SeriesPayload.From(response, chartType ?? ChartTypes.Bar, config.Layout, info);
+            var boxes = response.Boxes is null ? null : BoxPayload.From(response.Boxes, info);
             return new
             {
                 indicator = config.Indicator,
@@ -107,7 +116,8 @@ public sealed class McpDashboardTools(
                 response.Published,
                 missing = response.Missing.Any ? response.Missing : null,
                 response.RowLimitReached,
-                rows = series is null ? response.Rows.Select(r => Row(r, info)).ToList() : null,
+                rows = series is null && boxes is null ? response.Rows.Select(r => Row(r, info)).ToList() : null,
+                boxes,
                 series = series?.Series,
                 cells = series?.Cells,
                 totals = series?.Totals,
@@ -157,7 +167,7 @@ public sealed class McpDashboardTools(
 
     [McpServerTool(Name = "get_widget_data", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Get what the widgets show"),
      Description("What the widgets of a dashboard (or one widget) show, as a member opening the dashboard sees it: for each widget its rows (group and value, with the value formatted as the dashboard formats it), " +
-                 "or the message the widget shows when its indicator has not published, a column is gone or there are no rows. A widget with a series (seriesBy) returns series, cells ({ group, series, value, formatted, share? }), totals and notes instead of rows. " +
+                 "or the message the widget shows when its indicator has not published, a column is gone or there are no rows. A widget with a series (seriesBy) returns series, cells ({ group, series, value, formatted, share? }), totals and notes instead of rows, and a boxplot returns boxes instead of rows. " +
                  "Dashboard filters are at their defaults unless you pass filterValues: [{ column, values | min | max }].")]
     public Task<CallToolResult> GetWidgetData(
         [Description(ProjectHelp)] Guid projectId,
@@ -332,16 +342,16 @@ public sealed class McpDashboardTools(
     // Widgets
 
     [McpServerTool(Name = "create_widget", Title = "Add a widget to a dashboard", Idempotent = false, OpenWorld = false, Destructive = false),
-     Description("Adds a widget: a stat tile, bar, column, line, histogram, pie chart, map, heat map, population pyramid, diverging Likert chart or cross table, with a title and a query over one indicator's table. Check the query with query_indicator first. " +
-                 "config = { indicator, measure | ratio: { numerator, denominator }, groupBy, seriesBy, layout, pyramid: { left, right }, scale: [{ value, side }], filters, geometryColumn, buckets, sort, tooltip, display: { color, ramp } }. " +
-                 "Every kind but stat tile and histogram needs groupBy; a map also needs geometryColumn (WKT in degrees). " + SeriesHelp + " " + DisplayHelp + " " +
+     Description("Adds a widget: a stat tile, bar, column, line, histogram, pie chart, map, heat map, population pyramid, diverging Likert chart, cross table or box plot, with a title and a query over one indicator's table. Check the query with query_indicator first. " +
+                 "config = { indicator, measure | ratio: { numerator, denominator }, groupBy, seriesBy, layout, pyramid: { left, right }, scale: [{ value, side }], filters, geometryColumn, buckets, sort, tooltip, display: { color, ramp, orientation } }. " +
+                 "Every kind but stat tile, histogram and box plot needs groupBy; a map also needs geometryColumn (WKT in degrees). sort orders a bar or column, and a boxplot by value (its median) only. " + SeriesHelp + " " + BoxplotHelp + " " + DisplayHelp + " " +
                  "It goes under the dashboard's widgets unless you give layout = { x, y, w, h } on the 12-column grid. A dashboard holds a limited number of widgets.")]
     public Task<CallToolResult> CreateWidget(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
         [Description("The widget's title, up to 200 characters.")] string title,
         [Description(ChartTypeHelp)] string chartType,
-        [Description("The widget's query, and optionally its display (color or scale).")] WidgetConfigInput config,
+        [Description("The widget's query, and optionally its display (color, scale or orientation).")] WidgetConfigInput config,
         [Description(ChangeHelp)] string change,
         [Description("Optional. Position and size on the grid.")] WidgetLayout? layout = null,
         CancellationToken ct = default) =>
@@ -363,7 +373,7 @@ public sealed class McpDashboardTools(
         [Description(ChangeHelp)] string change,
         [Description("Optional. The new title.")] string? title = null,
         [Description("Optional. The new chart type: " + ChartTypeHelp)] string? chartType = null,
-        [Description("Optional. The new query and display, replacing the old ones.")] WidgetConfigInput? config = null,
+        [Description("Optional. The new query and display (color, scale or orientation), replacing the old ones.")] WidgetConfigInput? config = null,
         [Description("Optional. The new position and size on the grid.")] WidgetLayout? layout = null,
         [Description("Optional. Another dashboard of the project to move the widget to.")] Guid? moveToDashboardId = null,
         CancellationToken ct = default) =>
@@ -620,7 +630,7 @@ public sealed class McpDashboardTools(
 
         if (response.RowLimitReached)
         {
-            notes.Add($"The row limit was reached ({response.Rows.Count} rows).");
+            notes.Add($"The row limit was reached ({response.Rows.Count} {(widget.ChartType == ChartTypes.Boxplot ? "boxes" : "rows")}).");
         }
 
         if (response.Rows.Count == 0)
@@ -629,6 +639,7 @@ public sealed class McpDashboardTools(
         }
 
         var series = response.Series is null ? null : SeriesPayload.From(response, widget.ChartType, widget.Config.Layout, info);
+        var boxes = response.Boxes is null ? null : BoxPayload.From(response.Boxes, info);
         notes.AddRange(series?.Notes ?? []);
         return new
         {
@@ -640,7 +651,8 @@ public sealed class McpDashboardTools(
             status = "shown",
             message = (string?)null,
             notes = notes.Count > 0 ? notes : null,
-            rows = series is null ? response.Rows.Select(r => Row(r, info)).ToList() : null,
+            rows = series is null && boxes is null ? response.Rows.Select(r => Row(r, info)).ToList() : null,
+            boxes,
             series = series?.Series,
             cells = series?.Cells,
             totals = series?.Totals,
@@ -720,5 +732,41 @@ internal sealed record SeriesPayload(IReadOnlyList<object> Series, IReadOnlyList
                 all = new { value = table.GrandTotal, formatted = Shown(table.GrandTotal), rows = table.GrandRows },
             },
             notes);
+    }
+}
+
+/// <summary>
+/// What a tool says of a box plot (design D9 of add-boxplot-widget): one entry per box with its figures and the same figures as the
+/// indicator formats them. The outliers' own values are not sent, so a box is a fixed-size summary; the items hold no lists, so the
+/// result budget cuts the boxes as it cuts any list of rows.
+/// </summary>
+internal static class BoxPayload
+{
+    private static readonly ReportFormat English = new(CultureInfo.GetCultureInfo("en-US"), TimeZoneInfo.Utc);
+
+    public static List<object> From(IReadOnlyList<IndicatorBox> boxes, McpDashboardTools.IndicatorInfo? info)
+    {
+        // A count's figures have two decimals, as on the dashboard: quartiles and means fall between whole numbers.
+        var format = ReportDataBuilder.BoxFormat(info?.Format);
+        string Shown(double value) => English.Value(value, format, info?.Unit);
+        return boxes.Select(box => (object)new
+        {
+            group = box.Group,
+            values = box.Values,
+            min = box.Min,
+            q1 = box.Q1,
+            median = box.Median,
+            q3 = box.Q3,
+            max = box.Max,
+            mean = box.Mean,
+            lowerWhisker = box.LowerWhisker,
+            upperWhisker = box.UpperWhisker,
+            outlierCount = box.OutlierCount,
+            formatted = new
+            {
+                min = Shown(box.Min), q1 = Shown(box.Q1), median = Shown(box.Median), q3 = Shown(box.Q3), max = Shown(box.Max), mean = Shown(box.Mean),
+                lowerWhisker = Shown(box.LowerWhisker), upperWhisker = Shown(box.UpperWhisker),
+            },
+        }).ToList();
     }
 }
