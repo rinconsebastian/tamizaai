@@ -153,7 +153,7 @@ The calls appear in Settings > General. Everything Claude saved is a new version
 | `restore_dashboard_version` says `mcp.dashboardChanged` | The dashboard changed after Claude read its versions: it should read them again and decide what to restore |
 | `query_rows` says `mcp.rowsNotAllowed` | The project is at *Summaries only*, or the operator's maximum is `aggregates` |
 | A call says `mcp.timeout` | A table is being replaced by a run, or a profile took too long: name fewer columns, or try again |
-| `create_dashboard` or `duplicate_dashboard` says `dashboards.limit` | The project already has 7 dashboards, the most it can have (`status` 409). Remove one with `remove_dashboard`, after asking the person which, and call again |
+| `create_dashboard` or `duplicate_dashboard` says `dashboards.limit` | The project already has 10 dashboards, the most it can have (`status` 409). Remove one with `remove_dashboard`, after asking the person which, and call again |
 | A tool that names a dashboard says `dashboards.notFound` | The project has no dashboard with that `dashboardId`: another member removed it, or it is another project's or mistyped (`status` 404). `list_dashboards` gives the ones it has. `get_dashboard`, `get_widget_data`, `list_dashboard_versions`, `get_dashboard_version`, `restore_dashboard_version`, `duplicate_dashboard`, `remove_dashboard`, `create_widget`, `update_widget`, `remove_widget` and `update_dashboard` with a name, filters, palette or colors all answer it |
 | `get_dashboard_version` or `restore_dashboard_version` says `dashboards.versionNotFound` | The dashboard keeps only its 10 newest versions, and the number asked for is older than those or was never recorded (`status` 404). `list_dashboard_versions` gives the numbers kept |
 

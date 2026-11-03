@@ -2,7 +2,7 @@ import { CdkDrag, CdkDragEnd, CdkDragHandle, CdkDragMove } from '@angular/cdk/dr
 import { Component, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { DashboardColors, IndicatorEntry, Layout, Widget } from '../../../core/projects/indicators.service';
-import { ChartTooltips, DropdownMenu, MenuItem } from '../../../shared/ui';
+import { ChartTooltips, DropdownMenu, MenuGroup, MenuItem } from '../../../shared/ui';
 import { defaultColors } from './chart-colors';
 import { ActiveDashboardFilter } from './dashboard-filters';
 import { DashboardPrint } from './dashboard-print';
@@ -12,7 +12,7 @@ import { ExportState, WidgetView } from './widget-view';
 
 type Resize = 'move' | 'resize';
 
-/** What a member chose from a widget's Export menu: the widget, the format, and the view that knows what it shows (add-widget-export). */
+/** What a member chose from a widget's menu: the widget, the format, and the view that knows what it shows (add-widget-export). */
 export interface WidgetExportChoice {
   widget: Widget;
   format: WidgetFileExtension;
@@ -71,32 +71,15 @@ const fallbackWidth = 1200;
                 </button>
               }
               <h3 [id]="'widget-title-' + widget.id" class="min-w-0 flex-1 truncate text-sm font-medium text-heading" [attr.title]="widget.title" data-testid="widget-title">{{ widget.title }}</h3>
-              @if (drawable()[widget.id]) {
-                <button
-                  type="button"
-                  class="inline-flex size-9 shrink-0 items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary paper:hidden"
-                  [class.bg-neutral-tertiary-medium]="shownAsTable(widget)"
-                  [attr.aria-pressed]="shownAsTable(widget)"
-                  [attr.aria-label]="t('indicators.grid.showTable', { title: widget.title })"
-                  (click)="toggleTable(widget)"
-                  data-testid="widget-table-toggle"
-                >
-                  <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4zM4 10h16M4 15h16M10 5v14" /></svg>
-                </button>
-              }
-              <!-- Every member can export; the editors' actions come after it, in a menu of their own. -->
+              <!-- One menu for every member: Show as table, the Export formats and, for editors, Edit and Remove. -->
               <tmz-dropdown-menu
                 class="paper:hidden"
-                icon="download"
-                triggerTestId="widget-export"
-                [label]="t(isExporting(widget) ? 'indicators.widgetExport.preparing' : 'indicators.widgetExport.button', { title: widget.title })"
+                triggerTestId="widget-menu"
+                [label]="t(isExporting(widget) ? 'indicators.grid.menuForPreparing' : 'indicators.grid.menuFor', { title: widget.title })"
                 [busy]="isExporting(widget)"
-                [items]="exportItems(view.exportState())"
-                (selected)="exportChosen(widget, view, $event)"
+                [groups]="menuGroups(widget, view)"
+                (selected)="menuChosen(widget, view, $event)"
               />
-              @if (editable()) {
-                <tmz-dropdown-menu class="paper:hidden" [label]="t('indicators.grid.actionsFor', { title: widget.title })" [items]="actions()" (selected)="act(widget, $event)" />
-              }
             </header>
             <div class="min-h-0 flex-1 overflow-hidden p-3">
               <app-widget-view
@@ -224,14 +207,14 @@ export class WidgetGrid {
   readonly dashboardFilters = input<ActiveDashboardFilter[]>([]);
   /** The palette and the colors kept by value of the dashboard shown, or of the version shown: each widget is drawn in them (add-dashboard-palettes, design D7). */
   readonly colors = input<DashboardColors>(defaultColors);
-  /** The widgets whose export is being prepared, by id, with the format: only their Export menu is busy. */
+  /** The widgets whose export is being prepared, by id, with the format: only their menu is busy, and only their formats are unavailable. */
   readonly exporting = input<Record<string, WidgetFileExtension>>({});
 
   /** Every layout a move or resize changed, the dropped widget's and those it pushed down. */
   readonly layoutsChange = output<Placed[]>();
   readonly edit = output<Widget>();
   readonly remove = output<Widget>();
-  /** A format chosen from a widget's Export menu. The page makes the file: it knows the project, the dashboard, the version and the filters. */
+  /** A format chosen from a widget's menu. The page makes the file: it knows the project, the dashboard, the version and the filters. */
   readonly exportWidget = output<WidgetExportChoice>();
 
   protected readonly ordered = computed(() => readingOrder(this.widgets()));
@@ -252,7 +235,7 @@ export class WidgetGrid {
   private readonly tableChoice = signal<Record<string, boolean>>({});
   /** The widgets that currently have rows to draw, by id: only those get the chart/table toggle. */
   protected readonly drawable = signal<Record<string, boolean>>({});
-  /** The two actions of every widget's menu, with their translated names. */
+  /** The editing actions of a widget's menu, with their translated names. */
   protected readonly actions = computed<MenuItem[]>(() => [
     { id: 'edit', label: this.transloco.translate('indicators.grid.editItem'), testId: 'widget-edit' },
     { id: 'remove', label: this.transloco.translate('indicators.grid.removeItem'), danger: true, testId: 'widget-remove' },
@@ -283,16 +266,49 @@ export class WidgetGrid {
   }
 
   /**
-   * The three formats of a widget's Export menu. One that cannot be made stays in the menu, announced as unavailable, with the reason
-   * under it (design D3); an image that can be made may carry a line about what it leaves out.
+   * The parts of a widget's menu (design D3 of unify-widget-menu-and-ten-dashboards): Show as table, while the widget has rows to draw;
+   * the Export formats, under their heading; and, for editors, Edit and Remove. A part with nothing in it is left out.
    */
-  protected exportItems(state: ExportState): MenuItem[] {
+  protected menuGroups(widget: Widget, view: WidgetView): MenuGroup[] {
+    const groups: MenuGroup[] = [];
+    if (this.drawable()[widget.id]) {
+      groups.push({
+        id: 'view',
+        items: [{ id: 'table', label: this.transloco.translate('indicators.widget.showTable'), checked: this.shownAsTable(widget), testId: 'widget-show-table' }],
+      });
+    }
+    groups.push({ id: 'export', label: this.transloco.translate('indicators.grid.exportGroup'), items: this.exportItems(view.exportState(), this.isExporting(widget)) });
+    if (this.editable()) {
+      groups.push({ id: 'edit', items: this.actions() });
+    }
+    return groups;
+  }
+
+  /**
+   * The three formats of a widget's Export group. One that cannot be made stays in the menu, announced as unavailable, with the reason
+   * under it (design D3 of add-widget-export); an image that can be made may carry a line about what it leaves out. While the widget's
+   * own export is prepared, none can be started again.
+   */
+  protected exportItems(state: ExportState, exporting = false): MenuItem[] {
     const t = (key: string) => this.transloco.translate(`indicators.widgetExport.${key}`);
+    const busy = exporting ? t('reason.preparing') : null;
     return [
-      { id: 'png', label: t('png'), testId: 'widget-export-png', disabled: state.image !== null, description: state.image ?? state.imageNote ?? undefined },
-      { id: 'svg', label: t('svg'), testId: 'widget-export-svg', disabled: state.image !== null, description: state.image ?? state.imageNote ?? undefined },
-      { id: 'xlsx', label: t('xlsx'), testId: 'widget-export-xlsx', disabled: state.workbook !== null, description: state.workbook ?? undefined },
+      { id: 'png', label: t('png'), testId: 'widget-export-png', disabled: exporting || state.image !== null, description: busy ?? state.image ?? state.imageNote ?? undefined },
+      { id: 'svg', label: t('svg'), testId: 'widget-export-svg', disabled: exporting || state.image !== null, description: busy ?? state.image ?? state.imageNote ?? undefined },
+      { id: 'xlsx', label: t('xlsx'), testId: 'widget-export-xlsx', disabled: exporting || state.workbook !== null, description: busy ?? state.workbook ?? undefined },
     ];
+  }
+
+  /** What was chosen in a widget's menu: the table view, a format to export, or an editing action. */
+  protected menuChosen(widget: Widget, view: WidgetView, id: string): void {
+    if (id === 'table') {
+      this.toggleTable(widget);
+      this.status.set(this.transloco.translate(this.shownAsTable(widget) ? 'indicators.grid.shownAsTable' : 'indicators.grid.shownAsChart', { title: widget.title }));
+    } else if (id === 'edit' || id === 'remove') {
+      this.act(widget, id);
+    } else {
+      this.exportChosen(widget, view, id);
+    }
   }
 
   protected exportChosen(widget: Widget, view: WidgetView, format: string): void {

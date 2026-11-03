@@ -1,4 +1,6 @@
 import en from '../../../../public/i18n/en.json';
+import es from '../../../../public/i18n/es.json';
+import { maxDashboards } from '../projects/indicators.service';
 
 /** Codes the API returns in Problem Details or records on failed synchronizations, runs and tests. Each needs a message. */
 const apiErrorCodes = [
@@ -83,6 +85,11 @@ function lookup(root: unknown, path: string): unknown {
 describe('English translations', () => {
   it.each(apiErrorCodes)('have a message for the API error code %s', (code) => {
     expect(typeof lookup(en.errors.codes, code)).toBe('string');
+  });
+
+  // The text is a literal because the error path passes no parameters; this keeps it the number the API enforces.
+  it.each([['English', en], ['Spanish', es]])('have the dashboard limit message of %s name the most dashboards a project can have', (_name, texts) => {
+    expect(texts.errors.codes.dashboards.limit).toContain(`${maxDashboards} `);
   });
 
   it('have the assistant messages that name a time, for the codes that carry one', () => {

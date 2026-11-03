@@ -5,6 +5,7 @@ An MCP server in the `api` through which an AI client such as Claude, signed in 
 
 ## Requirements
 
+
 ### Requirement: Available only when enabled
 The MCP server SHALL exist only when the operator sets `TAMIZA_MCP_ENABLED` to `true`. Without it, `/mcp` and the protected resource metadata SHALL answer 404, the connect page and the project setting SHALL not be shown, and the system configuration SHALL report the server as disabled. Enabling it SHALL NOT make any project accessible: each project stays off until its admin turns it on. The server SHALL make no outbound request and call no model.
 
@@ -171,8 +172,12 @@ Each tool SHALL describe its arguments with a JSON schema and SHALL be marked as
 A tool that changes something SHALL apply the same validation, limits and checks as the REST endpoint for the same operation, and SHALL report a refused value with the field and the message that endpoint gives. Two members, or a member and their own AI client, changing the same thing at once SHALL be handled as for two members in the UI.
 
 #### Scenario: Dashboard limit
-- **WHEN** Claude calls `create_dashboard` on a project that has 7 dashboards
+- **WHEN** Claude calls `create_dashboard` on a project that has 10 dashboards
 - **THEN** the tool is refused with the code `dashboards.limit` and nothing is added
+
+#### Scenario: Dashboard limit described
+- **WHEN** an AI client lists the tools of the server
+- **THEN** the descriptions of `list_dashboards`, `create_dashboard` and `duplicate_dashboard` say a project has at most 10 dashboards
 
 #### Scenario: Group column required
 - **WHEN** Claude calls `create_widget` for a bar chart without a column to group by

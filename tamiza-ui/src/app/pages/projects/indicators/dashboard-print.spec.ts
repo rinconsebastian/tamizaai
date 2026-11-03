@@ -4,7 +4,7 @@ import { MapStub, stubMap } from '../../../../testing/leaflet';
 import { byTestId, settle } from '../../../../testing/project-harness';
 import { ChartType, DashboardColors, QueryBox, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { DashboardPrint, printDeadlineMs, printTitle, printingClass } from './dashboard-print';
-import { all, cell, clearOverlay, config, indicator, isQuery, open, paperOn, result, row, seriesResult, text, wait, widget } from './indicators-testing';
+import { all, cell, clearOverlay, config, indicator, isQuery, open, paperOn, result, row, seriesResult, text, wait, toggleTable, widget } from './indicators-testing';
 import { loadLeaflet } from './map-engine';
 
 // Paper mode (dashboard printing, design D1, D5, D6, D9, D10). jsdom lays nothing out and never prints, so these check the steps,
@@ -443,7 +443,7 @@ describe('the dashboard\'s colors on paper (dashboard printing, "Colors on paper
     it('prints the rows of its table that fit and says how many it left out when it is shown as a table (Box plot as a table)', async () => {
       const boxes = Array.from({ length: 10 }, (_, i) => box(`Place ${i + 1}`, 10 + i));
       const context = await showBoxes(boxes);
-      byTestId(context.root, 'widget-table-toggle')!.click();
+      await toggleTable(context);
       await settle(context.harness);
       const table = context.root.querySelector('app-widget-table')!;
       vi.spyOn(table, 'getBoundingClientRect').mockReturnValue({ bottom: 130 } as DOMRect);

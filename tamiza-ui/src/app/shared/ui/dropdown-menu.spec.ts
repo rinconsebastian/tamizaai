@@ -1,11 +1,11 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { pressKey, provideVisibleElements, tick } from '../../../testing/cdk';
-import { DropdownMenu, MenuItem } from './dropdown-menu';
+import { DropdownMenu, MenuGroup, MenuItem } from './dropdown-menu';
 
 @Component({
   imports: [DropdownMenu],
-  template: `<tmz-dropdown-menu label="Actions for Grace" [items]="items" [icon]="icon()" [busy]="busy()" (selected)="choose($event)" />`,
+  template: `<tmz-dropdown-menu label="Actions for Grace" [items]="items" [groups]="groups" [icon]="icon()" [busy]="busy()" (selected)="choose($event)" />`,
 })
 class Host {
   readonly icon = signal<'more' | 'download'>('more');
@@ -15,6 +15,7 @@ class Host {
     { id: 'viewer', label: 'Make viewer' },
     { id: 'remove', label: 'Remove', danger: true },
   ];
+  groups: MenuGroup[] = [];
   chosen: string | null = null;
   /** What the page would see when it acts on the choice, such as opening a dialog that records where focus is. */
   seen: { focused: Element | null; menuOpen: boolean } | null = null;
@@ -25,14 +26,19 @@ class Host {
   }
 }
 
+const entriesOf = (menu: HTMLElement) => Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]'));
+
 describe('DropdownMenu', () => {
   beforeEach(() => TestBed.configureTestingModule({ imports: [Host], providers: [provideVisibleElements()] }));
   afterEach(() => document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = '')));
 
-  async function open(items?: MenuItem[]) {
+  async function open(items?: MenuItem[], groups?: MenuGroup[]) {
     const fixture = TestBed.createComponent(Host);
     if (items) {
       fixture.componentInstance.items = items;
+    }
+    if (groups) {
+      fixture.componentInstance.groups = groups;
     }
     fixture.detectChanges();
     const trigger = fixture.nativeElement.querySelector('[data-testid="menu-trigger"]') as HTMLButtonElement;
@@ -94,7 +100,7 @@ describe('DropdownMenu', () => {
   describe('an unavailable item', () => {
     const withDisabled: MenuItem[] = [
       { id: 'rename', label: 'Rename' },
-      { id: 'duplicate', label: 'Duplicate', disabled: true, description: 'A project can have at most 7 dashboards.', testId: 'duplicate' },
+      { id: 'duplicate', label: 'Duplicate', disabled: true, description: 'A project can have at most 10 dashboards.', testId: 'duplicate' },
       { id: 'remove', label: 'Remove', danger: true },
     ];
 
@@ -105,7 +111,7 @@ describe('DropdownMenu', () => {
       expect(duplicate.getAttribute('aria-disabled')).toBe('true');
       expect(duplicate.getAttribute('aria-label')).toBe('Duplicate'); // the name is the label alone
       const description = document.getElementById(duplicate.getAttribute('aria-describedby')!);
-      expect(description?.textContent?.trim()).toBe('A project can have at most 7 dashboards.');
+      expect(description?.textContent?.trim()).toBe('A project can have at most 10 dashboards.');
       expect(duplicate.contains(description)).toBe(true); // shown, as a second line
       expect(duplicate.className).toContain('aria-disabled:opacity-50');
       expect(duplicate.className).not.toContain('hover:bg-');
@@ -158,14 +164,14 @@ describe('DropdownMenu', () => {
     const trigger = fixture.nativeElement.querySelector('[data-testid="menu-trigger"]') as HTMLButtonElement;
 
     expect(trigger.getAttribute('aria-busy')).toBe('true');
-    expect(trigger.getAttribute('aria-disabled')).toBe('true');
+    expect(trigger.getAttribute('aria-disabled')).toBeNull(); // it still opens
     expect(trigger.disabled).toBe(false);
     expect(trigger.querySelector('svg')?.classList.contains('animate-pulse')).toBe(true);
     trigger.focus();
     expect(document.activeElement).toBe(trigger);
   });
 
-  it('does not open while busy, from the keyboard or the mouse, and opens again once the action ends', async () => {
+  it('still opens while busy, from the keyboard and the mouse, and stops saying it is busy once the action ends', async () => {
     const fixture = TestBed.createComponent(Host);
     fixture.componentInstance.busy.set(true);
     fixture.detectChanges();
@@ -173,17 +179,126 @@ describe('DropdownMenu', () => {
     trigger.focus();
 
     pressKey(trigger, 'ArrowDown');
-    trigger.click();
+    await fixture.whenStable();
+    await tick();
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    pressKey(document.querySelector('[role="menu"]') as HTMLElement, 'Escape');
     await fixture.whenStable();
     await tick();
     expect(document.querySelector('[role="menu"]')).toBeNull();
 
-    fixture.componentInstance.busy.set(false);
-    fixture.detectChanges();
-    expect(trigger.getAttribute('aria-busy')).toBeNull();
-    pressKey(trigger, 'ArrowDown');
+    trigger.click();
     await fixture.whenStable();
     await tick();
     expect(document.querySelector('[role="menu"]')).not.toBeNull();
+
+    fixture.componentInstance.busy.set(false);
+    fixture.detectChanges();
+    expect(trigger.getAttribute('aria-busy')).toBeNull();
+  });
+
+  it('draws a flat list of items with no group around them, as before', async () => {
+    const { menu } = await open();
+
+    expect(menu.querySelector('[role="group"]')).toBeNull();
+    expect(menu.querySelector('[role="separator"]')).toBeNull();
+    expect(menu.querySelector('[data-testid="menu-group-heading"]')).toBeNull();
+  });
+
+  describe('groups', () => {
+    const groups: MenuGroup[] = [
+      { id: 'view', items: [{ id: 'table', label: 'Show as table', checked: false, testId: 'table' }] },
+      { id: 'empty', label: 'Nothing here', items: [] },
+      {
+        id: 'export',
+        label: 'Export',
+        items: [
+          { id: 'png', label: 'PNG image', testId: 'png' },
+          { id: 'xlsx', label: 'Excel workbook', testId: 'xlsx', disabled: true, description: 'Preparing the export…' },
+        ],
+      },
+      { id: 'edit', items: [{ id: 'remove', label: 'Remove widget', danger: true, testId: 'remove' }] },
+    ];
+
+    it('shows the groups in order, a line between those that are shown, and none for a group without items', async () => {
+      const { menu } = await open(undefined, groups);
+
+      expect(Array.from(menu.querySelectorAll('[role="group"]')).map((g) => g.getAttribute('aria-label'))).toEqual([null, 'Export', null]);
+      expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(2);
+      expect(entriesOf(menu).map((e) => e.dataset['testid'])).toEqual(['table', 'png', 'xlsx', 'remove']);
+      expect(menu.textContent).not.toContain('Nothing here');
+    });
+
+    it('names a group once: by its label, with a heading that assistive technology skips and the arrow keys never stop on', async () => {
+      const { menu } = await open(undefined, groups);
+      const heading = menu.querySelector<HTMLElement>('[data-testid="menu-group-heading"]')!;
+
+      expect(heading.textContent?.trim()).toBe('Export');
+      expect(heading.getAttribute('aria-hidden')).toBe('true');
+      const order = entriesOf(menu);
+      expect(document.activeElement).toBe(order[0]);
+      for (const next of order.slice(1)) {
+        pressKey(menu, 'ArrowDown');
+        expect(document.activeElement).toBe(next);
+      }
+    });
+
+    it('keeps the menu open when a heading or a line is pressed with the mouse', async () => {
+      const { fixture, menu } = await open(undefined, groups);
+      const press = (element: Element) => {
+        const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+        element.dispatchEvent(down);
+        return down.defaultPrevented;
+      };
+
+      expect(press(menu.querySelector('[data-testid="menu-group-heading"]')!)).toBe(true);
+      expect(press(menu.querySelector('[role="separator"]')!)).toBe(true);
+      await fixture.whenStable();
+      await tick();
+      expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    });
+
+    it('still describes an unavailable item of a group', async () => {
+      const { menu } = await open(undefined, groups);
+      const unavailable = menu.querySelector<HTMLElement>('[data-testid="xlsx"]')!;
+
+      expect(unavailable.getAttribute('aria-disabled')).toBe('true');
+      expect(document.getElementById(unavailable.getAttribute('aria-describedby')!)?.textContent?.trim()).toBe('Preparing the export…');
+    });
+  });
+
+  describe('a checkbox item', () => {
+    const withCheck = (checked: boolean): MenuItem[] => [
+      { id: 'table', label: 'Show as table', checked, testId: 'table' },
+      { id: 'other', label: 'Other' },
+    ];
+
+    it.each([false, true])('is a menuitemcheckbox that reads as checked = %s', async (checked) => {
+      const { menu } = await open(withCheck(checked));
+      const item = menu.querySelector<HTMLElement>('[data-testid="table"]')!;
+
+      expect(item.getAttribute('role')).toBe('menuitemcheckbox');
+      expect(item.getAttribute('aria-checked')).toBe(String(checked));
+      expect(item.querySelector('[data-icon="check"]')?.classList.contains('invisible')).toBe(!checked);
+      expect(menu.querySelectorAll('[role="menuitem"]')).toHaveLength(1);
+    });
+
+    it.each(['click', 'Enter', 'Space'])('closes the menu on %s, returns focus to the trigger, and emits its id once it has', async (how) => {
+      const { fixture, trigger, menu } = await open(withCheck(false));
+      const item = menu.querySelector<HTMLElement>('[data-testid="table"]')!;
+
+      if (how === 'click') {
+        item.click();
+      } else {
+        pressKey(item, how === 'Space' ? ' ' : how);
+      }
+      expect(fixture.componentInstance.chosen).toBeNull(); // not while the menu is still closing
+      await fixture.whenStable();
+      await tick();
+
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      expect(fixture.componentInstance.chosen).toBe('table');
+      expect(fixture.componentInstance.seen).toEqual({ focused: trigger, menuOpen: false });
+    });
   });
 });

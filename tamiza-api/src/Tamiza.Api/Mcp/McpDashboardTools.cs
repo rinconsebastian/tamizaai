@@ -128,7 +128,7 @@ public sealed class McpDashboardTools(
     // Dashboards, read
 
     [McpServerTool(Name = "list_dashboards", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "List the dashboards"),
-     Description("The project's own dashboards in their order (1 to 7), with how many widgets and filters each has and the number of its current version. Performance and Clean data are permanent and not listed.")]
+     Description("The project's own dashboards in their order (1 to 10), with how many widgets and filters each has and the number of its current version. Performance and Clean data are permanent and not listed.")]
     public Task<CallToolResult> ListDashboards([Description(ProjectHelp)] Guid projectId, CancellationToken ct = default) =>
         RunAsync(async () =>
         {
@@ -204,7 +204,7 @@ public sealed class McpDashboardTools(
     // Dashboards, write
 
     [McpServerTool(Name = "create_dashboard", Title = "Create a dashboard", Idempotent = false, OpenWorld = false, Destructive = false),
-     Description("Adds a dashboard of the project's own (at most 7, names unique whatever their case, 1 to 40 characters, never Performance, Clean data or Settings). It starts empty and goes last unless you give a position (1 = first).")]
+     Description("Adds a dashboard of the project's own (at most 10, names unique whatever their case, 1 to 40 characters, never Performance, Clean data or Settings). It starts empty and goes last unless you give a position (1 = first).")]
     public Task<CallToolResult> CreateDashboard(
         [Description(ProjectHelp)] Guid projectId,
         [Description("The dashboard's name.")] string name,
@@ -297,7 +297,7 @@ public sealed class McpDashboardTools(
         });
 
     [McpServerTool(Name = "duplicate_dashboard", Title = "Duplicate a dashboard", Idempotent = false, OpenWorld = false, Destructive = false),
-     Description("Copies a dashboard with all its widgets, filters, palette and colors kept by value right after the original, under a new name. Fails at 7 dashboards.")]
+     Description("Copies a dashboard with all its widgets, filters, palette and colors kept by value right after the original, under a new name. Fails at 10 dashboards.")]
     public Task<CallToolResult> DuplicateDashboard(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,

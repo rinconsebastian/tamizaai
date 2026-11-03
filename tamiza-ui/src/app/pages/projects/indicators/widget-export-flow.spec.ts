@@ -12,7 +12,7 @@ const answer = { downloadUrl: '/api/v1/data-exports/t0k3n', fileName: 'x.xlsx', 
 const toasts = () => TestBed.inject(ToastService).toasts().map((toast) => String(toast.message));
 
 async function choose(context: Context, format: 'png' | 'svg' | 'xlsx', index = 0) {
-  all(context.root, 'widget-export')[index].click();
+  all(context.root, 'widget-menu')[index].click();
   await settle(context.harness);
   document.querySelector<HTMLElement>(`[data-testid="widget-export-${format}"]`)!.click();
   await settle(context.harness);
@@ -56,13 +56,13 @@ describe('exporting a widget from the dashboard', () => {
       const context = await open('viewer', [coverage, second], rows);
 
       await choose(context, 'xlsx');
-      const [busy, idle] = all(context.root, 'widget-export');
+      const [busy, idle] = all(context.root, 'widget-menu');
       expect(busy.getAttribute('aria-busy')).toBe('true');
       expect(idle.getAttribute('aria-busy')).toBeNull();
 
       context.http.expectOne(isExport).flush(answer);
       await settle(context.harness);
-      expect(all(context.root, 'widget-export')[0].getAttribute('aria-busy')).toBeNull();
+      expect(all(context.root, 'widget-menu')[0].getAttribute('aria-busy')).toBeNull();
     });
 
     it('says "1 row" for one row', async () => {
@@ -110,7 +110,7 @@ describe('exporting a widget from the dashboard', () => {
 
       expect(downloader.start).not.toHaveBeenCalled();
       expect(toasts()).toEqual(['The dashboard’s filters changed since the page was opened. Reload the dashboard and try again.']);
-      expect(all(context.root, 'widget-export')[0].getAttribute('aria-busy')).toBeNull();
+      expect(all(context.root, 'widget-menu')[0].getAttribute('aria-busy')).toBeNull();
     });
 
     it('shows the API\'s own words when a column is gone', async () => {
@@ -162,7 +162,7 @@ describe('exporting a widget from the dashboard', () => {
 
       expect(downloader.save).not.toHaveBeenCalled();
       expect(toasts()).toEqual(['The PNG image could not be made. Try the SVG image.']);
-      expect(all(context.root, 'widget-export')[0].getAttribute('aria-busy')).toBeNull();
+      expect(all(context.root, 'widget-menu')[0].getAttribute('aria-busy')).toBeNull();
     });
   });
 });

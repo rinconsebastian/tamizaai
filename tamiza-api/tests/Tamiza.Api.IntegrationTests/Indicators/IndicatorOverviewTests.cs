@@ -48,7 +48,7 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
         Assert.Equal(3, coverage.GetProperty("rows").GetInt64());
         Assert.Equal("Coverage", widgets.EnumerateArray().Single().GetProperty("title").GetString());
         var limits = overview.GetProperty("limits");
-        Assert.Equal((50, 5000, 7), (limits.GetProperty("maxWidgets").GetInt32(), limits.GetProperty("maxQueryRows").GetInt32(), limits.GetProperty("maxDashboards").GetInt32()));
+        Assert.Equal((50, 5000, 10), (limits.GetProperty("maxWidgets").GetInt32(), limits.GetProperty("maxQueryRows").GetInt32(), limits.GetProperty("maxDashboards").GetInt32()));
         Assert.False(overview.TryGetProperty("widgets", out _)); // each dashboard lists its own
     }
 

@@ -278,7 +278,7 @@ public static class DashboardEndpoints
             return Problems.Validation("name", error);
         }
 
-        // Counting and inserting are one step per project: two adds at 6 dashboards give one 7th (design D3).
+        // Counting and inserting are one step per project: two adds at 9 dashboards give one 10th (design D3).
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await LockProjectAsync(db, projectId, ct);
         var dashboards = await OrderedAsync(db, projectId, ct);

@@ -1,7 +1,7 @@
 namespace Tamiza.Api.Data;
 
 /// <summary>
-/// One of a project's own indicator dashboards, shown as a tab after Performance and Clean data. A project has 1 to 7, in
+/// One of a project's own indicator dashboards, shown as a tab after Performance and Clean data. A project has 1 to 10, in
 /// <see cref="Position"/> order, and each holds its <see cref="DashboardWidget"/>s.
 /// </summary>
 public sealed class Dashboard

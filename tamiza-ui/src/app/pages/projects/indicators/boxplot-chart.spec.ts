@@ -3,7 +3,7 @@ import { pressKey } from '../../../../testing/cdk';
 import { byTestId, settle } from '../../../../testing/project-harness';
 import { DashboardColors, IndicatorEntry, PaletteId, QueryBox, QueryResult, ValueColor, WidgetConfig } from '../../../core/projects/indicators.service';
 import { BoxplotPlotInput, BoxplotWords, boxDomain, boxTableModel, boxplotPlot } from './boxplot-chart';
-import { Context, all, clearOverlay, config, indicator, isQuery, open, overlay, result, text, widget } from './indicators-testing';
+import { Context, all, clearOverlay, config, indicator, isQuery, open, overlay, result, text, toggleTable, widget } from './indicators-testing';
 import { boxFormat, valueFormatter } from './format';
 
 // The box plot (design D5 of add-boxplot-widget). The plot is pure geometry over the boxes the API computed; the component is looked at
@@ -435,7 +435,7 @@ describe('box plot widget', () => {
   it('lists the same numbers as a table', async () => {
     const context = await show();
 
-    byTestId(context.root, 'widget-table-toggle')!.click();
+    await toggleTable(context);
     await settle(context.harness);
 
     const headers = Array.from(context.root.querySelectorAll('[data-testid="widget-table"] th[scope="col"]')).map(text);
@@ -449,7 +449,7 @@ describe('box plot widget', () => {
     const context = await show({ groupBy: null }, [box(null, { q1: 1, median: 2, q3: 3 })]);
 
     expect(all(context.root, 'chart-mark')).toHaveLength(1);
-    byTestId(context.root, 'widget-table-toggle')!.click();
+    await toggleTable(context);
     await settle(context.harness);
     expect(Array.from(context.root.querySelectorAll('[data-testid="widget-table"] th[scope="col"]')).map(text)[0]).toBe('Group');
     expect(all(context.root, 'widget-table-row').map((r) => text(r.children[0]))).toEqual(['All rows']);

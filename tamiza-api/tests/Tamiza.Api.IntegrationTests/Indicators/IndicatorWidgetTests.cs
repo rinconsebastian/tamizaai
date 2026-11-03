@@ -292,7 +292,7 @@ public sealed class IndicatorWidgetTests(PostgresFixture postgres)
 
         var limits = (await h.GetAsync()).GetProperty("limits");
 
-        Assert.Equal((9, 123, 7), (limits.GetProperty("maxWidgets").GetInt32(), limits.GetProperty("maxQueryRows").GetInt32(),
+        Assert.Equal((9, 123, 10), (limits.GetProperty("maxWidgets").GetInt32(), limits.GetProperty("maxQueryRows").GetInt32(),
             limits.GetProperty("maxDashboards").GetInt32()));
     }
 

@@ -82,7 +82,7 @@ export const maxTitleLength = 200;
 /** A dashboard's name, once trimmed (`DashboardValidation.MaxNameLength`). */
 export const maxDashboardNameLength = 40;
 /** The most dashboards a project can hold (`IndicatorDashboardOptions.MaxDashboards`), until the overview says so. */
-export const maxDashboards = 7;
+export const maxDashboards = 10;
 export const maxTooltipItems = 5;
 export const maxTooltipLabel = 80;
 /** The most filters a dashboard has (`DashboardFilterRules.MaxFilters`), and so the most a widget ignores. */

@@ -11,6 +11,7 @@ import {
   all,
   catalog,
   cell,
+  chooseInWidgetMenu,
   clearOverlay,
   config,
   indicator,
@@ -65,10 +66,8 @@ async function openDialog({ existing = null, columns = catalog(), indicators, da
     ...(lang ? { lang } : {}),
   });
   if (existing) {
-    // Edit is an item of the widget's actions menu.
-    context.root.querySelector<HTMLElement>('[data-testid="menu-trigger"]')!.click();
-    await settle(context.harness);
-    document.querySelector<HTMLElement>('[data-testid="widget-edit"]')!.click();
+    // Edit is an item of the widget's menu.
+    await chooseInWidgetMenu(context, 'widget-edit');
   } else {
     context.root.querySelector<HTMLElement>('[data-testid="widget-add"]')!.click();
   }
@@ -517,7 +516,7 @@ describe('the widget dialog', () => {
       await previewAnswer(context, result([row('Cali', 75)]));
 
       expect(field('dialog-preview').querySelector('[data-testid="chart-svg"]')).not.toBeNull();
-      expect(field('dialog-preview').querySelector('[data-testid="widget-export"]')).toBeNull();
+      expect(field('dialog-preview').querySelector('[data-testid="widget-menu"]')).toBeNull();
     });
 
     it('shows the server\'s refusal of an invalid draft in place of the earlier chart', async () => {

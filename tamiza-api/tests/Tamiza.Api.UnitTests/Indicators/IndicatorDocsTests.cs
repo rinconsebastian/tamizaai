@@ -17,6 +17,7 @@ public sealed class IndicatorDocsTests
 {
     private const string DashboardPage = "tamiza-ui/src/app/pages/projects/project-indicators.ts";
     private const string EnglishTexts = "tamiza-ui/public/i18n/en.json";
+    private const string WidgetGridPage = "tamiza-ui/src/app/pages/projects/indicators/widget-grid.ts";
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -247,6 +248,16 @@ public sealed class IndicatorDocsTests
         Assert.Contains("keeps the page's code instead of an `mcp.` one and adds the HTTP `status`", text, StringComparison.Ordinal);
     }
 
+    // The descriptions are attribute strings, which cannot read the constant: this keeps the number in them the one the API enforces.
+    [Theory]
+    [InlineData("list_dashboards", "(1 to {0})")]
+    [InlineData("create_dashboard", "at most {0},")]
+    [InlineData("duplicate_dashboard", "Fails at {0} dashboards.")]
+    public void The_dashboard_tools_say_the_most_dashboards_a_project_can_have(string tool, string phrase)
+    {
+        Assert.Contains(string.Format(phrase, IndicatorDashboardOptions.MaxDashboards), Description(tool), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void The_mcp_documentation_lists_the_refusal_of_a_dashboard_the_project_does_not_have_for_every_tool_that_names_a_dashboard()
     {
@@ -294,6 +305,57 @@ public sealed class IndicatorDocsTests
 
         Assert.Contains("Colors", labels);
         Assert.Equal(labels, listed);
+    }
+
+    [Fact]
+    public void The_dashboard_documentation_lists_the_items_of_the_widget_menu_in_the_order_the_grid_has_them()
+    {
+        if (PromptKitChecks.FindUp("docs/indicators-dashboard.md") is not { } dashboard || PageSource(WidgetGridPage) is not { } grid || PageSource(EnglishTexts) is not { } english)
+        {
+            return;
+        }
+
+        // The text each item shows, and the items of each group, in the order the grid names them.
+        using var texts = JsonDocument.Parse(english);
+        var indicators = texts.RootElement.GetProperty("indicators");
+        string Text(string section, string key) => indicators.GetProperty(section).GetProperty(key).GetString()!;
+        var groups = new (string Id, (string TestId, string Label)[] Items)[]
+        {
+            ("view", [("widget-show-table", Text("widget", "showTable"))]),
+            ("export", [("widget-export-png", Text("widgetExport", "png")), ("widget-export-svg", Text("widgetExport", "svg")), ("widget-export-xlsx", Text("widgetExport", "xlsx"))]),
+            ("edit", [("widget-edit", Text("grid", "editItem")), ("widget-remove", Text("grid", "removeItem"))]),
+        };
+        var methodStart = grid.IndexOf("protected menuGroups(", StringComparison.Ordinal);
+        Assert.True(methodStart >= 0, "widget-grid.ts no longer builds its menu in menuGroups: update this test and the documentation.");
+        var method = grid[methodStart..grid.IndexOf("\n  }\n", methodStart, StringComparison.Ordinal)];
+        foreach (var (id, items) in groups)
+        {
+            Assert.True(method.Contains($"id: '{id}'", StringComparison.Ordinal), $"The widget menu no longer has the group {id}: update this test and the documentation.");
+            foreach (var (testId, _) in items)
+            {
+                Assert.True(grid.Contains($"'{testId}'", StringComparison.Ordinal), $"widget-grid.ts no longer has the item {testId}: update this test and the documentation.");
+            }
+        }
+
+        // The groups in the order menuGroups pushes them, each with its items in the order the grid names them.
+        var inTheGrid = groups
+            .OrderBy(group => method.IndexOf($"id: '{group.Id}'", StringComparison.Ordinal))
+            .SelectMany(group => group.Items.OrderBy(item => grid.IndexOf($"'{item.TestId}'", StringComparison.Ordinal)))
+            .Select(item => item.Label)
+            .ToList();
+
+        var text = File.ReadAllText(dashboard);
+        const string opening = "**widget menu** (the button with three dots at the right of its title), with ";
+        var start = text.IndexOf(opening, StringComparison.Ordinal);
+        Assert.True(start >= 0, "docs/indicators-dashboard.md no longer introduces the items of the widget menu.");
+        var sentence = text[(start + opening.Length)..].Split(';')[0];
+        var exportGroup = Text("grid", "exportGroup");
+        var listed = Regex.Matches(sentence, @"\*\*([^*]+)\*\*").Select(m => m.Groups[1].Value).ToList();
+
+        // The heading of the Export group stands between Show as table and the formats.
+        Assert.Equal(inTheGrid[0], listed[0]);
+        Assert.Equal(exportGroup, listed[1]);
+        Assert.Equal(inTheGrid, listed.Where(item => item != exportGroup).ToList());
     }
 
     [Fact]

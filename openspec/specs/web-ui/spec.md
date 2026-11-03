@@ -6,6 +6,7 @@ Shared behavior of the web interface across all screens: it works from phone wid
 
 ## Requirements
 
+
 ### Requirement: Responsive layout
 Every screen SHALL be usable at viewport widths from 360 CSS pixels to desktop sizes without horizontal scrolling of the page. Content SHALL reflow to the available width. Tables wider than the screen SHALL scroll horizontally inside their own container, without the page scrolling.
 
@@ -180,8 +181,12 @@ From 768 pixels wide, tabs that do not fit in one row SHALL scroll sideways insi
 - **WHEN** an `analyst` opens a project with 7 dashboards, each named with at least 20 characters, in a viewport 1024 pixels wide
 - **THEN** the tab row scrolls inside itself, Settings is visible at its end, the hidden side shows that more tabs are there, and the page does not scroll horizontally
 
+#### Scenario: Ten dashboards at tablet width
+- **WHEN** an `analyst` opens a project with 10 dashboards, each named with at least 20 characters, in a viewport 1024 pixels wide
+- **THEN** the tab row scrolls inside itself, Settings is visible at its end, the hidden side shows that more tabs are there, and the page does not scroll horizontally
+
 #### Scenario: Open tab brought into view
-- **WHEN** a member opens the address of the seventh of 7 dashboards, each named with at least 20 characters, in a viewport 768 pixels wide
+- **WHEN** a member opens the address of the tenth of 10 dashboards, each named with at least 20 characters, in a viewport 768 pixels wide
 - **THEN** that dashboard's tab is visible in the row
 
 #### Scenario: Page stays in place

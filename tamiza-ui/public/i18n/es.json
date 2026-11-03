@@ -161,7 +161,7 @@
       },
       "dashboards": {
         "notFound": "El tablero ya no existe.",
-        "limit": "Un proyecto puede tener como máximo 7 tableros. Elimina uno antes de agregar otro.",
+        "limit": "Un proyecto puede tener como máximo 10 tableros. Elimina uno antes de agregar otro.",
         "lastOne": "Un proyecto necesita al menos un tablero.",
         "orderChanged": "Los tableros del proyecto han cambiado. Recarga e intenta de nuevo.",
         "versionNotFound": "Esa versión ya no se conserva."
@@ -1548,12 +1548,13 @@
     "grid": {
       "move": "Mover {{ title }}",
       "resize": "Cambiar tamaño de {{ title }}",
-      "edit": "Editar {{ title }}",
-      "remove": "Eliminar {{ title }}",
       "help": "Las teclas de flecha mueven el widget una celda. Mantén presionada la tecla Mayús, o usa el control de tamaño, para cambiar su tamaño.",
       "status": "{{ title }}: columna {{ column }}, fila {{ row }}, {{ width }} de ancho, {{ height }} de alto.",
-      "showTable": "Mostrar {{ title }} como tabla",
-      "actionsFor": "Acciones de {{ title }}",
+      "menuFor": "Opciones de “{{ title }}”",
+      "menuForPreparing": "Opciones de “{{ title }}”, preparando su exportación",
+      "exportGroup": "Exportar",
+      "shownAsTable": "“{{ title }}” se muestra como tabla",
+      "shownAsChart": "“{{ title }}” se muestra como gráfico",
       "editItem": "Editar widget",
       "removeItem": "Eliminar widget"
     },
@@ -1879,14 +1880,13 @@
       "summarySame": "Diagrama de caja de {{ what }} por {{ group }}: {{ count }} cajas, todas con la mediana {{ median }}."
     },
     "widgetExport": {
-      "button": "Exportar “{{ title }}”",
-      "preparing": "Preparando la exportación de “{{ title }}”…",
       "png": "Imagen PNG",
       "svg": "Imagen SVG",
       "xlsx": "Libro de Excel (XLSX)",
       "withoutBasemap": "Formas y leyenda, sin el mapa base",
       "reason": {
         "loading": "El widget aún se está cargando.",
+        "preparing": "Preparando la exportación…",
         "failed": "No se pudo cargar el widget.",
         "missing": "Su tabla ya no tiene {{ names }}.",
         "mapDrawing": "El mapa aún se está dibujando.",

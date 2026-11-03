@@ -12,7 +12,7 @@ public sealed class IndicatorDashboardOptions
     public const string Section = "IndicatorDashboard";
 
     /// <summary>The most dashboards of its own a project may have. A product rule, not a setting (design D6).</summary>
-    public const int MaxDashboards = 7;
+    public const int MaxDashboards = 10;
 
     public const string MaxWidgetsPerDashboardVariable = "IndicatorDashboard__MaxWidgetsPerDashboard";
 

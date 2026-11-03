@@ -6,34 +6,39 @@ Lets every member take one widget of a project's own dashboard out of Tamiza, as
 
 ## Requirements
 
-### Requirement: Export button
-Every member SHALL find an Export button on each widget of a project's own dashboards, after the "Show as table" toggle and before the widget's actions menu, named after the widget's title. Its menu SHALL offer "PNG image", "SVG image" and "Excel workbook (XLSX)". It SHALL be offered at every width from 360 pixels. It SHALL NOT be printed, and it SHALL NOT be offered in the widget form's preview or in the script editor.
+
+### Requirement: Export in the widget menu
+Every member SHALL find an "Export" group in the menu of each widget of a project's own dashboards (see `dashboard-indicators` "Widget menu"), under a visible heading, after "Show as table" and before the editing actions. It SHALL offer "PNG image", "SVG image" and "Excel workbook (XLSX)" as items of the menu itself, with no submenu. It SHALL be offered wherever the widget menu is, and SHALL NOT be offered in the widget form's preview or in the script editor.
 
 #### Scenario: Viewer exports
-- **WHEN** a `viewer` opens the Export button of the column chart "Coverage by municipality" on "Housing"
-- **THEN** its menu offers "PNG image", "SVG image" and "Excel workbook (XLSX)"
+- **WHEN** a `viewer` opens the menu of the column chart "Coverage by municipality" on "Housing"
+- **THEN** its "Export" group offers "PNG image", "SVG image" and "Excel workbook (XLSX)"
 
 #### Scenario: Analyst's widget header
 - **WHEN** an `analyst` looks at the header of "Coverage by municipality"
-- **THEN** it shows the title, the "Show as table" toggle, the Export button and the widget's actions menu, in that order, and the actions menu still holds only "Edit" and "Remove"
+- **THEN** it shows no Export button of its own: the formats are in the widget's menu, between "Show as table" and "Edit widget"
+
+#### Scenario: Formats in the menu itself
+- **WHEN** a member opens the menu of "Coverage by municipality" and moves down with the arrow keys
+- **THEN** they reach "PNG image", "SVG image" and "Excel workbook (XLSX)" without opening another menu, and a screen reader says they belong to the "Export" group
 
 #### Scenario: Phone width
 - **WHEN** a member opens "Housing" on a screen 360 pixels wide
-- **THEN** every widget's Export button can be reached without scrolling the page sideways
+- **THEN** every widget's export formats can be reached from its menu without scrolling the page sideways
 
 #### Scenario: Printed sheet
 - **WHEN** a member prints "Housing"
-- **THEN** no widget's Export button is on the sheet
+- **THEN** no widget's menu or export format is on the sheet
 
 #### Scenario: Widget form preview
 - **WHEN** an `analyst` previews a widget in the widget form
-- **THEN** the preview offers no Export button
+- **THEN** the preview offers no export
 
 ### Requirement: Formats that cannot be exported yet
-A format that cannot be exported SHALL stay in the menu, announced as unavailable, with the reason on a second line. Every format SHALL be unavailable while the widget is loading, after it failed to load, while its indicator is not published, while its table lacks a column the widget needs, and when no row matches. A map's images SHALL also be unavailable while the map is being drawn or moved, or when it has no shape to draw; its workbook SHALL stay available.
+A format that cannot be exported SHALL stay in the widget menu's "Export" group, announced as unavailable, with the reason on a second line. Every format SHALL be unavailable while the widget is loading, after it failed to load, while its indicator is not published, while its table lacks a column the widget needs, and when no row matches. A map's images SHALL also be unavailable while the map is being drawn or moved, or when it has no shape to draw; its workbook SHALL stay available.
 
 #### Scenario: Widget still loading
-- **WHEN** a member opens the Export button of a widget that is still loading
+- **WHEN** a member opens the menu of a widget that is still loading
 - **THEN** the three formats are unavailable, each reading "The widget is still loading."
 
 #### Scenario: Indicator not published
@@ -49,7 +54,7 @@ A format that cannot be exported SHALL stay in the menu, announced as unavailabl
 - **THEN** the three formats are unavailable, each reading "No rows match this widget's query."
 
 #### Scenario: Map still being drawn
-- **WHEN** a member opens the Export button of a map that is still being drawn
+- **WHEN** a member opens the menu of a map that is still being drawn
 - **THEN** "PNG image" and "SVG image" are unavailable, reading "The map is still being drawn.", and "Excel workbook (XLSX)" is available
 
 #### Scenario: Row limit reached
@@ -57,11 +62,19 @@ A format that cannot be exported SHALL stay in the menu, announced as unavailabl
 - **THEN** the three formats are available, and each file carries the row-limit note
 
 ### Requirement: Feedback while a widget export runs
-While a widget's file is being prepared, that widget's Export button SHALL show that it is busy and SHALL NOT open, and other widgets' Export buttons SHALL stay usable. The export SHALL end with exactly one message: the image saved, the workbook ready with its number of rows, or the reason it failed (see `web-ui` "Feedback while an action runs").
+While a widget's file is being prepared, that widget's menu button SHALL show that it is busy and its name SHALL say so, but the menu SHALL still open: its three formats SHALL be unavailable, each reading "Preparing the export…", and its other items SHALL stay usable. The format items are the controls that started the export in the sense of `web-ui` "Feedback while an action runs". Other widgets' menus SHALL stay as they were. The export SHALL end with exactly one message: the image saved, the workbook ready with its number of rows, or the reason it failed (see `web-ui` "Feedback while an action runs").
 
 #### Scenario: Two widgets
 - **WHEN** a member exports the workbook of "Coverage by municipality" while "Type of dwelling" is on the same dashboard
-- **THEN** only the Export button of "Coverage by municipality" shows that it is busy, and that of "Type of dwelling" can still be opened
+- **THEN** only the menu button of "Coverage by municipality" shows that it is busy, and the formats of "Type of dwelling" can still be chosen
+
+#### Scenario: Menu of a widget being exported
+- **WHEN** a member opens the menu of "Coverage by municipality" while its workbook is being prepared
+- **THEN** "PNG image", "SVG image" and "Excel workbook (XLSX)" are unavailable, each reading "Preparing the export…", and "Show as table" can be chosen
+
+#### Scenario: Export ends
+- **WHEN** that workbook is ready
+- **THEN** the menu button no longer shows that it is busy, and the three formats are available again
 
 #### Scenario: Workbook ready
 - **WHEN** the workbook of a bar chart with 32 bars is ready
