@@ -227,3 +227,88 @@ describe('map engine', () => {
     });
   });
 });
+
+describe('map engine picture (add-widget-export, design D10)', () => {
+  let stub: MapStub;
+  let host: HTMLElement;
+  let created: MapEngine | null = null;
+
+  beforeEach(() => {
+    stub = stubMap({ width: 600, height: 400 });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+  });
+
+  afterEach(() => {
+    created?.destroy();
+    created = null;
+    host.remove();
+    stub.restore();
+  });
+
+  async function open(shapes: ShapeInput[]) {
+    created = await MapEngine.create(host, { kind: 'degrees', shapes, view: null, reducedMotion: true, events: none });
+    return created;
+  }
+
+  it('projects the shapes into the container, in its size, with their steps', async () => {
+    const engine = await open([shape(square(-77, 3, 1), 7), shape('POINT (-76.5 3.5)', 2)]);
+
+    const picture = engine.picture();
+
+    expect(picture.width).toBe(600);
+    expect(picture.height).toBe(400);
+    expect(picture.shapes.map((s) => [s.step, s.point === null])).toEqual([[7, true], [2, false]]);
+    const [region, point] = picture.shapes;
+    const ring = region.polygons[0][0];
+    expect(ring.length).toBeGreaterThanOrEqual(4);
+    expect(ring.every((at) => at.x >= -1 && at.x <= 601 && at.y >= -1 && at.y <= 401)).toBe(true);
+    // The marker is where the middle of the square is.
+    const xs = ring.map((at) => at.x);
+    expect(point.point!.x).toBeGreaterThan(Math.min(...xs));
+    expect(point.point!.x).toBeLessThan(Math.max(...xs));
+  });
+
+  it('keeps a hole as a second ring of the polygon and a multipolygon as several polygons', async () => {
+    const engine = await open([
+      shape('POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (3 3, 7 3, 7 7, 3 7, 3 3))'),
+      shape(`MULTIPOLYGON (((20 0, 21 0, 21 1, 20 1, 20 0)), ((22 0, 23 0, 23 1, 22 1, 22 0)))`),
+    ]);
+
+    const [holed, many] = engine.picture().shapes;
+
+    expect(holed.polygons).toHaveLength(1);
+    expect(holed.polygons[0]).toHaveLength(2);
+    expect(many.polygons).toHaveLength(2);
+  });
+
+  it('leaves out the shapes that the member\'s zoom has moved out of the view', async () => {
+    const engine = await open([shape(square(-77, 3, 1)), shape(square(-60, 30, 1))]);
+    expect(engine.picture().shapes).toHaveLength(2);
+
+    for (let i = 0; i < 6; i++) {
+      engine.zoomIn();
+    }
+
+    expect(engine.picture().shapes.length).toBeLessThan(2);
+  });
+
+  it('drops a vertex closer than half a pixel to the one before it', async () => {
+    const dense = `POLYGON ((-77 3, -76.9999999 3, -76.9999998 3, -76 3, -76 4, -77 4, -77 3))`;
+    const engine = await open([shape(dense)]);
+
+    const [region] = engine.picture().shapes;
+
+    expect(region.polygons[0][0]).toHaveLength(5);
+  });
+
+  it('touches no tile layer and sends no request', async () => {
+    const engine = await open([shape(square(-77, 3, 1))]);
+    engine.setTiles({ template: 'https://tile.example/{z}/{x}/{y}.png', maxNativeZoom: 19 }, { onError: () => undefined, onSettled: () => undefined });
+    const images = host.querySelectorAll('img').length;
+
+    engine.picture();
+
+    expect(host.querySelectorAll('img').length).toBe(images);
+  });
+});

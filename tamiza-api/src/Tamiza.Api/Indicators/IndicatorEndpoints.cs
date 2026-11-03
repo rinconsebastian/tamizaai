@@ -118,7 +118,7 @@ public static class IndicatorEndpoints
         }
     }
 
-    private static ProblemHttpResult NotPublished() =>
+    internal static ProblemHttpResult NotPublished() =>
         TypedResults.Problem(
             statusCode: StatusCodes.Status404NotFound,
             title: "The indicator is not published.",

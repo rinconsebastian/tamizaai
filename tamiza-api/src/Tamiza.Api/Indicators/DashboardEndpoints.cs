@@ -69,6 +69,7 @@ public static class DashboardEndpoints
             .RequireProjectRole(ProjectRole.Analyst).WithName("GetDashboardVersion");
         dashboards.MapPost("/{dashboardId:guid}/versions/{number:int}/restore", DashboardVersionEndpoints.RestoreAsync)
             .RequireProjectRole(ProjectRole.Analyst).WithName("RestoreDashboardVersion");
+        dashboards.MapWidgetExportEndpoints();
         return api;
     }
 

@@ -25,6 +25,40 @@ describe('IndicatorsService', () => {
     filters: [{ column: 'year', op: 'range', min: '2024' }],
   };
 
+  it('posts the settings and filters the screen shows to a dashboard\'s widget-exports, and answers the link', () => {
+    const request = {
+      format: 'xlsx' as const,
+      title: 'Coverage by municipality',
+      chartType: 'bar' as const,
+      config,
+      filters: [{ column: 'municipality', kind: 'text' as const, values: ['Cali'], ignored: false }],
+      locale: 'es-CO',
+    };
+    const result = { downloadUrl: '/api/v1/data-exports/t', fileName: 'a.xlsx', rowCount: 3, publishedAt: '2026-11-02T10:41:00Z', expiresAt: '2026-11-02T10:46:00Z' };
+    let answer: unknown;
+
+    service.exportWidget('p1', 'd1', request).subscribe((r) => (answer = r));
+    const call = http.expectOne(`${dashboards}/d1/widget-exports`);
+    call.flush(result);
+
+    expect(call.request.method).toBe('POST');
+    expect(call.request.body).toEqual(request);
+    expect(answer).toEqual(result);
+  });
+
+  it('sends the version being viewed with a widget export, and nothing about it on the current dashboard', () => {
+    const request = { format: 'xlsx' as const, title: 'W', chartType: 'bar' as const, config, filters: [], locale: 'en-US' };
+
+    service.exportWidget('p1', 'd1', { ...request, version: 9 }).subscribe();
+    service.exportWidget('p1', 'd1', request).subscribe();
+
+    const [viewed, current] = http.match(`${dashboards}/d1/widget-exports`);
+    expect(viewed.request.body.version).toBe(9);
+    expect('version' in current.request.body).toBe(false);
+    viewed.flush({});
+    current.flush({});
+  });
+
   it('reads the overview, and the columns of one indicator\'s table', () => {
     service.overview('p1').subscribe();
     service.columns('p1', 'piped_water_rate').subscribe();

@@ -5,10 +5,11 @@ import { QueryResult, QueryRow, WidgetConfig, defaultBuckets } from '../../../co
 import { histogram, observeSize, pivot } from './chart-data';
 import { bandScale, charWidth, compactNumber, linePath, linearScale, niceAxis, truncate, Point } from './chart-scales';
 import { ChartColors } from './chart-colors';
-import { CrosstabWidget } from './crosstab-widget';
+import { CrosstabWidget, crossTableModel } from './crosstab-widget';
+import { registerExportParts } from './export-parts';
 import { ValueFormatter, plotted } from './format';
 import { MarkGrid, markTooltips } from './mark-tooltips';
-import { LegendEntry, SeriesLegend, SeriesNotes, seriesName } from './series-legend';
+import { LegendEntry, SeriesLegend, SeriesNotes, seriesName, seriesNoteTexts } from './series-legend';
 import { Dot, Hit, Label, Line, Path, Rect, SeriesPlot, seriesPlot } from './series-plot';
 import { SeriesTable, buildSeriesTable, isSeriesAnswer } from './series-table';
 import { TableModel, WidgetTable } from './widget-table';
@@ -215,6 +216,35 @@ export class AxisChart {
     marks: () => this.seriesMarks()?.marks ?? noMarks,
     groupsAcross: () => this.kind() !== 'bar',
   });
+
+  // What an image of the chart says around its plot (add-widget-export): the series legend in the caption's place, or the caption.
+  constructor() {
+    registerExportParts({
+      plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
+      settle: () => this.marks.reset(),
+      parts: () => {
+        const t: Translate = (key, params) => this.transloco.translate(key, params);
+        const legend = this.legend();
+        const series = this.seriesTable();
+        const withLegend = legend.length > 1;
+        const shared = {
+          caption: withLegend ? null : this.caption(t),
+          legend: withLegend
+            ? { kind: 'entries' as const, entries: legend.map((entry) => ({ label: entry.name, color: entry.color, swatch: this.kind() === 'line' ? ('line' as const) : ('square' as const) })) }
+            : null,
+          stat: null,
+        };
+        if (this.asTable()) {
+          const table = series
+            ? crossTableModel(series, { type: this.kind(), config: this.config(), format: this.format(), locale: this.locale, t })
+            : this.table(t);
+          return { ...shared, notes: [], table };
+        }
+        const notes = series ? seriesNoteTexts({ negativeLeftOut: series.negativeLeftOut, leftOut: 0, kind: null }, t, this.transloco.getActiveLang()) : [];
+        return { ...shared, notes, table: null };
+      },
+    });
+  }
 
   /** Counts of rows (a histogram's axis) are not values of the indicator, so they are written plainly. */
   private readonly compact = compactNumber(this.locale);

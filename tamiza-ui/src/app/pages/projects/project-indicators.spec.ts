@@ -3262,10 +3262,38 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
       expect(all(context.root, 'widget-move')).toHaveLength(0);
       expect(all(context.root, 'widget-resize')).toHaveLength(0);
       expect(all(byTestId(context.root, 'widget-grid')!, 'menu-trigger')).toHaveLength(0);
+      // Taking a widget out of Tamiza changes nothing, so every widget keeps its Export button (widget-export "Export button").
+      expect(all(byTestId(context.root, 'widget-grid')!, 'widget-export')).toHaveLength(2);
       // The switch to tables saves nothing, so it stays.
       expect(byTestId(context.root, 'tables-toggle')).not.toBeNull();
       expect(document.activeElement).toBe(notice(context.root));
       expect(context.http.match((r) => r.method !== 'GET' && !isQuery(r))).toHaveLength(0);
+    });
+
+    it('exports the widgets of the version shown: the workbook asks for the version, and the files of both kinds name it (Exporting a widget of a version)', async () => {
+      downloader.save.mockClear();
+      const context = await open('analyst', [coverage], answer, {}, { dashboards: indicatorsAndField });
+      await view(context, historyOf([12, 9]), versionOf(9, [coverage, water], { name: 'Water' }));
+      await answerQueries(context, answer);
+
+      const choose = async (format: string) => {
+        all(context.root, 'widget-export')[0].click();
+        await settle(context.harness);
+        document.querySelector<HTMLElement>(`[data-testid="widget-export-${format}"]`)!.click();
+        await settle(context.harness);
+      };
+      await choose('xlsx');
+      const request = context.http.expectOne((r) => r.method === 'POST' && r.url.endsWith('/widget-exports'));
+      expect(request.request.body).toMatchObject({ version: 9, title: 'Coverage by municipality' });
+      request.flush({ downloadUrl: '/api/v1/data-exports/x', fileName: 'x.xlsx', rowCount: 3, publishedAt: null, expiresAt: '2026-10-02T12:05:00Z' });
+      await settle(context.harness);
+      await choose('svg');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await settle(context.harness);
+
+      const [blob, name] = downloader.save.mock.calls[0] as [Blob, string];
+      expect(name).toMatch(/^[a-z0-9-]+_water_coverage-by-municipality_v9_\d{4}-\d{2}-\d{2}\.svg$/);
+      expect(await blob.text()).toContain('Version 9, saved by Ana Pérez');
     });
 
     it('draws the version in its own palette and colors kept by value, and the dashboard in its own once back (Colors of a version)', async () => {

@@ -49,6 +49,27 @@ public sealed class ReportTextTests
     }
 
     [Fact]
+    public void The_summary_sheet_of_a_widget_workbook_has_its_words_in_both_languages()
+    {
+        var english = ReportText.For("en-US");
+        var spanish = ReportText.For("es-CO");
+
+        Assert.Equal("Item", english["item"]);
+        Assert.Equal("Elemento", spanish["item"]);
+        Assert.Equal("Not filtered by", english["notFilteredBy"]);
+        Assert.Equal("Sin filtrar por", spanish["notFilteredBy"]);
+        Assert.Equal("All", english["allValues"]);
+        Assert.Equal("Todos", spanish["allValues"]);
+        // As the UI's dashboards.print.version, so the file and the page say the same.
+        Assert.Equal("Version 9, saved by Ana on Oct 31, 2026", english.Format("versionLine", 9, "Ana", "Oct 31, 2026"));
+        Assert.Equal("Versión 9, guardada por Ana el 31 oct 2026", spanish.Format("versionLine", 9, "Ana", "31 oct 2026"));
+        foreach (var key in new[] { "indicator", "plotted", "exported", "version", "rows" })
+        {
+            Assert.NotEqual(english[key], spanish[key]);
+        }
+    }
+
+    [Fact]
     public void More_rows_has_a_singular_and_a_plural()
     {
         Assert.Equal("1 more row", ReportText.For("en-US").MoreRows(1));

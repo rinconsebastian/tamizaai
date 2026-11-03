@@ -1,7 +1,3 @@
-using System.Data;
-using MiniExcelLibs;
-using MiniExcelLibs.Attributes;
-using MiniExcelLibs.OpenXml;
 using Tamiza.Api.CleanData;
 
 namespace Tamiza.Api.Reports;
@@ -26,7 +22,7 @@ public static class ReportWorkbook
         var formats = new Dictionary<string, string?>(StringComparer.Ordinal);
 
         string Item(string key) => text[key];
-        var summaryItem = Item("summary") == "Resumen" ? "Elemento" : "Item";
+        var summaryItem = Item("item");
         var summaryValue = Item("value");
         var summary = new List<Dictionary<string, object?>>
         {
@@ -51,7 +47,7 @@ public static class ReportWorkbook
         // The summary holds text, which a number format leaves as it is: its headers never block a widget sheet's format.
         sheets[SheetName(text["summary"], sheets)] = summary;
 
-        Dictionary<string, object?> Line(string item, string value) => new() { [summaryItem] = item, [summaryValue] = Cut(value) };
+        Dictionary<string, object?> Line(string item, string value) => new() { [summaryItem] = item, [summaryValue] = WorkbookSheets.Cut(value) };
 
         foreach (var widget in model.Tables)
         {
@@ -62,71 +58,13 @@ public static class ReportWorkbook
                 continue;
             }
 
-            var headers = Headers(widget, formats);
-            var rows = widget.Rows.Select(row =>
-            {
-                var cells = new Dictionary<string, object?>(StringComparer.Ordinal);
-                for (var i = 0; i < headers.Count; i++)
-                {
-                    cells[headers[i]] = row[i].Value is string value ? Cut(value) : row[i].Value;
-                }
-
-                return cells;
-            }).ToList();
-            sheets[name] = rows.Count > 0 ? rows : EmptyTable(headers);
+            var headers = WorkbookSheets.Headers(widget.Columns, widget.Position, formats);
+            sheets[name] = WorkbookSheets.Table(widget.Rows, headers);
         }
 
         formats.TryAdd(summaryItem, null);
         formats.TryAdd(summaryValue, null);
-        var columns = formats.Select(f => new DynamicExcelColumn(f.Key) { Format = f.Value, Width = 24 }).ToArray();
-        var configuration = new OpenXmlConfiguration { FastMode = false, EnableAutoWidth = false, DynamicColumns = columns };
-        using (var file = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
-        {
-            MiniExcel.SaveAs(file, sheets, printHeader: true, excelType: ExcelType.XLSX, configuration: configuration);
-        }
-
-        return new FileInfo(path).Length;
-    }
-
-    /// <summary>
-    /// The sheet's headers, each unique in the sheet and, where it needs a number format, unique in the workbook for that format. The
-    /// unit is written in the header, since the cells hold bare numbers.
-    /// </summary>
-    private static List<string> Headers(ReportWidget widget, Dictionary<string, string?> formats)
-    {
-        var headers = new List<string>();
-        foreach (var column in widget.Columns)
-        {
-            var header = column.Unit is { Length: > 0 } unit ? $"{column.Header} ({unit})" : column.Header;
-            header = header.Length == 0 ? "-" : header;
-            if (formats.TryGetValue(header, out var taken) && taken != column.ExcelFormat)
-            {
-                header = $"{header} ({widget.Position})";
-            }
-
-            var unique = header;
-            for (var n = 2; headers.Contains(unique, StringComparer.Ordinal); n++)
-            {
-                unique = $"{header} ({n})";
-            }
-
-            headers.Add(unique);
-            formats.TryAdd(unique, column.ExcelFormat);
-        }
-
-        return headers;
-    }
-
-    /// <summary>A header row for a table without rows: MiniExcel writes none for an empty list.</summary>
-    private static DataTable EmptyTable(IReadOnlyList<string> headers)
-    {
-        var table = new DataTable();
-        foreach (var header in headers)
-        {
-            table.Columns.Add(header, typeof(string));
-        }
-
-        return table;
+        return WorkbookSheets.Save(path, sheets, formats);
     }
 
     /// <summary>
@@ -150,6 +88,4 @@ public static class ReportWorkbook
 
         return unique;
     }
-
-    private static string Cut(string value) => XlsxExport.CutToCell(value, out _);
 }

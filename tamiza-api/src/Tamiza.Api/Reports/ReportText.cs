@@ -70,6 +70,16 @@ public sealed partial class ReportText
         ["range.both"] = "{0} to {1}",
         ["range.min"] = "from {0}",
         ["range.max"] = "up to {0}",
+        // The Summary sheet of a widget's workbook (add-widget-export).
+        ["item"] = "Item",
+        ["indicator"] = "Indicator",
+        ["plotted"] = "Plotted",
+        ["exported"] = "Exported",
+        ["version"] = "Version",
+        ["versionLine"] = "Version {0}, saved by {1} on {2}",
+        ["rows"] = "Rows",
+        ["notFilteredBy"] = "Not filtered by",
+        ["allValues"] = "All",
     };
 
     private static readonly IReadOnlyDictionary<string, string> Spanish = new Dictionary<string, string>
@@ -134,6 +144,15 @@ public sealed partial class ReportText
         ["range.both"] = "{0} a {1}",
         ["range.min"] = "desde {0}",
         ["range.max"] = "hasta {0}",
+        ["item"] = "Elemento",
+        ["indicator"] = "Indicador",
+        ["plotted"] = "Graficado",
+        ["exported"] = "Exportado",
+        ["version"] = "Versión",
+        ["versionLine"] = "Versión {0}, guardada por {1} el {2}",
+        ["rows"] = "Filas",
+        ["notFilteredBy"] = "Sin filtrar por",
+        ["allValues"] = "Todos",
     };
 
     private readonly IReadOnlyDictionary<string, string> _texts;

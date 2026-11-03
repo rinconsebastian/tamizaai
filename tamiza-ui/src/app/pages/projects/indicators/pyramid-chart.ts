@@ -4,11 +4,12 @@ import { countKey } from '../../../core/i18n/plural';
 import { QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { observeSize } from './chart-data';
 import { ChartColors } from './chart-colors';
+import { registerExportParts } from './export-parts';
 import { bandScale, charWidth, linearScale, niceAxis, truncate } from './chart-scales';
 import { CrosstabWidget } from './crosstab-widget';
 import { ValueFormatter, plotted } from './format';
 import { MarkPoint, markTooltips } from './mark-tooltips';
-import { LegendEntry, SeriesLegend, SeriesNotes, seriesName } from './series-legend';
+import { LegendEntry, SeriesLegend, SeriesNotes, seriesName, seriesNoteTexts } from './series-legend';
 import { Hit, Label, Line, Rect } from './series-plot';
 import { SeriesTable, buildSeriesTable, orderedSeriesTable } from './series-table';
 
@@ -284,6 +285,24 @@ export class PyramidChart {
   );
 
   protected readonly marks = markTooltips({ host: () => this.svg()?.nativeElement, marks: () => this.plot().marks, groupsAcross: () => false });
+
+  // What an image of the pyramid says around its bars (add-widget-export): the two sides' legend and the rows it left out.
+  constructor() {
+    registerExportParts({
+      plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
+      settle: () => this.marks.reset(),
+      parts: () => {
+        const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
+        return {
+          caption: null,
+          legend: { kind: 'entries' as const, entries: this.legend().map((entry) => ({ label: entry.name, color: entry.color, swatch: 'square' as const })) },
+          notes: this.asTable() ? [] : seriesNoteTexts({ negativeLeftOut: 0, leftOut: this.table().leftOut, kind: 'pyramid' }, t, this.transloco.getActiveLang()),
+          stat: null,
+          table: null,
+        };
+      },
+    });
+  }
 
   protected summary(t: Translate): string {
     const [left, right] = this.names();

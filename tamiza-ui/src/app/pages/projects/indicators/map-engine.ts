@@ -99,8 +99,30 @@ export interface Viewport {
   box: Box;
 }
 
+/** A shape as the map shows it now, in the pixels of its container (add-widget-export, design D10). */
+export interface PictureShape {
+  /** The step (1 to 7) of the sequential scale. */
+  step: number;
+  /** A marker's centre; null for a region. */
+  point: MapPoint | null;
+  /** A region's polygons, each its outline and then its holes, with the vertices closer than half a pixel to the last one dropped. */
+  polygons: MapPoint[][][];
+}
+
+/** The shapes in view, projected into the container, for a picture that has no tiles. */
+export interface MapPicture {
+  width: number;
+  height: number;
+  shapes: PictureShape[];
+}
+
+/** A vertex closer than this to the one before it adds nothing to a picture. */
+const minVertexDistance = 0.5;
+
 interface Shape {
   layer: Path;
+  step: number;
+  geometry: Geometry;
   /** The pixel half-size added around a marker, which has a radius and no extent. */
   point: boolean;
 }
@@ -189,13 +211,13 @@ export class MapEngine {
       if (shape.geometry.type === 'point') {
         const [x, y] = shape.geometry.position;
         const layer = L.circleMarker([y, x], { ...markerStyle, fillOpacity, className, bubblingMouseEvents: false });
-        this.shapes.push({ layer, point: true });
+        this.shapes.push({ layer, point: true, step: shape.step, geometry: shape.geometry });
         layers.push(layer);
       } else {
         const polygons = shape.geometry.type === 'polygon' ? [shape.geometry.rings] : shape.geometry.polygons;
         const toLatLngs = (ring: Position[]) => ring.map(([x, y]) => L.latLng(y, x));
         const layer = L.polygon(polygons.map((rings) => rings.map(toLatLngs)), { ...polygonStyle, fillOpacity, className, bubblingMouseEvents: false });
-        this.shapes.push({ layer, point: false });
+        this.shapes.push({ layer, point: false, step: shape.step, geometry: shape.geometry });
         layers.push(layer);
       }
     }
@@ -402,6 +424,46 @@ export class MapEngine {
 
   elementOf(index: number): SVGElement | null {
     return (this.shapes[index]?.layer.getElement() as SVGElement | undefined) ?? null;
+  }
+
+  /**
+   * What the map shows now, without its basemap: every shape that meets the view, projected with the map's own projection into the
+   * container's pixels (design D10). Nothing here reads Leaflet's overlay, whose `padding` and layer-pixel view box are not the view.
+   */
+  picture(): MapPicture {
+    const { map } = this;
+    const size = this.size();
+    const project = (position: Position): MapPoint => {
+      const at = map.latLngToContainerPoint([position[1], position[0]]);
+      return { x: at.x, y: at.y };
+    };
+    const shapes: PictureShape[] = [];
+    for (const shape of this.shapes) {
+      if (shape.geometry.type === 'point') {
+        const at = project(shape.geometry.position);
+        const reach = markerStyle.radius + markerStyle.weight;
+        if (at.x >= -reach && at.x <= size.x + reach && at.y >= -reach && at.y <= size.y + reach) {
+          shapes.push({ step: shape.step, point: at, polygons: [] });
+        }
+        continue;
+      }
+      if (!map.getBounds().intersects(this.boundsOf(shape))) {
+        continue;
+      }
+      const polygons = (shape.geometry.type === 'polygon' ? [shape.geometry.rings] : shape.geometry.polygons)
+        .map((rings) =>
+          rings
+            .map((ring) =>
+              ring.map(project).filter((at, i, all) => i === 0 || i === all.length - 1 || Math.hypot(at.x - all[i - 1].x, at.y - all[i - 1].y) >= minVertexDistance),
+            )
+            .filter((ring) => ring.length >= 3),
+        )
+        .filter((rings) => rings.length > 0);
+      if (polygons.length) {
+        shapes.push({ step: shape.step, point: null, polygons });
+      }
+    }
+    return { width: size.x, height: size.y, shapes };
   }
 
   size(): MapPoint {

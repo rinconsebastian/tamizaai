@@ -1010,6 +1010,7 @@ public sealed class DashboardTests(PostgresFixture postgres)
                 "/dashboards/{dashboardId}/versions get",
                 "/dashboards/{dashboardId}/versions/{number} get",
                 "/dashboards/{dashboardId}/versions/{number}/restore post",
+                "/dashboards/{dashboardId}/widget-exports post",
                 "/dashboards/{dashboardId}/widgets post",
                 "/dashboards/{dashboardId}/widgets/{widgetId} delete patch",
             ],
@@ -1034,6 +1035,10 @@ public sealed class DashboardTests(PostgresFixture postgres)
         Assert.Contains("dashboardId", Properties(Component(document, Answer(widget.GetProperty("patch"), "200"))));
         Assert.Contains("dashboardId", Properties(Component(document, Body(widget.GetProperty("patch")))));
         Assert.Equal(["dashboardIds", "expectedIds"], Properties(Component(document, Body(order.GetProperty("put")))));
+        // A widget export is sent the settings and filters on the page, and answers with the link and what the file read.
+        var export = paths.GetProperty(project + "/dashboards/{dashboardId}/widget-exports");
+        Assert.Equal(["chartType", "config", "filters", "format", "locale", "title", "version"], Properties(Component(document, Body(export.GetProperty("post")))));
+        Assert.Equal(["downloadUrl", "expiresAt", "fileName", "publishedAt", "rowCount"], Properties(Component(document, Answer(export.GetProperty("post"), "200"))));
         Assert.Contains("dashboards", Properties(document.GetProperty("components").GetProperty("schemas").GetProperty("ProjectDetails")));
     }
 

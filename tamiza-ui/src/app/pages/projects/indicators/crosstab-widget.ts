@@ -1,8 +1,9 @@
 import { LOCALE_ID, Component, computed, inject, input } from '@angular/core';
-import { TranslocoDirective } from '@jsverse/transloco';
+import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ChartType, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ValueFormatter, plotted } from './format';
-import { SeriesNotes, seriesName } from './series-legend';
+import { registerExportParts } from './export-parts';
+import { SeriesNotes, seriesName, seriesNoteTexts } from './series-legend';
 import { SeriesTable, buildSeriesTable, chartOrder, hasShares } from './series-table';
 import { TableModel, WidgetTable } from './widget-table';
 
@@ -65,6 +66,7 @@ export function crossTableModel(table: SeriesTable, context: CrossTableContext):
 })
 export class CrosstabWidget {
   private readonly locale = inject(LOCALE_ID);
+  private readonly transloco = inject(TranslocoService);
 
   readonly answer = input.required<QueryResult>();
   readonly config = input.required<WidgetConfig>();
@@ -77,6 +79,25 @@ export class CrosstabWidget {
   protected readonly what = computed(() => plotted(this.config(), this.label()));
   protected readonly table = computed(() => buildSeriesTable(this.answer(), this.chartType(), this.config().layout));
   protected readonly notesKind = computed(() => (this.chartType() === 'pyramid' ? 'pyramid' : this.chartType() === 'likert' ? 'likert' : null));
+
+  // The cross table is the whole of a cross table widget and the table view of every widget with a series (add-widget-export).
+  constructor() {
+    registerExportParts({
+      plot: () => null,
+      settle: () => undefined,
+      parts: () => {
+        const t: Translate = (key, params) => this.transloco.translate(key, params);
+        const table = this.table();
+        return {
+          caption: t('indicators.series.caption', { what: this.what(), group: this.config().groupBy, series: this.config().seriesBy }),
+          legend: null,
+          notes: seriesNoteTexts({ negativeLeftOut: table.negativeLeftOut, leftOut: table.leftOut, kind: this.notesKind() }, t, this.transloco.getActiveLang()),
+          stat: null,
+          table: this.model(t),
+        };
+      },
+    });
+  }
 
   protected model(t: Translate): TableModel {
     return crossTableModel(this.table(), { type: this.chartType(), config: this.config(), format: this.format(), locale: this.locale, t });

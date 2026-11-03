@@ -4,6 +4,7 @@ import { countKey } from '../../../core/i18n/plural';
 import { QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { observeSize } from './chart-data';
 import { ChartColors } from './chart-colors';
+import { registerExportParts } from './export-parts';
 import { charWidth, sequentialStep, sequentialSteps, truncate } from './chart-scales';
 import { CrosstabWidget } from './crosstab-widget';
 import { ValueFormatter, plotted } from './format';
@@ -306,6 +307,35 @@ export class HeatmapChart {
   });
 
   protected readonly marks = markTooltips({ host: () => this.svg()?.nativeElement, marks: () => this.marksGrid(), groupsAcross: () => false });
+
+  // What an image of the heat map says around its grid (add-widget-export): its caption and its scale, from the smallest value to the largest.
+  constructor() {
+    registerExportParts({
+      plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
+      settle: () => this.marks.reset(),
+      parts: () => {
+        const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
+        const caption = t('indicators.series.caption', { what: this.what(), group: this.config().groupBy, series: this.config().seriesBy });
+        const range = this.plot().range;
+        return {
+          caption,
+          legend:
+            this.asTable() || !range
+              ? null
+              : {
+                  kind: 'scale' as const,
+                  low: this.format()(range.min),
+                  high: this.format()(range.max),
+                  steps: this.steps.map((step) => this.color(step)),
+                  empty: this.hasEmpty() ? t('indicators.series.noValue') : null,
+                },
+          notes: [],
+          stat: null,
+          table: null,
+        };
+      },
+    });
+  }
 
   /** The fill of a step: the variable the host sets to the step of the widget's scale (it is the blue scale where none is set). */
   protected color(step: number): string {

@@ -60,6 +60,16 @@ public sealed class ReportWorkbookTests : IDisposable
         Assert.Contains(rows, r => r.Values.Select(v => v?.ToString()).SequenceEqual(["Coverage", "92%"]));
     }
 
+    [Theory]
+    [InlineData("en-US", "Summary", "Item", "Value")]
+    [InlineData("es-CO", "Resumen", "Elemento", "Valor")]
+    public void Summary_sheet_headers_follow_the_language(string locale, string sheet, string item, string value)
+    {
+        Write(Model([Stat(1, "Total", "250")], locale));
+
+        Assert.Equal([item, value], Rows(sheet)[0].Keys);
+    }
+
     [Fact]
     public void Sheets()
     {

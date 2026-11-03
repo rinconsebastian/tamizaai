@@ -57,6 +57,16 @@ public static class ExportFileName
         $"{Slug(projectName)}_{table}_{day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}.{extension}";
 
     /// <summary>
+    /// The name a widget's file is downloaded under: the project, the dashboard, the widget's title, the version shown when there is
+    /// one, and the project's day (design D16 of add-widget-export). The UI builds the names of its images with the same rule, and both
+    /// are tested against <c>export-file-names.json</c>.
+    /// </summary>
+    public static string ForWidget(string projectName, string dashboardName, string widgetTitle, int? version, DateOnly day, string extension) =>
+        $"{Slug(projectName)}_{Slug(dashboardName, "dashboard")}_{Slug(widgetTitle, "widget")}"
+        + (version is { } number ? $"_v{number.ToString(CultureInfo.InvariantCulture)}" : "")
+        + $"_{day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}.{extension}";
+
+    /// <summary>
     /// Lower-case ASCII letters and digits separated by single dashes; accents are dropped to their letters. A name that leaves no
     /// letter or digit, such as "住房", gives <paramref name="fallback"/>.
     /// </summary>

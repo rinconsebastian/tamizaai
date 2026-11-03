@@ -1,5 +1,6 @@
 import { Component, computed, input } from '@angular/core';
 import { QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
+import { registerExportParts } from './export-parts';
 import { ValueFormatter, plotted } from './format';
 
 /**
@@ -27,4 +28,13 @@ export class StatWidget {
     return row ? this.format()(row.value) : '—';
   });
   protected readonly description = computed(() => plotted(this.config(), this.label()));
+
+  // What an image of the tile says (add-widget-export): the figure and what it measures.
+  constructor() {
+    registerExportParts({
+      plot: () => null,
+      settle: () => undefined,
+      parts: () => ({ caption: null, legend: null, notes: [], stat: { value: this.value(), description: this.description() }, table: null }),
+    });
+  }
 }

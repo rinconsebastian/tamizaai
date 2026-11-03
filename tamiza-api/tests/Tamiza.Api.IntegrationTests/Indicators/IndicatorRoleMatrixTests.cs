@@ -25,6 +25,7 @@ public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
             data.Add(role, "columns", read);
             data.Add(role, "query", read);
             data.Add(role, "export", read);
+            data.Add(role, "export widget", read);
             data.Add(role, "create", Write(HttpStatusCode.Created));
             data.Add(role, "update", Write(HttpStatusCode.OK));
             data.Add(role, "move", Write(HttpStatusCode.OK));
@@ -63,6 +64,10 @@ public sealed class IndicatorRoleMatrixTests(PostgresFixture postgres)
             "columns" => await client.GetAsync(h.Url + "/coverage/columns"),
             "query" => await client.PostAsJsonAsync(h.Url + "/query", new { config = new { indicator = "coverage", groupBy = "municipality" } }),
             "export" => await client.PostAsJsonAsync(h.Url + "/coverage/exports", new { format = "csv" }),
+            "export widget" => await client.PostAsJsonAsync(h.DashboardUrl() + "/widget-exports", new
+            {
+                format = "xlsx", title = "Coverage", chartType = "bar", config = new { indicator = "coverage", groupBy = "municipality" }, filters = Array.Empty<object>(), locale = "en-US",
+            }),
             "create" => await client.PostAsJsonAsync(h.WidgetsUrl(), new { title = "N", chartType = "stat", config = new { indicator = "coverage" } }),
             "update" => await client.PatchJsonAsync(h.WidgetUrl(widgetId), new { title = "Renamed" }),
             "move" => await client.PatchJsonAsync(h.WidgetUrl(widgetId), new { dashboardId = await h.InsertDashboardAsync("Second") }),

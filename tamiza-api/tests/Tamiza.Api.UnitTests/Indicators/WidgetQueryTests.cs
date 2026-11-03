@@ -170,6 +170,29 @@ public sealed class WidgetQueryTests
     public void Filters_without_a_default_are_never_named() =>
         Assert.Empty(WidgetQuery.NotNarrowedBy(Filters, Config(ignored: ["urban"]), notFiltered: ["urban"]));
 
+    private static readonly FilterInForce[] InForce =
+    [
+        new("municipality", "Municipality", Ignored: false),
+        new("round", "Round", Ignored: true),
+        new("visited_on", "Visit date", Ignored: false),
+    ];
+
+    [Fact]
+    public void An_ignored_filter_in_force_is_not_narrowing_the_widget() =>
+        Assert.Equal(["Round"], WidgetQuery.NotNarrowedBy(InForce, notFiltered: null));
+
+    [Fact]
+    public void A_filter_in_force_the_table_cannot_apply_is_named_too_in_the_bar_order() =>
+        Assert.Equal(["Round", "Visit date"], WidgetQuery.NotNarrowedBy(InForce, notFiltered: ["visited_on"]));
+
+    [Fact]
+    public void A_filter_that_is_ignored_and_not_applied_is_named_once() =>
+        Assert.Equal(["Round"], WidgetQuery.NotNarrowedBy(InForce, notFiltered: ["round"]));
+
+    [Fact]
+    public void With_no_filter_in_force_nothing_is_named() =>
+        Assert.Empty(WidgetQuery.NotNarrowedBy([], notFiltered: ["round"]));
+
     private static WidgetConfig WithSeries() => new WidgetConfigInput(
         "population", "value", GroupBy: "age_band", SeriesBy: "sex", Layout: SeriesLayouts.Stacked, Pyramid: new WidgetPyramid("Female", "Male"),
         Scale: [new LikertStep("No", LikertSides.Negative), new LikertStep("Yes", LikertSides.Positive)]).Normalize();

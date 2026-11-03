@@ -4,6 +4,7 @@ import { countKey } from '../../../core/i18n/plural';
 import { BoxOrientation, QueryBox, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartTooltip, ChartTooltipContent, ChartTooltips } from '../../../shared/ui';
 import { ChartColors } from './chart-colors';
+import { registerExportParts } from './export-parts';
 import { observeSize } from './chart-data';
 import { NiceAxis, bandScale, charWidth, linearScale, niceAxis, truncate } from './chart-scales';
 import { ValueFormatter, plotted } from './format';
@@ -526,6 +527,38 @@ export class BoxplotChart {
   private watch: AbortController | null = null;
 
   constructor() {
+    // What an image of the box plot says around its boxes (add-widget-export): the key of its marks, and the outliers it did not draw.
+    registerExportParts({
+      plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
+      settle: () => {
+        this.marks.reset();
+        this.outlierTip.close();
+      },
+      parts: () => {
+        if (this.asTable()) {
+          return { caption: null, legend: null, notes: [], stat: null, table: this.table(this.tr) };
+        }
+        const key = (name: string) => this.tr(`indicators.boxplot.key.${name}`);
+        const notDrawn = this.plot().notDrawn;
+        return {
+          caption: null,
+          legend: {
+            kind: 'key' as const,
+            accent: this.colors().accent,
+            items: [
+              { glyph: 'box' as const, label: key('box') },
+              { glyph: 'median' as const, label: key('median') },
+              { glyph: 'mean' as const, label: key('mean') },
+              { glyph: 'whiskers' as const, label: key('whiskers') },
+              { glyph: 'outliers' as const, label: key('outliers') },
+            ],
+          },
+          notes: notDrawn > 0 ? [this.notDrawnText(notDrawn)] : [],
+          stat: null,
+          table: null,
+        };
+      },
+    });
     inject(DestroyRef).onDestroy(() => {
       this.watch?.abort();
       this.outlierTip.destroy();

@@ -7,7 +7,8 @@ import { bandScale, charWidth, linearScale, niceAxis, truncate } from './chart-s
 import { CrosstabWidget } from './crosstab-widget';
 import { ValueFormatter, plotted } from './format';
 import { MarkPoint, markTooltips } from './mark-tooltips';
-import { LegendEntry, SeriesLegend, SeriesNotes, seriesName } from './series-legend';
+import { registerExportParts } from './export-parts';
+import { LegendEntry, SeriesLegend, SeriesNotes, seriesName, seriesNoteTexts } from './series-legend';
 import { Hit, Label, Line, Rect } from './series-plot';
 import { SeriesTable, buildSeriesTable, orderedSeriesTable } from './series-table';
 
@@ -311,6 +312,27 @@ export class LikertChart {
   );
 
   protected readonly marks = markTooltips({ host: () => this.svg()?.nativeElement, marks: () => this.plot().marks, groupsAcross: () => false });
+
+  // What an image of the Likert bars says around them (add-widget-export): the scale's legend, neutral outlined, and the rows left out.
+  constructor() {
+    registerExportParts({
+      plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
+      settle: () => this.marks.reset(),
+      parts: () => {
+        const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
+        return {
+          caption: null,
+          legend: {
+            kind: 'entries' as const,
+            entries: this.legend().map((entry) => ({ label: entry.name, color: entry.color, swatch: entry.outlined ? ('outlined' as const) : ('square' as const) })),
+          },
+          notes: this.asTable() ? [] : seriesNoteTexts({ negativeLeftOut: 0, leftOut: this.table().leftOut, kind: 'likert' }, t, this.transloco.getActiveLang()),
+          stat: null,
+          table: null,
+        };
+      },
+    });
+  }
 
   protected summary(t: Translate): string {
     const table = this.table();

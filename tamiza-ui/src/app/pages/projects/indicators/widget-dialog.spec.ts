@@ -510,6 +510,16 @@ describe('the widget dialog', () => {
       expect(field('dialog-preview').querySelectorAll('[data-testid="chart-mark"]')).toHaveLength(2);
     });
 
+    it('offers no Export in the preview of a draft (Export button)', async () => {
+      const context = await openDialog();
+      await change(context, field('dialog-chart-type'), 'bar');
+
+      await previewAnswer(context, result([row('Cali', 75)]));
+
+      expect(field('dialog-preview').querySelector('[data-testid="chart-svg"]')).not.toBeNull();
+      expect(field('dialog-preview').querySelector('[data-testid="widget-export"]')).toBeNull();
+    });
+
     it('shows the server\'s refusal of an invalid draft in place of the earlier chart', async () => {
       const context = await openDialog();
       await previewAnswer(context, result([row('Cali', 75)]));

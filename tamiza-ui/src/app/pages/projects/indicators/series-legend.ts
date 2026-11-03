@@ -43,6 +43,22 @@ export class SeriesLegend {
   readonly shape = input<'square' | 'line'>('square');
 }
 
+/** The texts `app-series-notes` shows, for a picture of the widget: negatives left out of shares, then rows a pyramid or Likert left out. */
+export function seriesNoteTexts(
+  notes: { negativeLeftOut: number; leftOut: number; kind: 'pyramid' | 'likert' | null },
+  t: Translate,
+  lang: string,
+): string[] {
+  const texts: string[] = [];
+  if (notes.negativeLeftOut > 0) {
+    texts.push(t(countKey('indicators.series.negativeLeftOut', notes.negativeLeftOut, lang), { count: notes.negativeLeftOut }));
+  }
+  if (notes.leftOut > 0 && notes.kind) {
+    texts.push(t(countKey(`indicators.${notes.kind}.leftOut`, notes.leftOut, lang), { count: notes.leftOut }));
+  }
+  return texts;
+}
+
 /**
  * What a chart or a table with a series left out, said under it: negative values that a table of shares left out of the shares, and the
  * rows a pyramid or a Likert widget left out (design D4, D5). `kind` picks the words for the rows.
