@@ -2,11 +2,12 @@ import { LOCALE_ID, Component, ElementRef, computed, inject, input, viewChild } 
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { QueryRow, QuerySeries, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartColors, SeriesKey } from './chart-colors';
+import { registerExportParts } from './export-parts';
 import { observeSize, pivot } from './chart-data';
 import { seriesCount, slicePath } from './chart-scales';
 import { ValueFormatter, plotted } from './format';
 import { TableModel, WidgetTable } from './widget-table';
-import { PctPipe } from '../../../shared/ui';
+import { PctPipe, percentText } from '../../../shared/ui';
 import { countKey } from '../../../core/i18n/plural';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
@@ -53,7 +54,7 @@ const otherKey: SeriesKey = { value: null, kind: 'other' };
         <!-- A wide tile puts the legend beside the pie, so the pie keeps the tile's height. -->
         <div class="@container flex min-h-0 flex-1 flex-col gap-2 @md:flex-row">
         <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
-          <svg role="img" class="tmz-chart-svg absolute inset-0 block" [attr.width]="geometry().width" [attr.height]="geometry().height" [attr.viewBox]="'0 0 ' + geometry().width + ' ' + geometry().height" [attr.aria-label]="summary(t)" data-testid="chart-svg">
+          <svg #pieSvg role="img" class="tmz-chart-svg absolute inset-0 block" [attr.width]="geometry().width" [attr.height]="geometry().height" [attr.viewBox]="'0 0 ' + geometry().width + ' ' + geometry().height" [attr.aria-label]="summary(t)" data-testid="chart-svg">
             @for (slice of slices(); track slice.name) {
               @if (slice.d) {
                 <path class="stroke-neutral-primary-soft hover:opacity-80" stroke-width="2" [attr.d]="slice.d" [style.fill]="slice.color" data-testid="pie-slice">
@@ -103,6 +104,7 @@ export class PieWidget {
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private readonly size = observeSize(() => this.box());
+  private readonly svg = viewChild<ElementRef<SVGSVGElement>>('pieSvg');
 
   protected readonly what = computed(() => plotted(this.config(), this.label()));
 
@@ -183,6 +185,36 @@ export class PieWidget {
     const height = Math.max(100, this.size().height);
     return { width, height, cx: width / 2, cy: height / 2, radius: Math.max(20, Math.min(width, height) / 2 - 6) };
   });
+
+  // What an image of the pie says (add-widget-export): the caption, the whole legend with each slice's value and share, what was not drawn.
+  constructor() {
+    registerExportParts({
+      plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
+      settle: () => undefined,
+      parts: () => {
+        const t: Translate = (key, params) => this.transloco.translate(key, params);
+        const caption = t('indicators.chart.caption', { what: this.what(), group: this.config().groupBy });
+        if (this.asTable()) {
+          return { caption, legend: null, notes: [], stat: null, table: this.table(t) };
+        }
+        const skipped = this.notDrawn();
+        return {
+          caption,
+          legend: {
+            kind: 'entries' as const,
+            entries: this.slices().map((slice) => ({
+              label: slice.name,
+              color: slice.color,
+              detail: `${this.format()(slice.value)} · ${percentText(slice.share, this.locale, '1.0-1')}`,
+            })),
+          },
+          notes: skipped > 0 ? [t(this.key('indicators.pie.skipped', skipped), { count: skipped })] : [],
+          stat: null,
+          table: null,
+        };
+      },
+    });
+  }
 
   protected sliceTitle(slice: Slice): string {
     return `${slice.name}: ${this.format()(slice.value)} (${new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }).format(slice.share)})`;

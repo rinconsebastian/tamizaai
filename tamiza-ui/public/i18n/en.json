@@ -188,6 +188,9 @@
         "authFailed": "Authentication with the email server failed.",
         "rejected": "The email server refused the message.",
         "rejectedAddress": "The email server refused the address {{ address }}, so no recipient received the email."
+      },
+      "widgetExports": {
+        "filtersChanged": "The dashboard’s filters changed since the page was opened. Reload the dashboard and try again."
       }
     }
   },
@@ -1874,6 +1877,35 @@
       "summaryOne": "Box plot of {{ what }} by {{ group }}: {{ count }} box, median {{ min }}.",
       "summaryAll": "Box plot of {{ what }}: one box over every row, median {{ median }}, from {{ min }} to {{ max }}.",
       "summarySame": "Box plot of {{ what }} by {{ group }}: {{ count }} boxes, all with the median {{ median }}."
+    },
+    "widgetExport": {
+      "button": "Export “{{ title }}”",
+      "preparing": "Preparing the export of “{{ title }}”…",
+      "png": "PNG image",
+      "svg": "SVG image",
+      "xlsx": "Excel workbook (XLSX)",
+      "withoutBasemap": "Shapes and legend, without the basemap",
+      "reason": {
+        "loading": "The widget is still loading.",
+        "failed": "The widget could not be loaded.",
+        "missing": "Its table no longer has {{ names }}.",
+        "mapDrawing": "The map is still being drawn.",
+        "mapNothing": "The map has no shape to draw."
+      },
+      "imageReadyPng": "“{{ title }}” was saved as a PNG image.",
+      "imageReadySvg": "“{{ title }}” was saved as an SVG image.",
+      "workbookReady": "The workbook of “{{ title }}” is ready: {{ count }} rows. The download starts now.",
+      "workbookReadyOne": "The workbook of “{{ title }}” is ready: 1 row. The download starts now.",
+      "newerData": "It holds data published {{ time }}, after this page was loaded. Reload the page to see it.",
+      "pngFailed": "The PNG image could not be made. Try the SVG image.",
+      "pngTooLarge": "This widget is too large for a PNG image. Try the SVG image.",
+      "footerExported": "Exported {{ time }} ({{ zone }})",
+      "basemapLeftOut": "The basemap is not included in the image.",
+      "rowsNotShown": "{{ count }} rows not shown in the image.",
+      "rowsNotShownOne": "1 row not shown in the image.",
+      "columnsNotShown": "{{ count }} columns not shown in the image.",
+      "columnsNotShownOne": "1 column not shown in the image.",
+      "inWorkbook": "The Excel workbook has them all."
     }
   },
   "dashboards": {

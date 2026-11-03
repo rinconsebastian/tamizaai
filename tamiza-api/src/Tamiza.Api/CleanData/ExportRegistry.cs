@@ -42,6 +42,34 @@ public sealed class ExportRegistry(TimeProvider time, IOptions<DataDashboardOpti
     }
 
     /// <summary>
+    /// Writes a file in the export directory with <paramref name="write"/> and registers it. Returns null, leaving no file, when
+    /// <paramref name="write"/> wrote nothing; the file is deleted too when anything fails before the registry owns it, so a write
+    /// that throws (a size limit, a full disk) leaves no file behind either.
+    /// </summary>
+    public ExportLink? Register(Guid projectId, Guid userId, string fileName, string contentType, Func<string, bool> write)
+    {
+        string? path = NewFilePath();
+        try
+        {
+            if (!write(path))
+            {
+                return null;
+            }
+
+            var link = Add(projectId, userId, path, fileName, contentType);
+            path = null; // the registry owns the file now
+            return link;
+        }
+        finally
+        {
+            if (path is not null)
+            {
+                DeleteQuietly(path);
+            }
+        }
+    }
+
+    /// <summary>
     /// The export for the link, removed so that no one can take it again. Null when the link is unknown, was used or expired;
     /// an expired file is deleted. When two callers race for one link, only one gets it.
     /// </summary>

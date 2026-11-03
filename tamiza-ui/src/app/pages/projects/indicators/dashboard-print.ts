@@ -19,7 +19,7 @@ export function printTitle(project: string, dashboard: string, now: Date, timeZo
 }
 
 /** `yyyy-mm-dd` of the instant in the zone; an unknown zone falls back to UTC. */
-function isoDay(now: Date, timeZone: string): string {
+export function isoDay(now: Date, timeZone: string): string {
   let parts: Intl.DateTimeFormatPart[];
   try {
     parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);

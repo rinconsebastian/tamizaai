@@ -188,6 +188,9 @@
         "authFailed": "Falló la autenticación con el servidor de correo.",
         "rejected": "El servidor de correo rechazó el mensaje.",
         "rejectedAddress": "El servidor de correo rechazó la dirección {{ address }}, así que ningún destinatario recibió el correo."
+      },
+      "widgetExports": {
+        "filtersChanged": "Los filtros del tablero cambiaron desde que se abrió la página. Recarga el tablero e inténtalo de nuevo."
       }
     }
   },
@@ -1874,6 +1877,35 @@
       "summaryOne": "Diagrama de caja de {{ what }} por {{ group }}: {{ count }} caja, mediana {{ min }}.",
       "summaryAll": "Diagrama de caja de {{ what }}: una caja sobre todas las filas, mediana {{ median }}, de {{ min }} a {{ max }}.",
       "summarySame": "Diagrama de caja de {{ what }} por {{ group }}: {{ count }} cajas, todas con la mediana {{ median }}."
+    },
+    "widgetExport": {
+      "button": "Exportar “{{ title }}”",
+      "preparing": "Preparando la exportación de “{{ title }}”…",
+      "png": "Imagen PNG",
+      "svg": "Imagen SVG",
+      "xlsx": "Libro de Excel (XLSX)",
+      "withoutBasemap": "Formas y leyenda, sin el mapa base",
+      "reason": {
+        "loading": "El widget aún se está cargando.",
+        "failed": "No se pudo cargar el widget.",
+        "missing": "Su tabla ya no tiene {{ names }}.",
+        "mapDrawing": "El mapa aún se está dibujando.",
+        "mapNothing": "El mapa no tiene ninguna forma que dibujar."
+      },
+      "imageReadyPng": "“{{ title }}” se guardó como imagen PNG.",
+      "imageReadySvg": "“{{ title }}” se guardó como imagen SVG.",
+      "workbookReady": "El libro de “{{ title }}” está listo: {{ count }} filas. La descarga comienza ahora.",
+      "workbookReadyOne": "El libro de “{{ title }}” está listo: 1 fila. La descarga comienza ahora.",
+      "newerData": "Contiene datos publicados el {{ time }}, después de cargar esta página. Recarga la página para verlos.",
+      "pngFailed": "No se pudo crear la imagen PNG. Prueba con la imagen SVG.",
+      "pngTooLarge": "Este widget es demasiado grande para una imagen PNG. Prueba con la imagen SVG.",
+      "footerExported": "Exportado el {{ time }} ({{ zone }})",
+      "basemapLeftOut": "El mapa base no está incluido en la imagen.",
+      "rowsNotShown": "{{ count }} filas no se muestran en la imagen.",
+      "rowsNotShownOne": "1 fila no se muestra en la imagen.",
+      "columnsNotShown": "{{ count }} columnas no se muestran en la imagen.",
+      "columnsNotShownOne": "1 columna no se muestra en la imagen.",
+      "inWorkbook": "El libro de Excel las tiene todas."
     }
   },
   "dashboards": {

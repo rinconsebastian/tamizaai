@@ -26,15 +26,23 @@ const itemBase = 'block w-full text-left px-4 py-2 text-sm min-h-10 focus:bg-neu
   template: `
     <button
       type="button"
-      [cdkMenuTriggerFor]="menu"
+      [cdkMenuTriggerFor]="busy() ? null : menu"
       (cdkMenuClosed)="closed()"
       [attr.aria-label]="label()"
+      [attr.aria-busy]="busy() ? 'true' : null"
+      [attr.aria-disabled]="busy() ? 'true' : null"
       class="inline-flex items-center justify-center min-h-10 min-w-10 rounded-base text-body hover:bg-neutral-secondary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary"
       [attr.data-testid]="triggerTestId()"
     >
-      <svg aria-hidden="true" class="size-5" viewBox="0 0 24 24" fill="currentColor">
-        <circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" />
-      </svg>
+      @if (icon() === 'download') {
+        <svg aria-hidden="true" class="size-5" [class.animate-pulse]="busy()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-icon="download">
+          <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M12 4v12m0 0 4-4m-4 4-4-4" />
+        </svg>
+      } @else {
+        <svg aria-hidden="true" class="size-5" [class.animate-pulse]="busy()" viewBox="0 0 24 24" fill="currentColor" data-icon="more">
+          <circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" />
+        </svg>
+      }
     </button>
     <ng-template #menu>
       <div cdkMenu class="z-10 min-w-44 max-w-[calc(100vw-2rem)] py-2 bg-neutral-primary-medium border border-default-medium rounded-base shadow-lg">
@@ -67,6 +75,13 @@ export class DropdownMenu {
   readonly items = input.required<MenuItem[]>();
   /** Lets tests and scripts tell this menu's button from the other menus' on the page. */
   readonly triggerTestId = input('menu-trigger');
+  /** The trigger's icon: the three dots of an actions menu, or a download arrow for an export menu. */
+  readonly icon = input<'more' | 'download'>('more');
+  /**
+   * An action started from this menu is still running: the trigger pulses and says it is busy, and the menu does not open. It stays
+   * focusable, as the Print action does, so a keyboard user does not lose their place.
+   */
+  readonly busy = input(false);
   readonly selected = output<string>();
 
   /** The item chosen while the menu is open; emitted once it has closed. */

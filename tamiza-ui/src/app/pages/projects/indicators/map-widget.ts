@@ -1,4 +1,4 @@
-import { Component, DestroyRef, ElementRef, LOCALE_ID, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, LOCALE_ID, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
 import { BasemapCredits, BasemapEntry, Basemaps, CreditsArea } from '../../../core/basemaps.service';
@@ -6,11 +6,12 @@ import { DataColumnType } from '../../../core/projects/data.service';
 import { BasemapKind, QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartTooltip, ChartTooltips } from '../../../shared/ui';
 import { ChartColors } from './chart-colors';
+import { registerExportParts } from './export-parts';
 import { sequentialStep, sequentialSteps } from './chart-scales';
 import { DashboardPrint } from './dashboard-print';
 import { ValueFormatter, plotted } from './format';
 import { BasemapChoice, MapControls } from './map-controls';
-import { EngineView, MapEngine, MapEvents, MapPoint, ShapeInput, TileHooks } from './map-engine';
+import { EngineView, MapEngine, MapEvents, MapPicture, MapPoint, ShapeInput, TileHooks } from './map-engine';
 import { kindOf } from './map-geometry';
 import { TooltipContext, tooltipContent, tooltipLabel, tooltipSpeech, tooltipValues } from './map-tooltip';
 import { countKey } from '../../../core/i18n/plural';
@@ -18,6 +19,9 @@ import { Geometry, parseWkt, positionsOf } from './wkt';
 import { TableModel, WidgetTable } from './widget-table';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
+
+/** What a map tells the widget's Export menu about itself (add-widget-export, design D3). */
+export type MapReadiness = 'ready' | 'drawing' | 'nothing';
 
 /** A row with a geometry that can be drawn; `index` is its place among the shapes, in the order of the table. */
 interface Drawn {
@@ -174,6 +178,13 @@ export class MapWidget {
   readonly asTable = input(false);
   /** The colors of the widget: its sequential scale, from the widget or from its dashboard's palette. */
   readonly colors = input.required<ChartColors>();
+  /**
+   * Whether the map can be saved as an image now (add-widget-export, design D3): `drawing` until the engine is made and while the map
+   * moves, `nothing` when every row was left out. The widget's Export menu reads it.
+   */
+  readonly exportReadiness = output<MapReadiness>();
+  /** Whether a basemap is under the shapes, which an image leaves out (design D10). */
+  readonly basemapShown = output<boolean>();
 
   protected readonly steps = Array.from({ length: sequentialSteps }, (_, i) => i + 1);
   protected readonly helpId = `map-help-${++helpIds}`;
@@ -220,6 +231,8 @@ export class MapWidget {
   // --- The view (design D4): never saved, never queried ------------------------------------------------------------------
 
   protected readonly engine = signal<MapEngine | null>(null);
+  /** Between the first frame of a move or a zoom and the view settling. */
+  private readonly moving = signal(false);
   protected readonly current = signal<EngineView | null>(null);
   /** The member moved or zoomed the map: a resize no longer re-fits it. */
   private readonly touched = signal(false);
@@ -237,6 +250,11 @@ export class MapWidget {
   private drawnOnEngine: Drawn[] | null = null;
   /** The rows the last view that was settled belongs to. */
   private viewOf: Drawn[] | null = null;
+
+  /** The shapes in the member's view, projected, for an image of the map; null before the engine is made (add-widget-export). */
+  picture(): MapPicture | null {
+    return this.engine()?.picture() ?? null;
+  }
 
   // --- The basemap (design D11, D13 to D17) ------------------------------------------------------------------------------
 
@@ -292,7 +310,10 @@ export class MapWidget {
     leave: (index) => this.onLeave(index),
     pick: (index, at) => this.pin(index, at),
     blank: () => this.closePinned(),
-    motion: () => this.closeHover(),
+    motion: () => {
+      this.moving.set(true);
+      this.closeHover();
+    },
     settled: (view, byUser) => this.onSettled(view, byUser),
   };
 
@@ -308,6 +329,36 @@ export class MapWidget {
 
   constructor() {
     this.basemaps.load();
+    // What an image of the map says around its shapes (add-widget-export): the caption, the scale at full opacity (an image has no
+    // basemap under it), and what the map left out. The shapes themselves come from the engine (`MapEngine.picture`).
+    registerExportParts({
+      plot: () => null,
+      settle: () => {
+        this.closePinned();
+        this.closeHover();
+      },
+      parts: () => {
+        const t: Translate = (key, params) => this.transloco.translate(key, params);
+        const caption = t('indicators.map.caption', { what: this.what(), group: this.config().groupBy });
+        if (this.asTable()) {
+          return { caption, legend: null, notes: [], stat: null, table: this.table(t) };
+        }
+        const range = this.range();
+        const left = this.leftOut();
+        const notes = [this.note(t), left > 0 ? t(this.key('indicators.map.leftOut', left), { count: left }) : null, this.drawn().length ? null : t('indicators.map.nothing')];
+        return {
+          caption,
+          legend: this.drawn().length
+            ? { kind: 'scale' as const, low: this.format()(range.min), high: this.format()(range.max), steps: this.steps.map((step) => this.color(step)), stepOpacity: 1 }
+            : null,
+          notes: notes.filter((note): note is string => !!note),
+          stat: null,
+          table: null,
+        };
+      },
+    });
+    effect(() => this.exportReadiness.emit(this.drawn().length === 0 ? 'nothing' : !this.engine() || this.moving() ? 'drawing' : 'ready'));
+    effect(() => this.basemapShown.emit(this.layerKey() !== null));
 
     // Paper mode (dashboard printing, design D5, D6): the map is made even below the screen, takes the box it has on paper and
     // shows all its shapes again unless the member moved it; the Print action waits for it to be made and for its tiles.
@@ -840,6 +891,7 @@ export class MapWidget {
 
   /** The view settled: a pinned tooltip follows its shape. */
   private onSettled(view: EngineView, byUser: boolean): void {
+    this.moving.set(false);
     this.current.set(view);
     if (byUser) {
       this.touched.set(true);

@@ -7,9 +7,17 @@ import { defaultColors } from './chart-colors';
 import { ActiveDashboardFilter } from './dashboard-filters';
 import { DashboardPrint } from './dashboard-print';
 import { Placed, changed, movedBy, readingOrder, reflow, resizedBy, unitsFor } from './grid-layout';
-import { WidgetView } from './widget-view';
+import { WidgetFileExtension } from './widget-export/file-name';
+import { ExportState, WidgetView } from './widget-view';
 
 type Resize = 'move' | 'resize';
+
+/** What a member chose from a widget's Export menu: the widget, the format, and the view that knows what it shows (add-widget-export). */
+export interface WidgetExportChoice {
+  widget: Widget;
+  format: WidgetFileExtension;
+  view: WidgetView;
+}
 
 const arrows: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 /** Used when the grid has no measured width (before layout). */
@@ -76,12 +84,23 @@ const fallbackWidth = 1200;
                   <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4zM4 10h16M4 15h16M10 5v14" /></svg>
                 </button>
               }
+              <!-- Every member can export; the editors' actions come after it, in a menu of their own. -->
+              <tmz-dropdown-menu
+                class="paper:hidden"
+                icon="download"
+                triggerTestId="widget-export"
+                [label]="t(isExporting(widget) ? 'indicators.widgetExport.preparing' : 'indicators.widgetExport.button', { title: widget.title })"
+                [busy]="isExporting(widget)"
+                [items]="exportItems(view.exportState())"
+                (selected)="exportChosen(widget, view, $event)"
+              />
               @if (editable()) {
                 <tmz-dropdown-menu class="paper:hidden" [label]="t('indicators.grid.actionsFor', { title: widget.title })" [items]="actions()" (selected)="act(widget, $event)" />
               }
             </header>
             <div class="min-h-0 flex-1 overflow-hidden p-3">
               <app-widget-view
+                #view
                 [projectId]="projectId()"
                 [chartType]="widget.chartType"
                 [config]="widget.config"
@@ -205,11 +224,15 @@ export class WidgetGrid {
   readonly dashboardFilters = input<ActiveDashboardFilter[]>([]);
   /** The palette and the colors kept by value of the dashboard shown, or of the version shown: each widget is drawn in them (add-dashboard-palettes, design D7). */
   readonly colors = input<DashboardColors>(defaultColors);
+  /** The widgets whose export is being prepared, by id, with the format: only their Export menu is busy. */
+  readonly exporting = input<Record<string, WidgetFileExtension>>({});
 
   /** Every layout a move or resize changed, the dropped widget's and those it pushed down. */
   readonly layoutsChange = output<Placed[]>();
   readonly edit = output<Widget>();
   readonly remove = output<Widget>();
+  /** A format chosen from a widget's Export menu. The page makes the file: it knows the project, the dashboard, the version and the filters. */
+  readonly exportWidget = output<WidgetExportChoice>();
 
   protected readonly ordered = computed(() => readingOrder(this.widgets()));
   /** Laid out as it prints: the 12 columns at every width, the phone layout off. */
@@ -253,6 +276,29 @@ export class WidgetGrid {
   protected toggleTable(widget: Widget): void {
     const next = !this.shownAsTable(widget);
     this.tableChoice.update((choice) => ({ ...choice, [widget.id]: next }));
+  }
+
+  protected isExporting(widget: Widget): boolean {
+    return widget.id in this.exporting();
+  }
+
+  /**
+   * The three formats of a widget's Export menu. One that cannot be made stays in the menu, announced as unavailable, with the reason
+   * under it (design D3); an image that can be made may carry a line about what it leaves out.
+   */
+  protected exportItems(state: ExportState): MenuItem[] {
+    const t = (key: string) => this.transloco.translate(`indicators.widgetExport.${key}`);
+    return [
+      { id: 'png', label: t('png'), testId: 'widget-export-png', disabled: state.image !== null, description: state.image ?? state.imageNote ?? undefined },
+      { id: 'svg', label: t('svg'), testId: 'widget-export-svg', disabled: state.image !== null, description: state.image ?? state.imageNote ?? undefined },
+      { id: 'xlsx', label: t('xlsx'), testId: 'widget-export-xlsx', disabled: state.workbook !== null, description: state.workbook ?? undefined },
+    ];
+  }
+
+  protected exportChosen(widget: Widget, view: WidgetView, format: string): void {
+    if (format === 'png' || format === 'svg' || format === 'xlsx') {
+      this.exportWidget.emit({ widget, format, view });
+    }
   }
 
   protected setDrawable(id: string, value: boolean): void {

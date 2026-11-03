@@ -141,29 +141,12 @@ public static class SamplingFrameEndpoints
             .SingleAsync(ct);
 
     /// <summary>
-    /// Writes a file in the export directory with <paramref name="write"/> and registers it. Returns null, leaving no file, when
-    /// <paramref name="write"/> wrote nothing; the file is deleted too when anything fails before the registry owns it.
+    /// Writes a file with <paramref name="write"/> and registers its single-use link (see <see cref="ExportRegistry.Register"/>).
+    /// Returns null, leaving no file, when <paramref name="write"/> wrote nothing.
     /// </summary>
     private static SamplingFrameFile? Register(ExportRegistry exports, Guid projectId, Guid userId, string fileName, long rowCount, Func<string, bool> write)
     {
-        string? path = exports.NewFilePath();
-        try
-        {
-            if (!write(path))
-            {
-                return null;
-            }
-
-            var link = exports.Add(projectId, userId, path, fileName, DataDashboard.XlsxContentType);
-            path = null; // the registry owns the file now
-            return new SamplingFrameFile($"/api/v1/data-exports/{link.Token}", fileName, rowCount, link.ExpiresAt);
-        }
-        finally
-        {
-            if (path is not null)
-            {
-                ExportRegistry.DeleteQuietly(path);
-            }
-        }
+        var link = exports.Register(projectId, userId, fileName, DataDashboard.XlsxContentType, write);
+        return link is null ? null : new SamplingFrameFile($"/api/v1/data-exports/{link.Token}", fileName, rowCount, link.ExpiresAt);
     }
 }

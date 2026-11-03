@@ -7,6 +7,8 @@
 @plugin 'flowbite/plugin';
 @import '@angular/cdk/overlay-prebuilt.css';
 @import '@angular/cdk/a11y-prebuilt.css';
+/* The picture exporter writes class names and colors as plain strings; they are not utilities to generate (add-widget-export, design D19). */
+@source not "./app/pages/projects/indicators/widget-export";
 
 /*
  * `paper:` styles a dashboard as it prints (dashboard printing, design D3): on paper, and on screen while the page prepares the print

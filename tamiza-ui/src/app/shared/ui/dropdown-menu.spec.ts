@@ -1,13 +1,15 @@
-import { Component } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { pressKey, provideVisibleElements, tick } from '../../../testing/cdk';
 import { DropdownMenu, MenuItem } from './dropdown-menu';
 
 @Component({
   imports: [DropdownMenu],
-  template: `<tmz-dropdown-menu label="Actions for Grace" [items]="items" (selected)="choose($event)" />`,
+  template: `<tmz-dropdown-menu label="Actions for Grace" [items]="items" [icon]="icon()" [busy]="busy()" (selected)="choose($event)" />`,
 })
 class Host {
+  readonly icon = signal<'more' | 'download'>('more');
+  readonly busy = signal(false);
   items: MenuItem[] = [
     { id: 'analyst', label: 'Make analyst' },
     { id: 'viewer', label: 'Make viewer' },
@@ -135,5 +137,53 @@ describe('DropdownMenu', () => {
       expect(fixture.componentInstance.chosen).toBeNull();
       expect(document.querySelector('[role="menu"]')).not.toBeNull();
     });
+  });
+
+  it('shows three dots by default and a download arrow for an export menu', () => {
+    const fixture = TestBed.createComponent(Host);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-icon="more"]')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('[data-icon="download"]')).toBeNull();
+
+    fixture.componentInstance.icon.set('download');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-icon="download"]')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('[data-icon="more"]')).toBeNull();
+  });
+
+  it('says it is busy, pulses its icon and stays focusable while an action runs', () => {
+    const fixture = TestBed.createComponent(Host);
+    fixture.componentInstance.busy.set(true);
+    fixture.detectChanges();
+    const trigger = fixture.nativeElement.querySelector('[data-testid="menu-trigger"]') as HTMLButtonElement;
+
+    expect(trigger.getAttribute('aria-busy')).toBe('true');
+    expect(trigger.getAttribute('aria-disabled')).toBe('true');
+    expect(trigger.disabled).toBe(false);
+    expect(trigger.querySelector('svg')?.classList.contains('animate-pulse')).toBe(true);
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('does not open while busy, from the keyboard or the mouse, and opens again once the action ends', async () => {
+    const fixture = TestBed.createComponent(Host);
+    fixture.componentInstance.busy.set(true);
+    fixture.detectChanges();
+    const trigger = fixture.nativeElement.querySelector('[data-testid="menu-trigger"]') as HTMLButtonElement;
+    trigger.focus();
+
+    pressKey(trigger, 'ArrowDown');
+    trigger.click();
+    await fixture.whenStable();
+    await tick();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+
+    fixture.componentInstance.busy.set(false);
+    fixture.detectChanges();
+    expect(trigger.getAttribute('aria-busy')).toBeNull();
+    pressKey(trigger, 'ArrowDown');
+    await fixture.whenStable();
+    await tick();
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
   });
 });

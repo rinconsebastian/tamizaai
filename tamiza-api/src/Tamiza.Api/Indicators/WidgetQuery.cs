@@ -65,4 +65,19 @@ public static class WidgetQuery
                         && (config.IgnoredDashboardFilters.Contains(f.Column) || (notFiltered?.Contains(f.Column) ?? false)))
             .Select(f => f.Label)
             .ToList();
+
+    /// <summary>
+    /// The labels, in the filter bar's order, of the filters in force on a member's screen that do not narrow the widget: those it
+    /// ignores, and those whose column the answer lists in <paramref name="notFiltered"/> (null when nothing was sent). Twin of
+    /// <c>notFiltered</c> in <c>widget-view.ts</c>, which reads the filters in force, ignored ones included (design D12 of
+    /// add-widget-export).
+    /// </summary>
+    public static IReadOnlyList<string> NotNarrowedBy(IReadOnlyList<FilterInForce> inForce, IReadOnlyList<string>? notFiltered) =>
+        inForce
+            .Where(f => f.Ignored || (notFiltered?.Contains(f.Column) ?? false))
+            .Select(f => f.Label)
+            .ToList();
 }
+
+/// <summary>A dashboard filter with a value in force on a member's screen, named as the dashboard stores it; <see cref="Ignored"/> when the widget ignores it.</summary>
+public sealed record FilterInForce(string Column, string Label, bool Ignored);

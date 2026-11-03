@@ -36,6 +36,8 @@ public sealed record ReportCell(object? Value, string Text);
 /// <param name="Reason">Why the widget shows no table or value, in the email's language; null when it has one.</param>
 /// <param name="Notes">What the reader should know about the rows shown: the row limit, or filters that do not narrow it.</param>
 /// <param name="SeriesColumns">A cross table's series columns, which come between the group column and the "Total" column; 0 for any other table.</param>
+/// <param name="StatColumn">A stat tile's header and number format, for a widget's own workbook; the email writes the tile as text.</param>
+/// <param name="StatCell">A stat tile's value as a number, with its text.</param>
 public sealed record ReportWidget(
     int Position,
     string Title,
@@ -47,7 +49,9 @@ public sealed record ReportWidget(
     string? StatValue,
     string? Reason,
     IReadOnlyList<string> Notes,
-    int SeriesColumns = 0)
+    int SeriesColumns = 0,
+    ReportColumn? StatColumn = null,
+    ReportCell? StatCell = null)
 {
     /// <summary>The most series columns the body of an email shows for one widget; the workbook shows them all.</summary>
     public const int BodySeriesColumns = 6;
@@ -100,3 +104,8 @@ public sealed record ReportModel(
 
     public string Subject => Text.Format("subject", ProjectName, DashboardName, Format.Day(Format.LocalDay(GeneratedAt)));
 }
+
+/// <summary>One widget's table for its own workbook, and how its indicator is named there (design D12 of add-widget-export).</summary>
+/// <param name="Widget">The table, value, notes or reason, in the member's language.</param>
+/// <param name="IndicatorLabel">The indicator's label, or its name when the project no longer lists it.</param>
+public sealed record WidgetExportContent(ReportWidget Widget, string IndicatorLabel);

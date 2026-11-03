@@ -1,0 +1,95 @@
+{
+ "_comment": "Shared by the API's ExportFileName tests and the UI's file-name.ts spec (design D16 of add-widget-export). Names are worked out by hand: each part is lower-case ASCII separated by dashes (accents dropped, anything else a dash), at most 40 characters, and an empty part reads project, dashboard or widget; the version, when shown, is _v<number> before the project's day.",
+ "cases": [
+  {
+   "name": "project, dashboard, widget and day",
+   "project": "Census 2026",
+   "dashboard": "Housing",
+   "title": "Coverage by municipality",
+   "version": null,
+   "day": "2026-11-02",
+   "extension": "png",
+   "expected": "census-2026_housing_coverage-by-municipality_2026-11-02.png"
+  },
+  {
+   "name": "version shown",
+   "project": "Census 2026",
+   "dashboard": "Housing",
+   "title": "Coverage by municipality",
+   "version": 9,
+   "day": "2026-11-02",
+   "extension": "xlsx",
+   "expected": "census-2026_housing_coverage-by-municipality_v9_2026-11-02.xlsx"
+  },
+  {
+   "name": "svg extension",
+   "project": "Census 2026",
+   "dashboard": "Housing",
+   "title": "Coverage by municipality",
+   "version": null,
+   "day": "2026-11-02",
+   "extension": "svg",
+   "expected": "census-2026_housing_coverage-by-municipality_2026-11-02.svg"
+  },
+  {
+   "name": "accents and a slash",
+   "project": "Census 2026",
+   "dashboard": "Housing",
+   "title": "Cobertura / Población rural",
+   "version": null,
+   "day": "2026-11-02",
+   "extension": "png",
+   "expected": "census-2026_housing_cobertura-poblacion-rural_2026-11-02.png"
+  },
+  {
+   "name": "a title of emoji only",
+   "project": "Census 2026",
+   "dashboard": "Housing",
+   "title": "🎉🚀",
+   "version": null,
+   "day": "2026-11-02",
+   "extension": "svg",
+   "expected": "census-2026_housing_widget_2026-11-02.svg"
+  },
+  {
+   "name": "a title of 56 characters",
+   "project": "Census 2026",
+   "dashboard": "Housing",
+   "title": "Households visited by municipality, by round and by sex!",
+   "version": null,
+   "day": "2026-11-02",
+   "extension": "png",
+   "expected": "census-2026_housing_households-visited-by-municipality-by-ro_2026-11-02.png"
+  },
+  {
+   "name": "a bidirectional control character",
+   "project": "Census 2026",
+   "dashboard": "Housing",
+   "title": "Cover‮age",
+   "version": null,
+   "day": "2026-11-02",
+   "extension": "png",
+   "expected": "census-2026_housing_cover-age_2026-11-02.png"
+  },
+  {
+   "name": "an empty dashboard name",
+   "project": "Census 2026",
+   "dashboard": "",
+   "title": "Coverage",
+   "version": null,
+   "day": "2026-11-02",
+   "extension": "xlsx",
+   "expected": "census-2026_dashboard_coverage_2026-11-02.xlsx"
+  },
+  {
+   "name": "a long project name",
+   "project": "Encuesta de caracterización de hogares rurales del Valle del Cauca 2026",
+   "dashboard": "Housing",
+   "title": "Coverage",
+   "version": 12,
+   "day": "2026-12-31",
+   "extension": "xlsx",
+   "expected": "encuesta-de-caracterizacion-de-hogares-r_housing_coverage_v12_2026-12-31.xlsx"
+  }
+ ]
+}

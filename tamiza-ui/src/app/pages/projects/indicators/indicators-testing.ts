@@ -59,7 +59,7 @@ export function flushLayout(request: TestRequest, widgets: Widget[]): void {
   request.flush(widgets.filter((w) => w.id in places).map((w) => ({ ...w, layout: places[w.id] })));
 }
 
-export const downloader = { start: vi.fn() };
+export const downloader = { start: vi.fn(), save: vi.fn() };
 
 /** The indicators the specs use, with the metadata a script gave them. Others are counts with their name as label. */
 const presets: Record<string, Pick<IndicatorEntry, 'label' | 'format' | 'unit'>> = {

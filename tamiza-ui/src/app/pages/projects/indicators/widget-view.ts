@@ -1,8 +1,8 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { Component, DestroyRef, LOCALE_ID, computed, effect, inject, input, model, output, signal } from '@angular/core';
+import { Component, DestroyRef, ElementRef, LOCALE_ID, computed, effect, inject, input, model, output, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import { TranslocoDirective } from '@jsverse/transloco';
+import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { catchError, distinctUntilChanged, map, of, switchMap, tap, timer } from 'rxjs';
 import { ApiErrors } from '../../../core/api-error';
 import {
@@ -29,10 +29,22 @@ import { LikertChart } from './likert-chart';
 import { boxIndicator, plainIndicator, valueFormatter } from './format';
 import { ActiveDashboardFilter, appliedOf } from './dashboard-filters';
 import { DashboardPrint } from './dashboard-print';
-import { MapWidget } from './map-widget';
+import { WidgetExportHost } from './export-parts';
+import { MapPicture } from './map-engine';
+import { MapReadiness, MapWidget } from './map-widget';
 import { PieWidget } from './pie-widget';
 import { PyramidChart } from './pyramid-chart';
 import { StatWidget } from './stat-widget';
+
+/**
+ * Whether the widget can be exported now (add-widget-export, design D3). `null` means the format is available; a string is the reason
+ * it is not, already translated, for the menu to show under the format. `imageNote` is a line the available image formats carry.
+ */
+export interface ExportState {
+  image: string | null;
+  workbook: string | null;
+  imageNote: string | null;
+}
 
 type State = { kind: 'idle' } | { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; result: QueryResult };
 
@@ -208,7 +220,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
                       <app-pie-widget [rows]="result.rows" [domain]="result.domain" [config]="config()!" [label]="label()" [format]="formatter()" [colors]="resolvedColors()" [asTable]="asTable()" />
                     }
                     @case ('map') {
-                      <app-map-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [colors]="resolvedColors()" [tooltipTypes]="result.tooltipTypes" [asTable]="asTable()" />
+                      <app-map-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [colors]="resolvedColors()" [tooltipTypes]="result.tooltipTypes" [asTable]="asTable()" (exportReadiness)="mapReadiness.set($event)" (basemapShown)="mapBasemap.set($event)" />
                     }
                     @case ('bar') {
                       <ng-container *ngTemplateOutlet="axis" />
@@ -260,12 +272,17 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
       </div>
     </ng-template>
   `,
+  providers: [WidgetExportHost],
   host: { class: 'block h-full min-h-0' },
 })
 export class WidgetView {
   private readonly service = inject(IndicatorsService);
   private readonly errors = inject(ApiErrors);
   private readonly locale = inject(LOCALE_ID);
+  private readonly transloco = inject(TranslocoService);
+  private readonly exportHost = inject(WidgetExportHost);
+  private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly map = viewChild(MapWidget);
 
   readonly projectId = input.required<string>();
   readonly chartType = input.required<ChartType>();
@@ -333,6 +350,81 @@ export class WidgetView {
    * the whole config, `display` included, so a color change redraws the chart without a query: the query's key leaves it out.
    */
   readonly resolvedColors = computed<ChartColors>(() => chartColors(this.colors(), this.chartType(), this.config() ?? emptyConfig()));
+
+  /** The width of the widget's body on screen, which an image of it keeps (add-widget-export, design D7). */
+  bodyWidth(): number {
+    return Math.round(this.element.nativeElement.clientWidth);
+  }
+
+  /** The widget's own element, where the styles that reach its chart are set. */
+  get host(): HTMLElement {
+    return this.element.nativeElement;
+  }
+
+  /** The shapes of a map drawn as a chart, as the member's view shows them; null for any other widget. */
+  mapPicture(): MapPicture | null {
+    return this.map()?.picture() ?? null;
+  }
+
+  /** What the chart or tile drawn inside registered for an image of the widget (add-widget-export), or null before one exists. */
+  readonly exportRegistration = this.exportHost.current;
+
+  /**
+   * What the tile says above its chart (add-widget-export, design D8): the filters in force that did not narrow it, and the row limit,
+   * in the words the tile uses.
+   */
+  readonly exportNotesAbove = computed(() => {
+    const notes: string[] = [];
+    if (this.notFiltered().length) {
+      notes.push(this.transloco.translate('dashboardFilters.notFiltered', { names: this.notFiltered().join(', ') }));
+    }
+    const result = this.result();
+    if (result?.published && !result.missing.indicator && !result.missing.columns.length && result.rowLimitReached) {
+      notes.push(this.transloco.translate(this.chartType() === 'boxplot' ? 'indicators.widget.rowLimitBoxes' : 'indicators.widget.rowLimit', { count: result.rows.length }));
+    }
+    return notes;
+  });
+
+  /** What a map as a chart says about itself; a map shown as a table has no engine and is read as a table. */
+  readonly mapReadiness = signal<MapReadiness>('drawing');
+  readonly mapBasemap = signal(false);
+
+  /**
+   * Which formats of this widget can be saved now, and why not (design D3). A map's images wait for its engine and its moving to end and
+   * need a shape to draw, while its workbook only needs its rows. The reasons are in the interface language at the time of the call.
+   */
+  readonly exportState = computed<ExportState>(() => {
+    const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
+    const neither = (reason: string): ExportState => ({ image: reason, workbook: reason, imageNote: null });
+    const state = this.state();
+    if (state.kind === 'idle') {
+      return neither(this.blocked() ? t('indicators.widget.notPublished', { label: this.label() }) : t('indicators.widgetExport.reason.loading'));
+    }
+    if (state.kind === 'loading') {
+      return neither(t('indicators.widgetExport.reason.loading'));
+    }
+    if (state.kind === 'error') {
+      return neither(t('indicators.widgetExport.reason.failed'));
+    }
+    const result = state.result;
+    if (!result.published || result.missing.indicator) {
+      return neither(t('indicators.widget.notPublished', { label: this.label() }));
+    }
+    if (result.missing.columns.length) {
+      return neither(t('indicators.widgetExport.reason.missing', { names: result.missing.columns.join(', ') }));
+    }
+    if (result.rows.length === 0) {
+      return neither(t('indicators.widget.empty'));
+    }
+    if (this.chartType() === 'map' && !this.asTable()) {
+      const readiness = this.mapReadiness();
+      if (readiness !== 'ready') {
+        return { image: t(`indicators.widgetExport.reason.${readiness === 'nothing' ? 'mapNothing' : 'mapDrawing'}`), workbook: null, imageNote: null };
+      }
+      return { image: null, workbook: null, imageNote: this.mapBasemap() ? t('indicators.widgetExport.withoutBasemap') : null };
+    }
+    return { image: null, workbook: null, imageNote: null };
+  });
 
   private readonly key = computed(() => {
     const config = this.config();

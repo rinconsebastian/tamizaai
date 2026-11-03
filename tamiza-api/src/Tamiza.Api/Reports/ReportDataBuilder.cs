@@ -47,12 +47,10 @@ public sealed class ReportDataBuilder(
         for (var i = 0; i < widgets.Count; i++)
         {
             var widget = widgets[i];
-            // An indicator the project no longer lists, such as a removed script whose table is still published, is written as the
-            // dashboard writes it (tamiza-ui plainIndicator): two decimals, no unit, and its name as its label.
-            var indicator = metadata.GetValueOrDefault(widget.Config.Indicator);
-            var meta = new IndicatorMeta(
-                indicator?.Label ?? widget.Config.Indicator, indicator?.Format ?? ReportFormat.Decimal, indicator?.Unit);
-            built.Add(await BuildWidgetAsync(dashboard.ProjectId, i + 1, widget, filters, meta, format, text, ct));
+            var meta = MetaOf(widget, metadata.GetValueOrDefault(widget.Config.Indicator));
+            built.Add(await BuildWidgetAsync(
+                dashboard.ProjectId, i + 1, widget, WidgetQuery.AppliedDefaults(filters, widget.Config),
+                notFiltered => WidgetQuery.NotNarrowedBy(filters, widget.Config, notFiltered), meta, format, text, ct));
         }
 
         return new ReportModel(
@@ -70,6 +68,29 @@ public sealed class ReportDataBuilder(
     }
 
     private sealed record IndicatorMeta(string Label, string Format, string? Unit);
+
+    /// <summary>
+    /// How a widget writes its indicator. One the project no longer lists, such as a removed script whose table is still published, is
+    /// written as the dashboard writes it (tamiza-ui plainIndicator): two decimals, no unit, and its name as its label.
+    /// </summary>
+    private static IndicatorMeta MetaOf(Widget widget, ScriptVersionDetails? indicator) =>
+        new(indicator?.Label ?? widget.Config.Indicator, indicator?.Format ?? ReportFormat.Decimal, indicator?.Unit);
+
+    /// <summary>
+    /// One widget's table as its workbook lists it (design D12 of add-widget-export): the same table, notes and reasons as the same widget
+    /// in a scheduled email, read with the filters in force on a member's screen instead of the dashboard's defaults. The widget need not be
+    /// saved: the page sends the settings it is showing, which a version's removed widget needs.
+    /// </summary>
+    /// <param name="applied">The filter values in force that narrow the widget: those it does not ignore.</param>
+    /// <param name="notNarrowedBy">The labels of the filters in force that do not narrow it, given the columns the table lacked.</param>
+    public async Task<WidgetExportContent> BuildWidgetExportAsync(
+        Guid projectId, Widget widget, IReadOnlyList<AppliedDashboardFilter> applied, Func<IReadOnlyList<string>?, IReadOnlyList<string>> notNarrowedBy,
+        ReportText text, ReportFormat format, CancellationToken ct)
+    {
+        var indicator = (await ScriptEndpoints.CurrentIndicatorsAsync(db, projectId, ct)).FirstOrDefault(v => v.Name == widget.Config.Indicator);
+        var meta = MetaOf(widget, indicator);
+        return new WidgetExportContent(await BuildWidgetAsync(projectId, 1, widget, applied, notNarrowedBy, meta, format, text, ct), meta.Label);
+    }
 
     private async Task<DateTimeOffset?> PublishedAtAsync(Guid projectId, IReadOnlyList<Widget> widgets, CancellationToken ct)
     {
@@ -89,8 +110,8 @@ public sealed class ReportDataBuilder(
     }
 
     private async Task<ReportWidget> BuildWidgetAsync(
-        Guid projectId, int position, Widget widget, IReadOnlyList<DashboardFilter> filters, IndicatorMeta meta, ReportFormat format,
-        ReportText text, CancellationToken ct)
+        Guid projectId, int position, Widget widget, IReadOnlyList<AppliedDashboardFilter> applied,
+        Func<IReadOnlyList<string>?, IReadOnlyList<string>> notNarrowedBy, IndicatorMeta meta, ReportFormat format, ReportText text, CancellationToken ct)
     {
         var caption = Plotted(widget.Config, meta.Label);
         ReportWidget Without(WidgetOutcome outcome, string reason, IReadOnlyList<string>? notes = null) =>
@@ -99,8 +120,7 @@ public sealed class ReportDataBuilder(
         IndicatorQueryOutcome outcome;
         try
         {
-            outcome = await indicators.QueryAsync(
-                projectId, WidgetQuery.For(widget.ChartType, widget.Config), widget.ChartType, ct, WidgetQuery.AppliedDefaults(filters, widget.Config));
+            outcome = await indicators.QueryAsync(projectId, WidgetQuery.For(widget.ChartType, widget.Config), widget.ChartType, ct, applied);
         }
         catch (DataTimeoutException)
         {
@@ -124,7 +144,7 @@ public sealed class ReportDataBuilder(
         }
 
         var notes = new List<string>();
-        var notNarrowed = WidgetQuery.NotNarrowedBy(filters, widget.Config, response.NotFiltered);
+        var notNarrowed = notNarrowedBy(response.NotFiltered);
         if (notNarrowed.Count > 0)
         {
             notes.Add(text.Format("notFiltered", string.Join(", ", notNarrowed)));
@@ -155,7 +175,8 @@ public sealed class ReportDataBuilder(
         if (widget.ChartType == ChartTypes.Stat)
         {
             return new(position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, [], [],
-                format.Value(response.Rows[0].Value, meta.Format, meta.Unit), null, notes);
+                format.Value(response.Rows[0].Value, meta.Format, meta.Unit), null, notes,
+                StatColumn: ValueColumn(caption, meta), StatCell: ValueCell(response.Rows[0].Value, meta, format));
         }
 
         // A widget made of a series that came back without one cannot be told apart from a settings change: it no longer fits.

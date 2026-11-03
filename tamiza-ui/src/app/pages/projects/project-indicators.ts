@@ -5,7 +5,7 @@ import { Component, DestroyRef, ElementRef, Injector, LOCALE_ID, afterNextRender
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
-import { EMPTY, Observable, Subject, Subscription, catchError, forkJoin, switchMap } from 'rxjs';
+import { EMPTY, Observable, Subject, Subscription, catchError, firstValueFrom, forkJoin, switchMap } from 'rxjs';
 import { ApiErrors } from '../../core/api-error';
 import { Downloader } from '../../core/download.service';
 import { ExportFormat } from '../../core/projects/data.service';
@@ -23,19 +23,22 @@ import {
 } from '../../core/projects/indicators.service';
 import { DashboardEntry } from '../../core/projects/projects.service';
 import { SystemConfigService } from '../../core/system-config';
-import { Alert, ApiLang, Badge, Button, Card, ConfirmDialog, Disclosure, DropdownMenu, MenuItem, Skeleton, ToastService, DateTimePipe, NumberPipe, dateText, numberText } from '../../shared/ui';
+import { Alert, ApiLang, Badge, Button, Card, ChartTooltips, ConfirmDialog, Disclosure, DropdownMenu, MenuItem, Skeleton, ToastService, DateTimePipe, NumberPipe, dateText, numberText } from '../../shared/ui';
 import { colorsOf, defaultColors } from './indicators/chart-colors';
 import { DashboardColorsData, DashboardColorsDialog, DashboardColorsResult } from './indicators/dashboard-colors-dialog';
 import { DashboardFilterBar, FilterChange } from './indicators/dashboard-filter-bar';
-import { FilterValues, activeFilters, defaultsOf, readAddress, writeAddress } from './indicators/dashboard-filters';
+import { FilterValues, activeFilters, defaultsOf, describeValue, readAddress, writeAddress } from './indicators/dashboard-filters';
 import { DashboardFiltersData, DashboardFiltersDialog, DashboardFiltersResult } from './indicators/dashboard-filters-dialog';
 import { DashboardNameAction, DashboardNameData, DashboardNameDialog, DashboardNameResult } from './indicators/dashboard-name-dialog';
-import { DashboardPrint, printTitle } from './indicators/dashboard-print';
+import { DashboardPrint, isoDay, printTitle } from './indicators/dashboard-print';
 import { DashboardReportData, DashboardReportDialog, DashboardReportResult } from './indicators/dashboard-report-dialog';
 import { DashboardVersionsData, DashboardVersionsDialog, DashboardVersionsResult, VersionToRestore } from './indicators/dashboard-versions-dialog';
 import { Placed } from './indicators/grid-layout';
 import { WidgetDialog, WidgetDialogData, WidgetDialogResult } from './indicators/widget-dialog';
-import { WidgetGrid } from './indicators/widget-grid';
+import { WidgetFileExtension, widgetFileName } from './indicators/widget-export/file-name';
+import { loadExporter } from './indicators/widget-export/load';
+import { WidgetExportChoice, WidgetGrid } from './indicators/widget-grid';
+import { queryFor } from './indicators/widget-view';
 import { ProjectContext } from './project-context';
 import { countKey, isSingular } from '../../core/i18n/plural';
 
@@ -335,9 +338,11 @@ export const layoutSaveDelayMs = 400;
             [allTables]="allTables()"
             [dashboardFilters]="active()"
             [colors]="colors()"
+            [exporting]="exportingWidgets()"
             (layoutsChange)="layoutsChanged($event)"
             (edit)="editWidget($event)"
             (remove)="removeWidget($event)"
+            (exportWidget)="exportWidget($event)"
           />
         } @else if (anyPublished()) {
           @if (viewing()) {
@@ -375,6 +380,7 @@ export class ProjectIndicators {
   private readonly dialog = inject(Dialog);
   private readonly confirm = inject(ConfirmDialog);
   private readonly downloader = inject(Downloader);
+  private readonly tooltips = inject(ChartTooltips);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly injector = inject(Injector);
@@ -712,6 +718,120 @@ export class ProjectIndicators {
     this.preparing.set(true);
     this.announce(this.transloco.translate('dashboards.print.preparing'));
     await this.printer.print(() => this.preparing.set(false));
+  }
+
+  /** The widgets whose export is being prepared, by id, with the format: only their Export menu is busy (add-widget-export). */
+  protected readonly exportingWidgets = signal<Record<string, WidgetFileExtension>>({});
+
+  /**
+   * Makes the file of a widget a member chose from its Export menu: an image from what the widget shows now, made in the browser, or its
+   * workbook, prepared by the API from the settings and the filters on this screen. Ends with one message, a success or a failure.
+   */
+  protected async exportWidget(choice: WidgetExportChoice): Promise<void> {
+    const { widget, format } = choice;
+    if (widget.id in this.exportingWidgets()) {
+      return;
+    }
+    this.exportingWidgets.update((busy) => ({ ...busy, [widget.id]: format }));
+    try {
+      await (format === 'xlsx' ? this.exportWorkbook(choice) : this.exportImage({ ...choice, format }));
+    } catch (error) {
+      this.reportExportFailure(error);
+    } finally {
+      this.exportingWidgets.update(({ [widget.id]: _done, ...rest }) => rest);
+    }
+  }
+
+  private reportExportFailure(error: unknown): void {
+    const t = (key: string) => this.transloco.translate(key);
+    if (error instanceof Error && error.name === 'PngError') {
+      this.toasts.error(t((error as Error & { reason: string }).reason === 'tooLarge' ? 'indicators.widgetExport.pngTooLarge' : 'indicators.widgetExport.pngFailed'));
+      return;
+    }
+    this.errors.report(error);
+  }
+
+  /** The file name of a widget's export: the project, the dashboard (or the version's name), the widget, the version and the day. */
+  private fileNameOf(widget: { title: string }, extension: WidgetFileExtension, now: Date): string {
+    return widgetFileName({
+      project: this.context.project()?.name ?? '',
+      dashboard: this.shownName(),
+      title: widget.title,
+      version: this.viewing()?.number ?? null,
+      day: isoDay(now, this.timeZone()),
+      extension,
+    });
+  }
+
+  private async exportImage({ widget, format, view }: WidgetExportChoice & { format: 'png' | 'svg' }): Promise<void> {
+    const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
+    const registration = view.exportRegistration();
+    if (!registration) {
+      return;
+    }
+    const lang = this.transloco.getActiveLang();
+    const now = new Date();
+    const version = this.viewing();
+    const indicator = this.overview()?.indicators.find((entry) => entry.name === widget.config.indicator);
+    const { browserEnvironment, makeImage } = await loadExporter();
+    const asChart = !view.asTable();
+    const result = await makeImage(
+      {
+        format,
+        title: widget.title,
+        bodyWidth: view.bodyWidth(),
+        registration,
+        notesAbove: view.exportNotesAbove(),
+        mapPicture: view.chartType() === 'map' && asChart ? view.mapPicture() : null,
+        basemapNote: view.chartType() === 'map' && asChart && view.mapBasemap() ? t('indicators.widgetExport.basemapLeftOut') : null,
+        facts: {
+          project: this.context.project()?.name ?? '',
+          dashboard: this.shownName(),
+          version: version ? t('dashboards.print.version', { number: version.number, author: version.author.name, time: this.when(version.savedAt) }) : null,
+          filters: this.shownFilters().map((filter) => `${filter.label}: ${describeValue(filter, this.filterValues()[filter.column], t)}`),
+          published: indicator?.publishedAt ? t('dashboards.print.publishedAt', { time: this.when(indicator.publishedAt) }) : t('dashboards.print.notPublished'),
+          exported: t('indicators.widgetExport.footerExported', { time: this.when(now), zone: this.timeZone() }),
+        },
+        tableLabels: {
+          rowsNotShown: (count) => t(countKey('indicators.widgetExport.rowsNotShown', count, lang), { count }),
+          columnsNotShown: (count) => t(countKey('indicators.widgetExport.columnsNotShown', count, lang), { count }),
+          inWorkbook: t('indicators.widgetExport.inWorkbook'),
+        },
+        closeTooltips: () => this.tooltips.closeAll(),
+      },
+      browserEnvironment(view.host.ownerDocument, view.host),
+    );
+    this.downloader.save(result.blob, this.fileNameOf(widget, format, now));
+    this.toasts.success(t(format === 'png' ? 'indicators.widgetExport.imageReadyPng' : 'indicators.widgetExport.imageReadySvg', { title: widget.title }));
+  }
+
+  private async exportWorkbook({ widget, view }: WidgetExportChoice): Promise<void> {
+    const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
+    const ignored = widget.config.ignoredDashboardFilters ?? [];
+    const result = await firstValueFrom(
+      this.service.exportWidget(this.projectId, this.dashboardId(), {
+        format: 'xlsx',
+        title: widget.title,
+        chartType: widget.chartType,
+        config: queryFor(widget.chartType, widget.config),
+        filters: this.active().map(({ filter, value }) => ({
+          column: filter.column,
+          kind: filter.kind,
+          ...(value.values ? { values: value.values } : {}),
+          ...(value.min ? { min: value.min } : {}),
+          ...(value.max ? { max: value.max } : {}),
+          ignored: ignored.includes(filter.column),
+        })),
+        locale: this.locale,
+        ...(this.viewing() ? { version: this.viewing()!.number } : {}),
+      }),
+    );
+    this.downloader.start(result.downloadUrl);
+    const indicator = this.overview()?.indicators.find((entry) => entry.name === widget.config.indicator);
+    const newer = !!result.publishedAt && !!indicator?.publishedAt && new Date(result.publishedAt) > new Date(indicator.publishedAt);
+    const ready = t(countKey('indicators.widgetExport.workbookReady', result.rowCount, this.transloco.getActiveLang()), { title: widget.title, count: numberText(result.rowCount, this.locale) });
+    this.toasts.success(newer ? `${ready} ${t('indicators.widgetExport.newerData', { time: this.when(result.publishedAt!) })}` : ready);
+    void view;
   }
 
   /** A time on the print header: the shared format, in the project's time zone. */

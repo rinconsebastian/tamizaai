@@ -120,6 +120,37 @@ export interface AppliedDashboardFilter extends DashboardFilterValue {
   kind: DashboardFilterKind;
 }
 
+/** A dashboard filter's value in force on the member's screen, sent to export a widget. `ignored` when the widget ignores that filter. */
+export interface WidgetExportFilter extends AppliedDashboardFilter {
+  ignored: boolean;
+}
+
+/**
+ * What the screen sends to get a widget's workbook (add-widget-export): the settings it shows, not the widget's id, so a widget of a
+ * version the dashboard no longer has can be exported. `version` is the dashboard version being viewed; left out on the current one.
+ */
+export interface WidgetExportRequest {
+  format: 'xlsx';
+  title: string;
+  chartType: ChartType;
+  /** The widget's query, as `queryFor` builds it. */
+  config: WidgetConfig;
+  filters: WidgetExportFilter[];
+  /** The interface's language and region, such as `es-CO`: the workbook's own words and formats follow it. */
+  locale: string;
+  version?: number;
+}
+
+/** A prepared widget workbook: the single-use link that downloads it, and what the file read. */
+export interface WidgetExportResult {
+  downloadUrl: string;
+  fileName: string;
+  rowCount: number;
+  /** When the widget's indicator was last published, as the file read it; null when it has not been. */
+  publishedAt: string | null;
+  expiresAt: string;
+}
+
 /** A place on the grid, in grid units: `x + w` never passes the 12 columns. */
 export interface Layout {
   x: number;
@@ -607,6 +638,14 @@ export class IndicatorsService {
   /** Prepares a file with the whole published table of one indicator; the result has the single-use link that downloads it. */
   export(projectId: string, indicator: string, format: ExportFormat): Observable<DataExport> {
     return this.http.post<DataExport>(`${this.url(projectId)}/${encodeURIComponent(indicator)}/exports`, { format });
+  }
+
+  /**
+   * Prepares the workbook of one widget on a dashboard, with the dashboard filters in force, and answers the single-use link that
+   * downloads it. The dashboard's filters may have changed since the page was opened: that is a 409 `widgetExports.filtersChanged`.
+   */
+  exportWidget(projectId: string, dashboardId: string, request: WidgetExportRequest): Observable<WidgetExportResult> {
+    return this.http.post<WidgetExportResult>(`${this.dashboardUrl(projectId, dashboardId)}/widget-exports`, request);
   }
 
   // Dashboards. A dashboard the project no longer has is a 404 with the code `dashboards.notFound`, on its own routes and its widgets'.

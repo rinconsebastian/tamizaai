@@ -68,7 +68,7 @@ Every change a person saves to a dashboard in Tamiza SHALL make a new version, h
 - **THEN** the dashboard has no new version
 
 ### Requirement: Changes that are not dashboard changes
-Runs and the data they publish, synchronizations, the filter values a member picks, a member's basemap or map view, showing widgets as tables, printing, the order of the project's dashboards and the dashboard's scheduled email SHALL NOT make versions, and a restore SHALL NOT change them.
+Runs and the data they publish, synchronizations, the filter values a member picks, a member's basemap or map view, showing widgets as tables, printing, exporting a widget, the order of the project's dashboards and the dashboard's scheduled email SHALL NOT make versions, and a restore SHALL NOT change them.
 
 #### Scenario: Run publishes new data
 - **WHEN** a run publishes new rows for the indicators of "Housing"
@@ -84,6 +84,10 @@ Runs and the data they publish, synchronizations, the filter values a member pic
 
 #### Scenario: Filter values
 - **WHEN** a member picks the value "Rionegro" in the filter "Municipality" of "Housing"
+- **THEN** "Housing" has no new version
+
+#### Scenario: Widget exported
+- **WHEN** a member exports a widget of "Housing" as a PNG image and as a workbook
 - **THEN** "Housing" has no new version
 
 ### Requirement: State before the history began
@@ -128,7 +132,7 @@ For an `analyst` or `admin`, the dashboard's actions SHALL include **Version his
 - **THEN** the current version holds the widget in its new place
 
 ### Requirement: Viewing a version
-From the version history, an `analyst` or `admin` SHALL be able to view a version on the dashboard page: its name, filters, colors and widgets with the current data, read-only, with a notice naming the version, its author and time, and actions to return to the current version or restore an older one. Its filters SHALL offer its widgets' values. While it is shown, the page SHALL offer no other action that changes or prints the dashboard, and a browser-printed sheet SHALL name the version.
+From the version history, an `analyst` or `admin` SHALL be able to view a version on the dashboard page: its name, filters, colors and widgets with the current data, read-only, with a notice naming the version, its author and time, and actions to return to the current version or restore an older one. Its filters SHALL offer its widgets' values. While it is shown, the page SHALL offer no other action that changes or prints the dashboard, and a browser-printed sheet SHALL name the version. Each widget's Export button SHALL stay offered, and the files it makes SHALL name the version.
 
 #### Scenario: Viewing an older version
 - **WHEN** an `analyst` views version 9 of "Housing", which had a widget since removed
@@ -149,6 +153,10 @@ From the version history, an `analyst` or `admin` SHALL be able to view a versio
 #### Scenario: Colors of a version
 - **WHEN** "Housing" now has the palette *Earth* and an `analyst` views its version 4, which had the palette *Tamiza*
 - **THEN** the page shows version 4's widgets in the colors of *Tamiza*, with version 4's colors kept by value
+
+#### Scenario: Exporting a widget of a version
+- **WHEN** an `analyst` exports, as a PNG image and as a workbook, the widget of version 9 of "Housing" that has since been removed
+- **THEN** both files show that widget with today's data, the image's footer and the workbook's "Summary" sheet name version 9, and both file names hold `_v9` before the day
 
 ### Requirement: Restoring a version
 An `analyst` or `admin` SHALL be able to restore a kept version after confirming. The dashboard's name, filters, colors and widgets SHALL become those of that version, recorded as a new version that names the version restored, so the state it replaced stays in the history. The dashboard SHALL keep its address, its place and its scheduled email. A restore that would leave the dashboard as it is SHALL change nothing and say so.
