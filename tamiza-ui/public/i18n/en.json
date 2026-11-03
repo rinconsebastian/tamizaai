@@ -161,7 +161,7 @@
       },
       "dashboards": {
         "notFound": "The dashboard no longer exists.",
-        "limit": "A project can have at most 7 dashboards. Remove one before adding another.",
+        "limit": "A project can have at most 10 dashboards. Remove one before adding another.",
         "lastOne": "A project needs at least one dashboard.",
         "orderChanged": "The project’s dashboards have changed. Reload and try again.",
         "versionNotFound": "That version is no longer kept."
@@ -1548,12 +1548,13 @@
     "grid": {
       "move": "Move {{ title }}",
       "resize": "Resize {{ title }}",
-      "edit": "Edit {{ title }}",
-      "remove": "Remove {{ title }}",
       "help": "Arrow keys move the widget by one cell. Hold shift, or use the resize handle, to change its size.",
       "status": "{{ title }}: column {{ column }}, row {{ row }}, {{ width }} wide, {{ height }} high.",
-      "showTable": "Show {{ title }} as a table",
-      "actionsFor": "Actions for {{ title }}",
+      "menuFor": "Options for “{{ title }}”",
+      "menuForPreparing": "Options for “{{ title }}”, preparing its export",
+      "exportGroup": "Export",
+      "shownAsTable": "“{{ title }}” is shown as a table",
+      "shownAsChart": "“{{ title }}” is shown as a chart",
       "editItem": "Edit widget",
       "removeItem": "Remove widget"
     },
@@ -1879,14 +1880,13 @@
       "summarySame": "Box plot of {{ what }} by {{ group }}: {{ count }} boxes, all with the median {{ median }}."
     },
     "widgetExport": {
-      "button": "Export “{{ title }}”",
-      "preparing": "Preparing the export of “{{ title }}”…",
       "png": "PNG image",
       "svg": "SVG image",
       "xlsx": "Excel workbook (XLSX)",
       "withoutBasemap": "Shapes and legend, without the basemap",
       "reason": {
         "loading": "The widget is still loading.",
+        "preparing": "Preparing the export…",
         "failed": "The widget could not be loaded.",
         "missing": "Its table no longer has {{ names }}.",
         "mapDrawing": "The map is still being drawn.",

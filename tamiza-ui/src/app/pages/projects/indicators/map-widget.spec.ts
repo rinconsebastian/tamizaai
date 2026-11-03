@@ -14,7 +14,7 @@ import { ChartTooltips } from '../../../shared/ui';
 import styles from '../../../../styles.css';
 import { chartColors, defaultColors } from './chart-colors';
 import { plainIndicator, valueFormatter } from './format';
-import { Context, all, catalog, clearOverlay, config, indicator, isColumns, isQuery, open, overlay, paperOn, printOf, result, row, text, wait, widget } from './indicators-testing';
+import { Context, all, catalog, chooseInWidgetMenu, clearOverlay, config, indicator, isColumns, isQuery, open, overlay, paperOn, printOf, result, row, text, wait, toggleTable, widget } from './indicators-testing';
 import { MapEngine, loadLeaflet } from './map-engine';
 import { MapWidget } from './map-widget';
 import { previewDelayMs } from './widget-dialog';
@@ -240,7 +240,7 @@ describe('map widget', () => {
       expect(map.getAttribute('aria-roledescription')).toBe('map');
       expect(map.getAttribute('aria-label')).toBe('Map of Coverage: 4 places drawn, from 10 to 90; 0 left out.');
       expect(context.root.querySelector('svg[role="img"]')).toBeNull();
-      byTestId(context.root, 'widget-table-toggle')!.click();
+      await toggleTable(context);
       await settle(context.harness);
 
       expect(byTestId(context.root, 'map-container')).toBeNull();
@@ -253,7 +253,7 @@ describe('map widget', () => {
 
       expect(text(byTestId(context.root, 'map-legend-min'))).toBe('10%');
       expect(text(byTestId(context.root, 'map-legend-max'))).toBe('90%');
-      byTestId(context.root, 'widget-table-toggle')!.click();
+      await toggleTable(context);
       await settle(context.harness);
       expect(all(context.root, 'widget-table-row').map((r) => Array.from(r.children).map(text))).toEqual([
         ['Cali', '90%', 'Region'],
@@ -421,7 +421,7 @@ describe('map widget', () => {
     it('lists the left-out rows in the table too', async () => {
       const context = await show(rows);
 
-      byTestId(context.root, 'widget-table-toggle')!.click();
+      await toggleTable(context);
       await settle(context.harness);
       const cells = all(context.root, 'widget-table-row').map((r) => Array.from(r.children).map(text));
       expect(cells.slice(2)).toEqual([['Pasto', '10', 'Left out'], ['Quibdó', '70', 'Left out'], ['Leticia', '30', 'Left out']]);
@@ -647,10 +647,10 @@ describe('map widget', () => {
       await click(context, byTestId(context.root, 'map-zoom-in'));
       const view = { zoom: zoomOf(context), center: centerOf(context) };
 
-      byTestId(context.root, 'widget-table-toggle')!.click();
+      await toggleTable(context);
       await settle(context.harness);
       expect(context.root.querySelector('.leaflet-container')).toBeNull();
-      byTestId(context.root, 'widget-table-toggle')!.click();
+      await toggleTable(context);
       await ready(context);
 
       expect({ zoom: zoomOf(context), center: centerOf(context) }).toEqual(view);
@@ -922,7 +922,7 @@ describe('map widget', () => {
     it('lists the tooltip columns, under their labels, in "Show as table", text aligned to the start', async () => {
       const context = await survey_progress(columns, [block(), block({ group: '0043', value: 0.5, tooltip: ['Cra 6 # 11-21', 30, 15] })]);
 
-      byTestId(context.root, 'widget-table-toggle')!.click();
+      await toggleTable(context);
       await settle(context.harness);
 
       const headers = Array.from(context.root.querySelectorAll('[data-testid="widget-table"] thead th')).map(text);
@@ -1161,10 +1161,7 @@ describe('map widget', () => {
     async function editForm() {
       const existing = widget('w1', { chartType: 'map', config: config({ geometryColumn: 'geometry' }) });
       const context = await open('analyst', [existing], result(blocks));
-      context.root.querySelector<HTMLElement>('[data-testid="menu-trigger"]')!.click();
-      await settle(context.harness);
-      document.querySelector<HTMLElement>('[data-testid="widget-edit"]')!.click();
-      await settle(context.harness);
+      await chooseInWidgetMenu(context, 'widget-edit');
       context.http.expectOne(isColumns).flush(catalog());
       await settle(context.harness);
       await wait(previewDelayMs + 100);
@@ -1763,7 +1760,7 @@ describe('map widget', () => {
         expect(tiles(context)).toHaveLength(0); // it does not try again by itself
         regions(context)[0].dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
         expect(overlay().querySelector('[data-testid="tooltip-heading"]')).not.toBeNull();
-        byTestId(context.root, 'widget-table-toggle')!.click();
+        await toggleTable(context);
         await settle(context.harness);
         expect(all(context.root, 'widget-table-row')).toHaveLength(3);
       });

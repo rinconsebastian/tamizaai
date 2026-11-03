@@ -1,7 +1,7 @@
 import { byTestId, settle } from '../../../../testing/project-harness';
 import { pressKey } from '../../../../testing/cdk';
 import { ChartType, DashboardColors, IndicatorEntry, PaletteId, QueryResult, QueryRow, QuerySeries, ValueColor, WidgetConfig } from '../../../core/projects/indicators.service';
-import { Context, all, cell, clearOverlay, config, indicator, isQuery, open, overlay, printOf, result, row, seriesResult, text, wait, widget } from './indicators-testing';
+import { Context, all, cell, clearOverlay, config, indicator, isQuery, open, overlay, printOf, result, row, seriesResult, text, wait, menuItem, openWidgetMenu, toggleTable, widget } from './indicators-testing';
 
 interface Query {
   config: WidgetConfig;
@@ -32,7 +32,7 @@ async function showAnswer(chartType: ChartType, settings: Partial<WidgetConfig>,
 }
 
 async function toggle(context: Context) {
-  byTestId(context.root, 'widget-table-toggle')!.click();
+  await toggleTable(context);
   await settle(context.harness);
 }
 
@@ -58,11 +58,12 @@ describe('chart widgets', () => {
 
   describe('stat tile', () => {
     it('shows one number for the indicator, written with its format and unit (single figure)', async () => {
-      const { root, query } = await show('stat', { indicator: 'households_visited', measure: 'value' }, [row(null, 12450)]);
+      const { root, query, harness } = await show('stat', { indicator: 'households_visited', measure: 'value' }, [row(null, 12450)]);
 
       expect(text(byTestId(root, 'stat-value'))).toBe('12,450 households');
       expect(text(byTestId(root, 'stat-label'))).toBe('Households visited: value');
-      expect(byTestId(root, 'widget-table-toggle')).toBeNull(); // a single figure has no plot
+      await openWidgetMenu({ root, harness });
+      expect(menuItem('widget-show-table')).toBeNull(); // a single figure has no plot
       // The server sums the measure over every row; a stat tile never groups.
       expect(query).toEqual({ config: { ...config({ indicator: 'households_visited', measure: 'value' }), groupBy: null }, chartType: 'stat' });
     });
@@ -171,9 +172,11 @@ describe('chart widgets', () => {
       expect(byTestId(context.root, 'chart-svg')).toBeNull();
       expect(tableHeaders(context)).toEqual(['municipality', 'Coverage']);
       expect(tableRows(context)).toEqual([['Cali', '75'], ['Bogotá', '60'], ['Pasto', '35'], ['Quibdó', '90'], ['Leticia', '10']]);
-      expect(byTestId(context.root, 'widget-table-toggle')!.getAttribute('aria-pressed')).toBe('true'); // pressed while the table is shown
+      await openWidgetMenu(context);
+      expect(menuItem('widget-show-table')!.getAttribute('aria-checked')).toBe('true'); // checked while the table is shown
 
-      await toggle(context);
+      menuItem('widget-show-table')!.click();
+      await settle(context.harness);
       expect(marks(context)).toHaveLength(5);
     });
 

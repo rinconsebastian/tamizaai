@@ -33,11 +33,14 @@ import {
   isOverview,
   flushLayout,
   isLayout,
+  chooseInWidgetMenu,
   isPatch,
   isQuery,
   layoutUrlOf,
   layoutsOf,
+  menuItem,
   open,
+  openWidgetMenu,
   overlay,
   overview,
   paperOn,
@@ -519,12 +522,17 @@ describe('ProjectIndicators', () => {
       ['analyst', true],
       ['admin', true],
     ])('gives editing controls to the roles that may edit, for a %s', async (role, editor) => {
-      const { root } = await open(role, two, answer);
+      const { root, harness } = await open(role, two, answer);
 
-      for (const id of ['widget-add', 'widget-move', 'widget-resize', 'menu-trigger']) {
+      for (const id of ['widget-add', 'widget-move', 'widget-resize']) {
         expect(all(root, id).length > 0, id).toBe(editor);
       }
       expect(all(root, 'widget-move')).toHaveLength(editor ? 2 : 0);
+      // Every member has the widget menu; only editors find Edit and Remove in it.
+      expect(all(root, 'widget-menu')).toHaveLength(2);
+      await openWidgetMenu({ root, harness });
+      expect(menuItem('widget-edit') !== null).toBe(editor);
+      expect(menuItem('widget-remove') !== null).toBe(editor);
     });
 
     it('tells a viewer there are no widgets yet, and an analyst how to add one', async () => {
@@ -820,10 +828,8 @@ describe('ProjectIndicators', () => {
     /** Opens the widget dialog, which reads the columns of the indicator it starts on. */
     async function openDialog(context: Context, button: string, index = 0) {
       if (button === 'widget-edit' || button === 'widget-remove') {
-        // Edit and Remove are the two items of the widget's actions menu.
-        all(context.root, 'menu-trigger')[index].click();
-        await settle(context.harness);
-        (document.querySelector(`[data-testid="${button}"]`) as HTMLElement).click();
+        // Edit and Remove are the last items of the widget's menu.
+        await chooseInWidgetMenu(context, button, index);
       } else {
         all(context.root, button)[index].click();
       }
@@ -932,7 +938,7 @@ describe('ProjectIndicators', () => {
     }, 10000);
 
     it('turns Add off, with a notice, when the widget limit is reached', async () => {
-      const { root } = await open('analyst', two, answer, { limits: { maxWidgets: 2, maxQueryRows: 5000, maxDashboards: 7 } });
+      const { root } = await open('analyst', two, answer, { limits: { maxWidgets: 2, maxQueryRows: 5000, maxDashboards: 10 } });
 
       expect(byTestId<HTMLButtonElement>(root, 'widget-add')!.disabled).toBe(true);
       expect(text(byTestId(root, 'widget-limit'))).toContain('(2)');
@@ -960,12 +966,9 @@ describe('ProjectIndicators', () => {
       await settle(context.harness);
     }
 
-    /** Chooses Edit in a widget's actions menu; the form opens at once unless a layout of the widget is still to be saved. */
+    /** Chooses Edit in a widget's menu; the form opens at once unless a layout of the widget is still to be saved. */
     async function chooseEdit(context: Context, index = 0): Promise<void> {
-      all(context.root, 'menu-trigger')[index].click();
-      await settle(context.harness);
-      document.querySelector<HTMLElement>('[data-testid="widget-edit"]')!.click();
-      await settle(context.harness);
+      await chooseInWidgetMenu(context, 'widget-edit', index);
     }
 
     /** Answers what the open form reads: the columns of the widget's indicator. */
@@ -1221,7 +1224,7 @@ describe('ProjectIndicators', () => {
     });
 
     it('merges the count and the limit into one line for an editor', async () => {
-      const { root } = await open('analyst', two, answer, { limits: { maxWidgets: 2, maxQueryRows: 5000, maxDashboards: 7 } });
+      const { root } = await open('analyst', two, answer, { limits: { maxWidgets: 2, maxQueryRows: 5000, maxDashboards: 10 } });
       expect(byTestId(root, 'indicators-count')).toBeNull();
       expect(text(byTestId(root, 'widget-limit'))).toContain('(2)');
       expect(byTestId<HTMLButtonElement>(root, 'widget-add')!.disabled).toBe(true);
@@ -1233,17 +1236,23 @@ describe('ProjectIndicators', () => {
       expect(byTestId(byTestId(root, 'no-widgets')!, 'widget-add')).not.toBeNull();
     });
 
-    it('offers the table toggle in the tile header only once the widget has something to draw, and not for a stat tile', async () => {
-      const { root } = await open('viewer', two, answer);
-      const tiles = all(root, 'widget');
-      expect(byTestId(tiles[0], 'widget-table-toggle')).not.toBeNull();
+    it('offers "Show as table" in the widget menu only once the widget has something to draw, and not for a stat tile', async () => {
+      const context = await open('viewer', two, answer);
+      const tiles = all(context.root, 'widget');
+      expect(byTestId(tiles[0], 'widget-table-toggle')).toBeNull(); // no button of its own in the header
       expect(byTestId(tiles[0], 'chart-toggle')).toBeNull(); // not also in the body
-      expect(byTestId(tiles[1], 'widget-table-toggle')).toBeNull(); // a single figure has no plot
+      await openWidgetMenu(context, 0);
+      expect(menuItem('widget-show-table')).not.toBeNull();
+      pressKey(document.querySelector('[role="menu"]')!, 'Escape');
+      await settle(context.harness);
+      await openWidgetMenu(context, 1);
+      expect(menuItem('widget-show-table')).toBeNull(); // a single figure has no plot
     });
 
-    it('does not offer the table toggle while the widget has no rows', async () => {
-      const { root } = await open('viewer', [widget('w1')], result([]));
-      expect(byTestId(root, 'widget-table-toggle')).toBeNull();
+    it('does not offer "Show as table" while the widget has no rows', async () => {
+      const context = await open('viewer', [widget('w1')], result([]));
+      await openWidgetMenu(context);
+      expect(menuItem('widget-show-table')).toBeNull();
     });
 
     it('keeps a tile short while its indicator has not published', async () => {
@@ -1254,13 +1263,15 @@ describe('ProjectIndicators', () => {
 
     it('returns focus to the widget\'s menu button when its Edit form is closed', async () => {
       const context = await open('analyst', two, answer);
-      const trigger = all(context.root, 'menu-trigger')[1];
+      const trigger = all(context.root, 'widget-menu')[1];
 
       trigger.focus();
       pressKey(trigger, 'ArrowDown');
       await settle(context.harness);
-      const edit = document.querySelector<HTMLElement>('[data-testid="widget-edit"]')!;
-      expect(document.activeElement).toBe(edit);
+      // The menu opens on its first item: the second widget is a stat tile, which has no Show as table, so PNG image. Edit widget is further down.
+      expect(document.activeElement).toBe(menuItem('widget-export-png'));
+      const edit = menuItem('widget-edit')!;
+      edit.focus();
       pressKey(edit, 'Enter');
       await settle(context.harness);
       context.http.expectOne(isColumns).flush(catalog());
@@ -1275,15 +1286,16 @@ describe('ProjectIndicators', () => {
       expect(document.activeElement).toBe(trigger); // not the menu item, which the menu's overlay removed
     });
 
-    it('collapses edit and remove into one actions menu named after the widget', async () => {
+    it('gathers Show as table, the exports and the editing actions in one menu named after the widget (Analyst\'s widget menu)', async () => {
       const context = await open('analyst', two, answer);
-      const trigger = all(context.root, 'menu-trigger')[0];
-      expect(trigger.getAttribute('aria-label')).toBe('Actions for Coverage by municipality');
+      const trigger = all(context.root, 'widget-menu')[0];
+      expect(trigger.getAttribute('aria-label')).toBe('Options for “Coverage by municipality”');
       expect(all(context.root, 'widget-edit')).toHaveLength(0); // the items exist once the menu is open
       trigger.click();
       await settle(context.harness);
-      const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-      expect(items.map((i) => text(i))).toEqual(['Edit widget', 'Remove widget']);
+      const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]'));
+      expect(items.map((i) => text(i))).toEqual(['Show as table', 'PNG image', 'SVG image', 'Excel workbook (XLSX)', 'Edit widget', 'Remove widget']);
+      expect(items.map((i) => i.getAttribute('role'))).toEqual(['menuitemcheckbox', 'menuitem', 'menuitem', 'menuitem', 'menuitem', 'menuitem']);
     });
   });
 
@@ -1333,7 +1345,7 @@ describe('ProjectIndicators', () => {
     const health: DashboardEntry = { id: 'd2', name: 'Health' };
     const field: DashboardEntry = { id: 'd3', name: 'Field' };
     const education: DashboardEntry = { id: 'd4', name: 'Education' };
-    const seven = Array.from({ length: 7 }, (_, i): DashboardEntry => ({ id: `d${i + 1}`, name: `Dashboard ${i + 1}` }));
+    const ten = Array.from({ length: 10 }, (_, i): DashboardEntry => ({ id: `d${i + 1}`, name: `Dashboard ${i + 1}` }));
     const dashboardsUrl = `/api/v1/projects/${projectId}/dashboards`;
     const projectUrl = `/api/v1/projects/${projectId}`;
     const orderUrl = `${dashboardsUrl}/order`;
@@ -1397,7 +1409,7 @@ describe('ProjectIndicators', () => {
     });
 
     it('keeps "New dashboard" reachable at the limit, saying why it is unavailable, and turns Duplicate off (Add action at the limit)', async () => {
-      const context = await open('analyst', [], null, {}, { dashboards: seven });
+      const context = await open('analyst', [], null, {}, { dashboards: ten });
       const add = byTestId<HTMLButtonElement>(context.root, 'dashboard-add')!;
 
       // Still in the tab order: not disabled, so Tab reaches it and its description can be heard.
@@ -1407,7 +1419,7 @@ describe('ProjectIndicators', () => {
       expect(document.activeElement).toBe(add);
       expect(add.getAttribute('aria-disabled')).toBe('true');
       const hint = document.getElementById(add.getAttribute('aria-describedby')!);
-      expect(text(hint)).toBe('The project has the most dashboards it can hold (7).');
+      expect(text(hint)).toBe('The project has the most dashboards it can hold (10).');
       expect(hint).toBe(byTestId(context.root, 'dashboard-limit-hint')); // shown, under the header
 
       add.click();
@@ -1418,10 +1430,26 @@ describe('ProjectIndicators', () => {
       await settle(context.harness);
       const duplicate = item('dashboard-duplicate')!;
       expect(duplicate.getAttribute('aria-disabled')).toBe('true');
-      expect(text(document.getElementById(duplicate.getAttribute('aria-describedby')!))).toBe('A project can have at most 7 dashboards.');
+      expect(text(document.getElementById(duplicate.getAttribute('aria-describedby')!))).toBe('A project can have at most 10 dashboards.');
       duplicate.click();
       await settle(context.harness);
       expect(nameDialog()).toBeNull();
+    });
+
+    it('offers "New dashboard" and Duplicate below the limit, at 8 of 10 (Add action below the limit)', async () => {
+      const context = await open('analyst', [], null, {}, { dashboards: ten.slice(0, 8) });
+      const add = byTestId<HTMLButtonElement>(context.root, 'dashboard-add')!;
+
+      expect(add.getAttribute('aria-disabled')).toBeNull();
+      expect(add.getAttribute('aria-describedby')).toBeNull();
+      expect(byTestId(context.root, 'dashboard-limit-hint')).toBeNull();
+
+      byTestId(context.root, 'dashboard-menu')!.click();
+      await settle(context.harness);
+      expect(item('dashboard-duplicate')!.getAttribute('aria-disabled')).toBeNull();
+      item('dashboard-duplicate')!.click();
+      await settle(context.harness);
+      expect(nameDialog()).not.toBeNull();
     });
 
     it('renames a dashboard, keeping its widgets and its place, and says so (Analyst renames a dashboard)', async () => {
@@ -1785,9 +1813,7 @@ describe('ProjectIndicators', () => {
 
       it('opens the first dashboard after a refused widget removal (Widget edited on a removed dashboard)', async () => {
         const context = await open('analyst', [widget('w1', { dashboardId: 'd2', title: 'Clinics' })], answer, {}, { dashboardId: 'd2', dashboards: [housing, health] });
-        all(context.root, 'menu-trigger')[0].click();
-        await settle(context.harness);
-        item('widget-remove')!.click();
+        await chooseInWidgetMenu(context, 'widget-remove');
         await settle(context.harness);
         (overlay().querySelector('[data-testid="confirm"]') as HTMLElement).click();
         await settle(context.harness);
@@ -1822,9 +1848,7 @@ describe('ProjectIndicators', () => {
 
       it('says the dashboard no longer exists when the page knew no other and the project cannot be read again', async () => {
         const context = await open('analyst', [widget('w1', { title: 'Clinics' })], answer, {}, { dashboards: [housing] });
-        all(context.root, 'menu-trigger')[0].click();
-        await settle(context.harness);
-        item('widget-remove')!.click();
+        await chooseInWidgetMenu(context, 'widget-remove');
         await settle(context.harness);
         (overlay().querySelector('[data-testid="confirm"]') as HTMLElement).click();
         await settle(context.harness);
@@ -1901,7 +1925,7 @@ describe('ProjectIndicators', () => {
       });
 
       it('opens the first dashboard when the project read after a refused add no longer has the open one, the form keeping the focus', async () => {
-        const context = await open('analyst', [], null, {}, { dashboards: seven.slice(0, 6) });
+        const context = await open('analyst', [], null, {}, { dashboards: ten.slice(0, 9) });
         const add = byTestId(context.root, 'dashboard-add')!;
         add.focus();
         add.click();
@@ -1911,7 +1935,7 @@ describe('ProjectIndicators', () => {
         context.http.expectOne(dashboardsUrl).flush(...conflict('dashboards.limit'));
         await settle(context.harness);
         // Another member removed "Dashboard 1", the one open, and added two.
-        const fresh = [...seven.slice(1), { id: 'd8', name: 'Dashboard 8' }];
+        const fresh = [...ten.slice(1), { id: 'd11', name: 'Dashboard 11' }];
         context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: fresh }));
         await settle(context.harness);
         await answerLoad(context, [], {}, 'd2');
@@ -1923,7 +1947,7 @@ describe('ProjectIndicators', () => {
         expect(tabs(context.root)).toEqual(fresh.map((d) => d.name));
         expect(toasts()).toEqual([]);
         // The form stays open with its message, and keeps the focus the heading would otherwise take.
-        expect(text(byTestId(nameDialog()!, 'dashboard-name-error'))).toBe('A project can have at most 7 dashboards. Remove one before adding another.');
+        expect(text(byTestId(nameDialog()!, 'dashboard-name-error'))).toBe('A project can have at most 10 dashboards. Remove one before adding another.');
         expect(nameDialog()!.contains(document.activeElement)).toBe(true);
 
         byTestId(nameDialog()!, 'dashboard-name-cancel')!.click();
@@ -2077,20 +2101,20 @@ describe('ProjectIndicators', () => {
     });
 
     it('keeps the limit in the name dialog and reads the project again, turning "New dashboard" off', async () => {
-      const six = seven.slice(0, 6);
-      const context = await open('analyst', [], null, {}, { dashboards: six });
+      const nine = ten.slice(0, 9);
+      const context = await open('analyst', [], null, {}, { dashboards: nine });
 
       byTestId(context.root, 'dashboard-add')!.click();
       await settle(context.harness);
       await nameAndSave(context, 'Field progress');
       context.http.expectOne(dashboardsUrl).flush(...conflict('dashboards.limit'));
       await settle(context.harness);
-      context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: seven }));
+      context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: ten }));
       await settle(context.harness);
 
-      expect(text(byTestId(nameDialog()!, 'dashboard-name-error'))).toBe('A project can have at most 7 dashboards. Remove one before adding another.');
+      expect(text(byTestId(nameDialog()!, 'dashboard-name-error'))).toBe('A project can have at most 10 dashboards. Remove one before adding another.');
       expect(toasts()).toEqual([]);
-      expect(tabs(context.root)).toEqual(seven.map((d) => d.name));
+      expect(tabs(context.root)).toEqual(ten.map((d) => d.name));
       expect(byTestId(context.root, 'dashboard-add')!.getAttribute('aria-disabled')).toBe('true');
     });
 
@@ -2756,12 +2780,9 @@ describe('ProjectIndicators dashboard colors (add-dashboard-palettes, design D9)
     const columns = (context: Context) => all(context.root, 'chart-mark').map((mark) => /var\(--[\w-]+\)/.exec(mark.getAttribute('style') ?? '')?.[0] ?? null);
     const inPlace3 = (name: string) => Array<string>(2).fill(`var(--tmz-pal-${name}-3)`);
 
-    /** Chooses Edit in the first widget's actions menu, and answers the columns the form reads. */
+    /** Chooses Edit in the first widget's menu, and answers the columns the form reads. */
     async function edit(context: Context): Promise<void> {
-      all(context.root, 'menu-trigger')[0].click();
-      await settle(context.harness);
-      document.querySelector<HTMLElement>('[data-testid="widget-edit"]')!.click();
-      await settle(context.harness);
+      await chooseInWidgetMenu(context, 'widget-edit');
       context.http.expectOne(isColumns).flush(catalog());
       await settle(context.harness);
     }
@@ -3261,13 +3282,18 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
       expect(byTestId(context.root, 'indicators-count')).toBeNull();
       expect(all(context.root, 'widget-move')).toHaveLength(0);
       expect(all(context.root, 'widget-resize')).toHaveLength(0);
-      expect(all(byTestId(context.root, 'widget-grid')!, 'menu-trigger')).toHaveLength(0);
-      // Taking a widget out of Tamiza changes nothing, so every widget keeps its Export button (widget-export "Export button").
-      expect(all(byTestId(context.root, 'widget-grid')!, 'widget-export')).toHaveLength(2);
+      // Taking a widget out of Tamiza changes nothing, so every widget keeps its menu, with Show as table and the exports (Widget menu of a version).
+      expect(all(byTestId(context.root, 'widget-grid')!, 'widget-menu')).toHaveLength(2);
       // The switch to tables saves nothing, so it stays.
       expect(byTestId(context.root, 'tables-toggle')).not.toBeNull();
       expect(document.activeElement).toBe(notice(context.root));
       expect(context.http.match((r) => r.method !== 'GET' && !isQuery(r))).toHaveLength(0);
+      // The menu holds no editing action.
+      await openWidgetMenu(context);
+      expect(menuItem('widget-show-table')).not.toBeNull();
+      expect(menuItem('widget-export-xlsx')).not.toBeNull();
+      expect(menuItem('widget-edit')).toBeNull();
+      expect(menuItem('widget-remove')).toBeNull();
     });
 
     it('exports the widgets of the version shown: the workbook asks for the version, and the files of both kinds name it (Exporting a widget of a version)', async () => {
@@ -3277,7 +3303,7 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
       await answerQueries(context, answer);
 
       const choose = async (format: string) => {
-        all(context.root, 'widget-export')[0].click();
+        all(context.root, 'widget-menu')[0].click();
         await settle(context.harness);
         document.querySelector<HTMLElement>(`[data-testid="widget-export-${format}"]`)!.click();
         await settle(context.harness);

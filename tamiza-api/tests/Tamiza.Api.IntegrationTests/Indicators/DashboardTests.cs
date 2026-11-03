@@ -16,7 +16,7 @@ public sealed class DashboardTests(PostgresFixture postgres)
     private const string LimitCode = "dashboards.limit";
     private const string LastOneCode = "dashboards.lastOne";
     private const string OrderChangedCode = "dashboards.orderChanged";
-    private const string LimitMessage = "A project can have at most 7 dashboards. Remove one before adding another.";
+    private const string LimitMessage = "A project can have at most 10 dashboards. Remove one before adding another.";
 
     private static readonly string FortyOne = new('n', 41);
 
@@ -156,13 +156,28 @@ public sealed class DashboardTests(PostgresFixture postgres)
     // Eighth dashboard
 
     [Fact]
-    public async Task An_eighth_dashboard_is_refused_with_the_limit()
+    public async Task An_eighth_dashboard_is_added_after_the_other_seven()
     {
         await using var h = await CreateAsync();
         await FillAsync(h, 7);
-        var before = await h.StoredDashboardsAsync();
 
         var response = await h.PostDashboardAsync("Eighth", h.Admin);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(Enumerable.Range(0, 8), await PositionsAsync(h));
+        Assert.Equal("Eighth", (await NamesAsync(h))[^1]);
+    }
+
+    // Eleventh dashboard
+
+    [Fact]
+    public async Task An_eleventh_dashboard_is_refused_with_the_limit()
+    {
+        await using var h = await CreateAsync();
+        await FillAsync(h, 10);
+        var before = await h.StoredDashboardsAsync();
+
+        var response = await h.PostDashboardAsync("Eleventh", h.Admin);
 
         await AssertProblemAsync(response, HttpStatusCode.Conflict, LimitCode, LimitMessage);
         Assert.Equal(before, await h.StoredDashboardsAsync());
@@ -171,10 +186,10 @@ public sealed class DashboardTests(PostgresFixture postgres)
     // Two added at the same moment
 
     [Fact]
-    public async Task Of_eight_dashboards_added_at_the_same_moment_to_a_project_with_six_one_is_added()
+    public async Task Of_eight_dashboards_added_at_the_same_moment_to_a_project_with_nine_one_is_added()
     {
         await using var h = await CreateAsync();
-        await FillAsync(h, 6);
+        await FillAsync(h, 9);
         // Each insert takes a moment, so every request has counted before the first one commits unless the count waits for it.
         await h.ExecuteAsync(
             """
@@ -194,7 +209,7 @@ public sealed class DashboardTests(PostgresFixture postgres)
             await AssertProblemAsync(refused, HttpStatusCode.Conflict, LimitCode);
         }
 
-        Assert.Equal(Enumerable.Range(0, 7), await PositionsAsync(h));
+        Assert.Equal(Enumerable.Range(0, 10), await PositionsAsync(h));
     }
 
     // Name trimmed
@@ -899,16 +914,29 @@ public sealed class DashboardTests(PostgresFixture postgres)
     // Duplicate at the limit
 
     [Fact]
-    public async Task Duplicating_a_dashboard_of_a_project_with_seven_is_refused_with_the_limit()
+    public async Task Duplicating_a_dashboard_of_a_project_with_ten_is_refused_with_the_limit()
     {
         await using var h = await CreateAsync();
-        await FillAsync(h, 7);
+        await FillAsync(h, 10);
         var before = await h.StoredDashboardsAsync();
 
         var response = await DuplicateAsync(h, h.DashboardId, "Indicators (copy)");
 
         await AssertProblemAsync(response, HttpStatusCode.Conflict, LimitCode, LimitMessage);
         Assert.Equal(before, await h.StoredDashboardsAsync());
+    }
+
+    [Fact]
+    public async Task Duplicating_a_dashboard_of_a_project_with_seven_adds_the_copy()
+    {
+        await using var h = await CreateAsync();
+        await FillAsync(h, 7);
+
+        var response = await DuplicateAsync(h, h.DashboardId, "Indicators (copy)");
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(Enumerable.Range(0, 8), await PositionsAsync(h));
+        Assert.Equal("Indicators (copy)", (await NamesAsync(h))[1]);
     }
 
     // Original above the widget limit

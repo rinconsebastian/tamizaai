@@ -9,13 +9,15 @@ class Blank {}
 
 const longName = 'Cobertura de vacunación por departamento';
 const dashboardNames = ['Housing', 'Health', 'Field', 'Education', 'Water', 'Roads', longName];
+/** The most dashboards a project can have, each named with at least 20 characters. */
+const tenNames = Array.from({ length: 10 }, (_, i) => `Dashboard number ${i + 1} of the project`);
 
-/** Performance, Clean data, seven dashboards (`d1` to `d7`, the last with a long name) and the Settings group. */
-function projectTabs(): TabItem[] {
+/** Performance, Clean data, the dashboards (`d1` to `d7`, the last with a long name, unless others are given) and the Settings group. */
+function projectTabs(names: string[] = dashboardNames): TabItem[] {
   return [
     { label: 'Performance', link: '/projects/p1/performance' },
     { label: 'Clean data', link: '/projects/p1/clean-data' },
-    ...dashboardNames.map((name, i) => ({ label: name, link: `/projects/p1/dashboards/d${i + 1}`, truncate: true, testId: `dashboard-tab-d${i + 1}` })),
+    ...names.map((name, i) => ({ label: name, link: `/projects/p1/dashboards/d${i + 1}`, truncate: true, testId: `dashboard-tab-d${i + 1}` })),
     {
       label: 'Settings',
       link: '/projects/p1/overview',
@@ -123,10 +125,11 @@ describe('TabsNav', () => {
   });
 
   /** Opens `url`, then creates the tabs, as the project page does once the project has loaded. */
-  async function create(url: string) {
+  async function create(url: string, names: string[] = dashboardNames) {
     const router = TestBed.inject(Router);
     await router.navigateByUrl(url);
     const fixture = TestBed.createComponent(Host);
+    fixture.componentInstance.items.set(projectTabs(names));
     await fixture.whenStable();
     const root = fixture.nativeElement as HTMLElement;
     const navigate = async (to: string) => {
@@ -178,6 +181,30 @@ describe('TabsNav', () => {
 
     expect(list.scrollLeft).toBeGreaterThan(0);
     expect(inView(list, tab(root, 'd7'))).toBe(true);
+    expect(pageScrolls).not.toHaveBeenCalled();
+  });
+
+  it('scrolls a row of ten long-named dashboards inside itself, keeping Settings at its end, and shows the side that hides tabs (Ten dashboards at tablet width)', async () => {
+    layout.width = 1024;
+    const { root, list } = await create('/projects/p1/performance', tenNames);
+    const nav = root.querySelector('nav')!;
+
+    // Performance, Clean data and ten dashboards: twelve tabs of 150 pixels in a list of 1024.
+    expect(tabsOf(list)).toHaveLength(12);
+    expect(list.scrollWidth).toBeGreaterThan(list.clientWidth);
+    expect(list.className).toContain('overflow-x-auto');
+    expect(list.querySelector('[data-testid="settings-tab"]')).toBeNull();
+    expect(nav.querySelector('[data-testid="settings-tab"]')).not.toBeNull();
+    expect(chevrons(root)).toEqual(['tabs-scroll-end']);
+    expect(pageScrolls).not.toHaveBeenCalled();
+  });
+
+  it('brings the tenth of ten dashboards into view when the row is created on it (Open tab brought into view)', async () => {
+    layout.width = 768;
+    const { root, list } = await create('/projects/p1/dashboards/d10', tenNames);
+
+    expect(list.scrollLeft).toBeGreaterThan(0);
+    expect(inView(list, tab(root, 'd10'))).toBe(true);
     expect(pageScrolls).not.toHaveBeenCalled();
   });
 

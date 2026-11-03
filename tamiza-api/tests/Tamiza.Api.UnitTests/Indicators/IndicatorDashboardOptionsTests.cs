@@ -42,13 +42,13 @@ public sealed class IndicatorDashboardOptionsTests
     }
 
     [Fact]
-    public void Defaults_are_50_widgets_per_dashboard_5000_rows_and_7_dashboards()
+    public void Defaults_are_50_widgets_per_dashboard_5000_rows_and_10_dashboards()
     {
         var options = Resolve();
 
         Assert.Equal(50, options.MaxWidgetsPerDashboard);
         Assert.Equal(5000, options.MaxWidgetQueryRows);
-        Assert.Equal(7, IndicatorDashboardOptions.MaxDashboards);
+        Assert.Equal(10, IndicatorDashboardOptions.MaxDashboards);
     }
 
     [Fact]

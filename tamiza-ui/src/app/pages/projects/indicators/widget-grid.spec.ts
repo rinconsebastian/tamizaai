@@ -1,11 +1,12 @@
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { vi } from 'vitest';
+import { pressKey, tick } from '../../../../testing/cdk';
 import { configureApp, projectId, settle } from '../../../../testing/project-harness';
 import { DashboardFilter, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartTooltips } from '../../../shared/ui';
 import { encodeFilters } from '../data-view';
-import { Context, all, answerLoad, answerQueries, clearOverlay, colorsOfWidgets, config, flushLayout, isLayout, isQuery, layoutUrlOf, layoutsOf, open, paperOn, result, row, text, wait, widget } from './indicators-testing';
+import { Context, all, answerLoad, answerQueries, clearOverlay, colorsOfWidgets, config, flushLayout, isLayout, isQuery, layoutUrlOf, layoutsOf, menuItem, open, openWidgetMenu, paperOn, result, row, text, toggleTable, wait, widget } from './indicators-testing';
 import { layoutSaveDelayMs } from '../project-indicators';
 import { WidgetGrid } from './widget-grid';
 
@@ -430,7 +431,7 @@ describe('the widget grid on paper (dashboard printing)', () => {
 
     expect(handle(context, 'w1', 'move').classList).toContain('paper:hidden');
     expect(handle(context, 'w1', 'resize').classList).toContain('paper:hidden');
-    expect(tile.querySelector('[data-testid="widget-table-toggle"]')!.classList).toContain('paper:hidden');
+    expect(tile.querySelector('[data-testid="widget-menu"]')!.closest('tmz-dropdown-menu')!.classList).toContain('paper:hidden');
     expect(tile.querySelector('tmz-dropdown-menu')!.classList).toContain('paper:hidden');
     expect(tile.querySelector('[data-testid="widget-title"]')!.closest('.paper\:hidden')).toBeNull();
     const article = tile.querySelector('article')!;
@@ -451,6 +452,61 @@ describe('the widget grid on paper (dashboard printing)', () => {
 
 // The colors of the dashboard shown reach every widget (add-dashboard-palettes, design D7): these check what each widget resolves from
 // them, and the charts' own specs check that the marks are drawn in it.
+describe('the widget menu in the grid', () => {
+  afterEach(clearOverlay);
+
+  const status = (context: Context) => text(context.root.querySelector('[data-testid="grid-status"]'));
+  const hasTable = (context: Context, id: string) => item(context, id).querySelector('[data-testid="widget-table"]') !== null;
+
+  it('switches between the chart and the table, checking the item and announcing each view (Switched to a table, Back to the chart)', async () => {
+    const context = await open('viewer', [left, right], rows);
+
+    await toggleTable(context, 1);
+    expect(hasTable(context, 'w2')).toBe(true);
+    expect(hasTable(context, 'w1')).toBe(false);
+    expect(status(context)).toBe('“Right” is shown as a table');
+    await openWidgetMenu(context, 1);
+    expect(menuItem('widget-show-table')!.getAttribute('aria-checked')).toBe('true');
+    menuItem('widget-show-table')!.click();
+    await settle(context.harness);
+
+    expect(hasTable(context, 'w2')).toBe(false);
+    expect(status(context)).toBe('“Right” is shown as a chart');
+    await openWidgetMenu(context, 1);
+    expect(menuItem('widget-show-table')!.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('opens from the keyboard, moves through its items, and closes on Escape with focus on its button (Keyboard)', async () => {
+    const context = await open('analyst', [left], rows);
+    const trigger = context.root.querySelector<HTMLElement>('[data-testid="widget-menu"]')!;
+
+    trigger.focus();
+    pressKey(trigger, 'ArrowDown');
+    await settle(context.harness);
+    const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+    const order = ['widget-show-table', 'widget-export-png', 'widget-export-svg', 'widget-export-xlsx', 'widget-edit', 'widget-remove'];
+    expect(document.activeElement).toBe(menuItem(order[0]));
+    for (const id of order.slice(1)) {
+      pressKey(menu, 'ArrowDown');
+      expect(document.activeElement).toBe(menuItem(id));
+    }
+
+    pressKey(menu, 'Escape');
+    await settle(context.harness);
+    await tick();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('shows a viewer the menu without Edit widget and Remove widget, and an analyst with them', async () => {
+    const viewer = await open('viewer', [left], rows);
+    await openWidgetMenu(viewer);
+    expect(menuItem('widget-edit')).toBeNull();
+    expect(menuItem('widget-remove')).toBeNull();
+    expect(menuItem('widget-export-png')).not.toBeNull();
+  });
+});
+
 describe('the colors of the dashboard shown', () => {
   afterEach(clearOverlay);
 

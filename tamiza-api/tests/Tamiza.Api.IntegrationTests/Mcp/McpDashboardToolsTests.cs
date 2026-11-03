@@ -68,7 +68,7 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         var byName = body.RootElement.GetProperty("indicators").EnumerateArray().ToDictionary(i => i.GetProperty("name").GetString()!);
         Assert.Equal(("Piped water rate", "percent", true, 2), (byName["piped_water_rate"].GetProperty("label").GetString(), byName["piped_water_rate"].GetProperty("format").GetString(), byName["piped_water_rate"].GetProperty("published").GetBoolean(), byName["piped_water_rate"].GetProperty("rows").GetInt32()));
         Assert.False(byName["not_yet"].GetProperty("published").GetBoolean());
-        Assert.Equal(7, body.RootElement.GetProperty("limits").GetProperty("maxDashboards").GetInt32());
+        Assert.Equal(10, body.RootElement.GetProperty("limits").GetProperty("maxDashboards").GetInt32());
     }
 
     [Fact]
@@ -191,29 +191,29 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
     {
         await using var h = await CreateAsync();
 
-        for (var i = 2; i <= 7; i++)
+        for (var i = 2; i <= 10; i++)
         {
             await AddDashboardAsync(h, $"Dashboard {i}");
         }
 
-        var eighth = await h.CallAsync("analyst", "create_dashboard", new { name = "Eighth", change = Request });
+        var eleventh = await h.CallAsync("analyst", "create_dashboard", new { name = "Eleventh", change = Request });
         var copied = await h.CallAsync("analyst", "duplicate_dashboard", new { dashboardId = await FirstDashboardAsync(h), name = "Copy", change = Request });
         var taken = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = await FirstDashboardAsync(h), name = "DASHBOARD 3", change = Request });
         var reserved = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = await FirstDashboardAsync(h), name = "Performance", change = Request });
 
-        Assert.Equal("dashboards.limit", eighth.Code());
+        Assert.Equal("dashboards.limit", eleventh.Code());
         Assert.Equal("dashboards.limit", copied.Code());
         // The page's code, not an mcp. one, and the HTTP status next to it (docs/mcp.md, Troubleshooting).
-        foreach (var refused in new[] { eighth, copied })
+        foreach (var refused in new[] { eleventh, copied })
         {
             using var body = refused.Json();
             Assert.Equal(409, body.RootElement.GetProperty("status").GetInt32());
-            Assert.Contains("at most 7 dashboards", body.RootElement.GetProperty("message").GetString());
+            Assert.Contains("at most 10 dashboards", body.RootElement.GetProperty("message").GetString());
         }
 
         Assert.Equal("mcp.validation", taken.Code());
         Assert.Equal("mcp.validation", reserved.Code());
-        Assert.Equal(7, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboards"));
+        Assert.Equal(10, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboards"));
     }
 
     [Fact]

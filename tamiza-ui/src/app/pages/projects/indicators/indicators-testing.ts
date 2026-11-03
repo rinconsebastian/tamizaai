@@ -107,7 +107,7 @@ export function config(overrides: Partial<WidgetConfig> = {}): WidgetConfig {
 export function overview(overrides: Partial<IndicatorsOverview> = {}): IndicatorsOverview {
   return {
     indicators: defaultIndicators,
-    limits: { maxWidgets: 50, maxQueryRows: 5000, maxDashboards: 7 },
+    limits: { maxWidgets: 50, maxQueryRows: 5000, maxDashboards: 10 },
     ...overrides,
   };
 }
@@ -233,6 +233,27 @@ export async function answerQueries(context: Pick<Context, 'http' | 'harness'>, 
   await settle(context.harness);
   return requests;
 }
+
+/** The item of the open widget menu with this test id, or null. */
+export const menuItem = (testId: string) => document.querySelector<HTMLElement>(`[role="menu"] [data-testid="${testId}"]`);
+
+/** Opens the menu of the widget at `index` (in the page's order) and leaves it open. */
+export async function openWidgetMenu(context: Pick<Context, 'root' | 'harness'>, index = 0): Promise<HTMLElement> {
+  const trigger = all(context.root, 'widget-menu')[index];
+  trigger.click();
+  await settle(context.harness);
+  return trigger;
+}
+
+/** Opens the menu of the widget at `index` and chooses the item with this test id. */
+export async function chooseInWidgetMenu(context: Pick<Context, 'root' | 'harness'>, testId: string, index = 0): Promise<void> {
+  await openWidgetMenu(context, index);
+  menuItem(testId)!.click();
+  await settle(context.harness);
+}
+
+/** Switches the widget at `index` between its chart and its table with the "Show as table" item of its menu. */
+export const toggleTable = (context: Pick<Context, 'root' | 'harness'>, index = 0) => chooseInWidgetMenu(context, 'widget-show-table', index);
 
 export const overlay = () => document.querySelector('.cdk-overlay-container') as HTMLElement;
 export const clearOverlay = () => document.querySelectorAll('.cdk-overlay-container').forEach((c) => c.replaceChildren());

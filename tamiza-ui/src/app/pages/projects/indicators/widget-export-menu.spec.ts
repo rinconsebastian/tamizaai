@@ -12,44 +12,60 @@ const coverage = widget('w1', { title: 'Coverage by municipality', layout: { x: 
 const water = widget('w2', { title: 'Type of dwelling', chartType: 'pie', layout: { x: 6, y: 0, w: 6, h: 4 } });
 
 const grid = (context: Context) => context.harness.fixture.debugElement.query(By.directive(WidgetGrid));
-const menuItems = () => Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-const triggerOf = (context: Context, index = 0) => all(context.root, 'widget-export')[index];
+const menuEntries = () => Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]'));
+const formats = () => menuEntries().filter((entry) => entry.dataset['testid']?.startsWith('widget-export-'));
+const triggerOf = (context: Context, index = 0) => all(context.root, 'widget-menu')[index];
 
 async function openMenu(context: Context, index = 0) {
   triggerOf(context, index).click();
   await settle(context.harness);
-  return menuItems();
+  return formats();
 }
 
-// Every member exports the widgets of a project's own dashboards (add-widget-export: Export button, Formats that cannot be exported yet).
-describe('the Export button of a widget', () => {
+// Every member exports the widgets of a project's own dashboards, from the Export group of the widget's menu
+// (widget-export: Export in the widget menu, Formats that cannot be exported yet).
+describe('the Export group of a widget menu', () => {
   afterEach(clearOverlay);
 
-  it.each(['viewer', 'analyst', 'admin'] as const)('is offered to a %s on every widget, named after it', async (role) => {
+  it.each(['viewer', 'analyst', 'admin'] as const)('is offered to a %s on every widget, from one menu named after it', async (role) => {
     const context = await open(role, [coverage, water], rows);
 
-    expect(all(context.root, 'widget-export')).toHaveLength(2);
-    expect(triggerOf(context, 0).getAttribute('aria-label')).toBe('Export “Coverage by municipality”');
-    expect(triggerOf(context, 1).getAttribute('aria-label')).toBe('Export “Type of dwelling”');
+    expect(all(context.root, 'widget-menu')).toHaveLength(2);
+    expect(triggerOf(context, 0).getAttribute('aria-label')).toBe('Options for “Coverage by municipality”');
+    expect(triggerOf(context, 1).getAttribute('aria-label')).toBe('Options for “Type of dwelling”');
   });
 
-  it('comes after the table toggle and before the actions menu, which keeps only Edit and Remove', async () => {
+  it('leaves the header with the move handle, the title and the menu: no other button (Analyst’s widget header)', async () => {
     const context = await open('analyst', [coverage], rows);
     const header = triggerOf(context).closest('header')!;
 
-    const order = Array.from(header.querySelectorAll<HTMLElement>('[data-testid="widget-title"], [data-testid="widget-table-toggle"], [data-testid="widget-export"], [data-testid="menu-trigger"]')).map((e) => e.dataset['testid']);
-    expect(order).toEqual(['widget-title', 'widget-table-toggle', 'widget-export', 'menu-trigger']);
-
-    all(context.root, 'menu-trigger')[0].click();
-    await settle(context.harness);
-    expect(menuItems().map((item) => text(item))).toEqual(['Edit widget', 'Remove widget']);
+    const order = Array.from(header.querySelectorAll<HTMLElement>('button, h3')).map((e) => e.dataset['testid']);
+    expect(order).toEqual(['widget-move', 'widget-title', 'widget-menu']);
+    expect(header.querySelector('[data-testid="widget-table-toggle"]')).toBeNull();
+    expect(header.querySelector('[data-testid="widget-export"]')).toBeNull();
+    expect(header.querySelector('[data-testid="menu-trigger"]')).toBeNull();
   });
 
-  it('gives a viewer the Export button and none of the editing controls', async () => {
-    const context = await open('viewer', [coverage], rows);
+  it('is a labelled group of items of the menu itself, between Show as table and the editing actions (Formats in the menu itself)', async () => {
+    const context = await open('analyst', [coverage], rows);
+    triggerOf(context).click();
+    await settle(context.harness);
 
-    expect(all(context.root, 'widget-export')).toHaveLength(1);
-    expect(all(context.root, 'menu-trigger')).toHaveLength(0);
+    expect(menuEntries().map((entry) => text(entry))).toEqual(['Show as table', 'PNG image', 'SVG image', 'Excel workbook (XLSX)', 'Edit widget', 'Remove widget']);
+    expect(menuEntries().map((entry) => entry.getAttribute('role'))).toEqual(['menuitemcheckbox', 'menuitem', 'menuitem', 'menuitem', 'menuitem', 'menuitem']);
+    const groups = Array.from(document.querySelectorAll('[role="menu"] [role="group"]'));
+    expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual([null, 'Export', null]);
+    expect(groups[1].querySelectorAll('[role="menuitem"]')).toHaveLength(3);
+    expect(document.querySelector('[role="menu"] [aria-haspopup]')).toBeNull(); // no submenu
+    expect(document.querySelectorAll('[role="menu"] [role="separator"]')).toHaveLength(2);
+  });
+
+  it('gives a viewer Show as table and the formats, and none of the editing controls', async () => {
+    const context = await open('viewer', [coverage], rows);
+    triggerOf(context).click();
+    await settle(context.harness);
+
+    expect(menuEntries().map((entry) => text(entry))).toEqual(['Show as table', 'PNG image', 'SVG image', 'Excel workbook (XLSX)']);
     expect(all(context.root, 'widget-move')).toHaveLength(0);
   });
 
@@ -109,7 +125,7 @@ describe('the Export button of a widget', () => {
     expect(triggerOf(context).closest('tmz-dropdown-menu')!.classList).toContain('paper:hidden');
   });
 
-  it('is a header control like the others, with no breakpoint that would hide it on a phone', async () => {
+  it('is a header control like the others, with no breakpoint that would hide it on a phone (Phone width)', async () => {
     const context = await open('analyst', [coverage, water], rows);
 
     const classes = Array.from(triggerOf(context).closest('tmz-dropdown-menu')!.classList);
@@ -120,14 +136,14 @@ describe('the Export button of a widget', () => {
 
 @Component({
   imports: [WidgetGrid],
-  template: `<app-widget-grid projectId="p1" [widgets]="widgets" [exporting]="exporting()" />`,
+  template: `<app-widget-grid projectId="p1" [widgets]="widgets" [exporting]="exporting()" [editable]="true" />`,
 })
 class Host {
   readonly widgets = [coverage, water];
   readonly exporting = signal<Record<string, WidgetFileExtension>>({});
 }
 
-describe('the Export button of a widget while its file is being prepared', () => {
+describe('the menu of a widget while its file is being prepared', () => {
   afterEach(clearOverlay);
 
   async function render() {
@@ -143,11 +159,11 @@ describe('the Export button of a widget while its file is being prepared', () =>
     await run();
     http.match(isQuery).forEach((r) => r.flush(rows));
     await run();
-    const triggers = () => Array.from(fixture.nativeElement.querySelectorAll('[data-testid="widget-export"]')) as HTMLButtonElement[];
+    const triggers = () => Array.from(fixture.nativeElement.querySelectorAll('[data-testid="widget-menu"]')) as HTMLButtonElement[];
     return { fixture, run, triggers };
   }
 
-  it('shows that only that widget is busy, and does not open', async () => {
+  it('shows that only that widget is busy, and still opens with its formats unavailable (Two widgets, Menu of a widget being exported)', async () => {
     const { fixture, run, triggers } = await render();
 
     fixture.componentInstance.exporting.set({ w1: 'xlsx' });
@@ -155,17 +171,43 @@ describe('the Export button of a widget while its file is being prepared', () =>
 
     const [busy, idle] = triggers();
     expect(busy.getAttribute('aria-busy')).toBe('true');
-    expect(busy.getAttribute('aria-label')).toBe('Preparing the export of “Coverage by municipality”…');
+    expect(busy.getAttribute('aria-label')).toBe('Options for “Coverage by municipality”, preparing its export');
     expect(idle.getAttribute('aria-busy')).toBeNull();
+
     busy.click();
     await run();
-    expect(menuItems()).toHaveLength(0);
+    expect(formats().map((item) => item.getAttribute('aria-disabled'))).toEqual(['true', 'true', 'true']);
+    expect(formats().map((item) => text(item.querySelector('[data-testid="menu-item-description"]')))).toEqual(Array(3).fill('Preparing the export…'));
+    const others = menuEntries().filter((entry) => !formats().includes(entry));
+    expect(others.map((entry) => entry.getAttribute('aria-disabled'))).toEqual([null, null, null]); // Show as table, Edit, Remove
+    expect(others.map((entry) => text(entry))).toEqual(['Show as table', 'Edit widget', 'Remove widget']);
+    clearOverlay();
+
     idle.click();
     await run();
-    expect(menuItems()).toHaveLength(3);
+    expect(formats().map((item) => item.getAttribute('aria-disabled'))).toEqual([null, null, null]);
   });
 
-  it('opens again once the export ends', async () => {
+  it('keeps Show as table usable while the export runs', async () => {
+    const { fixture, run, triggers } = await render();
+    fixture.componentInstance.exporting.set({ w1: 'png' });
+    await run();
+
+    const tableOf = (index: number) => fixture.nativeElement.querySelectorAll('app-widget-view')[index].querySelector('[data-testid="widget-table"]');
+    expect(tableOf(0)).toBeNull();
+    triggers()[0].click();
+    await run();
+    const table = menuEntries().find((entry) => entry.dataset['testid'] === 'widget-show-table')!;
+    expect(table.getAttribute('aria-disabled')).toBeNull();
+    table.click();
+    await run();
+
+    expect(tableOf(0)).not.toBeNull();
+    expect(tableOf(1)).toBeNull(); // the other widget keeps its chart
+    expect(fixture.nativeElement.querySelector('[data-testid="grid-status"]').textContent).toContain('“Coverage by municipality” is shown as a table');
+  });
+
+  it('has everything available again once the export ends (Export ends)', async () => {
     const { fixture, run, triggers } = await render();
     fixture.componentInstance.exporting.set({ w1: 'png' });
     await run();
@@ -174,6 +216,9 @@ describe('the Export button of a widget while its file is being prepared', () =>
     await run();
 
     expect(triggers()[0].getAttribute('aria-busy')).toBeNull();
-    expect(triggers()[0].getAttribute('aria-label')).toBe('Export “Coverage by municipality”');
+    expect(triggers()[0].getAttribute('aria-label')).toBe('Options for “Coverage by municipality”');
+    triggers()[0].click();
+    await run();
+    expect(formats().map((item) => item.getAttribute('aria-disabled'))).toEqual([null, null, null]);
   });
 });

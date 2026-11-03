@@ -140,7 +140,7 @@ describe('DashboardNameDialog', () => {
     dialog.http.expectOne(dashboardsUrl).flush({ title: 'x', code: 'dashboards.limit' }, { status: 409, statusText: 'Conflict' });
     await dialog.settle();
 
-    expect(dialog.dialogError()).toBe('A project can have at most 7 dashboards. Remove one before adding another.');
+    expect(dialog.dialogError()).toBe('A project can have at most 10 dashboards. Remove one before adding another.');
     expect(dialog.get('dashboard-name-error')!.querySelector('[lang]')).toBeNull(); // translated from its code: the UI wrote it
     expect(dialog.fieldError()).toBeNull();
     expect(dialog.refused).toHaveBeenCalledTimes(1);

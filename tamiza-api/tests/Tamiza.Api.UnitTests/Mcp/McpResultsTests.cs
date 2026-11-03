@@ -62,14 +62,14 @@ public sealed class McpResultsTests
     [Fact]
     public void A_problem_with_a_code_keeps_the_code_the_detail_and_the_extensions()
     {
-        var problem = Problems.Status(StatusCodes.Status429TooManyRequests, "dashboards.limit", "Too many dashboards.", "A project has at most 7 dashboards.",
-            new Dictionary<string, object?> { ["max"] = 7 });
+        var problem = Problems.Status(StatusCodes.Status429TooManyRequests, "dashboards.limit", "Too many dashboards.", "A project has at most 10 dashboards.",
+            new Dictionary<string, object?> { ["max"] = 10 });
 
         var refusal = Assert.Throws<McpRefusal>(() => McpResults.Unwrap(problem));
 
         Assert.Equal("dashboards.limit", refusal.Code);
-        Assert.Equal("A project has at most 7 dashboards.", refusal.Message);
-        Assert.Equal(7, refusal.Details["max"]);
+        Assert.Equal("A project has at most 10 dashboards.", refusal.Message);
+        Assert.Equal(10, refusal.Details["max"]);
         Assert.Equal(StatusCodes.Status429TooManyRequests, refusal.Details["status"]);
     }
 

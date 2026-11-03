@@ -3,7 +3,7 @@ import es from '../../../../../public/i18n/es.json';
 import { pressKey } from '../../../../testing/cdk';
 import { byTestId, settle } from '../../../../testing/project-harness';
 import { ChartType, DashboardColors, IndicatorEntry, LikertStep, PaletteId, QueryResult, ValueColor, WidgetConfig, chartTypes } from '../../../core/projects/indicators.service';
-import { Context, all, cell, clearOverlay, config, indicator, isQuery, open, overlay, result, seriesResult, text, widget } from './indicators-testing';
+import { Context, all, cell, clearOverlay, config, indicator, isQuery, open, overlay, result, seriesResult, text, menuItem, openWidgetMenu, toggleTable, widget } from './indicators-testing';
 import { valueFormatter } from './format';
 import { armSteps, scaleColors } from './likert-chart';
 import { pyramidPlot } from './pyramid-chart';
@@ -43,7 +43,7 @@ const hover = async (context: Context, target: Element) => {
   await settle(context.harness);
 };
 async function toggle(context: Context) {
-  byTestId(context.root, 'widget-table-toggle')!.click();
+  await toggleTable(context);
   await settle(context.harness);
 }
 
@@ -739,7 +739,8 @@ describe('cross table widget', () => {
   it('has no switch to a chart, being a table already', async () => {
     const context = await show('crosstab', sources, grid(), [households]);
 
-    expect(byTestId(context.root, 'widget-table-toggle')).toBeNull();
+    await openWidgetMenu(context);
+    expect(menuItem('widget-show-table')).toBeNull();
     expect(byTestId(context.root, 'chart-toggle')).toBeNull();
   });
 

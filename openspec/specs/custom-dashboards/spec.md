@@ -2,12 +2,13 @@
 
 ## Purpose
 
-Let a project organize its indicator widgets into up to 7 dashboards of its own, each with a name, shown as tabs after the Performance and Clean data dashboards.
+Let a project organize its indicator widgets into up to 10 dashboards of its own, each with a name, shown as tabs after the Performance and Clean data dashboards.
 
 ## Requirements
 
+
 ### Requirement: Project dashboards
-A project SHALL have at least 1 and at most 7 dashboards of its own, in an order. Each dashboard SHALL have a name and its own widgets (see `dashboard-indicators`). Every project member SHALL see every dashboard of the project. The Performance and Clean data dashboards SHALL NOT count among them: they cannot be renamed, moved, duplicated or removed, and they always come before the project's own dashboards.
+A project SHALL have at least 1 and at most 10 dashboards of its own, in an order. Each dashboard SHALL have a name and its own widgets (see `dashboard-indicators`). Every project member SHALL see every dashboard of the project. The Performance and Clean data dashboards SHALL NOT count among them: they cannot be renamed, moved, duplicated or removed, and they always come before the project's own dashboards.
 
 #### Scenario: Viewer sees every dashboard
 - **WHEN** a `viewer` opens a project whose dashboards are "Housing", "Health" and "Field", in that order
@@ -16,6 +17,10 @@ A project SHALL have at least 1 and at most 7 dashboards of its own, in an order
 #### Scenario: Permanent dashboards
 - **WHEN** an `analyst` opens the Performance or the Clean data dashboard
 - **THEN** no action to rename, move, duplicate or remove it is offered
+
+#### Scenario: Ten dashboards
+- **WHEN** an `analyst` of a project that has 9 dashboards adds one
+- **THEN** the dashboard is added, and the project's 10 dashboards are offered after Performance and Clean data
 
 ### Requirement: First dashboard
 A new project SHALL start with one dashboard named "Indicators" and no widgets. A project that existed before dashboards were introduced SHALL get one dashboard named "Indicators" that holds all of its widgets, each with the same title, chart type, query, position and size.
@@ -71,7 +76,7 @@ Each dashboard SHALL show its name as a heading above its widgets. For every mem
 - **THEN** **Version history** is among them
 
 ### Requirement: Adding a dashboard
-An `analyst` or `admin` SHALL be able to add a dashboard by giving its name. It SHALL be placed after the project's other dashboards, start with no widgets, and open for the member who added it. A project that already has 7 dashboards SHALL refuse another with a message naming the limit, and the action to add one SHALL then be unavailable and say why.
+An `analyst` or `admin` SHALL be able to add a dashboard by giving its name. It SHALL be placed after the project's other dashboards, start with no widgets, and open for the member who added it. A project that already has 10 dashboards SHALL refuse another with a message naming the limit, and the action to add one SHALL then be unavailable and say why.
 
 #### Scenario: Analyst adds a dashboard
 - **WHEN** an `analyst` of a project whose only dashboard is "Indicators" adds "Field progress"
@@ -79,14 +84,22 @@ An `analyst` or `admin` SHALL be able to add a dashboard by giving its name. It 
 
 #### Scenario: Eighth dashboard
 - **WHEN** a project has 7 dashboards and an `admin` asks the API to add another
-- **THEN** the API responds 409 with a message saying a project can have at most 7 dashboards
+- **THEN** the API adds the dashboard after the other seven
+
+#### Scenario: Add action below the limit
+- **WHEN** an `analyst` opens a dashboard of a project that has 8 dashboards
+- **THEN** the actions to add and to duplicate a dashboard are available
+
+#### Scenario: Eleventh dashboard
+- **WHEN** a project has 10 dashboards and an `admin` asks the API to add another
+- **THEN** the API responds 409 with a message saying a project can have at most 10 dashboards
 
 #### Scenario: Add action at the limit
-- **WHEN** an `analyst` opens a dashboard of a project that has 7 dashboards
-- **THEN** the actions to add and to duplicate a dashboard are unavailable, can still be reached from the keyboard, and say the project has the most dashboards it can hold
+- **WHEN** an `analyst` opens a dashboard of a project that has 10 dashboards
+- **THEN** the actions to add and to duplicate a dashboard are unavailable, can still be reached from the keyboard, and say the project has the most dashboards it can hold (10)
 
 #### Scenario: Two added at the same moment
-- **WHEN** two analysts each add a dashboard at the same moment to a project that has 6
+- **WHEN** two analysts each add a dashboard at the same moment to a project that has 9
 - **THEN** one dashboard is added and the other request is refused with the limit
 
 ### Requirement: Renaming a dashboard
@@ -116,7 +129,7 @@ An `analyst` or `admin` SHALL be able to move a dashboard one place to the left 
 - **THEN** it ends up third of 4
 
 ### Requirement: Duplicating a dashboard
-An `analyst` or `admin` SHALL be able to duplicate a dashboard under a new name, proposed as the original's name followed by " (copy)" and shortened to fit 40 characters. The copy SHALL be placed right after the original and SHALL hold a copy of each of its widgets, with the same title, chart type, query, ignored filters, color, orientation, position and size, a copy of its filters, in the same order with the same defaults, and its palette and colors kept by value. Later changes to one SHALL NOT change the other. The copy SHALL have no scheduled email (see `dashboard-reports`). Duplicating SHALL be refused when the project already has 7 dashboards.
+An `analyst` or `admin` SHALL be able to duplicate a dashboard under a new name, proposed as the original's name followed by " (copy)" and shortened to fit 40 characters. The copy SHALL be placed right after the original and SHALL hold a copy of each of its widgets, with the same title, chart type, query, ignored filters, color, orientation, position and size, a copy of its filters, in the same order with the same defaults, and its palette and colors kept by value. Later changes to one SHALL NOT change the other. The copy SHALL have no scheduled email (see `dashboard-reports`). Duplicating SHALL be refused when the project already has 10 dashboards.
 
 #### Scenario: Dashboard duplicated
 - **WHEN** an `analyst` duplicates "Housing", which holds 8 widgets, as "Housing 2026"
@@ -135,8 +148,8 @@ An `analyst` or `admin` SHALL be able to duplicate a dashboard under a new name,
 - **THEN** the name field reads the first 33 characters of the name followed by " (copy)"
 
 #### Scenario: Duplicate at the limit
-- **WHEN** a project has 7 dashboards and an `analyst` asks the API to duplicate one
-- **THEN** the API responds 409 with a message saying a project can have at most 7 dashboards
+- **WHEN** a project has 10 dashboards and an `analyst` asks the API to duplicate one
+- **THEN** the API responds 409 with a message saying a project can have at most 10 dashboards
 
 #### Scenario: Recent move included
 - **WHEN** an `analyst` drags a widget to a new place and duplicates its dashboard right away
@@ -169,6 +182,10 @@ An `analyst` or `admin` SHALL be able to duplicate a dashboard under a new name,
 #### Scenario: Orientation duplicated
 - **WHEN** an `analyst` duplicates "Housing", which holds a horizontal box plot
 - **THEN** the copy of the box plot in "Housing (copy)" is horizontal
+
+#### Scenario: Duplicate of a seventh dashboard
+- **WHEN** a project has 7 dashboards and an `analyst` duplicates one
+- **THEN** the copy is added, and the project has 8 dashboards
 
 ### Requirement: Removing a dashboard
 An `analyst` or `admin` SHALL be able to remove a dashboard together with all its widgets, after confirming a message that says how many widgets will be removed. The last dashboard of a project SHALL NOT be removable. After a removal the member SHALL be told what was removed and taken to the dashboard now in its place, or to the new last dashboard when the removed one was last.
