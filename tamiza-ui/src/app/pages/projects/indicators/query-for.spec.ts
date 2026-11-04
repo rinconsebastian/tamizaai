@@ -1,5 +1,5 @@
-import { LikertStep, WidgetConfig, WidgetDisplay, WidgetSort, WidgetTooltipItem, chartTypes, emptyConfig } from '../../../core/projects/indicators.service';
-import { queryFor, savedConfig } from './widget-view';
+import { LikertStep, WidgetConfig, WidgetDisplay, WidgetReferenceLine, WidgetSort, WidgetTooltipItem, chartTypes, emptyConfig } from '../../../core/projects/indicators.service';
+import { offersDataLabels, overallFor, queryFor, referenceKindsFor, savedConfig } from './widget-view';
 
 const byColumn: WidgetSort = { by: 'column', column: 'round', compareAs: 'number', direction: 'asc' };
 const byValue: WidgetSort = { by: 'value', column: null, compareAs: null, direction: 'desc' };
@@ -280,6 +280,67 @@ describe('queryFor and savedConfig with a display (add-dashboard-palettes, desig
   });
 });
 
+describe('queryFor and savedConfig with the texts of a widget (add-widget-context, design D1)', () => {
+  /** Every text of the display at once, as an author who set them all. */
+  const texts: WidgetDisplay = {
+    subtitle: '¿Quién fue al evento?',
+    footnote: 'No suman 100 %: respuesta múltiple.',
+    caption: { text: '% de quienes asistieron' },
+    unit: 'de quienes asistieron',
+    showDescription: true,
+  };
+  const withTexts = (overrides: Partial<WidgetConfig> = {}): WidgetConfig => ({ ...config(null), display: { ...texts }, ...overrides });
+
+  it('gives, for every kind, the query of the same config without the texts, so editing them never queries again', () => {
+    for (const type of chartTypes) {
+      const query = queryFor(type, withTexts({ seriesBy: type === 'heatmap' ? 'water_source' : undefined }));
+      expect('display' in query).toBe(false);
+      expect(JSON.stringify(query)).toBe(JSON.stringify(queryFor(type, withTexts({ seriesBy: type === 'heatmap' ? 'water_source' : undefined, display: undefined }))));
+      expect(JSON.stringify(query)).toBe(JSON.stringify(queryFor(type, withTexts({ seriesBy: type === 'heatmap' ? 'water_source' : undefined, display: { caption: { hidden: true }, subtitle: 'Otro' } }))));
+    }
+  });
+
+  it('keeps the texts on every one of the twelve kinds, with nothing else the kind does not take', () => {
+    for (const type of chartTypes) {
+      expect(savedConfig(type, withTexts()).display).toEqual(texts);
+    }
+  });
+
+  it('keeps the texts when a stat tile becomes a bar chart, and when it becomes anything else', () => {
+    const stat = savedConfig('stat', withTexts());
+    expect(stat.display).toEqual(texts);
+    for (const type of chartTypes) {
+      expect(savedConfig(type, stat).display).toEqual(texts);
+    }
+  });
+
+  it('keeps a color or a scale beside the texts, in the order the API writes them', () => {
+    const saved = savedConfig('map', withTexts({ display: { ...texts, ramp: 'green', color: 4, labels: { municipality: 'Comuna' } } }));
+
+    expect(Object.keys(saved.display!)).toEqual(['ramp', 'labels', 'subtitle', 'footnote', 'caption', 'unit', 'showDescription']);
+  });
+
+  it('keeps a hidden caption, and leaves out a caption, a text and a flag that say nothing', () => {
+    expect(savedConfig('bar', withTexts({ display: { caption: { hidden: true } } })).display).toEqual({ caption: { hidden: true } });
+    for (const display of [
+      { caption: {} },
+      { caption: { text: '  ' } },
+      { subtitle: '  ', footnote: '', unit: ' ' },
+      { showDescription: false as unknown as true },
+    ] satisfies WidgetDisplay[]) {
+      expect('display' in savedConfig('bar', withTexts({ display }))).toBe(false);
+    }
+  });
+
+  it('saves what a widget without texts saved before', () => {
+    for (const type of chartTypes) {
+      expect(JSON.stringify(savedConfig(type, { ...config(null), display: { color: 3, ramp: 'green' } }))).toBe(
+        JSON.stringify({ ...savedConfig(type, { ...config(null), display: { color: 3, ramp: 'green', caption: {} } }) }),
+      );
+    }
+  });
+});
+
 describe('queryFor and savedConfig for a box plot (add-boxplot-widget, design D7)', () => {
   const boxed = (overrides: Partial<WidgetConfig> = {}): WidgetConfig => ({
     ...emptyConfig('household_income'),
@@ -330,5 +391,214 @@ describe('queryFor and savedConfig for a box plot (add-boxplot-widget, design D7
 
     expect(JSON.stringify(queryFor('boxplot', boxed({ display: { orientation: 'vertical' } })))).toBe(horizontal);
     expect(JSON.stringify(queryFor('boxplot', boxed({ display: undefined })))).toBe(horizontal);
+  });
+});
+
+describe('queryFor and savedConfig with column labels (add-indicator-column-metadata, design D5)', () => {
+  const labels = { numerator: 'Hogares que asistieron', zona: 'Zona' };
+  const labelled = (overrides: Partial<WidgetConfig> = {}): WidgetConfig => ({ ...config(null), display: { labels }, ...overrides });
+
+  it('leaves the labels out of the query of every kind, so typing one never queries again', () => {
+    for (const type of chartTypes) {
+      const seriesBy = type === 'heatmap' || type === 'pyramid' || type === 'likert' || type === 'crosstab' ? 'sex' : undefined;
+      const query = queryFor(type, labelled({ seriesBy }));
+
+      expect('display' in query).toBe(false);
+      expect(JSON.stringify(query)).toBe(JSON.stringify(queryFor(type, { ...labelled({ seriesBy }), display: undefined })));
+      expect(JSON.stringify(query)).toBe(JSON.stringify(queryFor(type, { ...labelled({ seriesBy }), display: { labels: { zona: 'Otra' } } })));
+    }
+  });
+
+  it('saves the labels of every kind, and only them for a kind that takes no color or scale', () => {
+    for (const type of chartTypes) {
+      const saved = savedConfig(type, { ...labelled({ seriesBy: 'sex' }), display: { color: 3, ramp: 'green', orientation: 'horizontal', labels } });
+
+      expect(saved.display?.labels, type).toEqual(labels);
+    }
+    expect(savedConfig('stat', labelled()).display).toEqual({ labels });
+    expect(savedConfig('pie', labelled()).display).toEqual({ labels });
+  });
+
+  it('keeps the labels across a change of kind', () => {
+    const draft = labelled({ groupBy: 'zona' });
+
+    expect(savedConfig('column', draft).display?.labels).toEqual(labels);
+    expect(savedConfig('bar', draft).display?.labels).toEqual(labels);
+    expect(savedConfig('stat', draft).display?.labels).toEqual(labels);
+  });
+
+  it('keeps the color and the labels together, and the labels alone where no color is taken', () => {
+    const draft = { ...labelled(), display: { color: 3, labels } };
+
+    expect(savedConfig('column', draft).display).toEqual({ color: 3, labels });
+    expect(savedConfig('stat', draft).display).toEqual({ labels });
+  });
+
+  it('drops a blank label and saves no display when none is left', () => {
+    expect(savedConfig('column', { ...config(null), display: { labels: { zona: '  ', numerator: 'Hogares' } } }).display).toEqual({ labels: { numerator: 'Hogares' } });
+    expect('display' in savedConfig('column', { ...config(null), display: { labels: { zona: '' } } })).toBe(false);
+    expect('display' in savedConfig('column', { ...config(null), display: { labels: {} } })).toBe(false);
+  });
+
+  it('saves the same config as before for a widget with no labels', () => {
+    const before = JSON.stringify(savedConfig('column', config(null)));
+
+    expect(JSON.stringify(savedConfig('column', { ...config(null), display: { labels: undefined } }))).toBe(before);
+    expect(before).not.toContain('labels');
+  });
+});
+
+describe('overallFor and the chart annotations (add-chart-annotations, design D2, D4)', () => {
+  const rate = { numerator: 'numerator', denominator: 'denominator' };
+  const lined = (referenceLines: WidgetReferenceLine[] | undefined, overrides: Partial<WidgetConfig> = {}): WidgetConfig => ({
+    ...config(null),
+    ratio: rate,
+    ...overrides,
+    ...(referenceLines ? { display: { ...overrides.display, referenceLines } } : {}),
+  });
+  const overall: WidgetReferenceLine[] = [{ kind: 'overall' }];
+
+  // The cases of `WidgetQueryTests` for `WidgetQuery.Overall` (tamiza-api): both twins decide it the same way.
+  it.each(['bar', 'column', 'line'] as const)('asks for the overall value of a %s with no series, a ratio and an overall line', (type) => {
+    expect(overallFor(type, lined(overall))).toBe(true);
+    expect(overallFor(type, lined([{ kind: 'mean' }, { kind: 'value', value: 0.5, label: 'Meta' }, { kind: 'overall', label: 'General' }]))).toBe(true);
+  });
+
+  it.each(['bar', 'column', 'line'] as const)('does not ask for it for a measure, a series, a mean line only or no display (%s)', (type) => {
+    expect(overallFor(type, lined(overall, { ratio: null, measure: 'value' }))).toBe(false);
+    expect(overallFor(type, lined(overall, { ratio: null }))).toBe(false);
+    expect(overallFor(type, lined(overall, { seriesBy: 'water_source' }))).toBe(false);
+    expect(overallFor(type, lined([{ kind: 'mean' }, { kind: 'median' }, { kind: 'value', value: 0.5 }]))).toBe(false);
+    expect(overallFor(type, lined(undefined))).toBe(false);
+    expect(overallFor(type, lined(undefined, { display: { color: 2, dataLabels: true } }))).toBe(false);
+    expect(overallFor(type, lined(undefined, { display: { referenceLines: [] } }))).toBe(false);
+  });
+
+  it('never asks for it for any other chart type', () => {
+    for (const type of chartTypes.filter((t) => t !== 'bar' && t !== 'column' && t !== 'line')) {
+      expect(overallFor(type, lined(overall))).toBe(false);
+    }
+  });
+
+  it('leaves the lines, the steps and the data labels out of the query of every kind, so editing them never queries again', () => {
+    const annotated: WidgetDisplay = { color: 2, referenceLines: [{ kind: 'mean' }, { kind: 'overall' }], interpolation: 'step', dataLabels: true };
+    for (const type of chartTypes) {
+      const series = type === 'heatmap' ? 'water_source' : undefined;
+      const query = queryFor(type, { ...config(null), ratio: rate, seriesBy: series, display: annotated });
+      expect('display' in query).toBe(false);
+      expect(JSON.stringify(query)).toBe(JSON.stringify(queryFor(type, { ...config(null), ratio: rate, seriesBy: series })));
+    }
+  });
+
+  it('saves the lines, the steps and the data labels last, after the texts, in the order the API writes them', () => {
+    const display: WidgetDisplay = {
+      referenceLines: [{ kind: 'mean' }, { kind: 'value', value: 0.5, label: 'Meta' }],
+      dataLabels: true,
+      interpolation: 'step',
+      showDescription: true,
+      color: 2,
+      subtitle: 'Subtítulo',
+    };
+
+    const saved = savedConfig('line', lined(undefined, { display })).display!;
+
+    expect(Object.keys(saved)).toEqual(['color', 'subtitle', 'showDescription', 'referenceLines', 'interpolation', 'dataLabels']);
+    expect(saved.referenceLines).toEqual([{ kind: 'mean' }, { kind: 'value', value: 0.5, label: 'Meta' }]);
+  });
+
+  it('keeps a saved "linear" and a saved false as they are, and saves no display for a widget with none of the three', () => {
+    expect(savedConfig('line', lined(undefined, { display: { interpolation: 'linear', dataLabels: false } })).display).toEqual({ interpolation: 'linear', dataLabels: false });
+    expect(savedConfig('pie', lined(undefined, { display: { dataLabels: false } })).display).toEqual({ dataLabels: false });
+    expect('display' in savedConfig('line', lined(undefined, { display: { referenceLines: [] } }))).toBe(false);
+    expect(JSON.stringify(savedConfig('column', lined(undefined, { display: { color: 3 } })))).toBe(
+      JSON.stringify(savedConfig('column', lined(undefined, { display: { color: 3, referenceLines: undefined, interpolation: undefined, dataLabels: undefined } }))),
+    );
+  });
+
+  it('keeps the reference lines on a bar, a column and a line only', () => {
+    for (const type of chartTypes) {
+      const kept = savedConfig(type, lined([{ kind: 'value', value: 0.5 }], { seriesBy: type === 'heatmap' ? 'water_source' : undefined })).display?.referenceLines;
+      expect(kept !== undefined, type).toBe(type === 'bar' || type === 'column' || type === 'line');
+    }
+  });
+
+  it('keeps the steps on a line only, and the data labels on a bar, a column, a line and a pie only', () => {
+    for (const type of chartTypes) {
+      const saved = savedConfig(type, lined(undefined, { seriesBy: type === 'heatmap' ? 'water_source' : undefined, display: { interpolation: 'step', dataLabels: true } })).display;
+      expect(saved?.interpolation !== undefined, type).toBe(type === 'line');
+      expect(saved?.dataLabels !== undefined, type).toBe(type === 'bar' || type === 'column' || type === 'line' || type === 'pie');
+    }
+  });
+
+  it('drops a mean and a median line when the chart has a series, and an overall line when it has no ratio', () => {
+    const all: WidgetReferenceLine[] = [{ kind: 'mean' }, { kind: 'median' }, { kind: 'overall' }, { kind: 'value', value: 0.5 }];
+
+    expect(savedConfig('column', lined(all, { seriesBy: 'water_source' })).display?.referenceLines?.map((l) => l.kind)).toEqual(['overall', 'value']);
+    expect(savedConfig('column', lined(all, { ratio: null, measure: 'value' })).display?.referenceLines?.map((l) => l.kind)).toEqual(['mean', 'median', 'value']);
+    expect(savedConfig('line', lined(all, { ratio: null, measure: 'value', seriesBy: 'water_source' })).display?.referenceLines?.map((l) => l.kind)).toEqual(['value']);
+    expect('display' in savedConfig('column', lined([{ kind: 'mean' }], { seriesBy: 'water_source' }))).toBe(false);
+  });
+
+  it('saves only the fixed values of a stacked or a 100% layout, and no data labels there', () => {
+    const all: WidgetReferenceLine[] = [{ kind: 'mean' }, { kind: 'overall' }, { kind: 'value', value: 0.5 }];
+    for (const layout of ['stacked', 'percent'] as const) {
+      const saved = savedConfig('bar', lined(all, { seriesBy: 'water_source', layout, ratio: null, measure: 'value', display: { dataLabels: true } })).display!;
+      expect(saved.referenceLines).toEqual([{ kind: 'value', value: 0.5 }]);
+      expect('dataLabels' in saved).toBe(false);
+    }
+    // A saved false never blocks a layout change, and a grouped layout takes data labels.
+    expect(savedConfig('bar', lined(undefined, { seriesBy: 'water_source', layout: 'stacked', ratio: null, measure: 'value', display: { dataLabels: false } })).display).toEqual({ dataLabels: false });
+    expect(savedConfig('bar', lined(undefined, { seriesBy: 'water_source', layout: 'grouped', display: { dataLabels: true } })).display).toEqual({ dataLabels: true });
+    // A bar chart that lost its series is plain again: its old layout takes nothing away.
+    expect(savedConfig('bar', lined(all, { layout: 'stacked' })).display?.referenceLines?.map((l) => l.kind)).toEqual(['mean', 'overall', 'value']);
+  });
+
+  it('saves a line as its kind, its value only on a value line, and its label unless it is blank', () => {
+    const saved = savedConfig('column', lined([{ kind: 'mean', value: 3, label: '  ' }, { kind: 'value', label: ' Meta ', value: 0.5 }, { kind: 'overall', label: '' }])).display!;
+
+    expect(saved.referenceLines).toEqual([{ kind: 'mean' }, { kind: 'value', value: 0.5, label: ' Meta ' }, { kind: 'overall' }]);
+    expect(Object.keys(saved.referenceLines![1])).toEqual(['kind', 'value', 'label']);
+  });
+
+  it('saves a value line without its number as it is, for the API to refuse', () => {
+    expect(savedConfig('column', lined([{ kind: 'value' }])).display?.referenceLines).toEqual([{ kind: 'value' }]);
+  });
+});
+
+// What the widget form offers is what savedConfig keeps (add-chart-annotations, design D2, D8): one rule, read by both.
+describe('the kinds of reference line and the data labels a widget takes', () => {
+  const ratio = { numerator: 'numerator', denominator: 'denominator' };
+
+  it('offers a mean, a median and a fixed value for a measure with no series, and an overall line too for a ratio', () => {
+    expect(referenceKindsFor('column', { ratio: null })).toEqual(['mean', 'median', 'value']);
+    expect(referenceKindsFor('bar', { ratio })).toEqual(['mean', 'median', 'overall', 'value']);
+    expect(referenceKindsFor('line', { ratio })).toEqual(['mean', 'median', 'overall', 'value']);
+  });
+
+  it('offers the overall and fixed kinds with a series on a ratio, and the fixed value alone on a measure', () => {
+    expect(referenceKindsFor('column', { ratio, seriesBy: 'water_source' })).toEqual(['overall', 'value']);
+    expect(referenceKindsFor('line', { ratio: null, seriesBy: 'water_source' })).toEqual(['value']);
+    expect(referenceKindsFor('bar', { ratio: null, seriesBy: 'water_source', layout: 'stacked' })).toEqual(['value']);
+    expect(referenceKindsFor('bar', { ratio: null, seriesBy: 'water_source', layout: 'percent' })).toEqual(['value']);
+    expect(referenceKindsFor('bar', { ratio: null, seriesBy: 'water_source', layout: 'grouped' })).toEqual(['value']);
+  });
+
+  it('offers none outside a bar, column or line', () => {
+    for (const type of chartTypes.filter((t) => t !== 'bar' && t !== 'column' && t !== 'line')) {
+      expect(referenceKindsFor(type, { ratio }), type).toEqual([]);
+    }
+  });
+
+  it('offers data labels to a bar, column, line and pie, but not to a stacked or 100% layout', () => {
+    for (const type of ['bar', 'column', 'line', 'pie'] as const) {
+      expect(offersDataLabels(type, {}), type).toBe(true);
+    }
+    expect(offersDataLabels('column', { seriesBy: 'water_source', layout: 'grouped' })).toBe(true);
+    expect(offersDataLabels('bar', { seriesBy: 'water_source', layout: 'stacked' })).toBe(false);
+    expect(offersDataLabels('bar', { seriesBy: 'water_source', layout: 'percent' })).toBe(false);
+    expect(offersDataLabels('line', { seriesBy: 'water_source', layout: 'stacked' })).toBe(true); // a line has no layout
+    for (const type of chartTypes.filter((t) => !['bar', 'column', 'line', 'pie'].includes(t))) {
+      expect(offersDataLabels(type, {}), type).toBe(false);
+    }
   });
 });

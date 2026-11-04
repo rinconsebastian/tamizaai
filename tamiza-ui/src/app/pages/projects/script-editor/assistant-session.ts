@@ -6,7 +6,7 @@ import { ApiError, ApiErrors } from '../../../core/api-error';
 import { AuthService } from '../../../core/auth/auth.service';
 import { AssistantStorage, StoredConversation, StoredProposal, conversationKey } from '../../../core/projects/assistant-storage';
 import { AssistantApplied, AssistantMessage, AssistantRequest, AssistantService } from '../../../core/projects/assistant.service';
-import type { ScriptRef } from '../../../core/projects/pipeline.service';
+import type { IndicatorMetadata, ScriptRef } from '../../../core/projects/pipeline.service';
 import { classifyProposal } from './assistant-proposal';
 import {
   ApplyRequest,
@@ -86,6 +86,12 @@ class Conversation {
     this.scope = signal(stored?.scope ?? 'script');
     this.answer = signal(stored?.proposal ?? null);
   }
+}
+
+/** The details the assistant reads: trimmed, and without the column names (it neither reads nor proposes them). */
+function assistantDetails(details: IndicatorMetadata): AssistantRequest['details'] {
+  const { columns: _columns, ...rest } = details;
+  return { ...rest, label: rest.label.trim(), description: rest.description.trim(), unit: rest.unit.trim() };
 }
 
 function scriptId(script: ScriptRef): string {
@@ -183,7 +189,8 @@ export class AssistantSession implements AssistantSessionState {
       messages: this.messages(conversation.thread(), conversation.text()),
       draft: frame.draft,
       ...(action === 'cell' && frame.cell ? { focus: { line: frame.cell.line } } : {}),
-      ...(details ? { details: { ...details, label: details.label.trim(), description: details.description.trim(), unit: details.unit.trim() } } : {}),
+      // The column names are not part of what the assistant reads (add-indicator-column-metadata, out of scope).
+      ...(details ? { details: assistantDetails(details) } : {}),
       ...(action === 'fix' && target ? { testId: target.testId, ...(target.warning ? { warning: target.warning } : {}) } : {}),
     };
   }

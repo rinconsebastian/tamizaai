@@ -911,6 +911,186 @@ public sealed class DashboardTests(PostgresFixture postgres)
         Assert.Equal(column.GetProperty("id").GetGuid(), (await h.GetWidgetsAsync())[0].GetProperty("id").GetGuid());
     }
 
+    // Column labels duplicated (custom-dashboards: Duplicating a dashboard)
+
+    [Fact]
+    public async Task A_duplicate_holds_the_column_labels_of_the_originals_widgets_as_they_are_stored()
+    {
+        await using var h = await PublishedAsync();
+        var column = await h.AddWidgetAsync(new
+        {
+            title = "By municipality", chartType = "column",
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { color = 3, labels = new { denominator = "Hogares que asistieron", municipality = "Municipio" } } },
+        });
+
+        var response = await DuplicateAsync(h, h.DashboardId, "Housing (copy)");
+        var copyId = (await ReadAsync(response)).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var copied = (await h.GetWidgetsAsync(copyId))[0].GetProperty("config").GetProperty("display");
+        Assert.Equal(3, copied.GetProperty("color").GetInt32());
+        Assert.Equal("Hogares que asistieron", copied.GetProperty("labels").GetProperty("denominator").GetString());
+        Assert.Equal("Municipio", copied.GetProperty("labels").GetProperty("municipality").GetString());
+        Assert.Equal(1L, await TestData.ScalarAsync<long>(h.Db,
+            """
+            SELECT count(*) FROM tamiza.dashboard_widgets AS c
+            JOIN tamiza.dashboard_widgets AS o ON o.id = @original AND o.config = c.config AND o.config -> 'display' -> 'labels' ->> 'denominator' = 'Hogares que asistieron'
+            WHERE c.dashboard_id = @copy
+            """,
+            ("original", column.GetProperty("id").GetGuid()), ("copy", copyId)));
+    }
+
+    [Fact]
+    public async Task The_column_labels_of_a_copy_and_its_original_change_independently()
+    {
+        await using var h = await PublishedAsync();
+        await h.AddWidgetAsync(new
+        {
+            title = "By municipality", chartType = "column",
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { labels = new { denominator = "Hogares" } } },
+        });
+        var copyId = (await ReadAsync(await DuplicateAsync(h, h.DashboardId, "Housing (copy)"))).GetProperty("id").GetGuid();
+        var copied = (await h.GetWidgetsAsync(copyId))[0];
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(copied.GetProperty("id").GetGuid(), copyId), new
+        {
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { labels = new { denominator = "Hogares de la base E1" } } },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        string LabelOf(JsonElement widget) =>
+            widget.GetProperty("config").GetProperty("display").GetProperty("labels").GetProperty("denominator").GetString()!;
+        Assert.Equal("Hogares de la base E1", LabelOf((await h.GetWidgetsAsync(copyId))[0]));
+        Assert.Equal("Hogares", LabelOf((await h.GetWidgetsAsync())[0]));
+    }
+
+    // Reference lines, steps and data labels duplicated (custom-dashboards: Duplicating a dashboard)
+
+    [Fact]
+    public async Task A_duplicate_holds_the_steps_the_lines_and_the_data_labels_of_the_originals_widgets_as_they_are_stored()
+    {
+        await using var h = await PublishedAsync();
+        await h.AddWidgetAsync(new
+        {
+            title = "Demand curve", chartType = "line",
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { interpolation = "step", dataLabels = true } },
+        });
+        await h.AddWidgetAsync(new
+        {
+            title = "By municipality", chartType = "column",
+            config = new
+            {
+                indicator = "coverage", ratio = new { numerator = "numerator", denominator = "denominator" }, groupBy = "municipality",
+                display = new { referenceLines = new object[] { new { kind = "mean" }, new { kind = "overall", label = "General" }, new { kind = "value", value = 0.5, label = "Meta" } } },
+            },
+        });
+
+        var response = await DuplicateAsync(h, h.DashboardId, "Housing (copy)");
+        var copyId = (await ReadAsync(response)).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var widgets = await h.GetWidgetsAsync(copyId);
+        var copiedCurve = widgets.EnumerateArray().Single(w => w.GetProperty("title").GetString() == "Demand curve").GetProperty("config").GetProperty("display");
+        Assert.Equal("step", copiedCurve.GetProperty("interpolation").GetString());
+        Assert.True(copiedCurve.GetProperty("dataLabels").GetBoolean());
+        var copiedColumn = widgets.EnumerateArray().Single(w => w.GetProperty("title").GetString() == "By municipality").GetProperty("config").GetProperty("display");
+        Assert.Equal(["mean", "overall", "value"], copiedColumn.GetProperty("referenceLines").EnumerateArray().Select(l => l.GetProperty("kind").GetString()));
+        Assert.Equal(2L, await TestData.ScalarAsync<long>(h.Db,
+            """
+            SELECT count(*) FROM tamiza.dashboard_widgets AS c
+            JOIN tamiza.dashboard_widgets AS o ON o.title = c.title AND o.dashboard_id = @original AND o.config = c.config
+            WHERE c.dashboard_id = @copy
+            """,
+            ("original", h.DashboardId), ("copy", copyId)));
+    }
+
+    // Source duplicated (custom-dashboards: Dashboard source in a copy)
+
+    private const string SurveySource = "Encuesta de ejemplo, 120 respuestas, primera ronda";
+
+    private static string? SourceOf(JsonElement dashboard) => dashboard.TryGetProperty("source", out var source) ? source.GetString() : null;
+
+    [Fact]
+    public async Task A_duplicate_holds_the_originals_source()
+    {
+        await using var h = await PublishedAsync();
+        await h.SaveSourceAsync(SurveySource);
+
+        var response = await DuplicateAsync(h, h.DashboardId, "Housing (copy)");
+        var copyId = (await ReadAsync(response)).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(SurveySource, SourceOf(await h.GetDashboardAsync(copyId, h.Viewer)));
+        Assert.Equal(SurveySource, SourceOf(await h.GetDashboardAsync(client: h.Viewer)));
+        Assert.Equal(SurveySource, await TestData.ScalarAsync<string>(h.Db, "SELECT source FROM tamiza.dashboards WHERE id = @id", ("id", copyId)));
+    }
+
+    [Fact]
+    public async Task A_duplicate_of_a_dashboard_with_no_source_has_none()
+    {
+        await using var h = await PublishedAsync();
+
+        var copyId = (await ReadAsync(await DuplicateAsync(h, h.DashboardId, "Housing (copy)"))).GetProperty("id").GetGuid();
+
+        var copy = await h.GetDashboardAsync(copyId, h.Viewer);
+        Assert.False(copy.TryGetProperty("source", out _));
+        Assert.Null(await TestData.ScalarAsync<string>(h.Db, "SELECT source FROM tamiza.dashboards WHERE id = @id", ("id", copyId)));
+    }
+
+    [Fact]
+    public async Task The_source_of_a_copy_and_its_original_change_independently()
+    {
+        await using var h = await PublishedAsync();
+        await h.SaveSourceAsync(SurveySource);
+        var copyId = (await ReadAsync(await DuplicateAsync(h, h.DashboardId, "Housing (copy)"))).GetProperty("id").GetGuid();
+
+        await h.SaveSourceAsync(null, dashboardId: copyId);
+
+        Assert.Null(SourceOf(await h.GetDashboardAsync(copyId, h.Viewer)));
+        Assert.Equal(SurveySource, SourceOf(await h.GetDashboardAsync(client: h.Viewer)));
+
+        await h.SaveSourceAsync("Otra fuente", dashboardId: copyId);
+        await h.SaveSourceAsync("Fuente del original");
+
+        Assert.Equal("Otra fuente", SourceOf(await h.GetDashboardAsync(copyId, h.Viewer)));
+        Assert.Equal("Fuente del original", SourceOf(await h.GetDashboardAsync(client: h.Viewer)));
+    }
+
+    // Widget texts duplicated (dashboard-indicators: Widget context kept with the widget)
+
+    [Fact]
+    public async Task A_duplicate_holds_the_texts_of_the_originals_widgets_as_they_are_stored()
+    {
+        await using var h = await PublishedAsync();
+        var bar = await h.AddWidgetAsync(new
+        {
+            title = "2.4. En qué lugares", chartType = "bar",
+            config = new
+            {
+                indicator = "coverage", groupBy = "municipality",
+                display = new { subtitle = "¿En qué lugares ha visto teatro?", footnote = "No suman 100 %", caption = new { hidden = true }, unit = "de quienes asistieron", showDescription = true },
+            },
+        });
+
+        var response = await DuplicateAsync(h, h.DashboardId, "Housing (copy)");
+        var copyId = (await ReadAsync(response)).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var copied = (await h.GetWidgetsAsync(copyId))[0].GetProperty("config").GetProperty("display");
+        Assert.Equal("¿En qué lugares ha visto teatro?", copied.GetProperty("subtitle").GetString());
+        Assert.Equal("No suman 100 %", copied.GetProperty("footnote").GetString());
+        Assert.True(copied.GetProperty("caption").GetProperty("hidden").GetBoolean());
+        Assert.Equal("de quienes asistieron", copied.GetProperty("unit").GetString());
+        Assert.True(copied.GetProperty("showDescription").GetBoolean());
+        Assert.Equal(1L, await TestData.ScalarAsync<long>(h.Db,
+            """
+            SELECT count(*) FROM tamiza.dashboard_widgets AS c
+            JOIN tamiza.dashboard_widgets AS o ON o.id = @original AND o.config = c.config AND o.config -> 'display' ->> 'subtitle' IS NOT NULL
+            WHERE c.dashboard_id = @copy
+            """,
+            ("original", bar.GetProperty("id").GetGuid()), ("copy", copyId)));
+    }
+
     // Duplicate at the limit
 
     [Fact]
@@ -1034,6 +1214,7 @@ public sealed class DashboardTests(PostgresFixture postgres)
                 "/dashboards/{dashboardId}/layout put",
                 "/dashboards/{dashboardId}/report delete get put",
                 "/dashboards/{dashboardId}/report/send post",
+                "/dashboards/{dashboardId}/source put",
                 "/dashboards/{dashboardId}/values get",
                 "/dashboards/{dashboardId}/versions get",
                 "/dashboards/{dashboardId}/versions/{number} get",
@@ -1050,7 +1231,7 @@ public sealed class DashboardTests(PostgresFixture postgres)
         var filters = paths.GetProperty(project + "/dashboards/{dashboardId}/filters");
         var colors = paths.GetProperty(project + "/dashboards/{dashboardId}/colors");
         Assert.Equal(
-            ["filters", "id", "name", "palette", "valueColors", "version", "widgets"],
+            ["filters", "id", "name", "palette", "source", "valueColors", "version", "widgets"],
             Properties(Component(document, Answer(dashboard.GetProperty("get"), "200"))));
         Assert.Equal(["filters"], Properties(Component(document, Body(filters.GetProperty("put")))));
         Assert.Equal(["filters"], Properties(Component(document, Answer(filters.GetProperty("put"), "200"))));
@@ -1059,6 +1240,11 @@ public sealed class DashboardTests(PostgresFixture postgres)
         var savedColors = Component(document, Answer(colors.GetProperty("put"), "200"));
         Assert.Equal(["palette", "valueColors"], Properties(savedColors));
         Assert.Equal(["color", "column", "value"], Properties(Component(document, Items(savedColors.GetProperty("properties").GetProperty("valueColors")))));
+        // The source is saved and answered as one text, which an empty one or null removes.
+        var source = paths.GetProperty(project + "/dashboards/{dashboardId}/source");
+        Assert.Equal(["source"], Properties(Component(document, Body(source.GetProperty("put")))));
+        Assert.Equal(["source"], Properties(Component(document, Answer(source.GetProperty("put"), "200"))));
+        Assert.Contains("300", Component(document, Body(source.GetProperty("put"))).GetProperty("properties").GetProperty("source").GetProperty("description").GetString());
         Assert.Contains("dashboardId", Properties(Component(document, Answer(widgets.GetProperty("post"), "201"))));
         Assert.Contains("dashboardId", Properties(Component(document, Answer(widget.GetProperty("patch"), "200"))));
         Assert.Contains("dashboardId", Properties(Component(document, Body(widget.GetProperty("patch")))));
@@ -1095,7 +1281,7 @@ public sealed class DashboardTests(PostgresFixture postgres)
         Assert.Equal(shown.Append("filterCount").Append("widgetCount").Order(StringComparer.Ordinal),
             Properties(Component(document, Items(versions.GetProperty("properties").GetProperty("versions")))));
         var versionDetails = Component(document, Answer(details, "200"));
-        Assert.Equal(shown.Append("filters").Append("palette").Append("valueColors").Append("widgets").Order(StringComparer.Ordinal), Properties(versionDetails));
+        Assert.Equal(shown.Append("filters").Append("palette").Append("source").Append("valueColors").Append("widgets").Order(StringComparer.Ordinal), Properties(versionDetails));
         Assert.Equal(["color", "column", "value"], Properties(Component(document, Items(versionDetails.GetProperty("properties").GetProperty("valueColors")))));
         var origin = versionDetails.GetProperty("properties").GetProperty("origin");
         origin = origin.TryGetProperty("$ref", out _) ? Component(document, origin) : origin;

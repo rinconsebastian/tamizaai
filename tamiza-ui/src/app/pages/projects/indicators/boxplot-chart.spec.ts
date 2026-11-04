@@ -234,12 +234,12 @@ describe('box plot widget', () => {
       { boxes: list },
     );
 
-  async function show(settings: Partial<WidgetConfig> = {}, list?: QueryBox[], colors?: DashboardColors) {
+  async function show(settings: Partial<WidgetConfig> = {}, list?: QueryBox[], colors?: DashboardColors, indicators: IndicatorEntry[] = [size()]) {
     const context = await open(
       'viewer',
       [widget('w1', { chartType: 'boxplot', config: config({ indicator: 'household_size', groupBy: 'municipality', ...settings }) })],
       null,
-      { indicators: [size()] },
+      { indicators },
       colors ? { colors } : {},
     );
     const requests = context.http.match(isQuery);
@@ -443,6 +443,47 @@ describe('box plot widget', () => {
     const rows = all(context.root, 'widget-table-row').map((r) => Array.from(r.children).map(text));
     expect(rows[0]).toEqual(['Cali', '1,200', '3.00 people', '3.75 people', '4.50 people', '5.25 people', '40.00 people', '10.50 people', '3']);
     expect(rows).toHaveLength(3);
+  });
+
+  it('names the group column in the header of the table and in the accessible name, and keeps the colors by the column itself (Table headers, Colors kept by value)', async () => {
+    const named = indicator('household_size', { label: 'Household size', format: 'count', unit: 'people', columns: { municipality: { label: 'Comuna' } } });
+    const context = await show({}, undefined, palette('tamiza', [{ column: 'municipality', value: 'Buga', color: 5 }]), [named]);
+
+    expect(svg(context).getAttribute('aria-label')).toContain('Comuna');
+    expect(svg(context).getAttribute('aria-label')).not.toContain('municipality');
+    expect(all(context.root, 'box-rect').map((r) => colorOf(r))).toEqual(['var(--tmz-pal-tamiza-1)', 'var(--tmz-pal-tamiza-5)', 'var(--tmz-pal-tamiza-1)']);
+    await toggleTable(context);
+    await settle(context.harness);
+    expect(Array.from(context.root.querySelectorAll('[data-testid="widget-table"] th[scope="col"]')).map(text)[0]).toBe('Comuna');
+    expect(context.query.config.groupBy).toBe('municipality');
+  });
+
+  it('writes the figures with the unit of the widget instead of that of the indicator, and the numbers of values whole (Unit of a box plot)', async () => {
+    const price = indicator('teatro_precio_hogar', { label: 'Teatro precio', format: 'count', unit: 'pesos' });
+    const prices = [box('Zona 1', { q1: 30000, median: 40000, q3: 52000, min: 20000, max: 90000, mean: 41500.5, values: 1200 })];
+    const context = await show({ indicator: 'teatro_precio_hogar', display: { unit: 'pesos por boleta' } }, prices, undefined, [price]);
+
+    hits(context)[0].dispatchEvent(new MouseEvent('pointerenter', { clientX: 40, clientY: 30 }));
+    await settle(context.harness);
+    expect(tooltipLines()).toContain('Median: 40,000.00 pesos por boleta');
+    expect(tooltipLines()).toContain('Values: 1,200');
+    await toggleTable(context);
+    await settle(context.harness);
+    const cells = all(context.root, 'widget-table-row').map((r) => Array.from(r.children).map(text));
+    expect(cells[0]).toContain('40,000.00 pesos por boleta');
+    expect(cells[0]).toContain('1,200');
+    // The unit is no part of the query.
+    expect(context.query.config).not.toHaveProperty('display');
+  });
+
+  it('keeps the unit of the indicator for a box plot with no unit of its own (Other widgets keep the unit)', async () => {
+    const price = indicator('teatro_precio_hogar', { label: 'Teatro precio', format: 'count', unit: 'pesos' });
+    const prices = [box('Zona 1', { q1: 30000, median: 40000, q3: 52000, min: 20000, max: 90000, mean: 41500.5, values: 1200 })];
+    const context = await show({ indicator: 'teatro_precio_hogar' }, prices, undefined, [price]);
+
+    hits(context)[0].dispatchEvent(new MouseEvent('pointerenter', { clientX: 40, clientY: 30 }));
+    await settle(context.harness);
+    expect(tooltipLines()).toContain('Median: 40,000.00 pesos');
   });
 
   it('labels the one box of a widget with no group column "All rows"', async () => {

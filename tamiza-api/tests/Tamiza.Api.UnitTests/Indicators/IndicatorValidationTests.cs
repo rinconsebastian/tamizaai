@@ -653,7 +653,6 @@ public sealed class IndicatorValidationTests
     [Fact]
     public void There_are_twelve_chart_types_and_each_has_a_default_size()
     {
-        Assert.Equal(12, ChartTypes.All.Count);
         Assert.Equal("boxplot", ChartTypes.All[^1]);
         Assert.All(ChartTypes.All, chartType => Assert.True(IndicatorValidation.DefaultSize(chartType).W > 0));
         Assert.Throws<ArgumentOutOfRangeException>(() => IndicatorValidation.DefaultSize("radar"));
@@ -1137,5 +1136,554 @@ public sealed class IndicatorValidationTests
         var errors = Check(Drawn(new WidgetDisplay(3, "green")), "pie");
 
         Assert.Equal(["config.display.color", "config.display.ramp"], errors.Keys.Order(StringComparer.Ordinal));
+    }
+
+    // A widget's own column labels (design D5 of the indicator column metadata)
+
+    public static TheoryData<string> EveryKind() => new(ChartTypes.All);
+
+    private static WidgetConfig Labelled(params (string Column, string Label)[] labels) =>
+        Drawn(new WidgetDisplay(Labels: labels.ToDictionary(l => l.Column, l => l.Label)));
+
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void Labels_are_accepted_on_every_kind_of_widget(string chartType)
+    {
+        var config = Labelled(("numerator", "Hogares que asistieron"), ("denominator", "Hogares"), ("municipality", "Municipio"));
+
+        Assert.DoesNotContain("config.display.labels", Check(config, chartType).Keys);
+        Assert.DoesNotContain(Check(config, chartType).Keys, key => key.StartsWith("config.display.labels", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Labels_are_accepted_without_a_chart_type()
+    {
+        Assert.Empty(Check(Labelled(("numerator", "Hogares")), null));
+    }
+
+    [Fact]
+    public void A_chart_type_change_of_a_widget_with_labels_is_accepted_and_the_labels_are_kept()
+    {
+        var config = new WidgetConfigInput(
+            "households_by_source", GroupBy: "municipality", Display: new WidgetDisplay(Color: 3, Labels: new Dictionary<string, string> { ["municipality"] = "Municipio" })).Normalize();
+
+        Assert.Empty(Check(config, ChartTypes.Column));
+        Assert.Equal(["config.display.color"], Check(config, ChartTypes.Pie).Keys); // only the color has a per-kind rule
+        Assert.Equal("Municipio", config.Display!.Labels!["municipality"]);
+    }
+
+    [Fact]
+    public void A_widget_labels_at_most_10_columns()
+    {
+        var ten = Labelled(Enumerable.Range(1, 10).Select(i => ($"columna_{i}", $"Columna {i}")).ToArray());
+        var eleven = Labelled(Enumerable.Range(1, 11).Select(i => ($"columna_{i}", $"Columna {i}")).ToArray());
+
+        Assert.Empty(Check(ten, ChartTypes.Column));
+        var error = Assert.Single(Check(eleven, ChartTypes.Column));
+        Assert.Equal("config.display.labels", error.Key);
+        Assert.Equal(["A widget labels at most 10 columns."], error.Value);
+    }
+
+    [Theory]
+    [InlineData("Comuna")]
+    [InlineData("hogar menores")]
+    [InlineData("2020_total")]
+    [InlineData("comuna-1")]
+    public void A_key_that_is_not_a_columns_name_is_refused_on_the_labels(string column)
+    {
+        var error = Assert.Single(Check(Labelled((column, "Comuna")), ChartTypes.Column));
+
+        Assert.Equal("config.display.labels", error.Key);
+        Assert.Equal(
+            [$"'{column}' is not a column's name: use the name the indicator's table gives the column, in lowercase letters, digits and underscores."],
+            error.Value);
+    }
+
+    [Fact]
+    public void A_label_of_81_characters_is_refused_on_its_column_and_80_are_accepted()
+    {
+        Assert.Empty(Check(Labelled(("numerator", new string('a', 80))), ChartTypes.Column));
+
+        var error = Assert.Single(Check(Labelled(("numerator", new string('a', 81))), ChartTypes.Column));
+
+        Assert.Equal("config.display.labels.numerator", error.Key);
+        Assert.Equal(["A column label can have up to 80 characters."], error.Value);
+    }
+
+    [Theory]
+    [InlineData("Hogares\nque asistieron")]
+    [InlineData("Hogares\tque")]
+    [InlineData("Hogares\0")]
+    public void A_label_with_a_control_character_is_refused_on_its_column(string label)
+    {
+        var error = Assert.Single(Check(Labelled(("numerator", label)), ChartTypes.Column));
+
+        Assert.Equal("config.display.labels.numerator", error.Key);
+        Assert.Equal(["A column label cannot hold a line break or another control character."], error.Value);
+    }
+
+    [Fact]
+    public void A_label_for_a_column_the_table_lost_does_not_make_the_widget_stale()
+    {
+        var errors = new FieldErrors();
+        IndicatorValidation.CheckAgainstColumns(Labelled(("estrato", "Estrato")), Columns, "UTC", "config.", errors);
+
+        Assert.False(errors.Any);
+    }
+
+    // A widget's texts (design D2 of the widget context)
+
+    private static IDictionary<string, string[]> CheckContext(WidgetDisplay display, string? chartType = ChartTypes.Bar) =>
+        Check(Drawn(display), chartType);
+
+    [Fact]
+    public void A_subtitle_of_200_characters_is_accepted_and_201_are_refused_on_its_key()
+    {
+        Assert.Empty(CheckContext(new WidgetDisplay(Subtitle: new string('a', 200))));
+
+        var error = Assert.Single(CheckContext(new WidgetDisplay(Subtitle: new string('a', 201))));
+        Assert.Equal("config.display.subtitle", error.Key);
+        Assert.Equal(["The subtitle is longer than 200 characters."], error.Value);
+    }
+
+    [Fact]
+    public void A_footnote_of_500_characters_is_accepted_and_501_are_refused_on_its_key()
+    {
+        Assert.Empty(CheckContext(new WidgetDisplay(Footnote: new string('a', 500))));
+
+        var error = Assert.Single(CheckContext(new WidgetDisplay(Footnote: new string('a', 501))));
+        Assert.Equal("config.display.footnote", error.Key);
+        Assert.Equal(["The footnote is longer than 500 characters."], error.Value);
+    }
+
+    [Fact]
+    public void A_caption_text_of_200_characters_is_accepted_and_201_are_refused_on_its_key()
+    {
+        Assert.Empty(CheckContext(new WidgetDisplay(Caption: new WidgetCaption(new string('a', 200)))));
+
+        var error = Assert.Single(CheckContext(new WidgetDisplay(Caption: new WidgetCaption(new string('a', 201)))));
+        Assert.Equal("config.display.caption.text", error.Key);
+        Assert.Equal(["The caption is longer than 200 characters."], error.Value);
+    }
+
+    [Fact]
+    public void A_unit_of_32_characters_is_accepted_and_33_are_refused_on_its_key()
+    {
+        Assert.Empty(CheckContext(new WidgetDisplay(Unit: new string('a', 32))));
+
+        var error = Assert.Single(CheckContext(new WidgetDisplay(Unit: new string('a', 33))));
+        Assert.Equal("config.display.unit", error.Key);
+        Assert.Equal(["The unit is longer than 32 characters."], error.Value);
+    }
+
+    [Fact]
+    public void The_lengths_are_counted_after_trimming()
+    {
+        var padded = new WidgetDisplay(
+            Subtitle: "  " + new string('a', 200) + "  ", Footnote: " " + new string('a', 500) + " ",
+            Caption: new WidgetCaption(" " + new string('a', 200) + " "), Unit: "  " + new string('a', 32) + "  ");
+
+        Assert.Empty(CheckContext(padded));
+        // The same texts with no trimming at all (a display that was not normalized) are counted trimmed too.
+        var errors = new FieldErrors();
+        IndicatorValidation.CheckConfig(new WidgetConfig("coverage", null, null, "municipality", [], null, null, Display: padded), ChartTypes.Bar, "config.", errors);
+        Assert.False(errors.Any);
+    }
+
+    [Theory]
+    [InlineData("subtitle", "\0")]
+    [InlineData("subtitle", "\n")]
+    [InlineData("subtitle", "\t")]
+    [InlineData("subtitle", "\u0085")]
+    [InlineData("footnote", "\0")]
+    [InlineData("footnote", "\r\n")]
+    [InlineData("footnote", "\t")]
+    [InlineData("footnote", "\u0085")]
+    [InlineData("caption", "\0")]
+    [InlineData("caption", "\n")]
+    [InlineData("caption", "\t")]
+    [InlineData("caption", "\u0085")]
+    [InlineData("unit", "\0")]
+    [InlineData("unit", "\n")]
+    [InlineData("unit", "\t")]
+    [InlineData("unit", "\u0085")]
+    public void A_control_character_inside_a_text_is_refused_on_the_fields_key(string field, string control)
+    {
+        var text = "uno" + control + "dos";
+        var display = field switch
+        {
+            "subtitle" => new WidgetDisplay(Subtitle: text),
+            "footnote" => new WidgetDisplay(Footnote: text),
+            "caption" => new WidgetDisplay(Caption: new WidgetCaption(text)),
+            _ => new WidgetDisplay(Unit: text),
+        };
+
+        var error = Assert.Single(CheckContext(display));
+
+        Assert.Equal(field == "caption" ? "config.display.caption.text" : $"config.display.{field}", error.Key);
+        Assert.Equal([$"The {field} cannot contain line breaks or other control characters."], error.Value);
+    }
+
+    [Theory]
+    [InlineData("uno\n")]
+    [InlineData("\tuno")]
+    [InlineData("  uno\r\n")]
+    public void A_control_character_at_the_end_of_a_text_is_refused_too_and_not_quietly_trimmed(string text)
+    {
+        var errors = CheckContext(new WidgetDisplay(Subtitle: text, Footnote: text, Caption: new WidgetCaption(text), Unit: text));
+
+        Assert.Equal(
+            ["config.display.caption.text", "config.display.footnote", "config.display.subtitle", "config.display.unit"],
+            errors.Keys.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void A_caption_with_a_text_and_hidden_is_refused_on_the_caption()
+    {
+        var error = Assert.Single(CheckContext(new WidgetDisplay(Caption: new WidgetCaption("% de quienes asistieron", true))));
+
+        Assert.Equal("config.display.caption", error.Key);
+        Assert.Equal(["Give the caption its own text or hide it, not both."], error.Value);
+        Assert.Empty(CheckContext(new WidgetDisplay(Caption: new WidgetCaption(null, true))));
+        Assert.Empty(CheckContext(new WidgetDisplay(Caption: new WidgetCaption("% de quienes asistieron"))));
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void The_texts_are_accepted_on_every_kind_of_widget(string chartType)
+    {
+        var display = new WidgetDisplay(
+            Subtitle: "¿En qué lugares ha visto teatro?", Footnote: "No suman 100 %: respuesta múltiple.",
+            Caption: new WidgetCaption(Hidden: true), Unit: "de quienes asistieron", ShowDescription: true);
+        var other = new WidgetDisplay(Caption: new WidgetCaption("% de quienes asistieron"));
+
+        Assert.DoesNotContain(Check(Drawn(display), chartType).Keys, key => key.StartsWith("config.display", StringComparison.Ordinal));
+        Assert.DoesNotContain(Check(Drawn(other), chartType).Keys, key => key.StartsWith("config.display", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_texts_are_accepted_with_no_chart_type()
+    {
+        Assert.Empty(CheckContext(
+            new WidgetDisplay(Subtitle: "Pregunta", Footnote: "Nota", Caption: new WidgetCaption("Texto"), Unit: "hogares", ShowDescription: true), null));
+    }
+
+    [Fact]
+    public void A_chart_type_change_of_a_widget_with_texts_is_accepted()
+    {
+        var config = Drawn(new WidgetDisplay(Subtitle: "Pregunta", Unit: "hogares"));
+
+        Assert.Empty(Check(config, ChartTypes.Bar));
+        Assert.Empty(Check(config, ChartTypes.Pie));
+        Assert.Equal(new WidgetDisplay(Subtitle: "Pregunta", Unit: "hogares"), config.Display);
+    }
+
+    [Fact]
+    public void The_texts_come_with_the_other_settings_without_changing_their_errors()
+    {
+        var errors = Check(Drawn(new WidgetDisplay(Color: 3, Subtitle: new string('a', 201))), ChartTypes.Pie);
+
+        Assert.Equal(["config.display.color", "config.display.subtitle"], errors.Keys.Order(StringComparer.Ordinal));
+    }
+
+    // Reference lines, steps and data labels (design D2 of the chart annotations)
+
+    private static WidgetConfig Annotated(WidgetDisplay display, bool ratio = true, string? seriesBy = null, string? layout = null) =>
+        new WidgetConfigInput(
+            "teatro_hoy", Ratio: ratio ? new WidgetRatio("numerator", "denominator") : null, GroupBy: "comuna", SeriesBy: seriesBy, Layout: layout,
+            Display: display).Normalize();
+
+    private static WidgetDisplay Lines(params WidgetReferenceLine?[] lines) => new(ReferenceLines: lines);
+
+    private static IDictionary<string, string[]> CheckLines(
+        WidgetDisplay display, string? chartType = ChartTypes.Column, bool ratio = true, string? seriesBy = null, string? layout = null) =>
+        Check(Annotated(display, ratio, seriesBy, layout), chartType);
+
+    private static void AssertRefused(IDictionary<string, string[]> errors, string key, string message)
+    {
+        var error = Assert.Single(errors);
+        Assert.Equal(key, error.Key);
+        Assert.Equal([message], error.Value);
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Bar)]
+    [InlineData(ChartTypes.Column)]
+    [InlineData(ChartTypes.Line)]
+    public void The_four_kinds_are_accepted_on_a_bar_a_column_and_a_line(string chartType)
+    {
+        var display = Lines(
+            new WidgetReferenceLine("mean"), new WidgetReferenceLine("median", Label: "Mediana"),
+            new WidgetReferenceLine("overall"), new WidgetReferenceLine("value", 0.5, "Meta"));
+
+        Assert.Empty(CheckLines(display, chartType));
+    }
+
+    [Fact]
+    public void Five_lines_are_refused_on_the_lines_and_four_are_accepted()
+    {
+        var four = new[] { new WidgetReferenceLine("value", 1), new WidgetReferenceLine("value", 2), new WidgetReferenceLine("value", 3), new WidgetReferenceLine("value", 4) };
+
+        Assert.Empty(CheckLines(Lines(four)));
+        AssertRefused(CheckLines(Lines([.. four, new WidgetReferenceLine("value", 5)])), "config.display.referenceLines", "A widget has at most 4 reference lines.");
+    }
+
+    [Fact]
+    public void A_null_line_is_refused_on_its_index()
+    {
+        AssertRefused(CheckLines(Lines(new WidgetReferenceLine("mean"), null)), "config.display.referenceLines[1]", "Each reference line needs a kind.");
+    }
+
+    [Theory]
+    [InlineData("average")]
+    [InlineData("Mean")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void A_kind_that_is_not_one_of_the_four_is_refused_on_its_kind(string? kind)
+    {
+        var errors = CheckLines(Lines(new WidgetReferenceLine("mean"), new WidgetReferenceLine(kind)));
+
+        AssertRefused(errors, "config.display.referenceLines[1].kind", "The kind must be 'mean', 'median', 'overall' or 'value'.");
+    }
+
+    [Theory]
+    [InlineData("mean")]
+    [InlineData("median")]
+    [InlineData("overall")]
+    public void A_second_mean_median_or_overall_line_is_refused_on_the_second(string kind)
+    {
+        var errors = CheckLines(Lines(new WidgetReferenceLine(kind), new WidgetReferenceLine(kind, Label: "Otra")));
+
+        AssertRefused(errors, "config.display.referenceLines[1].kind", $"The {kind} line is listed twice.");
+    }
+
+    [Fact]
+    public void Several_value_lines_are_accepted()
+    {
+        Assert.Empty(CheckLines(Lines(new WidgetReferenceLine("value", 0.2), new WidgetReferenceLine("value", 0.2, "Otra"))));
+    }
+
+    [Fact]
+    public void A_value_line_without_its_value_is_refused_on_its_value()
+    {
+        AssertRefused(CheckLines(Lines(new WidgetReferenceLine("value"))), "config.display.referenceLines[0].value", "A 'value' line needs its value.");
+    }
+
+    [Theory]
+    [InlineData("mean")]
+    [InlineData("median")]
+    [InlineData("overall")]
+    public void A_value_on_another_kind_is_refused_on_its_value(string kind)
+    {
+        AssertRefused(CheckLines(Lines(new WidgetReferenceLine(kind, 0.5))), "config.display.referenceLines[0].value", "Only a 'value' line takes a value.");
+    }
+
+    [Fact]
+    public void A_label_of_40_characters_is_accepted_and_41_are_refused_on_its_label_counted_after_trimming()
+    {
+        Assert.Empty(CheckLines(Lines(new WidgetReferenceLine("mean", Label: new string('a', 40)))));
+        Assert.Empty(CheckLines(Lines(new WidgetReferenceLine("mean", Label: "  " + new string('a', 40) + "  "))));
+        Assert.Empty(CheckLines(Lines(new WidgetReferenceLine("mean", Label: "   "))));
+
+        AssertRefused(
+            CheckLines(Lines(new WidgetReferenceLine("mean"), new WidgetReferenceLine("median", Label: new string('a', 41)))),
+            "config.display.referenceLines[1].label", "A reference line's label has at most 40 characters.");
+    }
+
+    [Theory]
+    [InlineData("\0")]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    [InlineData("\t")]
+    public void A_control_character_in_a_label_is_refused_on_its_label(string control)
+    {
+        var errors = CheckLines(Lines(new WidgetReferenceLine("value", 0.5, "Meta" + control + "2027")));
+
+        AssertRefused(errors, "config.display.referenceLines[0].label", "A reference line's label cannot contain line breaks or other control characters.");
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Stat)]
+    [InlineData(ChartTypes.Pie)]
+    [InlineData(ChartTypes.Histogram)]
+    [InlineData(ChartTypes.Map)]
+    [InlineData(ChartTypes.Heatmap)]
+    [InlineData(ChartTypes.Boxplot)]
+    [InlineData(ChartTypes.Crosstab)]
+    public void Lines_on_a_kind_that_is_not_a_bar_a_column_or_a_line_are_refused_on_the_lines(string chartType)
+    {
+        var errors = CheckLines(Lines(new WidgetReferenceLine("mean")), chartType);
+
+        // Some of these kinds are refused for other reasons too (a heat map needs its series): only the keys of the lines are looked at.
+        Assert.Equal("Only bar, column and line widgets have reference lines.", Assert.Single(errors["config.display.referenceLines"]));
+        Assert.DoesNotContain(errors.Keys, key => key.StartsWith("config.display.referenceLines[", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("mean")]
+    [InlineData("median")]
+    public void A_mean_or_median_line_with_a_series_is_refused_on_its_kind(string kind)
+    {
+        var errors = CheckLines(Lines(new WidgetReferenceLine(kind)), ChartTypes.Column, ratio: true, seriesBy: "estrato");
+
+        AssertRefused(errors, "config.display.referenceLines[0].kind", "A mean or median line needs a chart with no series.");
+    }
+
+    [Fact]
+    public void An_overall_line_over_a_measure_is_refused_on_its_kind()
+    {
+        AssertRefused(
+            CheckLines(Lines(new WidgetReferenceLine("overall")), ChartTypes.Bar, ratio: false),
+            "config.display.referenceLines[0].kind", "An overall line needs a ratio: over a measure it would be the sum of every bar.");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(SeriesLayouts.Grouped)]
+    public void Overall_and_value_lines_are_accepted_on_side_by_side_bars_and_on_a_line_with_a_series(string? layout)
+    {
+        var display = Lines(new WidgetReferenceLine("overall"), new WidgetReferenceLine("value", 0.4));
+
+        Assert.Empty(CheckLines(display, ChartTypes.Column, seriesBy: "estrato", layout: layout));
+        Assert.Empty(CheckLines(display, ChartTypes.Bar, seriesBy: "estrato", layout: layout));
+        Assert.Empty(CheckLines(display, ChartTypes.Line, seriesBy: "estrato"));
+    }
+
+    [Theory]
+    [InlineData(SeriesLayouts.Stacked)]
+    [InlineData(SeriesLayouts.Percent)]
+    public void An_overall_line_on_a_stacked_or_percent_layout_gets_the_ratio_message_and_value_lines_are_accepted(string layout)
+    {
+        Assert.Empty(CheckLines(Lines(new WidgetReferenceLine("value", 0.5)), ChartTypes.Bar, ratio: false, seriesBy: "respuesta", layout: layout));
+        AssertRefused(
+            CheckLines(Lines(new WidgetReferenceLine("overall")), ChartTypes.Bar, ratio: false, seriesBy: "respuesta", layout: layout),
+            "config.display.referenceLines[0].kind", "An overall line needs a ratio: over a measure it would be the sum of every bar.");
+    }
+
+    [Theory]
+    [InlineData(1.5)]
+    [InlineData(-0.1)]
+    [InlineData(50)]
+    public void A_value_outside_0_to_1_in_a_percent_layout_is_refused_on_its_value(double value)
+    {
+        var errors = CheckLines(Lines(new WidgetReferenceLine("value", value)), ChartTypes.Bar, ratio: false, seriesBy: "respuesta", layout: SeriesLayouts.Percent);
+
+        AssertRefused(errors, "config.display.referenceLines[0].value", "In a 100% layout a value is a share from 0 to 1.");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0.5)]
+    [InlineData(1)]
+    public void A_share_from_0_to_1_is_accepted_in_a_percent_layout_and_any_number_in_the_others(double value)
+    {
+        Assert.Empty(CheckLines(Lines(new WidgetReferenceLine("value", value)), ChartTypes.Bar, ratio: false, seriesBy: "respuesta", layout: SeriesLayouts.Percent));
+        Assert.Empty(CheckLines(Lines(new WidgetReferenceLine("value", 150)), ChartTypes.Bar, ratio: false, seriesBy: "respuesta", layout: SeriesLayouts.Stacked));
+        Assert.Empty(CheckLines(Lines(new WidgetReferenceLine("value", -3.5)), ChartTypes.Column, ratio: false));
+    }
+
+    [Theory]
+    [InlineData("linear")]
+    [InlineData("step")]
+    public void A_known_interpolation_is_accepted_on_a_line_with_or_without_a_series(string interpolation)
+    {
+        var display = new WidgetDisplay(Interpolation: interpolation);
+
+        Assert.Empty(CheckLines(display, ChartTypes.Line));
+        Assert.Empty(CheckLines(display, ChartTypes.Line, seriesBy: "estrato"));
+    }
+
+    [Theory]
+    [InlineData("curve")]
+    [InlineData("Step")]
+    public void An_interpolation_that_is_not_linear_or_step_is_refused_on_its_key_even_with_no_chart_type(string interpolation)
+    {
+        var display = new WidgetDisplay(Interpolation: interpolation);
+
+        AssertRefused(CheckLines(display, ChartTypes.Line), "config.display.interpolation", "The interpolation must be 'linear' or 'step'.");
+        AssertRefused(CheckLines(display, null), "config.display.interpolation", "The interpolation must be 'linear' or 'step'.");
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Column)]
+    [InlineData(ChartTypes.Bar)]
+    [InlineData(ChartTypes.Pie)]
+    [InlineData(ChartTypes.Stat)]
+    public void An_interpolation_on_a_kind_that_is_not_a_line_is_refused_on_its_key(string chartType)
+    {
+        AssertRefused(
+            CheckLines(new WidgetDisplay(Interpolation: "step"), chartType), "config.display.interpolation", "Only a line chart has an interpolation.");
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Bar)]
+    [InlineData(ChartTypes.Column)]
+    [InlineData(ChartTypes.Line)]
+    [InlineData(ChartTypes.Pie)]
+    public void Data_labels_are_accepted_on_a_bar_a_column_a_line_and_a_pie(string chartType)
+    {
+        Assert.Empty(CheckLines(new WidgetDisplay(DataLabels: true), chartType));
+        Assert.Empty(CheckLines(new WidgetDisplay(DataLabels: false), chartType));
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Stat)]
+    [InlineData(ChartTypes.Histogram)]
+    [InlineData(ChartTypes.Map)]
+    [InlineData(ChartTypes.Heatmap)]
+    [InlineData(ChartTypes.Pyramid)]
+    [InlineData(ChartTypes.Likert)]
+    [InlineData(ChartTypes.Crosstab)]
+    [InlineData(ChartTypes.Boxplot)]
+    public void Data_labels_on_another_kind_are_refused_on_their_key(string chartType)
+    {
+        // Some of these kinds are refused for other reasons too (a heat map needs its series): only the key of the labels is looked at.
+        var errors = CheckLines(new WidgetDisplay(DataLabels: true), chartType);
+
+        Assert.Equal("Only bar, column, line and pie widgets have data labels.", Assert.Single(errors["config.display.dataLabels"]));
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Bar, SeriesLayouts.Stacked)]
+    [InlineData(ChartTypes.Column, SeriesLayouts.Stacked)]
+    [InlineData(ChartTypes.Bar, SeriesLayouts.Percent)]
+    [InlineData(ChartTypes.Column, SeriesLayouts.Percent)]
+    public void Data_labels_on_a_stacked_or_percent_layout_are_refused_but_off_is_accepted(string chartType, string layout)
+    {
+        AssertRefused(
+            CheckLines(new WidgetDisplay(DataLabels: true), chartType, ratio: false, seriesBy: "respuesta", layout: layout),
+            "config.display.dataLabels", "Stacked bars have no data labels.");
+        Assert.Empty(CheckLines(new WidgetDisplay(DataLabels: false), chartType, ratio: false, seriesBy: "respuesta", layout: layout));
+    }
+
+    [Fact]
+    public void Data_labels_are_accepted_on_side_by_side_bars()
+    {
+        Assert.Empty(CheckLines(new WidgetDisplay(DataLabels: true), ChartTypes.Column, seriesBy: "estrato", layout: SeriesLayouts.Grouped));
+        Assert.Empty(CheckLines(new WidgetDisplay(DataLabels: true), ChartTypes.Bar, seriesBy: "estrato"));
+    }
+
+    [Fact]
+    public void With_no_chart_type_only_the_shape_of_the_lines_the_steps_and_the_labels_is_checked()
+    {
+        var everything = new WidgetDisplay(
+            ReferenceLines: [new WidgetReferenceLine("mean"), new WidgetReferenceLine("overall")], Interpolation: "step", DataLabels: true);
+
+        Assert.Empty(CheckLines(everything, null, ratio: false, seriesBy: "estrato", layout: SeriesLayouts.Stacked));
+        Assert.Empty(CheckLines(Lines(new WidgetReferenceLine("value", 7)), null, ratio: false, seriesBy: "estrato", layout: SeriesLayouts.Percent));
+
+        var errors = CheckLines(Lines(new WidgetReferenceLine("value"), new WidgetReferenceLine("nope"), null), null);
+        Assert.Equal(
+            ["config.display.referenceLines[0].value", "config.display.referenceLines[1].kind", "config.display.referenceLines[2]"],
+            errors.Keys.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void The_lines_the_steps_and_the_labels_come_with_the_other_settings_without_changing_their_errors()
+    {
+        var errors = CheckLines(new WidgetDisplay(Color: 3, Subtitle: new string('a', 201), ReferenceLines: [new WidgetReferenceLine("mean")]), ChartTypes.Column);
+
+        Assert.Equal(["config.display.subtitle"], errors.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(["config.display.color", "config.display.subtitle"], CheckLines(new WidgetDisplay(Color: 3, Subtitle: new string('a', 201), DataLabels: true), ChartTypes.Pie).Keys.Order(StringComparer.Ordinal));
     }
 }

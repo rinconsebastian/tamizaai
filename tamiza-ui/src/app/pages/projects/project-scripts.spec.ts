@@ -985,7 +985,7 @@ describe('ProjectScripts', () => {
     const code = editor().text();
     byTestId<HTMLButtonElement>(root, 'save')!.click();
     const request = http.expectOne((r) => r.url === `${scriptsUrl}/indicators/piped_water_rate` && r.method === 'PUT');
-    expect(request.request.body).toEqual({ code, label: 'Households with piped water', description: '', unit: '', format: 'percent' });
+    expect(request.request.body).toEqual({ code, label: 'Households with piped water', description: '', unit: '', format: 'percent', columns: {} });
     request.flush(indicatorVersion('piped_water_rate', 1, { code, label: 'Households with piped water', description: null, unit: null, format: 'percent' }));
     await settle(harness);
     const created = indicatorVersion('piped_water_rate', 1);
@@ -1048,6 +1048,7 @@ describe('ProjectScripts', () => {
       description: 'What it measures',
       unit: '%',
       format: 'percent',
+      columns: {},
     });
     request.flush(indicatorVersion('coverage', 3, { label: 'Coverage of piped water', unit: '%', format: 'percent' }));
     await settle(harness);
@@ -3271,5 +3272,244 @@ describe('ProjectScripts', () => {
         expect(byTestId(opened.root, 'test-stale')).toBeNull();
       });
     });
+  });
+});
+
+describe('ProjectScripts column names (add-indicator-column-metadata, design D8)', () => {
+  const columnsUrl = (name: string) => `/api/v1/projects/${projectId}/indicators/${name}/columns`;
+  const publishedTable = (names: string[], published = true) => ({
+    published,
+    columns: names.map((name) => ({ name, type: 'text' })),
+    numeric: [],
+    defaults: { measure: null, groupBy: null },
+  });
+  /** The rows of the Column names section as `[column, text in its field]`. */
+  const rowsOf = (root: ParentNode) => Array.from(root.querySelectorAll<HTMLInputElement>('[data-testid="meta-column-label"]')).map((input) => [input.dataset['column'], input.value]);
+  const fieldOf = (root: ParentNode, column: string) => root.querySelector<HTMLInputElement>(`[data-testid="meta-column-label"][data-column="${column}"]`)!;
+  const labelled = (name: string, number: number, columns: ScriptVersionDetails['columns'] = null) => indicatorVersion(name, number, { columns });
+
+  /** Chooses an indicator, and answers its versions and the columns of its published table. */
+  async function choose(opened: Opened, current: ScriptVersionDetails, table: string[] | null = ['variable', 'orden', 'comuna', 'numerator', 'denominator']) {
+    await pickIndicator(opened, current.name!);
+    opened.http.expectOne(`${scriptsUrl}/indicators/${current.name}/versions`).flush([summary(current)]);
+    opened.http.expectOne(columnsUrl(current.name!)).flush(publishedTable(table ?? [], table !== null));
+    await settle(opened.harness);
+  }
+
+  /** Views version `number` of the selected indicator from the Versions tab, answering the read of it. */
+  async function viewVersion(opened: Opened, version: ScriptVersionDetails) {
+    await openVersions(opened);
+    byTestId<HTMLButtonElement>(opened.root, `version-${version.number}`)!.click();
+    await settle(opened.harness);
+    opened.http.expectOne(`${scriptsUrl}/indicators/${version.name}/versions/${version.number}`).flush(version);
+    await settle(opened.harness);
+  }
+
+  it('offers a field for each column of the published table, in the table order, with the saved labels (Columns of the published table)', async () => {
+    const teatro = labelled('teatro_hoy', 4, { numerator: { label: 'Hogares que asistieron' }, comuna: { label: 'Comuna' } });
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+
+    await choose(opened, teatro);
+    await editDetails(opened);
+
+    expect(textOf(byTestId(opened.root, 'meta-columns'))).toContain('Column names');
+    expect(rowsOf(opened.root)).toEqual([
+      ['variable', ''],
+      ['orden', ''],
+      ['comuna', 'Comuna'],
+      ['numerator', 'Hogares que asistieron'],
+      ['denominator', ''],
+    ]);
+  });
+
+  it('offers the columns of the latest test of the draft in place of the published table (Columns of the latest test)', async () => {
+    const barreras = labelled('teatro_barreras', 2);
+    const opened = await open('analyst', { scripts: withIndicators(barreras) });
+    await choose(opened, barreras, ['variable', 'value']);
+
+    await startTest(opened);
+    const table = {
+      name: 'teatro_barreras',
+      rows: 3,
+      columns: [
+        { name: 'variable', type: 'text' as const },
+        { name: 'barrera_tipo', type: 'text' as const },
+        { name: 'value', type: 'decimal' as const },
+      ],
+      previewRows: 0,
+      preview: null,
+      cutCells: null,
+    };
+    opened.http
+      .expectOne((r) => r.url === testsUrl && r.method === 'POST')
+      .flush(scriptTest({ kind: 'indicator', name: 'teatro_barreras', status: 'succeeded', steps: [flattenStep, { ...flattenStep, step: 'indicator', tables: [table] }] }));
+    await settle(opened.harness);
+    await editDetails(opened);
+
+    expect(rowsOf(opened.root).map(([column]) => column)).toEqual(['variable', 'barrera_tipo', 'value']);
+  });
+
+  it('lists a labelled column the table no longer has after the others, marked, and lets its label be cleared (Column no longer in the table)', async () => {
+    const teatro = labelled('teatro_hoy', 4, { estrato_hogar: { label: 'Estrato del hogar' }, comuna: { label: 'Comuna' } });
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro, ['comuna', 'numerator']);
+    await editDetails(opened);
+
+    expect(rowsOf(opened.root)).toEqual([
+      ['comuna', 'Comuna'],
+      ['numerator', ''],
+      ['estrato_hogar', 'Estrato del hogar'],
+    ]);
+    expect(textOf(fieldOf(opened.root, 'estrato_hogar').closest('tmz-form-field'))).toContain('Not in the table');
+    expect(textOf(fieldOf(opened.root, 'comuna').closest('tmz-form-field'))).not.toContain('Not in the table');
+
+    typeInto(fieldOf(opened.root, 'estrato_hogar'), '');
+    await settle(opened.harness);
+    byTestId<HTMLButtonElement>(opened.root, 'save')!.click();
+    const request = opened.http.expectOne((r) => r.url === `${scriptsUrl}/indicators/teatro_hoy` && r.method === 'PUT');
+    expect(request.request.body.columns).toEqual({ comuna: { label: 'Comuna' } });
+  });
+
+  it('says the columns are listed after a test for an indicator never tested or published (New indicator)', async () => {
+    const opened = await open('analyst', { scripts: withIndicators(labelled('teatro_hoy', 1)) });
+    byTestId<HTMLButtonElement>(opened.root, 'add-indicator')!.click();
+    await settle(opened.harness);
+    const dialog = document.querySelector('.cdk-overlay-container')!;
+    typeInto(byTestId<HTMLInputElement>(dialog, 'indicator-name')!, 'teatro_nuevo');
+    await settle(opened.harness);
+    typeInto(byTestId<HTMLInputElement>(dialog, 'meta-label')!, 'Teatro nuevo');
+    await settle(opened.harness);
+
+    expect(textOf(byTestId(dialog, 'columns-empty'))).toBe('The columns are listed after a test.');
+    expect(byTestId(dialog, 'meta-column-label')).toBeNull();
+    byTestId<HTMLButtonElement>(dialog, 'indicator-add-confirm')!.click();
+    await tick();
+    await settle(opened.harness);
+    opened.http.expectNone((r) => r.url.includes('/teatro_nuevo'));
+    await editDetails(opened);
+    expect(textOf(byTestId(opened.root, 'columns-empty'))).toBe('The columns are listed after a test.');
+
+    byTestId<HTMLButtonElement>(opened.root, 'save')!.click();
+    const request = opened.http.expectOne((r) => r.url === `${scriptsUrl}/indicators/teatro_nuevo` && r.method === 'PUT');
+    expect(request.request.body.columns).toEqual({});
+  });
+
+  it('shows the labels of an older version as text, with no field to change them (Older version viewed)', async () => {
+    const current = labelled('teatro_hoy', 3, { numerator: { label: 'Hogares' } });
+    const older = labelled('teatro_hoy', 2, { comuna: { label: 'Comuna' } });
+    const opened = await open('analyst', { scripts: withIndicators(current) });
+    await pickIndicator(opened, current.name!);
+    opened.http.expectOne(`${scriptsUrl}/indicators/teatro_hoy/versions`).flush([summary(current), summary(older)]);
+    opened.http.expectOne(columnsUrl('teatro_hoy')).flush(publishedTable(['comuna', 'numerator']));
+    await settle(opened.harness);
+
+    await viewVersion(opened, older);
+
+    expect(textOf(byTestId(opened.root, 'indicator-meta-columns'))).toBe('Column namescomuna: Comuna');
+    expect(textOf(byTestId(opened.root, 'indicator-meta-column'))).toBe('comuna: Comuna');
+    expect(byTestId(opened.root, 'meta-column-label')).toBeNull();
+  });
+
+  it('marks the details unsaved when a label is typed, and not when its field is emptied again', async () => {
+    const teatro = labelled('teatro_hoy', 4);
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await editDetails(opened);
+    expect(byTestId(opened.root, 'unsaved')).toBeNull();
+
+    typeInto(fieldOf(opened.root, 'numerator'), 'Hogares que asistieron');
+    await settle(opened.harness);
+    expect(byTestId(opened.root, 'unsaved')).not.toBeNull();
+
+    typeInto(fieldOf(opened.root, 'numerator'), '   ');
+    await settle(opened.harness);
+    expect(byTestId(opened.root, 'unsaved')).toBeNull();
+  });
+
+  it('saves the labels as { column: { label } }, trimmed, for the fields that have one (Labels of a ratio)', async () => {
+    const teatro = labelled('teatro_hoy', 4, { comuna: { label: 'Comuna' } });
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await editDetails(opened);
+
+    typeInto(fieldOf(opened.root, 'numerator'), '  Hogares que asistieron  ');
+    await settle(opened.harness);
+    typeInto(fieldOf(opened.root, 'denominator'), 'Hogares');
+    await settle(opened.harness);
+    typeInto(fieldOf(opened.root, 'comuna'), '');
+    await settle(opened.harness);
+    byTestId<HTMLButtonElement>(opened.root, 'save')!.click();
+
+    const request = opened.http.expectOne((r) => r.url === `${scriptsUrl}/indicators/teatro_hoy` && r.method === 'PUT');
+    expect(request.request.body).toEqual({
+      code: teatro.code,
+      label: 'Label of teatro_hoy',
+      description: 'What it measures',
+      unit: 'households',
+      format: 'count',
+      columns: { numerator: { label: 'Hogares que asistieron' }, denominator: { label: 'Hogares' } },
+    });
+  });
+
+  it('sends an empty set when every label is emptied, which clears them (Label cleared)', async () => {
+    const teatro = labelled('teatro_hoy', 4, { comuna: { label: 'Comuna' } });
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await editDetails(opened);
+
+    typeInto(fieldOf(opened.root, 'comuna'), '');
+    await settle(opened.harness);
+    byTestId<HTMLButtonElement>(opened.root, 'save')!.click();
+
+    expect(opened.http.expectOne((r) => r.url === `${scriptsUrl}/indicators/teatro_hoy` && r.method === 'PUT').request.body.columns).toEqual({});
+  });
+
+  it('shows an error on a label next to its field, and an error on the labels under the heading', async () => {
+    const teatro = labelled('teatro_hoy', 4);
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await editDetails(opened);
+    typeInto(fieldOf(opened.root, 'numerator'), 'x'.repeat(81));
+    await settle(opened.harness);
+    byTestId<HTMLButtonElement>(opened.root, 'save')!.click();
+
+    opened.http
+      .expectOne((r) => r.url === `${scriptsUrl}/indicators/teatro_hoy` && r.method === 'PUT')
+      .flush(
+        { errors: { 'columns.numerator.label': ['A column label can have up to 80 characters.'], columns: ['An indicator labels at most 100 columns.'] } },
+        { status: 400, statusText: 'Bad Request' },
+      );
+    await settle(opened.harness);
+
+    expect(textOf(fieldOf(opened.root, 'numerator').closest('tmz-form-field'))).toContain('up to 80 characters');
+    expect(textOf(fieldOf(opened.root, 'denominator').closest('tmz-form-field'))).not.toContain('80 characters');
+    expect(textOf(byTestId(opened.root, 'columns-error'))).toBe('An indicator labels at most 100 columns.');
+    expect(byTestId(opened.root, 'save-error')).toBeNull();
+  });
+
+  it('brings the labels of a version back when it is restored (Column labels restored with a version)', async () => {
+    const current = labelled('teatro_hoy', 3);
+    const older = labelled('teatro_hoy', 2, { numerator: { label: 'Hogares que asistieron' } });
+    const opened = await open('analyst', { scripts: withIndicators(current) });
+    await pickIndicator(opened, current.name!);
+    opened.http.expectOne(`${scriptsUrl}/indicators/teatro_hoy/versions`).flush([summary(current), summary(older)]);
+    opened.http.expectOne(columnsUrl('teatro_hoy')).flush(publishedTable(['numerator', 'denominator']));
+    await settle(opened.harness);
+    await viewVersion(opened, older);
+
+    byTestId<HTMLButtonElement>(opened.root, 'restore')!.click();
+    opened.http
+      .expectOne((r) => r.url === `${scriptsUrl}/indicators/teatro_hoy/versions/2/restore` && r.method === 'POST')
+      .flush(labelled('teatro_hoy', 4, { numerator: { label: 'Hogares que asistieron' } }));
+    await settle(opened.harness);
+    opened.http.expectOne(`${scriptsUrl}/indicators/teatro_hoy/versions`).flush([]);
+    await settle(opened.harness);
+    await editDetails(opened);
+
+    expect(rowsOf(opened.root)).toEqual([
+      ['numerator', 'Hogares que asistieron'],
+      ['denominator', ''],
+    ]);
+    expect(byTestId(opened.root, 'unsaved')).toBeNull();
   });
 });

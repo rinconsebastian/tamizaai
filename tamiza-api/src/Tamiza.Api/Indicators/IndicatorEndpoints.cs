@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Tamiza.Api.Auth;
 using Tamiza.Api.CleanData;
@@ -42,7 +43,7 @@ public static class IndicatorEndpoints
                     var publication = publications.GetValueOrDefault(script.Name!, IndicatorPublication.None);
                     return new IndicatorEntry(
                         script.Name!, script.Label ?? script.Name!, script.Description, script.Unit, script.Format ?? "decimal",
-                        publication.Published, publication.PublishedAt, publication.RunId, publication.Rows);
+                        publication.Published, publication.PublishedAt, publication.RunId, publication.Rows, script.Columns);
                 })
                 .ToList();
             return TypedResults.Ok(new IndicatorOverview(
@@ -55,18 +56,36 @@ public static class IndicatorEndpoints
         }
     }
 
-    /// <summary>Every column of one indicator's published table, those a widget can plot, and the defaults for a new widget.</summary>
+    /// <summary>
+    /// Every column of one indicator's published table, those a widget can plot, and the defaults for a new widget. Each column's
+    /// <c>label</c> is the one its indicator gives it in the current version of its script, if any (design D4).
+    /// </summary>
     internal static async Task<Results<Ok<IndicatorColumns>, ProblemHttpResult>> GetColumnsAsync(
-        Guid projectId, string name, IndicatorDashboard dashboard, CancellationToken ct)
+        Guid projectId, string name, IndicatorDashboard dashboard, TamizaDbContext db, CancellationToken ct)
     {
         try
         {
-            return TypedResults.Ok(await dashboard.GetColumnsAsync(projectId, name, ct));
+            var columns = await dashboard.GetColumnsAsync(projectId, name, ct);
+            var labels = await CurrentColumnsAsync(db, projectId, name, ct);
+            return TypedResults.Ok(labels is null
+                ? columns
+                : columns with { Columns = columns.Columns.Select(c => c with { Label = labels.GetValueOrDefault(c.Name)?.Label ?? c.Label }).ToList() });
         }
         catch (DataTimeoutException)
         {
             return DataEndpoints.Timeout();
         }
+    }
+
+    /// <summary>What the current version of an indicator's script says about its columns; null when it says nothing or the indicator is removed.</summary>
+    internal static async Task<Dictionary<string, IndicatorColumnMetadata>?> CurrentColumnsAsync(
+        TamizaDbContext db, Guid projectId, string name, CancellationToken ct)
+    {
+        var current = await ScriptEndpoints.Versions(db, projectId, ScriptKind.Indicator, name)
+            .OrderByDescending(v => v.Number)
+            .Select(v => new { Removed = v.Code == null, v.Columns })
+            .FirstOrDefaultAsync(ct);
+        return current is { Removed: false } ? ColumnMetadata.Read(current.Columns) : null;
     }
 
     /// <summary>One widget's rows: the measure summed, or the ratio of sums, per group. Used to draw a saved widget and to preview a draft.</summary>
@@ -75,7 +94,8 @@ public static class IndicatorEndpoints
     {
         try
         {
-            var outcome = await dashboard.QueryAsync(projectId, request?.Config ?? new WidgetConfigInput(), request?.ChartType, ct, request?.DashboardFilters);
+            var outcome = await dashboard.QueryAsync(
+                projectId, request?.Config ?? new WidgetConfigInput(), request?.ChartType, ct, request?.DashboardFilters, request?.Overall == true);
             return outcome.Errors is { } errors ? Problems.Validation(errors) : TypedResults.Ok(outcome.Response!);
         }
         catch (DataTimeoutException)

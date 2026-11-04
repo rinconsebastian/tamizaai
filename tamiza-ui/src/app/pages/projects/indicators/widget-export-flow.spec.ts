@@ -2,7 +2,8 @@ import { TestBed } from '@angular/core/testing';
 import { settle } from '../../../../testing/project-harness';
 import { ToastService } from '../../../shared/ui';
 import { DashboardFilter } from '../../../core/projects/indicators.service';
-import { Context, all, clearOverlay, config, dashboardUrl, downloader, open, result, row, text, wait, widget } from './indicators-testing';
+import { savedConfig } from './widget-view';
+import { Context, all, clearOverlay, config, dashboardUrl, downloader, indicator, open, result, row, text, wait, widget } from './indicators-testing';
 
 const rows = result([row('Cali', 75), row('Pasto', 40)]);
 const coverage = widget('w1', { title: 'Coverage by municipality', layout: { x: 0, y: 0, w: 6, h: 4 } });
@@ -29,7 +30,7 @@ describe('exporting a widget from the dashboard', () => {
   });
 
   describe('the workbook', () => {
-    it('sends the widget\'s query, the interface\'s locale and no version, downloads the link and ends with one message', async () => {
+    it('sends the widget\'s saved config, the interface\'s locale and no version, downloads the link and ends with one message', async () => {
       const context = await open('viewer', [coverage], rows);
 
       await choose(context, 'xlsx');
@@ -39,7 +40,7 @@ describe('exporting a widget from the dashboard', () => {
         format: 'xlsx',
         title: 'Coverage by municipality',
         chartType: 'column',
-        config: expect.objectContaining({ indicator: 'coverage', groupBy: 'municipality', ignoredDashboardFilters: [] }),
+        config: savedConfig('column', coverage.config),
         filters: [],
         locale: expect.stringMatching(/^[a-z]{2}(-[A-Z]{2})?$/),
       });
@@ -49,6 +50,61 @@ describe('exporting a widget from the dashboard', () => {
 
       expect(downloader.start).toHaveBeenCalledWith('/api/v1/data-exports/t0k3n');
       expect(toasts()).toEqual(['The workbook of “Coverage by municipality” is ready: 32 rows. The download starts now.']);
+    });
+
+    it('sends the widget as it is saved: its display with the labels, the color and the texts (Own label in the workbook, Widget context in the workbook)', async () => {
+      const display = {
+        color: 3,
+        labels: { municipality: 'Comuna', numerator: ' ' },
+        subtitle: '¿Dónde ha visto teatro?',
+        footnote: 'No suman 100 %.',
+        caption: { text: '% de quienes asistieron' },
+        unit: 'de quienes asistieron',
+      };
+      const labelled = widget('w1', { title: 'Coverage by municipality', config: config({ display }) });
+      const context = await open('viewer', [labelled], rows);
+
+      await choose(context, 'xlsx');
+      const request = context.http.expectOne(isExport);
+
+      expect(request.request.body.config.display).toEqual({ ...display, labels: { municipality: 'Comuna' } });
+      expect(request.request.body.config).toMatchObject({ indicator: 'coverage', groupBy: 'municipality' });
+      request.flush(answer);
+      await settle(context.harness);
+    });
+
+    it('sends a map with its tooltip labels, formats and basemap (Map tooltip labels in the workbook)', async () => {
+      const tooltip = [
+        { column: 'registros', label: 'Total propio', format: 'count' as const },
+        { column: 'calles', label: null, format: null },
+      ];
+      const map = widget('w1', {
+        title: 'Coverage map',
+        chartType: 'map',
+        config: config({ geometryColumn: 'geom', groupBy: 'municipality', tooltip, basemap: 'satellite' }),
+      });
+      const context = await open('viewer', [map], rows);
+
+      await choose(context, 'xlsx');
+      const request = context.http.expectOne(isExport);
+
+      expect(request.request.body.chartType).toBe('map');
+      expect(request.request.body.config).toMatchObject({ geometryColumn: 'geom', basemap: 'satellite' });
+      expect(request.request.body.config.tooltip).toEqual(tooltip);
+      request.flush(answer);
+      await settle(context.harness);
+    });
+
+    it('sends a request without a display for a widget that sets nothing the kind takes, as it always did', async () => {
+      const ramped = widget('w1', { title: 'Coverage by municipality', config: config({ display: { ramp: 'green' } }) });
+      const context = await open('viewer', [ramped], rows);
+
+      await choose(context, 'xlsx');
+      const request = context.http.expectOne(isExport);
+
+      expect('display' in request.request.body.config).toBe(false);
+      request.flush(answer);
+      await settle(context.harness);
     });
 
     it('says only that widget is busy until the file is ready', async () => {
@@ -141,6 +197,135 @@ describe('exporting a widget from the dashboard', () => {
       expect(svg).not.toMatch(/data-testid|class=|<script|href=/);
       expect(toasts()).toEqual(['“Coverage by municipality” was saved as an SVG image.']);
       expect(context.http.match((r) => r.method === 'POST' && r.url.endsWith('/widget-exports'))).toHaveLength(0);
+    });
+
+    /** The SVG text the page saved for the first widget. */
+    async function savedSvg(context: Context): Promise<string> {
+      await choose(context, 'svg');
+      await wait(300);
+      await settle(context.harness);
+      expect(downloader.save).toHaveBeenCalledTimes(1);
+      return (downloader.save.mock.calls[0] as [Blob, string])[0].text();
+    }
+
+    it('writes the whole subtitle under the title and the whole footnote before the footer, and the dashboard\'s source in the footer (Texts in an image)', async () => {
+      const subtitle = '¿En qué lugares ha visto teatro en el último año? (E4), preguntado a quienes asistieron a alguna función en las zonas visitadas';
+      const footnote = 'No suman 100 %: respuesta múltiple. '.repeat(8).trim();
+      const texted = widget('w1', { title: 'Coverage by municipality', config: config({ display: { subtitle, footnote } }) });
+      const context = await open('viewer', [texted], rows, {}, { source: 'Encuesta de mercado de la zona, 478 encuestas' });
+
+      const svg = await savedSvg(context);
+      const lines = Array.from(svg.matchAll(/<text [^>]*font-size="(\d+)"[^>]*>([^<]*)</g)).map((m) => ({ size: Number(m[1]), text: m[2] }));
+      const joined = (from: number, size: number) => lines.filter((l, i) => i >= from && l.size === size).map((l) => l.text).join(' ');
+
+      expect(svg).toContain('>Coverage by municipality<');
+      expect(lines.filter((l) => l.size === 12).map((l) => l.text).join(' ')).toContain('¿En qué lugares ha visto teatro');
+      expect(joined(0, 12)).toContain('No suman 100 %: respuesta múltiple.');
+      expect(joined(0, 12).split('No suman 100 %').length - 1).toBe(8); // whole, not cut
+      expect(svg).not.toContain('…');
+      const source = lines.findIndex((l) => l.text === 'Source: Encuesta de mercado de la zona, 478 encuestas');
+      const published = lines.findIndex((l) => l.text.startsWith('Data published'));
+      expect(source).toBeGreaterThan(0);
+      expect(lines[source].size).toBe(11); // in the footer, after the project and dashboard line and before the publication line
+      expect(source).toBeLessThan(published);
+      expect(lines[source - 1].text).toMatch(/ · Indicators$/);
+      // The subtitle comes before the caption's place and the footnote after the chart, in the order of the design.
+      expect(svg.indexOf('¿En qué lugares')).toBeLessThan(svg.indexOf('No suman 100 %'));
+      expect(svg.indexOf('No suman 100 %')).toBeLessThan(svg.indexOf('Source: Encuesta'));
+    });
+
+    it('names what is plotted with the widget\'s own caption text in the image (Own caption text)', async () => {
+      const own = widget('w1', { title: 'Coverage by municipality', config: config({ display: { caption: { text: '% de quienes asistieron' } } }) });
+      const context = await open('viewer', [own], rows);
+
+      const svg = await savedSvg(context);
+
+      expect(svg).toContain('>% de quienes asistieron by municipality<');
+    });
+
+    it('leaves the caption line out of the image of a widget that hides it, and keeps the title (Caption hidden)', async () => {
+      const hidden = widget('w1', { title: 'Theatre attendance', config: config({ display: { caption: { hidden: true } } }) });
+      const context = await open('viewer', [hidden], rows);
+      expect(text(all(context.root, 'chart-caption')[0])).toBe('Coverage by municipality'); // still on the page, for screen readers
+
+      const svg = await savedSvg(context);
+
+      expect(svg).toContain('>Theatre attendance<');
+      expect(svg).not.toContain('Coverage by municipality');
+    });
+
+    it('holds no description of the indicator in the image, though the widget shows its button (Not printed or exported)', async () => {
+      const described = [indicator('coverage', { description: 'Share of households that visited a theatre in the last year.' })];
+      const shown = widget('w1', { title: 'Coverage by municipality', config: config({ display: { showDescription: true } }) });
+      const context = await open('viewer', [shown], rows, { indicators: described });
+      expect(all(context.root, 'widget-description')).toHaveLength(1);
+
+      const svg = await savedSvg(context);
+
+      expect(svg).not.toContain('Share of households');
+    });
+
+    it('draws no line of a source and no text of the widget for a widget and a dashboard without them', async () => {
+      const context = await open('viewer', [coverage], rows);
+
+      const svg = await savedSvg(context);
+
+      expect(svg).not.toContain('Source:');
+      expect(svg.match(/font-size="11"/g)).toHaveLength(2); // the footer's publication line and the line of the project, dashboard and day
+    });
+
+    // The chart annotations (add-chart-annotations, Chart annotations in widget images).
+    it('lists a reference line in the legend, above the footnote, which is above the footer (Mean line in an image, Lines above the footnote)', async () => {
+      const lined = widget('w1', {
+        title: 'Coverage by municipality',
+        config: config({ display: { footnote: 'No suman 100 %.', referenceLines: [{ kind: 'mean' }, { kind: 'value', value: 50, label: 'Meta' }] } }),
+      });
+      const context = await open('viewer', [lined], rows);
+
+      const svg = await savedSvg(context);
+
+      expect(svg).toContain('>Mean: 58<');
+      expect(svg).toContain('>Meta: 50<');
+      expect(svg).toMatch(/<line [^>]*stroke-dasharray="6 4"[^>]*\/>/);
+      expect(svg).toMatch(/<line [^>]*stroke-dasharray="2 3"[^>]*\/>/);
+      expect(svg.indexOf('>Meta: 50<')).toBeLessThan(svg.indexOf('No suman 100 %.'));
+      expect(svg.indexOf('No suman 100 %.')).toBeLessThan(svg.indexOf('Data published'));
+      expect(svg).not.toMatch(/data-testid|class=|<script|href=/);
+    });
+
+    it('draws the reference lines of the plot, their labels and the data labels in the image, the legend among them (Data labels in an image)', async () => {
+      const labelled = widget('w1', { title: 'Coverage by municipality', config: config({ display: { dataLabels: true, referenceLines: [{ kind: 'mean', label: 'Promedio' }] } }) });
+      const context = await open('viewer', [labelled], rows);
+
+      const svg = await savedSvg(context);
+      const texts = Array.from(svg.matchAll(/<text [^>]*>([^<]*)</g)).map((m) => m[1]);
+
+      // The plot's own texts (jsdom has no style sheet, so the halo's stroke is checked in svg-clean.spec.ts) and the legend's entry.
+      expect(texts.filter((t) => t === '75')).toHaveLength(1); // Cali's label; 75 is no tick of the axis
+      expect(texts.filter((t) => t === '40')).toHaveLength(2); // Pasto's label and the axis tick
+      expect(texts.filter((t) => t === 'Promedio: 58')).toHaveLength(2);
+    });
+
+    it('leaves out of the image the data labels the chart left out: bars thinner than their text (Data labels in an image)', async () => {
+      const thin = widget('w1', { title: 'Coverage by municipality', chartType: 'bar', config: config({ display: { dataLabels: true } }) });
+      const many = result(Array.from({ length: 40 }, (_, i) => row(`Municipio ${i + 1}`, 101 + i * 2)));
+      const context = await open('viewer', [thin], many);
+
+      const svg = await savedSvg(context);
+      const texts = Array.from(svg.matchAll(/<text [^>]*>([^<]*)</g)).map((m) => m[1]);
+
+      expect(texts).toContain('Municipio 1');
+      expect(texts).not.toContain('101');
+      expect(texts).not.toContain('179');
+    });
+
+    it('draws no line, key or label for a widget that sets none, as before', async () => {
+      const context = await open('viewer', [coverage], rows);
+
+      const svg = await savedSvg(context);
+
+      expect(svg).not.toContain('stroke-dasharray');
+      expect(svg).not.toContain('paint-order');
     });
 
     it('sends no request to make an image, and makes no version', async () => {

@@ -7,7 +7,7 @@ import { ChartColors } from './chart-colors';
 import { registerExportParts } from './export-parts';
 import { charWidth, sequentialStep, sequentialSteps, truncate } from './chart-scales';
 import { CrosstabWidget } from './crosstab-widget';
-import { ValueFormatter, plotted } from './format';
+import { ColumnNamer, ValueFormatter, captionShown, named, plotted, rawNames } from './format';
 import { MarkPoint, markTooltips } from './mark-tooltips';
 import { seriesName } from './series-legend';
 import { Hit, Label } from './series-plot';
@@ -143,9 +143,9 @@ let hatchIds = 0;
   imports: [TranslocoDirective, CrosstabWidget],
   template: `
     <ng-container *transloco="let t">
-      <p class="shrink-0 text-xs text-body" data-testid="chart-caption">{{ t('indicators.series.caption', { what: what(), group: config().groupBy, series: config().seriesBy }) }}</p>
+      <p class="shrink-0 text-xs text-body" [class.sr-only]="!captionShown(config())" data-testid="chart-caption">{{ t('indicators.series.caption', { what: what(), group: groupShown(), series: seriesShown() }) }}</p>
       @if (asTable()) {
-        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" chartType="heatmap" />
+        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" [names]="names()" chartType="heatmap" />
       } @else {
         <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
           <svg
@@ -254,9 +254,13 @@ export class HeatmapChart {
   private readonly transloco = inject(TranslocoService);
   readonly answer = input.required<QueryResult>();
   readonly config = input.required<WidgetConfig>();
+  /** Whether the line that names what the widget plots is seen: a hidden one stays for screen readers (add-widget-context, design D3). */
+  protected readonly captionShown = captionShown;
   /** The indicator's label and the formatter of its values. */
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
+  /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
+  readonly names = input<ColumnNamer>(rawNames);
   readonly asTable = input(false);
   /** The colors of the widget: its sequential scale, from the widget or from its dashboard's palette. */
   readonly colors = input.required<ChartColors>();
@@ -268,7 +272,10 @@ export class HeatmapChart {
   protected readonly steps = Array.from({ length: sequentialSteps }, (_, i) => i + 1);
   protected readonly hatchId = `heat-hatch-${++hatchIds}`;
   protected readonly hatchSwatch = 'repeating-linear-gradient(45deg, transparent 0 3px, var(--color-default-strong) 3px 4px)';
-  protected readonly what = computed(() => plotted(this.config(), this.label()));
+  protected readonly what = computed(() => plotted(this.config(), this.label(), this.names()));
+  /** The group and series columns under their names shown (their colors stay keyed by the columns themselves). */
+  protected readonly groupShown = computed(() => named(this.names(), this.config().groupBy));
+  protected readonly seriesShown = computed(() => named(this.names(), this.config().seriesBy));
   private readonly table = computed(() => orderedSeriesTable(this.answer(), 'heatmap', null));
   protected readonly hasEmpty = computed(() => this.table().rows.some((row) => row.cells.some((cell) => cell === null)));
 
@@ -315,7 +322,7 @@ export class HeatmapChart {
       settle: () => this.marks.reset(),
       parts: () => {
         const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
-        const caption = t('indicators.series.caption', { what: this.what(), group: this.config().groupBy, series: this.config().seriesBy });
+        const caption = t('indicators.series.caption', { what: this.what(), group: this.groupShown(), series: this.seriesShown() });
         const range = this.plot().range;
         return {
           caption,
@@ -358,8 +365,8 @@ export class HeatmapChart {
     const top = table.rows.flatMap((row) => row.cells.flatMap((cell, i) => (cell === null ? [] : [{ cell, group: row.group, column: table.columns[i] }]))).reduce((best, entry) => (entry.cell > best.cell ? entry : best));
     return t('indicators.heatmap.summary', {
       what: this.what(),
-      group: this.config().groupBy,
-      series: this.config().seriesBy,
+      group: this.groupShown(),
+      series: this.seriesShown(),
       groups: t(countKey('indicators.series.groupsCount', table.rows.length, lang), { count: table.rows.length }),
       seriesCount: t(countKey('indicators.series.seriesCount', table.columns.length, lang), { count: table.columns.length }),
       min: format(range.min),

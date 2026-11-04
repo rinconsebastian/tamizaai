@@ -7,6 +7,7 @@ namespace Tamiza.Api.Reports;
 /// <param name="Filters">Every filter of the dashboard with its value in force, or the text for "All", in the filter bar's order.</param>
 /// <param name="NotNarrowedBy">The labels of the filters in force that do not narrow the widget.</param>
 /// <param name="PublishedAt">When the widget's indicator was published; null when it has not been.</param>
+/// <param name="Source">The source of the dashboard, or of the version being viewed; null when it has none.</param>
 public sealed record WidgetWorkbookModel(
     string ProjectName,
     string DashboardName,
@@ -19,7 +20,8 @@ public sealed record WidgetWorkbookModel(
     DateTimeOffset? PublishedAt,
     DateTimeOffset ExportedAt,
     ReportFormat Format,
-    ReportText Text);
+    ReportText Text,
+    string? Source = null);
 
 /// <summary>
 /// The workbook of one widget (design D13): its table first, named after its title, so a reader, <c>read_excel</c> or Power Query
@@ -66,9 +68,24 @@ public static class WidgetWorkbook
             summary.Add(Line(text["version"], version));
         }
 
+        if (model.Source is { } source)
+        {
+            summary.Add(Line(text["source"], source));
+        }
+
         summary.Add(Line(text["widget"], widget.Title));
+        if (widget.Subtitle is { } subtitle)
+        {
+            summary.Add(Line(text["subtitle"], subtitle));
+        }
+
         summary.Add(Line(text["indicator"], $"{model.IndicatorLabel} ({model.IndicatorName})"));
         summary.Add(Line(text["plotted"], widget.Caption));
+        if (widget.ReferenceLines.Count > 0)
+        {
+            summary.Add(Line(text["referenceLines"], string.Join(" · ", widget.ReferenceLines.Select(l => l.Line))));
+        }
+
         summary.AddRange(model.Filters.Count == 0
             ? [Line(text["filters"], text["noFilters"])]
             : model.Filters.Select(f => Line($"{text["filters"]}: {f.Label}", f.Value)));
@@ -80,6 +97,10 @@ public static class WidgetWorkbook
         summary.Add(Line(text["dataPublished"], model.PublishedAt is { } published ? model.Format.Moment(published) : text["dataNotPublished"]));
         summary.Add(Line(text["exported"], model.Format.Moment(model.ExportedAt)));
         summary.Add(Line(text["rows"], rowCount.ToString("N0", text.Culture)));
+        if (widget.Footnote is { } footnote)
+        {
+            summary.Add(Line(text["footnote"], footnote));
+        }
 
         // The "Not filtered by" note repeats the line above: the other notes and the reason are what is left to say.
         var sentence = model.NotNarrowedBy.Count > 0 ? text.Format("notFiltered", string.Join(", ", model.NotNarrowedBy)) : null;

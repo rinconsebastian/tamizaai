@@ -1,0 +1,235 @@
+{
+ "_comment": "Shared by the API's ColumnLabels tests and the UI's format.spec.ts (design D6). Each case gives the indicator's column labels (null when it has none), the widget's display (null when it has none), the widget's config (only measure and ratio matter), the indicator's label, and the expected results: `plotted` (what the widget plots, for captions) and `names` (the name shown for each listed column). The widget's label wins over the indicator's, which wins over the column's own name; a blank widget label or indicator label means none. A display may also carry a caption: its own text replaces the whole `plotted` line, and a hidden caption keeps it. Every name and value is invented.",
+ "cases": [
+  {
+   "name": "ratio with both columns labelled by the indicator",
+   "indicator": {
+    "numerator": { "label": "Hogares que asistieron" },
+    "denominator": { "label": "Hogares" },
+    "comuna": { "label": "Comuna" }
+   },
+   "display": null,
+   "config": { "ratio": { "numerator": "numerator", "denominator": "denominator" } },
+   "label": "Teatro hoy",
+   "plotted": "Teatro hoy: Hogares que asistieron / Hogares",
+   "names": {
+    "numerator": "Hogares que asistieron",
+    "denominator": "Hogares",
+    "comuna": "Comuna",
+    "estrato": "estrato"
+   }
+  },
+  {
+   "name": "measure named",
+   "indicator": {
+    "value": { "label": "Hogares" },
+    "pregunta": { "label": "Pregunta" },
+    "respuesta": { "label": "Respuesta" }
+   },
+   "display": null,
+   "config": { "measure": "value" },
+   "label": "Teatro conteo",
+   "plotted": "Teatro conteo: Hogares",
+   "names": {
+    "value": "Hogares",
+    "pregunta": "Pregunta",
+    "respuesta": "Respuesta"
+   }
+  },
+  {
+   "name": "Widget label over the indicator's",
+   "indicator": {
+    "numerator": { "label": "Hogares que asistieron" },
+    "denominator": { "label": "Hogares" }
+   },
+   "display": { "labels": { "denominator": "Hogares de la base E1" } },
+   "config": { "ratio": { "numerator": "numerator", "denominator": "denominator" } },
+   "label": "Teatro hoy",
+   "plotted": "Teatro hoy: Hogares que asistieron / Hogares de la base E1",
+   "names": {
+    "numerator": "Hogares que asistieron",
+    "denominator": "Hogares de la base E1"
+   }
+  },
+  {
+   "name": "Indicator label used",
+   "indicator": {
+    "comuna": { "label": "Comuna" }
+   },
+   "display": { "labels": { "numerator": "Asistentes" } },
+   "config": { "ratio": { "numerator": "numerator", "denominator": "denominator" } },
+   "label": "Teatro hoy",
+   "plotted": "Teatro hoy: Asistentes / denominator",
+   "names": {
+    "comuna": "Comuna",
+    "numerator": "Asistentes",
+    "denominator": "denominator"
+   }
+  },
+  {
+   "name": "Column's own name",
+   "indicator": null,
+   "display": null,
+   "config": { "ratio": { "numerator": "numerator", "denominator": "denominator" } },
+   "label": "Teatro hoy",
+   "plotted": "Teatro hoy: numerator / denominator",
+   "names": {
+    "numerator": "numerator",
+    "denominator": "denominator",
+    "hogar_menores": "hogar_menores"
+   }
+  },
+  {
+   "name": "Column's own name with other columns labelled",
+   "indicator": {
+    "comuna": { "label": "Comuna" }
+   },
+   "display": null,
+   "config": { "measure": "value" },
+   "label": "Teatro conteo",
+   "plotted": "Teatro conteo: value",
+   "names": {
+    "value": "value",
+    "hogar_menores": "hogar_menores",
+    "comuna": "Comuna"
+   }
+  },
+  {
+   "name": "empty widget label falls back to the indicator's",
+   "indicator": {
+    "numerator": { "label": "Hogares que asistieron" },
+    "denominator": { "label": "Hogares" }
+   },
+   "display": { "labels": { "numerator": "", "denominator": "   " } },
+   "config": { "ratio": { "numerator": "numerator", "denominator": "denominator" } },
+   "label": "Teatro hoy",
+   "plotted": "Teatro hoy: Hogares que asistieron / Hogares",
+   "names": {
+    "numerator": "Hogares que asistieron",
+    "denominator": "Hogares"
+   }
+  },
+  {
+   "name": "empty widget label falls back to the column",
+   "indicator": null,
+   "display": { "labels": { "numerator": "" } },
+   "config": { "ratio": { "numerator": "numerator", "denominator": "denominator" } },
+   "label": "Teatro hoy",
+   "plotted": "Teatro hoy: numerator / denominator",
+   "names": {
+    "numerator": "numerator",
+    "denominator": "denominator"
+   }
+  },
+  {
+   "name": "indicator entry without a label",
+   "indicator": {
+    "numerator": {},
+    "denominator": { "label": "Hogares" }
+   },
+   "display": null,
+   "config": { "ratio": { "numerator": "numerator", "denominator": "denominator" } },
+   "label": "Teatro hoy",
+   "plotted": "Teatro hoy: numerator / Hogares",
+   "names": {
+    "numerator": "numerator",
+    "denominator": "Hogares"
+   }
+  },
+  {
+   "name": "widget labels on a display without the other settings",
+   "indicator": {
+    "value": { "label": "Personas" }
+   },
+   "display": { "labels": { "value": "Casos" } },
+   "config": { "measure": "value" },
+   "label": "Quién respondió",
+   "plotted": "Quién respondió: Casos",
+   "names": {
+    "value": "Casos"
+   }
+  },
+  {
+   "name": "Default measure",
+   "indicator": {
+    "value": { "label": "Personas" }
+   },
+   "display": null,
+   "config": {},
+   "label": "Quién respondió",
+   "plotted": "Quién respondió",
+   "names": {
+    "value": "Personas"
+   }
+  },
+  {
+   "name": "Own caption text over the label and the names",
+   "indicator": {
+    "numerator": { "label": "Hogares que asistieron" },
+    "denominator": { "label": "Hogares" }
+   },
+   "display": { "labels": { "denominator": "Hogares de la base E1" }, "caption": { "text": "% de quienes asistieron" } },
+   "config": { "ratio": { "numerator": "numerator", "denominator": "denominator" } },
+   "label": "Teatro hoy",
+   "plotted": "% de quienes asistieron",
+   "names": {
+    "numerator": "Hogares que asistieron",
+    "denominator": "Hogares de la base E1"
+   }
+  },
+  {
+   "name": "Own caption text of a measure, trimmed",
+   "indicator": null,
+   "display": { "caption": { "text": "  Total propio  " } },
+   "config": { "measure": "value" },
+   "label": "Teatro conteo",
+   "plotted": "Total propio",
+   "names": {
+    "value": "value"
+   }
+  },
+  {
+   "name": "Own caption text with no measure",
+   "indicator": {
+    "value": { "label": "Personas" }
+   },
+   "display": { "caption": { "text": "Total propio" } },
+   "config": {},
+   "label": "Quién respondió",
+   "plotted": "Total propio",
+   "names": {
+    "value": "Personas"
+   }
+  },
+  {
+   "name": "Hidden caption keeps what is plotted",
+   "indicator": {
+    "numerator": { "label": "Hogares que asistieron" },
+    "denominator": { "label": "Hogares" }
+   },
+   "display": { "caption": { "hidden": true } },
+   "config": { "ratio": { "numerator": "numerator", "denominator": "denominator" } },
+   "label": "Teatro hoy",
+   "plotted": "Teatro hoy: Hogares que asistieron / Hogares",
+   "names": {
+    "numerator": "Hogares que asistieron",
+    "denominator": "Hogares"
+   }
+  },
+  {
+   "name": "Other texts leave the caption as it was",
+   "indicator": {
+    "numerator": { "label": "Hogares que asistieron" },
+    "denominator": { "label": "Hogares" }
+   },
+   "display": { "subtitle": "¿Quién asistió?", "footnote": "Sin ponderar", "unit": "de quienes asistieron", "showDescription": true },
+   "config": { "ratio": { "numerator": "numerator", "denominator": "denominator" } },
+   "label": "Teatro hoy",
+   "plotted": "Teatro hoy: Hogares que asistieron / Hogares",
+   "names": {
+    "numerator": "Hogares que asistieron",
+    "denominator": "Hogares"
+   }
+  }
+ ]
+}

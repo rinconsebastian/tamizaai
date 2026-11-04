@@ -5,9 +5,8 @@ Keep a short history of each of a project's own dashboards, recorded automatical
 
 ## Requirements
 
-
 ### Requirement: Dashboard versions
-Each of a project's own dashboards SHALL have a history of versions. A version SHALL hold the dashboard's name, its filters with their defaults, its palette and colors kept by value, and its widgets with their title, chart type, query, color or scale, orientation, the dashboard filters they ignore, position and size. It SHALL record its number, who made it, when its last change was saved, where it was made (Tamiza or an AI client), and what changed. The newest version SHALL be the dashboard as it is.
+Each of a project's own dashboards SHALL have a history of versions. A version SHALL hold the dashboard's settings (its name, its filters with their defaults, its palette, its colors kept by value and its other display settings) and its widgets, each with every setting it is saved with: its title, chart type, query, display settings (how it is drawn, such as its color or scale, its orientation and its own column labels), the dashboard filters it ignores, its position and its size. An indicator's column labels belong to the versions of its script, not to a dashboard's. A version SHALL record its number, who made it, when its last change was saved, where it was made (Tamiza or an AI client), and what changed. The newest version SHALL be the dashboard as it is.
 
 #### Scenario: Widget added
 - **WHEN** an `analyst` adds the widget "Water source" to "Housing", whose newest version is 4
@@ -20,6 +19,14 @@ Each of a project's own dashboards SHALL have a history of versions. A version S
 #### Scenario: Orientation restored
 - **WHEN** an `analyst` changes a box plot of "Housing" from vertical to horizontal, and then restores the version before that change
 - **THEN** the box plot is vertical again, and the restore is a new version
+
+#### Scenario: Widget's column labels restored
+- **WHEN** an `analyst` changes a column chart's own label for `denominator` on "Teatro" from "Hogares" to "Hogares que asistieron", and then restores the version before that change
+- **THEN** the chart names its denominator "Hogares" again, and the restore is a new version
+
+#### Scenario: Indicator's labels in a version
+- **WHEN** an `analyst` changes the label of `comuna` of `teatro_hoy` after version 5 of "Teatro" was recorded, and then views version 5
+- **THEN** the widgets of version 5 name `comuna` with the indicator's current label
 
 ### Requirement: Changes that make a version
 Every change a person saves to a dashboard in Tamiza SHALL make a new version, however small: adding, renaming or duplicating the dashboard, saving its filters, saving its colors, and adding, editing, removing, moving or resizing a widget, or moving one between dashboards. One action SHALL make one version of each dashboard it changes. A save that leaves a dashboard as its newest version holds SHALL make none. An AI client's changes follow `mcp-server` "One version per request".
@@ -252,3 +259,26 @@ A copy made by duplicating a dashboard SHALL start its own history with a versio
 #### Scenario: Removed dashboard
 - **WHEN** an `analyst` removes "Housing"
 - **THEN** its versions are removed with it, and none of them can be listed or restored
+
+### Requirement: Dashboard source in versions
+A version SHALL hold the dashboard's source. Saving a different source SHALL make a version that says the source changed, and saving it unchanged SHALL make none. Viewing a version SHALL show its source, and restoring one SHALL bring its source back, or remove the source when the version has none. A dashboard that has never had a source SHALL keep the version content it had before sources existed.
+
+#### Scenario: Source changed
+- **WHEN** an `analyst` saves a source on "Teatro", whose newest version is 18
+- **THEN** "Teatro" has version 19, holding the source and saying its source changed
+
+#### Scenario: Source saved unchanged
+- **WHEN** an `analyst` opens **Source** on "Teatro" and saves it without changing it
+- **THEN** "Teatro" has no new version
+
+#### Scenario: Source restored
+- **WHEN** an `analyst` changes the source of "Teatro" and then restores the version before that change
+- **THEN** the earlier source is back, and the restore is a new version
+
+#### Scenario: Version recorded before sources
+- **WHEN** an `analyst` restores version 18 of "Teatro", recorded before it had a source
+- **THEN** "Teatro" has no source
+
+#### Scenario: Dashboard saved before sources
+- **WHEN** "Escuelas", which has no source and whose newest version was recorded before sources existed, has its filters saved unchanged
+- **THEN** "Escuelas" has no new version

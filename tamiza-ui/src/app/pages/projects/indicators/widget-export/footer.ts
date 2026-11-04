@@ -4,6 +4,8 @@ export interface FooterFacts {
   dashboard: string;
   /** "Version 9, saved by Ana Pérez on …" while a version is shown. */
   version: string | null;
+  /** "Source: …", the dashboard's source in the member's words; null when the dashboard has none (add-widget-context, design D8). */
+  source: string | null;
   /** Every filter of the dashboard as the filter bar writes it, "Municipality: Cali", with "All" for one without a value. */
   filters: string[];
   /** "Data published Nov 2, 2026, 5:12 AM", or the words for a table not published yet. */
@@ -13,12 +15,13 @@ export interface FooterFacts {
 }
 
 /**
- * The footer's lines: where the widget comes from, the filters in force (none when the dashboard has no filters), and when the data
+ * The footer's lines: where the widget comes from, the dashboard's source when it has one, the filters in force (none when the dashboard has no filters), and when the data
  * was published and the picture made. Carries no logo and no mark of Tamiza.
  */
 export function footerLines(facts: FooterFacts): string[] {
   return [
     [facts.project, facts.dashboard, facts.version].filter((part): part is string => !!part).join(' · '),
+    ...(facts.source ? [facts.source] : []),
     ...(facts.filters.length ? [facts.filters.join(' · ')] : []),
     `${facts.published} · ${facts.exported}`,
   ];

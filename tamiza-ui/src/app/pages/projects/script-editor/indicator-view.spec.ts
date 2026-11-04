@@ -26,7 +26,7 @@ function rate(overrides: Partial<IndicatorTestView> = {}): IndicatorTestView {
   };
 }
 
-const percent: IndicatorMetadata = { label: 'Households with piped water', description: '', unit: '', format: 'percent' };
+const percent: IndicatorMetadata = { label: 'Households with piped water', description: '', unit: '', format: 'percent', columns: {} };
 const warningKeys = (facts: IndicatorTestView, format: IndicatorMetadata['format'] = 'percent') =>
   viewWarnings(facts, valueFormatter({ format, unit: null }, 'en'), format).map((w) => w.key);
 
@@ -132,6 +132,16 @@ describe('IndicatorView', () => {
 
     expect(q('view-measure-tile')!.querySelector('[data-testid="stat-value"]')!.textContent).toBe('6.00 households');
     expect(q('view-ratio-tile')!.querySelector('[data-testid="stat-value"]')!.textContent).toBe('0.50 households');
+  });
+
+  it('names the columns of its tiles and chart with the labels being typed, without saving them (Test view uses the labels being typed)', async () => {
+    const { fixture, q, host } = await render();
+    expect(q('view-ratio-tile')!.querySelector('[data-testid="stat-label"]')!.textContent).toBe('Households with piped water: numerator / denominator');
+
+    host.metadata.set({ ...percent, columns: { numerator: { label: 'Hogares que asistieron' }, denominator: { label: '  ' } } });
+    fixture.detectChanges();
+
+    expect(q('view-ratio-tile')!.querySelector('[data-testid="stat-label"]')!.textContent).toBe('Households with piped water: Hogares que asistieron / denominator');
   });
 
   it('plots the ratio of each group when asked, leaving out groups whose denominator is zero', async () => {

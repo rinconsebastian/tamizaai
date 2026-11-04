@@ -16,6 +16,8 @@ function compose(overrides: Partial<ImageInput> = {}, parts: Partial<ExportParts
   const layout = composeImage({
     width: 400,
     title: 'Coverage by municipality',
+    subtitle: null,
+    footnote: null,
     notesAbove: [],
     parts: { ...empty, ...parts },
     plot: null,
@@ -104,6 +106,41 @@ describe('composeImage', () => {
     expect(ys).toEqual([...ys].sort((a, b) => a - b));
   });
 
+  it('writes the whole subtitle at 12 px under the title and the whole footnote after the notes, before the footer (Subtitle and footnote)', () => {
+    const subtitle = 'Where have you seen theatre in the last year? (E4) '.repeat(4).trim();
+    const footnote = 'Does not add up to 100 %: multiple answers. '.repeat(10).trim();
+    const { texts } = compose(
+      { subtitle, footnote, notesAbove: ['Not filtered by: Round'], notesExtra: ['The basemap is not included in the image.'], footer: ['Census 2026 · Housing', 'Exported'] },
+      { caption: 'Coverage: value', legend: { kind: 'entries', entries: [{ label: 'Piped', color: 'var(--c1)' }] }, notes: ['2 rows were left out.'] },
+    );
+
+    const titleAt = texts.findIndex((t) => t.text === 'Coverage by municipality');
+    const notesAt = texts.findIndex((t) => t.text === 'Not filtered by: Round');
+    const subtitleLines = texts.slice(titleAt + 1, notesAt);
+    expect(titleAt).toBe(0);
+    expect(subtitleLines.length).toBeGreaterThan(1); // wrapped to the width, never cut
+    expect(subtitleLines.every((t) => t.size === 12)).toBe(true);
+    expect(subtitleLines.map((t) => t.text).join(' ')).toBe(subtitle);
+
+    const lastNote = texts.findIndex((t) => t.text === 'The basemap is not included in the image.');
+    const footerAt = texts.findIndex((t) => t.text === 'Census 2026 · Housing');
+    const footnoteLines = texts.slice(lastNote + 1, footerAt);
+    expect(footnoteLines.length).toBeGreaterThan(1);
+    expect(footnoteLines.every((t) => t.size === 12)).toBe(true);
+    expect(footnoteLines.map((t) => t.text).join(' ')).toBe(footnote);
+    expect(names(texts).join('')).not.toContain('…');
+    const ys = texts.map((t) => t.y);
+    expect(ys).toEqual([...ys].sort((a, b) => a - b));
+  });
+
+  it('draws nothing more for a widget without a subtitle or a footnote: the picture is the one made before', () => {
+    const base = compose({ notesAbove: ['Not filtered by: Round'], footer: ['Census 2026 · Housing'] }, { caption: 'Coverage: value', notes: ['2 rows were left out.'] });
+    const blanks = compose({ subtitle: '', footnote: '', notesAbove: ['Not filtered by: Round'], footer: ['Census 2026 · Housing'] }, { caption: 'Coverage: value', notes: ['2 rows were left out.'] });
+
+    expect(blanks.markup).toBe(base.markup);
+    expect(names(base.texts)).toEqual(['Coverage by municipality', 'Not filtered by: Round', 'Coverage: value', '2 rows were left out.', 'Census 2026 · Housing']);
+  });
+
   it('writes the whole legend of a pie, with each slice\'s value and share, wrapped to the width', () => {
     const entries = Array.from({ length: 12 }, (_, i) => ({ label: `Municipality ${i + 1}`, color: 'var(--c1)', detail: `${(i + 1) * 10} · 8.3%` }));
 
@@ -123,6 +160,42 @@ describe('composeImage', () => {
 
     expect(svg.querySelectorAll('line[stroke-linecap="round"]')).toHaveLength(1);
     expect(svg.querySelectorAll('rect[stroke="#999"]')).toHaveLength(1);
+  });
+
+  it('draws a dashed swatch in the heading color and in the pattern of the line it stands for (Mean line in an image)', () => {
+    const { svg, texts } = compose(
+      {},
+      {
+        legend: {
+          kind: 'entries',
+          entries: [
+            { label: 'Mean: 34.17% de los hogares', color: 'var(--c1)', swatch: 'dashed', dash: 0 },
+            { label: 'Meta: 50%', color: 'var(--c1)', swatch: 'dashed', dash: 1 },
+            { label: 'Third: 20%', color: 'var(--c1)', swatch: 'dashed', dash: 2 },
+          ],
+        },
+      },
+    );
+
+    const dashed = Array.from(svg.querySelectorAll('line[stroke-dasharray]'));
+    expect(dashed.map((line) => line.getAttribute('stroke-dasharray'))).toEqual(['6 4', '2 3', '8 3 2 3']);
+    expect(dashed.every((line) => line.getAttribute('stroke') === '#111' && Number(line.getAttribute('x2')) - Number(line.getAttribute('x1')) === 14)).toBe(true);
+    expect(names(texts)).toContain('Mean: 34.17% de los hogares');
+  });
+
+  it('draws the legend of the lines under the plot, above the footnote and the footer (Lines above the footnote)', () => {
+    const plot = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    plot.setAttribute('width', '300');
+    plot.setAttribute('height', '120');
+    const { texts } = compose(
+      { plot, footnote: 'No suman 100 %.', footer: ['Household survey'] },
+      { legend: { kind: 'entries', entries: [{ label: 'Mean: 34.17%', color: 'var(--c1)', swatch: 'dashed', dash: 0 }] } },
+    );
+
+    const at = (text: string) => texts.find((t) => t.text === text)!.y;
+    expect(at('Mean: 34.17%')).toBeGreaterThan(Number(plot.getAttribute('y')) + 120 - 1);
+    expect(at('No suman 100 %.')).toBeGreaterThan(at('Mean: 34.17%'));
+    expect(at('Household survey')).toBeGreaterThan(at('No suman 100 %.'));
   });
 
   it('draws a scale from the smallest to the largest value in seven steps, with what an empty cell is', () => {
@@ -149,6 +222,13 @@ describe('composeImage', () => {
 
     expect(texts[1]).toMatchObject({ text: '1,234', size: 36 });
     expect(texts[2]).toMatchObject({ text: 'Households visited', size: 14 });
+  });
+
+  it('draws the figure of a stat tile alone when its description is null (Caption hidden)', () => {
+    const { texts } = compose({}, { stat: { value: '1,234', description: null } });
+
+    expect(names(texts)).toEqual(['Coverage by municipality', '1,234']);
+    expect(texts[1]).toMatchObject({ text: '1,234', size: 36 });
   });
 
   it('puts the chart where the text leaves room, and counts its height', () => {

@@ -1,6 +1,6 @@
 import { QueryRow, WidgetTooltipItem } from '../../../core/projects/indicators.service';
 import { DataColumnType } from '../../../core/projects/data.service';
-import { plainIndicator, valueFormatter } from './format';
+import { columnLabels, plainIndicator, valueFormatter } from './format';
 import { TooltipContext, tooltipContent, tooltipLabel, tooltipSpeech, tooltipValue, tooltipValues } from './map-tooltip';
 
 const labels: Record<string, string> = {
@@ -53,10 +53,32 @@ describe('map tooltip', () => {
       expect(content.lines[1].value).toBe('20');
     });
 
+    it('names the plotted value with the caption text and the unit of the widget, and leaves the tooltip columns their own formats (Own caption text and unit in a map tooltip)', () => {
+      const widgetUnit = { format: 'percent' as const, unit: 'de la meta' };
+      const content = tooltipContent(block(), context(items, types, widgetUnit, 'Avance de la muestra'));
+
+      expect(content.lines.map((line) => `${line.label}: ${line.value}`)).toEqual([
+        'Avance de la muestra: 45% de la meta',
+        'Dirección: Cra 5 # 10-20',
+        'Meta muestral: 20',
+        'Encuestas logradas: 9',
+      ]);
+    });
+
     it('labels an item with its column\'s name when it has no label, and trims the label', () => {
       expect(tooltipLabel(item('sample_target'))).toBe('sample_target');
       expect(tooltipLabel(item('sample_target', '   '))).toBe('sample_target');
       expect(tooltipLabel(item('address', '  Dirección '))).toBe('Dirección');
+    });
+
+    it('names a column that has no label of its own by the name the indicator gives it, and keeps an own label (Map tooltip column without a label)', () => {
+      const names = columnLabels({ columns: { registros: { label: 'Registros recibidos' }, meta: { label: 'Indicator Meta' } } }, null);
+
+      expect(tooltipLabel(item('registros'), names)).toBe('Registros recibidos');
+      expect(tooltipLabel(item('meta', 'Meta'), names)).toBe('Meta');
+      expect(tooltipLabel(item('barrio'), names)).toBe('barrio');
+      const content = tooltipContent(block({ tooltip: [7, 3] }), { ...context([item('registros'), item('meta', 'Meta')], ['integer', 'integer']), names });
+      expect(content.lines.slice(1).map((line) => `${line.label}: ${line.value}`)).toEqual(['Registros recibidos: 7', 'Meta: 3']);
     });
 
     it('says how many rows a group combines, only when it combines more than one', () => {

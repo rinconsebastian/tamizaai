@@ -170,6 +170,86 @@ public sealed class ReportWorkbookTests : IDisposable
     }
 
     [Fact]
+    public void Source_in_the_header_of_the_summary_sheet_after_the_filters_and_none_without_one()
+    {
+        const string source = "Encuesta de mercado del Centro Bicentenario de Duitama, 478 encuestas";
+        Write(Model([Stat(1, "Total", "250")], source: source));
+
+        var rows = Rows("Summary").Select(r => r.Values.Select(v => v?.ToString() ?? "").ToArray()).ToList();
+        var filters = rows.FindIndex(r => r[0] == "Filters: Round");
+        Assert.Equal(["Source", source], rows[filters + 1]);
+
+        Write(Model([Stat(1, "Total", "250")]));
+        Assert.DoesNotContain(Rows("Summary"), r => r.Values.Select(v => v?.ToString()).First() == "Source");
+        Write(Model([Stat(1, "Total", "250")], "es-CO", source: source));
+        Assert.Contains(Rows("Resumen"), r => r.Values.Select(v => v?.ToString()).SequenceEqual(["Fuente", source]));
+    }
+
+    [Fact]
+    public void Texts_in_the_summary_sheet_each_under_the_title_of_its_widget_and_before_its_notes()
+    {
+        var bars = Bars(1, "2.4. En qué lugares", 2) with
+        {
+            Subtitle = "¿En qué lugares ha visto teatro?", Footnote = "No suman 100 %.", Notes = ["Only the first 5000 rows are shown: the query matches more."],
+        };
+        var onlyNotes = Bars(2, "Other", 1) with { Notes = ["A note"] };
+        Write(Model([bars, onlyNotes]));
+
+        var rows = Rows("Summary").Select(r => r.Values.Select(v => v?.ToString() ?? "").ToArray()).ToList();
+        var subtitle = rows.FindIndex(r => r[0] == "Subtitle: 2.4. En qué lugares");
+        Assert.Equal("¿En qué lugares ha visto teatro?", rows[subtitle][1]);
+        Assert.Equal(["Footnote: 2.4. En qué lugares", "No suman 100 %."], rows[subtitle + 1]);
+        Assert.Equal("Notes: 2.4. En qué lugares", rows[subtitle + 2][0]);
+        Assert.Equal(["Notes: Other", "A note"], rows[subtitle + 3]);
+        Assert.DoesNotContain(rows, r => r[0] == "Subtitle: Other" || r[0] == "Footnote: Other");
+
+        Write(Model([bars], "es-CO"));
+        Assert.Contains(Rows("Resumen"), r => r.Values.First()?.ToString() == "Subtítulo: 2.4. En qué lugares");
+        Assert.Contains(Rows("Resumen"), r => r.Values.First()?.ToString() == "Nota al pie: 2.4. En qué lugares");
+    }
+
+    [Fact]
+    public void Reference_lines_are_one_item_in_the_summary_sheet_after_the_subtitle_and_footnote_and_before_the_notes()
+    {
+        var bars = Bars(1, "2.1. Asistió, por comuna", 2) with
+        {
+            Subtitle = "¿Cuántos asistieron?", Footnote = "Sin ponderar.", Notes = ["A note"],
+            ReferenceLines = [new ReportReferenceLine("mean", "Mean", 0.3417, "34.17%"), new ReportReferenceLine("value", "Meta", 0.5, "50%")],
+        };
+        var plain = Bars(2, "Other", 1) with { Notes = ["A note"] };
+        Write(Model([bars, plain]));
+
+        var rows = Rows("Summary").Select(r => r.Values.Select(v => v?.ToString() ?? "").ToArray()).ToList();
+        var subtitle = rows.FindIndex(r => r[0] == "Subtitle: 2.1. Asistió, por comuna");
+        Assert.Equal("Footnote: 2.1. Asistió, por comuna", rows[subtitle + 1][0]);
+        Assert.Equal(["Reference lines: 2.1. Asistió, por comuna", "Mean: 34.17% · Meta: 50%"], rows[subtitle + 2]);
+        Assert.Equal("Notes: 2.1. Asistió, por comuna", rows[subtitle + 3][0]);
+        Assert.DoesNotContain(rows, r => r[0] == "Reference lines: Other");
+        // The widget's own sheet is its table, with no row or column for the lines.
+        Assert.Equal(2, Rows("1. 2.1. Asistió, por comuna").Count);
+
+        Write(Model([bars], "es-CO"));
+        Assert.Contains(Rows("Resumen"), r => r.Values.First()?.ToString() == "Líneas de referencia: 2.1. Asistió, por comuna");
+    }
+
+    [Fact]
+    public void A_widget_without_reference_lines_has_no_such_item_in_the_summary()
+    {
+        Write(Model([Bars(1, "2.1", 2)]));
+
+        Assert.DoesNotContain(Rows("Summary"), r => r.Values.First()?.ToString()?.StartsWith("Reference lines") == true);
+    }
+
+    [Fact]
+    public void An_own_unit_is_named_in_the_value_header_of_the_widget_sheet_and_a_hidden_caption_keeps_the_header()
+    {
+        var bars = Bars(1, "Visits", 2, unit: "de quienes asistieron") with { CaptionHidden = true };
+        Write(Model([bars]));
+
+        Assert.Equal(["municipality", "Households visited: value (de quienes asistieron)"], Rows("1. Visits")[0].Keys);
+    }
+
+    [Fact]
     public void A_widget_that_cannot_be_shown_has_its_reason_in_its_sheet()
     {
         Write(Model([Unreadable(1, "Visits", "Visits has not published yet.")]));

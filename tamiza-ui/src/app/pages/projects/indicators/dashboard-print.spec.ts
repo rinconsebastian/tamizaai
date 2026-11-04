@@ -5,6 +5,7 @@ import { byTestId, settle } from '../../../../testing/project-harness';
 import { ChartType, DashboardColors, QueryBox, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { DashboardPrint, printDeadlineMs, printTitle, printingClass } from './dashboard-print';
 import { all, cell, clearOverlay, config, indicator, isQuery, open, paperOn, result, row, seriesResult, text, wait, toggleTable, widget } from './indicators-testing';
+import { boxOf as boxOfText, overlaps } from './chart-annotations';
 import { loadLeaflet } from './map-engine';
 
 // Paper mode (dashboard printing, design D1, D5, D6, D9, D10). jsdom lays nothing out and never prints, so these check the steps,
@@ -460,4 +461,227 @@ describe('the dashboard\'s colors on paper (dashboard printing, "Colors on paper
     });
   });
 
+});
+
+describe('column names on paper (add-indicator-column-metadata, "Column labels on paper")', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearOverlay();
+    document.documentElement.classList.remove(printingClass);
+    document.getElementById('tmz-print-page')?.remove();
+  });
+
+  const teatro = indicator('coverage', {
+    label: 'Teatro hoy',
+    columns: { numerator: { label: 'Hogares que asistieron' }, denominator: { label: 'Hogares' }, municipality: { label: 'Comuna' } },
+  });
+
+  async function show() {
+    const ratio = { numerator: 'numerator', denominator: 'denominator' };
+    const context = await open('viewer', [widget('w1', { chartType: 'column', config: config({ ratio }) })], null, { indicators: [teatro] });
+    const requests = context.http.match(isQuery);
+    expect(requests).toHaveLength(1);
+    requests[0].flush(result([row('Zona 1', 0.5), row('Zona 2', 0.25)]));
+    await settle(context.harness);
+    return context;
+  }
+
+  it('prints the caption of a chart with the names it has on screen (Caption printed)', async () => {
+    const context = await show();
+    expect(text(byTestId(context.root, 'chart-caption'))).toBe('Teatro hoy: Hogares que asistieron / Hogares by Comuna');
+
+    await paperOn(context);
+
+    expect(text(byTestId(context.root, 'chart-caption'))).toBe('Teatro hoy: Hogares que asistieron / Hogares by Comuna');
+    expect(byTestId(context.root, 'chart-caption')!.closest('.paper\:hidden')).toBeNull();
+  });
+
+  it('prints the headers of a table with the names it has on screen (Table printed)', async () => {
+    const context = await show();
+    await toggleTable(context);
+    await settle(context.harness);
+
+    await paperOn(context);
+
+    expect(Array.from(context.root.querySelectorAll('[data-testid="widget-table"] th[scope="col"]')).map(text)).toEqual(['Comuna', 'Teatro hoy: Hogares que asistieron / Hogares']);
+  });
+});
+
+describe('the words around a widget on paper (add-widget-context, "Subtitle on paper", "Charts on paper")', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearOverlay();
+    document.documentElement.classList.remove(printingClass);
+    document.getElementById('tmz-print-page')?.remove();
+  });
+
+  const subtitle = '¿En qué lugares ha visto teatro en el último año? (E4), preguntado a quienes asistieron a alguna función en las zonas visitadas';
+  const footnote = 'No suman 100 %: respuesta múltiple. '.repeat(10).trim();
+  const described = indicator('coverage', { description: 'Share of households that visited a theatre in the last year.' });
+
+  async function show(display: NonNullable<WidgetConfig['display']>, indicators = [indicator('coverage')]) {
+    const context = await open('viewer', [widget('w1', { chartType: 'column', config: config({ display }) })], null, { indicators });
+    const requests = context.http.match(isQuery);
+    expect(requests).toHaveLength(1);
+    requests[0].flush(result([row('Zona 1', 0.5), row('Zona 2', 0.25)]));
+    await settle(context.harness);
+    return context;
+  }
+
+  it('prints the subtitle and the footnote whole, and measures the chart again for the room they leave (Whole texts on paper)', async () => {
+    const context = await show({ subtitle, footnote });
+    const widthBefore = byTestId(context.root, 'chart-svg')!.getAttribute('viewBox');
+    // jsdom lays nothing out: every box is 333 by 222 once the sheet is laid out.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 333, height: 222, x: 0, y: 0, top: 0, left: 0, right: 333, bottom: 222, toJSON: () => ({}) });
+
+    await paperOn(context);
+
+    expect(byTestId(context.root, 'widget-subtitle')!.classList).toContain('paper:line-clamp-none');
+    expect(byTestId(context.root, 'widget-footnote')!.classList).toContain('paper:line-clamp-none');
+    expect(text(byTestId(context.root, 'widget-subtitle'))).toBe(subtitle);
+    expect(text(byTestId(context.root, 'widget-footnote'))).toBe(footnote);
+    expect(byTestId(context.root, 'widget-subtitle')!.closest('.paper\:hidden')).toBeNull();
+    expect(byTestId(context.root, 'widget-footnote')!.closest('.paper\:hidden')).toBeNull();
+    expect(byTestId(context.root, 'chart-svg')!.getAttribute('viewBox')).toBe('0 0 333 222');
+    expect(widthBefore).not.toBe('0 0 333 222');
+  });
+
+  it('prints a widget with a hidden caption without a visible caption line, as on screen (Hidden caption on paper)', async () => {
+    const context = await show({ caption: { hidden: true } });
+    expect(byTestId(context.root, 'chart-caption')!.classList).toContain('sr-only');
+
+    await paperOn(context);
+
+    const caption = byTestId(context.root, 'chart-caption')!;
+    expect(caption.classList).toContain('sr-only');
+    expect(text(caption)).toBe('Coverage by municipality'); // still in the page, for the tools that read it
+    expect(caption.closest('.paper\:hidden')).toBeNull();
+  });
+
+  it('does not print the description button, whatever the widget offers (Description not printed)', async () => {
+    const context = await show({ showDescription: true }, [described]);
+    const button = byTestId(context.root, 'widget-description')!;
+    expect(button).not.toBeNull();
+
+    await paperOn(context);
+
+    expect(button.closest('app-description-popover')!.classList).toContain('paper:hidden');
+    expect(context.root.textContent).not.toContain('Share of households');
+  });
+
+  it('cuts the chart at its own box when the texts leave it too little room, never over the footnote (Texts that leave a chart too little room)', async () => {
+    const context = await show({ footnote });
+
+    await paperOn(context);
+
+    const box = byTestId(context.root, 'widget-footnote')!.previousElementSibling as HTMLElement;
+    expect(box.classList).toContain('overflow-hidden');
+    expect(box.contains(byTestId(context.root, 'chart-svg'))).toBe(true);
+    expect(box.contains(byTestId(context.root, 'widget-footnote'))).toBe(false);
+  });
+
+  it('keeps the chart box of a widget without a footnote as it is on paper', async () => {
+    const context = await show({ subtitle });
+
+    await paperOn(context);
+
+    expect(byTestId(context.root, 'widget-footnote')).toBeNull();
+    const box = byTestId(context.root, 'chart-svg')!.closest('.min-h-0.flex-1') as HTMLElement;
+    expect(box.classList).not.toContain('overflow-hidden');
+  });
+});
+
+describe('chart annotations on paper (add-chart-annotations, "Chart annotations on paper")', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearOverlay();
+    document.documentElement.classList.remove(printingClass);
+    document.getElementById('tmz-print-page')?.remove();
+  });
+
+  const ratio = { numerator: 'numerator', denominator: 'denominator' };
+  /** jsdom lays nothing out: every box is this size, once it is mocked. */
+  const boxOf = (width: number, height: number) =>
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width, height, x: 0, y: 0, top: 0, left: 0, right: width, bottom: height, toJSON: () => ({}) });
+
+  async function show(chartType: ChartType, settings: Partial<WidgetConfig>, answer: QueryResult, indicators = [indicator('piped_water_rate')]) {
+    const context = await open('viewer', [widget('w1', { chartType, config: config({ indicator: 'piped_water_rate', ...settings }) })], null, { indicators });
+    const requests = context.http.match(isQuery);
+    expect(requests).toHaveLength(1);
+    requests[0].flush(answer);
+    await settle(context.harness);
+    return context;
+  }
+
+  const zones = result([row('Zona 1', 0.5), row('Zona 2', 0.4), row('Zona 3', 0.6), row('Zona 4', 0.2)], { overall: 0.4599 });
+
+  it('prints both dashed lines across the columns and the key that lists them, inside the widget\'s box (Reference lines printed)', async () => {
+    const context = await show('column', { ratio, display: { referenceLines: [{ kind: 'mean' }, { kind: 'overall' }] } }, zones);
+    boxOf(333, 222);
+
+    await paperOn(context);
+
+    const lines = all(context.root, 'reference-line');
+    expect(lines).toHaveLength(2);
+    expect(lines.map((line) => line.getAttribute('stroke-dasharray'))).toEqual(['6 4', '2 3']);
+    expect(lines.every((line) => Number(line.getAttribute('x1')) < Number(line.getAttribute('x2')) && Number(line.getAttribute('x2')) <= 333)).toBe(true);
+    const key = byTestId(context.root, 'reference-key')!;
+    expect(all(context.root, 'reference-key-text').map(text)).toEqual(['Mean: 42.5%', 'Overall: 45.99%']);
+    expect(key.closest('.paper\:hidden')).toBeNull();
+    // The key is the chart's own, a sibling of the plot's box (it takes its room before the plot does) and in the widget's box.
+    const host = key.closest('app-reference-key')!;
+    expect(host.classList).toContain('shrink-0');
+    expect(host.previousElementSibling!.contains(byTestId(context.root, 'chart-svg'))).toBe(true);
+    expect(key.closest('app-widget-view')).not.toBeNull();
+    expect(byTestId(context.root, 'chart-svg')!.getAttribute('viewBox')).toBe('0 0 333 222');
+  });
+
+  const barsOf = (count: number) => result(Array.from({ length: count }, (_, i) => row(`Zona ${i + 1}`, 0.1 + i / 100)));
+
+  /** Whether any two texts of the plot cover each other. */
+  const overlapping = (context: Awaited<ReturnType<typeof show>>) => {
+    const labels = all(context.root, 'data-label').map((label) => ({
+      x: Number(label.getAttribute('x')),
+      y: Number(label.getAttribute('y')),
+      text: label.textContent ?? '',
+      anchor: label.getAttribute('text-anchor') as 'start' | 'middle' | 'end',
+    }));
+    return labels.some((a, i) => labels.slice(i + 1).some((b) => overlaps(boxOfText(a), boxOfText(b))));
+  };
+
+  it('prints each data label that fits its bar on paper, and none overlaps another (Data labels on paper)', async () => {
+    // On screen the 30 bars are thin and have no label; the sheet gives them room, so they are laid out again and printed.
+    const context = await show('bar', { display: { dataLabels: true } }, barsOf(30));
+    expect(all(context.root, 'data-label')).toHaveLength(0);
+    boxOf(333, 900);
+
+    await paperOn(context);
+
+    expect(all(context.root, 'data-label')).toHaveLength(30);
+    expect(overlapping(context)).toBe(false);
+  });
+
+  it('leaves out of the print the labels of bars that are thinner on paper than on screen (Data labels on paper)', async () => {
+    const tall = boxOf(333, 600);
+    const context = await show('bar', { display: { dataLabels: true } }, barsOf(12));
+    expect(all(context.root, 'data-label')).toHaveLength(12);
+    tall.mockRestore();
+    boxOf(333, 130);
+
+    await paperOn(context);
+
+    expect(all(context.root, 'data-label')).toHaveLength(0);
+    expect(all(context.root, 'chart-mark')).toHaveLength(12);
+  });
+
+  it('prints a line chart drawn with steps as steps, not as straight segments (Steps printed)', async () => {
+    const context = await show('line', { display: { interpolation: 'step' } }, result([row('$0', 0.98), row('$10.000', 0.6), row('$20.000', 0.3)]));
+    boxOf(333, 222);
+
+    await paperOn(context);
+
+    const path = byTestId(context.root, 'chart-line')!.getAttribute('d')!;
+    expect(path).toMatch(/^M[^HVL]+H[^HVL]+V[^HVL]+H[^HVL]+V[^HVL]+$/);
+    expect(path).not.toContain('L');
+  });
 });

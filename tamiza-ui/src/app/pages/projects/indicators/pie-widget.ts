@@ -4,8 +4,10 @@ import { QueryRow, QuerySeries, WidgetConfig } from '../../../core/projects/indi
 import { ChartColors, SeriesKey } from './chart-colors';
 import { registerExportParts } from './export-parts';
 import { observeSize, pivot } from './chart-data';
+import { Box, labelGap, textWidth } from './chart-annotations';
 import { seriesCount, slicePath } from './chart-scales';
-import { ValueFormatter, plotted } from './format';
+import { ColumnNamer, ValueFormatter, captionShown, named, plotted, rawNames } from './format';
+import { Label, writeDataLabel } from './series-plot';
 import { TableModel, WidgetTable } from './widget-table';
 import { PctPipe, percentText } from '../../../shared/ui';
 import { countKey } from '../../../core/i18n/plural';
@@ -47,7 +49,7 @@ const otherKey: SeriesKey = { value: null, kind: 'other' };
   imports: [PctPipe, TranslocoDirective, WidgetTable],
   template: `
     <ng-container *transloco="let t">
-      <p class="shrink-0 text-xs text-body" data-testid="chart-caption">{{ t('indicators.chart.caption', { what: what(), group: config().groupBy }) }}</p>
+      <p class="shrink-0 text-xs text-body" [class.sr-only]="!captionShown(config())" data-testid="chart-caption">{{ t('indicators.chart.caption', { what: what(), group: groupShown() }) }}</p>
       @if (asTable()) {
         <app-widget-table class="flex-1 overflow-auto" [model]="table(t)" />
       } @else {
@@ -65,6 +67,9 @@ const otherKey: SeriesKey = { value: null, kind: 'other' };
                   <title>{{ sliceTitle(slice) }}</title>
                 </circle>
               }
+            }
+            @for (label of dataLabels(); track $index) {
+              <text class="fill-heading stroke-neutral-primary-soft" font-size="11" stroke-width="3" stroke-linejoin="round" paint-order="stroke" aria-hidden="true" [attr.x]="label.x" [attr.y]="label.y" [attr.text-anchor]="label.anchor" data-testid="data-label">{{ label.text }}</text>
             }
           </svg>
         </div>
@@ -93,9 +98,13 @@ export class PieWidget {
 
   readonly rows = input.required<QueryRow[]>();
   readonly config = input.required<WidgetConfig>();
+  /** Whether the line that names what the widget plots is seen: a hidden one stays for screen readers (add-widget-context, design D3). */
+  protected readonly captionShown = captionShown;
   /** The indicator's label and the formatter of its values. */
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
+  /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
+  readonly names = input<ColumnNamer>(rawNames);
   readonly asTable = input(false);
   /** The colors of the widget, from the dashboard's palette and its colors kept by value. */
   readonly colors = input.required<ChartColors>();
@@ -106,7 +115,9 @@ export class PieWidget {
   private readonly size = observeSize(() => this.box());
   private readonly svg = viewChild<ElementRef<SVGSVGElement>>('pieSvg');
 
-  protected readonly what = computed(() => plotted(this.config(), this.label()));
+  protected readonly what = computed(() => plotted(this.config(), this.label(), this.names()));
+  /** The group column under its name shown; its colors stay keyed by the column itself. */
+  protected readonly groupShown = computed(() => named(this.names(), this.config().groupBy));
 
   private readonly all = computed(() => {
     const data = pivot(this.rows(), this.transloco.translate('indicators.chart.noGroup'), 'listed');
@@ -180,6 +191,48 @@ export class PieWidget {
     });
   });
 
+  /**
+   * The value of each slice written on it when the widget asks for data labels (add-chart-annotations, design D7): at the slice's middle
+   * angle, at 0.62 of the radius. A slice whose chord at that radius is shorter than its text plus 4 px, or whose text would cover one
+   * already placed, or whose text would leave the circle, has none; a pie of a single slice puts its label in the center, unless the text is
+   * wider than the pie.
+   */
+  protected readonly dataLabels = computed<Label[]>(() => {
+    if (this.config().display?.dataLabels !== true) {
+      return [];
+    }
+    const { cx, cy, radius } = this.geometry();
+    const taken: Box[] = [];
+    const written: Label[] = [];
+    const around = radius * 0.62;
+    // Half the height of a text of 11 px (its box runs 10 px above the baseline to 2 below; the label's baseline is 4 px under its center).
+    const halfLine = 6;
+    let angle = 0;
+    for (const slice of this.slices()) {
+      const sweep = slice.share * 2 * Math.PI;
+      const middle = angle + sweep / 2;
+      angle += sweep;
+      const text = this.format()(slice.value);
+      const width = textWidth(text);
+      if (!slice.d) {
+        // The text is horizontal: its corners, half its width and half a text line from the center, must stay inside the circle.
+        if (width * width / 4 + halfLine * halfLine <= radius * radius) {
+          writeDataLabel({ x: cx, y: cy + 4, text, anchor: 'middle' }, taken, written);
+        }
+        continue;
+      }
+      // The chord across a slice of half the circle or more is as wide as the pie.
+      const chord = sweep >= Math.PI ? 2 * around : 2 * around * Math.sin(sweep / 2);
+      // The text is horizontal, so for a slice pointing sideways it reaches further than the chord says: its farthest corner, half its width
+      // and half a text line beyond the label's center, must stay inside the circle.
+      const reach = Math.hypot(Math.abs(around * Math.sin(middle)) + width / 2, Math.abs(around * Math.cos(middle)) + halfLine);
+      if (chord >= width + labelGap && reach <= radius) {
+        writeDataLabel({ x: cx + around * Math.sin(middle), y: cy - around * Math.cos(middle) + 4, text, anchor: 'middle' }, taken, written);
+      }
+    }
+    return written;
+  });
+
   protected readonly geometry = computed(() => {
     const width = Math.max(120, this.size().width);
     const height = Math.max(100, this.size().height);
@@ -193,7 +246,7 @@ export class PieWidget {
       settle: () => undefined,
       parts: () => {
         const t: Translate = (key, params) => this.transloco.translate(key, params);
-        const caption = t('indicators.chart.caption', { what: this.what(), group: this.config().groupBy });
+        const caption = t('indicators.chart.caption', { what: this.what(), group: this.groupShown() });
         if (this.asTable()) {
           return { caption, legend: null, notes: [], stat: null, table: this.table(t) };
         }
@@ -231,7 +284,7 @@ export class PieWidget {
     }
     return t(countKey('indicators.chart.summary.pie', slices.length, this.transloco.getActiveLang()), {
       what: this.what(),
-      group: this.config().groupBy,
+      group: this.groupShown(),
       count: slices.length,
       top: slices[0].name,
       share: new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }).format(slices[0].share),
@@ -241,7 +294,7 @@ export class PieWidget {
   protected table(t: Translate): TableModel {
     const total = this.all().reduce((sum, entry) => sum + Math.max(0, entry.value), 0);
     return {
-      headers: [this.config().groupBy ?? '', this.what(), t('indicators.pie.share')],
+      headers: [this.names()(this.config().groupBy ?? ''), this.what(), t('indicators.pie.share')],
       rows: this.all().map((entry) => [
         entry.name,
         this.format()(entry.value),

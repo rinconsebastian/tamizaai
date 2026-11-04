@@ -95,9 +95,14 @@ export function sanitizeSvg(source: Element, options: CleanOptions): SVGSVGEleme
       node.setAttribute('clip-path', clip);
     }
 
+    // A text with a halo (a reference line's label, a data label: the surface color stroked round the letters, painted under them) keeps
+    // its stroke and its paint order. Any other text has no stroke of its own to carry, whatever it inherits (add-chart-annotations, D9).
+    const order = texts.has(tag) ? read('paint-order') : '';
+    const halo = /^(normal|fill|stroke|markers)( (fill|stroke|markers))*$/.test(order) && order !== 'normal';
+
     if (shapes.has(tag) || texts.has(tag)) {
       const fill = paint(read('fill'));
-      const stroke = shapes.has(tag) ? paint(read('stroke')) : null;
+      const stroke = shapes.has(tag) || halo ? paint(read('stroke')) : null;
       // A shape that paints nothing answers a pointer or marks nothing: it is not in the picture.
       if (shapes.has(tag) && (fill === null || fill === 'none') && (stroke === null || stroke === 'none')) {
         return null;
@@ -118,6 +123,9 @@ export function sanitizeSvg(source: Element, options: CleanOptions): SVGSVGEleme
     }
 
     if (texts.has(tag)) {
+      if (halo) {
+        node.setAttribute('paint-order', order);
+      }
       node.setAttribute('font-size', px(read('font-size')));
       const weight = read('font-weight');
       if (weight && weight !== '400' && weight !== 'normal') {

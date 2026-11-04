@@ -161,6 +161,7 @@ describe('DashboardVersionsDialog', () => {
       [{ kind: 'renamed', dashboard: 'Agua' }, 'Renamed to “Agua”'],
       [{ kind: 'filtersChanged' }, 'Filters changed'],
       [{ kind: 'colorsChanged' }, 'Colors changed'],
+      [{ kind: 'sourceChanged' }, 'Source changed'],
       [{ kind: 'widgetAdded', widget: 'Water source' }, 'Widget “Water source” added'],
       [{ kind: 'widgetChanged', widget: 'Coverage.' }, 'Widget “Coverage.” changed'],
       [{ kind: 'widgetRemoved', widget: 'Water source' }, 'Widget “Water source” removed'],
@@ -190,6 +191,15 @@ describe('DashboardVersionsDialog', () => {
 
     expect(dialog.changes(5)).toEqual([words]);
     expect(dialog.changes(3)[1]).toBe(words);
+  });
+
+  it.each<[InterfaceLanguage, string]>([
+    ['en', 'Source changed'],
+    ['es', 'Se cambió la fuente'],
+  ])('says in %s that a version changed the source of the dashboard', async (lang, words) => {
+    const dialog = await open(listOf([version(5, { changes: [{ kind: 'sourceChanged' }] })]), { lang });
+
+    expect(dialog.changes(5)).toEqual([words]);
   });
 
   it.each<InterfaceLanguage>(['en', 'es'])('has words in %s for every kind of change the service lists', async (lang) => {

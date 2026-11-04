@@ -71,7 +71,7 @@ public static class WidgetExportEndpoints
         IndicatorValidation.CheckTitle(request?.Title, errors);
         IndicatorValidation.CheckChartType(request?.ChartType, errors);
         var config = (request?.Config ?? new WidgetConfigInput()).Normalize();
-        IndicatorValidation.CheckConfig(config, ChartTypes.IsKnown(request?.ChartType) ? request!.ChartType : null, "config", errors);
+        IndicatorValidation.CheckConfig(config, ChartTypes.IsKnown(request?.ChartType) ? request!.ChartType : null, "config.", errors);
         var sent = (request?.Filters ?? []).ToList();
         var applied = sent.Select(f => new AppliedDashboardFilter(f?.Column, f?.Kind, f?.Values, f?.Min, f?.Max)).ToList();
         var filterErrors = new FieldErrors();
@@ -97,15 +97,16 @@ public static class WidgetExportEndpoints
 
         var dashboard = await db.Dashboards.AsNoTracking()
             .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
-            .Select(d => new { d.Name, d.Filters })
+            .Select(d => new { d.Name, d.Filters, d.Source })
             .SingleOrDefaultAsync(ct);
         if (dashboard is null)
         {
             return DashboardEndpoints.DashboardNotFound();
         }
 
-        // The filters and the name the file is about: the dashboard's, or the version shown, which may not be the dashboard's any more.
+        // The filters, the name and the source the file is about: the dashboard's, or the version shown, which may not be the dashboard's any more.
         var dashboardName = dashboard.Name;
+        var dashboardSource = dashboard.Source;
         var storedFilters = DashboardEndpoints.ReadFilters(dashboard.Filters);
         Person? versionAuthor = null;
         DateTimeOffset versionSavedAt = default;
@@ -125,6 +126,7 @@ public static class WidgetExportEndpoints
             }
 
             dashboardName = version.Name;
+            dashboardSource = version.Source;
             storedFilters = [.. version.Filters];
             versionAuthor = version.Author;
             versionSavedAt = version.SavedAt;
@@ -201,7 +203,8 @@ public static class WidgetExportEndpoints
             publications.GetValueOrDefault(config.Indicator)?.PublishedAt,
             now,
             format,
-            text);
+            text,
+            dashboardSource);
 
         var fileName = ExportFileName.ForWidget(project.Name, dashboardName, title, request.Version, format.LocalDay(now), DataDashboard.Xlsx);
         ExportLink? link;

@@ -99,6 +99,50 @@ public sealed class McpGuideTests
     }
 
     [Fact]
+    public void The_instructions_ask_for_column_labels_with_each_indicator_and_say_what_a_widgets_labels_do()
+    {
+        var text = McpGuide.Instructions;
+
+        Assert.Contains("saved with a label, a unit, a format (`count`, `decimal`, `percent`, `currency`) and, in `columns`, labels for the columns people read, such as `numerator` and `denominator`", text);
+        Assert.Contains("`display` = `{ color, ramp, orientation, labels }`", text);
+        Assert.Contains("`labels` = `{ column: name }` gives up to 10 of the widget's columns a name for people on any kind", text);
+        Assert.Contains("a column takes its indicator's label, else its own name", text);
+        Assert.Contains("send the `display`, labels included, again when you change the query", text);
+    }
+
+    [Fact]
+    public void The_instructions_say_where_to_put_the_words_of_a_widget_and_that_update_widget_needs_the_display_sent_again()
+    {
+        var text = McpGuide.Instructions;
+
+        var start = text.IndexOf("## Words on a widget\n", StringComparison.Ordinal);
+        Assert.True(start > text.IndexOf("## Colors\n", StringComparison.Ordinal));
+        var section = text[start..text.IndexOf("\n## Rules\n", start, StringComparison.Ordinal)];
+        foreach (var word in new[] { "subtitle", "footnote", "caption", "unit", "source" })
+        {
+            Assert.Contains($"`{word}`", section);
+        }
+
+        Assert.Contains("rather than in the title", section);
+        Assert.Contains("`update_widget` replaces the whole `config`, so send the `display` again", section);
+        // The sentence about the colors still says what it said.
+        Assert.Contains("`update_widget` replaces the whole `config`, so send the `display`, labels included, again when you change the query", text);
+    }
+
+    [Fact]
+    public void The_instructions_say_when_to_use_reference_lines_the_overall_caution_and_steps_for_a_demand_curve()
+    {
+        var text = McpGuide.Instructions;
+
+        var start = text.IndexOf("## Choosing a widget\n", StringComparison.Ordinal);
+        var section = text[start..text.IndexOf("\n## Colors\n", start, StringComparison.Ordinal)];
+        Assert.Contains("A line to compare the bars with: `display.referenceLines` with `mean`, `median`, `overall` or `value`.", section);
+        Assert.Contains("Use `overall` when the bars are subgroups (comuna, estrato); over the answers of one question it is only their mean.", section);
+        Assert.Contains("A demand curve: a `line` with `display.interpolation` `step`.", section);
+        Assert.Contains("send `referenceLines`, `interpolation` and `dataLabels` again when you change the query", section);
+    }
+
+    [Fact]
     public void Versions_explained_one_change_for_every_write_of_a_request_and_an_undo_by_restoring_every_dashboard_it_changed()
     {
         var text = McpGuide.Instructions;
@@ -153,7 +197,7 @@ public sealed class McpGuideTests
         Assert.Contains("Keep color 1 for a widget unless it should stand out", text);
         // A call sends the whole list, and a new config replaces the whole old one, display included.
         Assert.Contains("send it whole", text);
-        Assert.Contains("send the `display` again when you change the query", text);
+        Assert.Contains("send the `display`, labels included, again when you change the query", text);
     }
 
     [Fact]

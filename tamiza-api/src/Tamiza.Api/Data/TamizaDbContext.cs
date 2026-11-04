@@ -206,6 +206,7 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
                 table.HasCheckConstraint("ck_script_versions_name", "(kind = 'indicator') = (name IS NOT NULL)");
                 table.HasCheckConstraint("ck_script_versions_format", "format IS NULL OR format IN ('count', 'decimal', 'percent', 'currency')");
                 table.HasCheckConstraint("ck_script_versions_origin", "origin IN ('app', 'mcp')");
+                table.HasCheckConstraint("ck_script_versions_columns", "columns IS NULL OR (kind = 'indicator' AND jsonb_typeof(columns) = 'object')");
             });
             version.HasKey(v => v.Id);
             version.Property(v => v.Id).ValueGeneratedNever();
@@ -215,6 +216,7 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             version.Property(v => v.Description).HasColumnType("text");
             version.Property(v => v.Unit).HasMaxLength(32);
             version.Property(v => v.Format).HasMaxLength(16);
+            version.Property(v => v.Columns).HasColumnType("jsonb");
             version.Property(v => v.Origin).HasConversion(LowercaseEnum<ScriptOrigin>()).HasMaxLength(8).HasDefaultValue(ScriptOrigin.App);
             // Versions are numbered per indicator; the clean and output scripts have no name and still collide.
             version.HasIndex(v => new { v.ProjectId, v.Kind, v.Name, v.Number }).IsUnique().AreNullsDistinct(false);
@@ -416,6 +418,7 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             {
                 table.HasCheckConstraint("ck_dashboards_position", "position >= 0");
                 table.HasCheckConstraint("ck_dashboards_palette", "palette IN ('tamiza', 'institutional', 'earth', 'vivid')");
+                table.HasCheckConstraint("ck_dashboards_source", "source IS NULL OR char_length(source) BETWEEN 1 AND 300");
             });
             dashboard.HasKey(d => d.Id);
             dashboard.Property(d => d.Id).HasDefaultValueSql("gen_random_uuid()");
@@ -424,6 +427,7 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             dashboard.Property(d => d.Filters).HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb");
             dashboard.Property(d => d.Palette).HasColumnType("text").HasDefaultValue("tamiza");
             dashboard.Property(d => d.ValueColors).HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb");
+            dashboard.Property(d => d.Source).HasColumnType("text");
             dashboard.Property(d => d.CreatedAt).HasDefaultValueSql("now()");
             dashboard.Property(d => d.UpdatedAt).HasDefaultValueSql("now()");
             // One name per project whatever its case; also serves the lookups by project, so the project has no index of its own.

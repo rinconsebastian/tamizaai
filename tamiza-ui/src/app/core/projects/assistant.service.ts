@@ -33,7 +33,7 @@ export interface AssistantRequest {
   /** The 1-based line of the `# %%` marker of the cell, for `cell`. */
   focus?: { line: number };
   /** The indicator's details as edited, saved or not. */
-  details?: IndicatorMetadata;
+  details?: Omit<IndicatorMetadata, 'columns'>;
   /** The analyst's own sample test a `fix` refers to. */
   testId?: string;
   warning?: AssistantWarning;

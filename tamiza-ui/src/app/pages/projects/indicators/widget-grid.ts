@@ -1,4 +1,5 @@
 import { CdkDrag, CdkDragEnd, CdkDragHandle, CdkDragMove } from '@angular/cdk/drag-drop';
+import { NgTemplateOutlet } from '@angular/common';
 import { Component, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { DashboardColors, IndicatorEntry, Layout, Widget } from '../../../core/projects/indicators.service';
@@ -6,6 +7,7 @@ import { ChartTooltips, DropdownMenu, MenuGroup, MenuItem } from '../../../share
 import { defaultColors } from './chart-colors';
 import { ActiveDashboardFilter } from './dashboard-filters';
 import { DashboardPrint } from './dashboard-print';
+import { DescriptionPopover } from './description-popover';
 import { Placed, changed, movedBy, readingOrder, reflow, resizedBy, unitsFor } from './grid-layout';
 import { WidgetFileExtension } from './widget-export/file-name';
 import { ExportState, WidgetView } from './widget-view';
@@ -32,7 +34,7 @@ const fallbackWidth = 1200;
  */
 @Component({
   selector: 'app-widget-grid',
-  imports: [CdkDrag, CdkDragHandle, TranslocoDirective, DropdownMenu, WidgetView],
+  imports: [CdkDrag, CdkDragHandle, NgTemplateOutlet, TranslocoDirective, DropdownMenu, DescriptionPopover, WidgetView],
   template: `
     <ul #grid class="tmz-grid" [class.tmz-paper]="paper()" *transloco="let t" data-testid="widget-grid">
       @for (widget of ordered(); track widget.id) {
@@ -55,8 +57,29 @@ const fallbackWidth = 1200;
             [class.z-30]="dragging() === widget.id"
             [class.shadow-lg]="dragging() === widget.id"
             [attr.aria-labelledby]="'widget-title-' + widget.id"
+            [attr.aria-describedby]="subtitleOf(widget) ? 'widget-subtitle-' + widget.id : null"
           >
-            <header class="flex shrink-0 items-center gap-1 border-b border-default px-3 py-1.5">
+            <!-- A widget with a subtitle has a header of two rows, the usual row and the subtitle; one without keeps its one row. -->
+            @if (subtitleOf(widget); as subtitle) {
+              <header class="flex shrink-0 flex-col gap-0.5 border-b border-default px-3 py-1.5">
+                <div class="flex min-w-0 items-center gap-1">
+                  <ng-container *ngTemplateOutlet="headerRow" />
+                </div>
+                <p
+                  [id]="'widget-subtitle-' + widget.id"
+                  class="text-xs text-body paper:line-clamp-none"
+                  [class.line-clamp-1]="spanOf(widget) <= 2"
+                  [class.line-clamp-2]="spanOf(widget) > 2"
+                  [attr.title]="subtitle"
+                  data-testid="widget-subtitle"
+                >{{ subtitle }}</p>
+              </header>
+            } @else {
+              <header class="flex shrink-0 items-center gap-1 border-b border-default px-3 py-1.5">
+                <ng-container *ngTemplateOutlet="headerRow" />
+              </header>
+            }
+            <ng-template #headerRow>
               @if (editable()) {
                 <button
                   cdkDragHandle
@@ -71,6 +94,10 @@ const fallbackWidth = 1200;
                 </button>
               }
               <h3 [id]="'widget-title-' + widget.id" class="min-w-0 flex-1 truncate text-sm font-medium text-heading" [attr.title]="widget.title" data-testid="widget-title">{{ widget.title }}</h3>
+              <!-- The indicator's description on demand, for a widget that offers it (add-widget-context, design D6): never on paper. -->
+              @if (descriptionOf(widget); as description) {
+                <app-description-popover class="paper:hidden" [label]="indicatorOf(widget)!.label" [description]="description" />
+              }
               <!-- One menu for every member: Show as table, the Export formats and, for editors, Edit and Remove. -->
               <tmz-dropdown-menu
                 class="paper:hidden"
@@ -80,7 +107,7 @@ const fallbackWidth = 1200;
                 [groups]="menuGroups(widget, view)"
                 (selected)="menuChosen(widget, view, $event)"
               />
-            </header>
+            </ng-template>
             <div class="min-h-0 flex-1 overflow-hidden p-3">
               <app-widget-view
                 #view
@@ -93,6 +120,7 @@ const fallbackWidth = 1200;
                 [asTable]="shownAsTable(widget)"
                 [dashboardFilters]="filtersOf().get(widget.id) ?? none"
                 [colors]="colors()"
+                [tileRows]="spanOf(widget)"
                 (tableAvailable)="setDrawable(widget.id, $event)"
               />
             </div>
@@ -337,6 +365,16 @@ export class WidgetGrid {
 
   protected indicatorOf(widget: Widget): IndicatorEntry | null {
     return this.indicators().find((indicator) => indicator.name === widget.config.indicator) ?? null;
+  }
+
+  /** The widget's subtitle, trimmed, or null while it has none (add-widget-context, design D5). */
+  protected subtitleOf(widget: Widget): string | null {
+    return widget.config.display?.subtitle?.trim() || null;
+  }
+
+  /** The description its button opens: the widget offers it and the indicator the project lists has one (design D6); null otherwise. */
+  protected descriptionOf(widget: Widget): string | null {
+    return widget.config.display?.showDescription === true ? (this.indicatorOf(widget)?.description?.trim() || null) : null;
   }
 
   protected help(): string {

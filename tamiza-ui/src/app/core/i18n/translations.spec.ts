@@ -62,6 +62,12 @@ describe('translation files', () => {
     expect(problems(es as unknown as Tree, en as unknown as Tree)).toEqual([]);
   });
 
+  it('es.json speaks to the user as tu, never as usted (Deja, not Deje)', () => {
+    const formal = [...leaves(es as unknown as Tree)].filter(([, text]) => /\bDéje(la|lo|las|los)\b/.test(text)).map(([key]) => key);
+
+    expect(formal).toEqual([]);
+  });
+
   describe('the check itself', () => {
     it('reports a missing key', () => {
       const broken = copyOfEnglish();

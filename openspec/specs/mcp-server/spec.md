@@ -5,7 +5,6 @@ An MCP server in the `api` through which an AI client such as Claude, signed in 
 
 ## Requirements
 
-
 ### Requirement: Available only when enabled
 The MCP server SHALL exist only when the operator sets `TAMIZA_MCP_ENABLED` to `true`. Without it, `/mcp` and the protected resource metadata SHALL answer 404, the connect page and the project setting SHALL not be shown, and the system configuration SHALL report the server as disabled. Enabling it SHALL NOT make any project accessible: each project stays off until its admin turns it on. The server SHALL make no outbound request and call no model.
 
@@ -465,3 +464,113 @@ Writes through MCP by one person on one dashboard with the same `change`, compar
 #### Scenario: Member changed meanwhile
 - **WHEN** Claude read version 12 of "Housing", an analyst then adds a widget in the UI, making version 13, and Claude calls `restore_dashboard_version` for version 9 with the base version 12
 - **THEN** the tool is refused with `mcp.dashboardChanged` naming version 13 and that analyst, and "Housing" is unchanged
+
+### Requirement: Indicator column labels through MCP
+`save_script` SHALL take for an indicator an optional `columns`: an object from a column's name to its properties, here its `label`. Left out, the current version's labels SHALL be kept; given, it SHALL replace them all, and `{}` SHALL clear them, with the rules and errors of the indicator's details. `list_indicators`, `get_script` and `save_script`'s result SHALL return an indicator's column labels, and `get_indicator_columns` SHALL give each column the label its indicator gives it.
+
+#### Scenario: Labels saved through MCP
+- **WHEN** Claude calls `save_script` for `teatro_hoy` with `columns` = `{ "numerator": { "label": "Hogares que asistieron" }, "denominator": { "label": "Hogares" } }`
+- **THEN** the new version has those labels, `get_script` returns them, and a member who opens "Teatro" sees them in its widgets
+
+#### Scenario: Client that leaves the labels out
+- **WHEN** an AI client that knows nothing of column labels calls `save_script` for `teatro_hoy` with new code, its label, unit and format
+- **THEN** the new version keeps the column labels of the version before it
+
+#### Scenario: Labels cleared through MCP
+- **WHEN** Claude calls `save_script` for `teatro_hoy` with `columns` = `{}`
+- **THEN** the new version labels no column
+
+#### Scenario: Label refused through MCP
+- **WHEN** Claude calls `save_script` with a label of 81 characters for `numerator`
+- **THEN** the call is refused with `mcp.validation` and the error on that label, and no version is created
+
+#### Scenario: Labels of a table's columns
+- **WHEN** Claude calls `get_indicator_columns` for `teatro_hoy`, which labels `numerator` "Hogares que asistieron" and not `orden`
+- **THEN** the result gives `numerator` the label "Hogares que asistieron" and `orden` no label
+
+### Requirement: Widget column labels through MCP
+`create_widget`, `update_widget` and `query_indicator` SHALL take a widget's own column labels in `config.display.labels`, with the rules of the widget form. `get_widget_data` and `query_indicator` SHALL return for each widget `labels`: the name shown for each of its columns that has a label, its own or its indicator's, and no `labels` when none has. A new `config` SHALL replace the old one whole, its labels included.
+
+#### Scenario: Widget labels through MCP
+- **WHEN** Claude calls `create_widget` for a column chart of `teatro_hoy` with `config.display.labels` = `{ "denominator": "Hogares que asistieron" }`
+- **THEN** a member who opens the dashboard sees the chart name its denominator "Hogares que asistieron", and `get_dashboard` returns the label
+
+#### Scenario: Labels in widget data
+- **WHEN** Claude calls `get_widget_data` for "Teatro", whose column chart grouped by `comuna` plots the ratio of `teatro_hoy`, which labels `numerator`, `denominator` and `comuna`
+- **THEN** that widget's result gives the three labels under `labels`, and a widget whose columns have no label gives no `labels`
+
+#### Scenario: Config replaced without labels
+- **WHEN** Claude calls `update_widget` with a new `config` that has no `display.labels` for a widget that had its own labels
+- **THEN** the widget has no labels of its own and names its columns with its indicator's labels
+
+#### Scenario: Too many widget labels through MCP
+- **WHEN** Claude calls `create_widget` with labels for 11 columns
+- **THEN** the call is refused with `mcp.validation` and the error on `config.display.labels`, and nothing is saved
+
+### Requirement: Widget context through MCP
+`create_widget` and `update_widget` SHALL take a widget's subtitle, footnote, caption, unit and description option in its display, on every chart type, refused and kept as a saved widget's are (see `dashboard-indicators` "Widget context validation"). `get_widget_data` SHALL format a widget's values with its own unit and return its subtitle, footnote and own caption text when it has them. A new config given to `update_widget` SHALL replace them with what it holds.
+
+#### Scenario: Widget context through MCP
+- **WHEN** Claude calls `create_widget` for a bar chart of `teatro_hoy` with the subtitle "¿En qué lugares ha visto teatro en el último año? (E4)", the caption hidden and the unit "de quienes asistieron"
+- **THEN** the widget is saved, a member who opens the dashboard sees the subtitle and no caption line, and `get_widget_data` returns the subtitle and values formatted with "de quienes asistieron"
+
+#### Scenario: Caption refused through MCP
+- **WHEN** Claude calls `update_widget` with a caption that has its own text and is also hidden
+- **THEN** the call is refused with `mcp.validation` and the error on `config.display.caption`, and nothing is saved
+
+#### Scenario: Config replaced through MCP
+- **WHEN** Claude calls `update_widget` on a widget that has a subtitle, with a new config that has none
+- **THEN** the widget has no subtitle
+
+#### Scenario: Widget data without these settings
+- **WHEN** Claude calls `get_widget_data` on "Escuelas", none of whose widgets has these settings
+- **THEN** each widget's result is as before these settings existed, with no subtitle, footnote or caption in it
+
+### Requirement: Dashboard source through MCP
+`update_dashboard` SHALL set or remove a dashboard's source with the rules of the page, as one more commit of the same request, and `get_dashboard` and `get_dashboard_version` SHALL return the source when the dashboard or the version has one. `list_dashboard_versions` SHALL name the kind of change a source change records.
+
+#### Scenario: Source through MCP
+- **WHEN** Claude calls `update_dashboard` on "Teatro" with the source "Encuesta de mercado del Centro Bicentenario de Duitama, 478 encuestas"
+- **THEN** a member who opens "Teatro" sees that source under its widgets, and `get_dashboard` returns it
+
+#### Scenario: Rename and source in one version
+- **WHEN** Claude calls `update_dashboard` on "Teatro" with a new name and a source in one call
+- **THEN** "Teatro" has one new version holding both
+
+#### Scenario: Source removed through MCP
+- **WHEN** Claude calls `update_dashboard` on "Teatro" with an empty source
+- **THEN** "Teatro" has no source, and `get_dashboard` returns none
+
+#### Scenario: Long source through MCP
+- **WHEN** Claude calls `update_dashboard` with a source of 301 characters
+- **THEN** the call is refused with `mcp.validation` and the error on `source`, and nothing is saved
+
+### Requirement: Chart annotations through MCP
+`create_widget` and `update_widget` SHALL take a widget's reference lines, its choice of straight segments or steps and its data labels in its display, with the validation of the widget form, and `get_dashboard` and `get_dashboard_version` SHALL return them as saved. A new chart type sent alone SHALL be refused, naming the display setting, when the kept display holds a setting the new type does not take.
+
+#### Scenario: Lines through MCP
+- **WHEN** Claude calls `create_widget` for a column chart of the ratio of `numerator` to `denominator` of `teatro_hoy` grouped by `comuna`, with a `mean` line and an `overall` line
+- **THEN** the widget is saved, a member who opens the dashboard sees both lines, and `get_dashboard` returns them in the widget's display
+
+#### Scenario: Overall line over a measure through MCP
+- **WHEN** Claude calls `create_widget` for a bar chart of the measure `value` of `teatro_conteo` with an `overall` line
+- **THEN** the call is refused with `mcp.validation` and the error on that line's kind, and nothing is saved
+
+#### Scenario: Chart type changed alone
+- **WHEN** Claude calls `update_widget` with only the chart type pie for a column chart that has a `mean` line
+- **THEN** the call is refused with `mcp.validation` and the error on the reference lines, and the widget is unchanged
+
+### Requirement: Reference lines in MCP widget data
+For a widget whose display has reference lines, `query_indicator` and `get_widget_data` SHALL return each line drawn with its kind, its label (its own, or the English default), its value and that value formatted as the result's other values are. A widget without reference lines SHALL return what it returned before.
+
+#### Scenario: Lines in widget data
+- **WHEN** Claude calls `get_widget_data` for a column chart with a `mean` line and an `overall` line
+- **THEN** the result lists both lines with their kinds, the labels "Mean" and "Overall", their values and their formatted values
+
+#### Scenario: Overall line previewed
+- **WHEN** Claude calls `query_indicator` for a column chart grouped by `comuna` whose display has an `overall` line
+- **THEN** the result holds the columns and the overall line, at the same value a stat tile with the same ratio and filters would show, and nothing is saved
+
+#### Scenario: Widget without reference lines
+- **WHEN** Claude calls `get_widget_data` for a widget with no reference lines
+- **THEN** the result holds no reference lines, as before

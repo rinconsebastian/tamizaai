@@ -2599,6 +2599,7 @@ describe('ProjectIndicators dashboard colors (add-dashboard-palettes, design D9)
       'dashboard-move-right',
       'dashboard-filters',
       'dashboard-colors',
+      'dashboard-source',
       'dashboard-versions',
       'dashboard-remove',
     ]);
@@ -2833,6 +2834,233 @@ describe('ProjectIndicators dashboard colors (add-dashboard-palettes, design D9)
   });
 });
 
+describe('ProjectIndicators dashboard source (add-widget-context, design D7)', () => {
+  beforeEach(() => downloader.start.mockClear());
+  afterEach(clearOverlay);
+
+  const sourceUrl = `${dashboardUrlOf('d1')}/source`;
+  const projectUrl = `/api/v1/projects/${projectId}`;
+  const survey = 'Encuesta de mercado de la zona, 478 encuestas';
+  /** The action in the open menu: the line under the widgets has the test id of the action too. */
+  const item = (testId: string) => document.querySelector<HTMLElement>(`[role="menu"] [data-testid="${testId}"]`);
+  const form = () => document.querySelector<HTMLElement>('[data-testid="dashboard-source-dialog"]');
+  const menuItems = () => Array.from(document.querySelectorAll<HTMLElement>('[cdkmenuitem]')).map((i) => i.dataset['testid']);
+  const toasts = () => TestBed.inject(ToastService).toasts().map((t) => t.message);
+  const line = (context: Pick<Context, 'root'>) => byTestId(context.root, 'dashboard-source');
+
+  /** Opens the dashboard's actions with a click; returns its trigger. */
+  async function openMenu(context: Context): Promise<HTMLElement> {
+    const trigger = byTestId(context.root, 'dashboard-menu')!;
+    trigger.click();
+    await settle(context.harness);
+    return trigger;
+  }
+
+  /** Opens the dashboard's actions from the keyboard and chooses Source; returns the actions button. */
+  async function openSource(context: Context): Promise<HTMLElement> {
+    const trigger = byTestId(context.root, 'dashboard-menu')!;
+    trigger.focus();
+    pressKey(trigger, 'ArrowDown');
+    await settle(context.harness);
+    // Rename, Duplicate, Move left, Move right, Filters, Colors, Source.
+    for (let i = 0; i < 6; i++) {
+      pressKey(document.activeElement!, 'ArrowDown');
+    }
+    expect(document.activeElement).toBe(item('dashboard-source'));
+    pressKey(document.activeElement!, 'Enter');
+    await settle(context.harness);
+    return trigger;
+  }
+
+  const type = async (context: Context, value: string) => {
+    typeInto(byTestId(form()!, 'dashboard-source-input')!, value);
+    await settle(context.harness);
+  };
+  const save = async (context: Context) => {
+    byTestId(form()!, 'dashboard-source-save')!.click();
+    await settle(context.harness);
+  };
+
+  it.each<ProjectRole>(['analyst', 'admin'])('offers Source right after Colors to an %s (Source action offered)', async (role) => {
+    const context = await open(role, two, answer, {}, { dashboards: indicatorsAndField });
+
+    await openMenu(context);
+
+    expect(menuItems().slice(4, 7)).toEqual(['dashboard-filters', 'dashboard-colors', 'dashboard-source']);
+    expect(text(item('dashboard-source'))).toBe('Source');
+    context.http.expectNone(sourceUrl); // nothing is sent until it is saved
+  });
+
+  it('names the action and the line in Spanish', async () => {
+    const context = await open('analyst', two, answer, {}, { lang: 'es', source: survey });
+
+    await openMenu(context);
+
+    expect(text(item('dashboard-source'))).toBe('Fuente');
+    expect(text(line(context))).toBe(`Fuente: ${survey}`);
+  });
+
+  it('offers a viewer no Source action, and shows the source to them (Viewer cannot change the source)', async () => {
+    const context = await open('viewer', two, answer, {}, { source: survey });
+
+    expect(byTestId(context.root, 'dashboard-menu')).toBeNull();
+    expect(item('dashboard-source')).toBeNull();
+    expect(text(line(context))).toBe(`Source: ${survey}`);
+  });
+
+  it('shows the source under the widgets and before the list of indicators (Under the widgets, Source after the widgets)', async () => {
+    const context = await open('viewer', two, answer, {}, { source: survey });
+
+    const grid = byTestId(context.root, 'widget-grid')!;
+    const list = byTestId(context.root, 'indicator-table-card')!;
+    expect(text(line(context))).toBe(`Source: ${survey}`);
+    expect(grid.compareDocumentPosition(line(context)!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line(context)!.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line(context)!.classList).toContain('paper:hidden');
+  });
+
+  it('shows no source line for a dashboard without one (No source)', async () => {
+    const context = await open('viewer', two, answer);
+
+    expect(line(context)).toBeNull();
+    expect(context.root.textContent).not.toContain('Source:');
+  });
+
+  it('saves a source, shows it at once without reading the widgets again, and returns focus to the actions (Source saved, UI part)', async () => {
+    const context = await open('analyst', two, answer);
+    expect(line(context)).toBeNull();
+    const trigger = await openSource(context);
+    expect(text(form()!.querySelector('h2'))).toBe('Source of Indicators');
+    expect((byTestId(form()!, 'dashboard-source-input') as HTMLInputElement).value).toBe('');
+
+    await type(context, `  ${survey} `);
+    await save(context);
+    const request = context.http.expectOne(sourceUrl);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.body).toEqual({ source: survey });
+    request.flush({ source: survey });
+    await settle(context.harness);
+
+    expect(form()).toBeNull();
+    expect(text(line(context))).toBe(`Source: ${survey}`);
+    expect(toasts()).toContain('Source saved.');
+    expect(document.activeElement).toBe(trigger);
+    expect(context.http.match(isQuery)).toEqual([]);
+    expect(context.http.match(isDashboard)).toEqual([]);
+    expect(context.http.match(isOverview)).toEqual([]);
+  });
+
+  it('removes the source when the field is emptied (Source removed, UI part)', async () => {
+    const context = await open('analyst', two, answer, {}, { source: survey });
+    expect(text(line(context))).toBe(`Source: ${survey}`);
+    const trigger = await openSource(context);
+    expect((byTestId(form()!, 'dashboard-source-input') as HTMLInputElement).value).toBe(survey);
+
+    await type(context, '');
+    await save(context);
+    const request = context.http.expectOne(sourceUrl);
+    expect(request.request.body).toEqual({ source: null });
+    request.flush({ source: null });
+    await settle(context.harness);
+
+    expect(line(context)).toBeNull();
+    expect(toasts()).toContain('Source removed.');
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('sends nothing and changes nothing when the form is saved as it was, and returns focus to the actions', async () => {
+    const context = await open('analyst', two, answer, {}, { source: survey });
+    const trigger = await openSource(context);
+
+    await save(context);
+
+    expect(form()).toBeNull();
+    context.http.expectNone(sourceUrl);
+    expect(toasts()).toEqual([]);
+    expect(text(line(context))).toBe(`Source: ${survey}`);
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('changes nothing when the form is cancelled, and returns focus to the actions', async () => {
+    const context = await open('analyst', two, answer);
+    const trigger = await openSource(context);
+
+    await type(context, survey);
+    byTestId(form()!, 'dashboard-source-cancel')!.click();
+    await settle(context.harness);
+
+    expect(form()).toBeNull();
+    context.http.expectNone(sourceUrl);
+    expect(line(context)).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('keeps the source it has and the form open when the server refuses the new one', async () => {
+    const context = await open('analyst', two, answer, {}, { source: survey });
+    await openSource(context);
+
+    await type(context, 'a'.repeat(300));
+    await save(context);
+    context.http.expectOne(sourceUrl).flush({ title: 'x', errors: { source: ['The source is longer than 300 characters.'] } }, { status: 400, statusText: 'Bad Request' });
+    await settle(context.harness);
+
+    expect(form()).not.toBeNull();
+    expect(text(form()!.querySelector('[data-testid="field-error"]'))).toBe('The source is longer than 300 characters.');
+    expect(text(line(context))).toBe(`Source: ${survey}`);
+    expect(toasts()).toEqual([]);
+  });
+
+  it('opens another dashboard without the source of the one left (Escuelas after Teatro)', async () => {
+    const context = await open('analyst', two, answer, {}, { dashboards: indicatorsAndField, source: survey });
+    expect(text(line(context))).toBe(`Source: ${survey}`);
+
+    await go(context, 'd2');
+    expect(line(context)).toBeNull(); // while it is read
+    await answerLoad(context, two, {}, 'd2');
+    await answerQueries(context, answer);
+
+    expect(line(context)).toBeNull();
+
+    await go(context, 'd1');
+    await answerLoad(context, two, {}, 'd1', [], undefined, survey);
+    await answerQueries(context, answer);
+    expect(text(line(context))).toBe(`Source: ${survey}`);
+  });
+
+  it('does not show a source saved on a dashboard the member left meanwhile', async () => {
+    const context = await open('analyst', two, answer, {}, { dashboards: indicatorsAndField });
+    await openSource(context);
+    await type(context, survey);
+    await save(context);
+
+    await go(context, 'd2');
+    context.http.expectOne(sourceUrl).flush({ source: survey });
+    await settle(context.harness);
+    await answerLoad(context, two, {}, 'd2');
+    await answerQueries(context, answer);
+
+    expect(line(context)).toBeNull();
+  });
+
+  it('takes the member to the first dashboard when the dashboard was removed meanwhile (Source saved on a removed dashboard)', async () => {
+    const context = await open('analyst', two, answer, {}, { dashboards: indicatorsAndField });
+    await openSource(context);
+
+    await type(context, survey);
+    await save(context);
+    context.http.expectOne(sourceUrl).flush({ title: 'x', code: 'dashboards.notFound' }, { status: 404, statusText: 'Not Found' });
+    await settle(context.harness);
+    context.http.expectOne(projectUrl).flush(details('analyst', { dashboards: [{ id: 'd2', name: 'Field' }] }));
+    await settle(context.harness);
+    await answerLoad(context, [], {}, 'd2');
+
+    expect(form()).toBeNull();
+    expect(TestBed.inject(Router).url).toBe(`/projects/${projectId}/dashboards/d2`);
+    expect(text(byTestId(context.root, 'dashboard-notice'))).toContain('"Indicators" no longer exists');
+    expect(line(context)).toBeNull();
+  });
+});
+
 describe('ProjectIndicators scheduled email (dashboard reports, design D14)', () => {
   beforeEach(() => downloader.start.mockClear());
   afterEach(clearOverlay);
@@ -2878,6 +3106,7 @@ describe('ProjectIndicators scheduled email (dashboard reports, design D14)', ()
       'dashboard-move-right',
       'dashboard-filters',
       'dashboard-colors',
+      'dashboard-source',
       'dashboard-report',
       'dashboard-versions',
       'dashboard-remove',
@@ -3030,7 +3259,7 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
 
     await openMenu(context);
 
-    expect(menuItems()).toEqual(['dashboard-rename', 'dashboard-duplicate', 'dashboard-move-left', 'dashboard-move-right', 'dashboard-filters', 'dashboard-colors', 'dashboard-versions', 'dashboard-remove']);
+    expect(menuItems()).toEqual(['dashboard-rename', 'dashboard-duplicate', 'dashboard-move-left', 'dashboard-move-right', 'dashboard-filters', 'dashboard-colors', 'dashboard-source', 'dashboard-versions', 'dashboard-remove']);
     expect(text(item('dashboard-versions'))).toBe('Version history');
     expect(item('dashboard-versions')!.getAttribute('aria-disabled')).toBeNull();
     // Nothing is read until it is chosen.
@@ -3261,6 +3490,24 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
   }
 
   describe('viewing a version', () => {
+    it('shows the source of the version, not the dashboard\'s, and none for a version recorded before sources (Version without a source, UI part)', async () => {
+      const source = 'Encuesta de mercado de la zona, ronda 1';
+      const context = await open('analyst', [coverage], answer, {}, { source: 'Encuesta de mercado de la zona, ronda 2' });
+      expect(text(byTestId(context.root, 'dashboard-source'))).toBe('Source: Encuesta de mercado de la zona, ronda 2');
+
+      await view(context, historyOf([12, 9, 2]), versionOf(9, [coverage], { source }));
+      await answerQueries(context, answer);
+      expect(text(byTestId(context.root, 'dashboard-source'))).toBe(`Source: ${source}`);
+
+      byTestId(context.root, 'dashboard-version-back')!.click();
+      await settle(context.harness);
+      expect(text(byTestId(context.root, 'dashboard-source'))).toBe('Source: Encuesta de mercado de la zona, ronda 2');
+
+      await view(context, historyOf([12, 9, 2]), versionOf(2, [coverage]));
+      await answerQueries(context, answer);
+      expect(byTestId(context.root, 'dashboard-source')).toBeNull();
+    });
+
     it('shows the version in place of the dashboard, read-only, its widgets querying by their configs, with nothing to add, edit, move, remove or print (Viewing an older version)', async () => {
       const context = await open('analyst', [coverage], answer, {}, { dashboards: indicatorsAndField });
 
@@ -3320,6 +3567,36 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
       const [blob, name] = downloader.save.mock.calls[0] as [Blob, string];
       expect(name).toMatch(/^[a-z0-9-]+_water_coverage-by-municipality_v9_\d{4}-\d{2}-\d{2}\.svg$/);
       expect(await blob.text()).toContain('Version 9, saved by Ana Pérez');
+    });
+
+    it('names the columns of the widgets of a version with the current labels of the indicator and the labels of the version (Indicator labels in a version)', async () => {
+      const labelled = [indicator('coverage', { columns: { municipality: { label: 'Comuna' }, numerator: { label: 'Hogares que asistieron' } } })];
+      const old = widget('w1', { title: 'Coverage by municipality', config: config({ ratio: { numerator: 'numerator', denominator: 'denominator' }, display: { labels: { denominator: 'Hogares de la base E1' } } }) });
+      const context = await open('analyst', [coverage], answer, { indicators: labelled }, { dashboards: indicatorsAndField });
+      expect(text(byTestId(context.root, 'chart-caption'))).toBe('Coverage by Comuna');
+
+      await view(context, historyOf([12, 9]), versionOf(9, [old]));
+      await answerQueries(context, answer);
+
+      expect(text(byTestId(context.root, 'chart-caption'))).toBe('Coverage: Hogares que asistieron / Hogares de la base E1 by Comuna');
+    });
+
+    it('sends the saved display of the widget of the version shown with its workbook request (Widget of a version)', async () => {
+      const old = widget('w1', { title: 'Coverage by municipality', config: config({ display: { color: 3, labels: { municipality: 'Comuna del año 9' } } }) });
+      const context = await open('analyst', [coverage], answer, {}, { dashboards: indicatorsAndField });
+      await view(context, historyOf([12, 9]), versionOf(9, [old]));
+      await answerQueries(context, answer);
+
+      all(context.root, 'widget-menu')[0].click();
+      await settle(context.harness);
+      document.querySelector<HTMLElement>('[data-testid="widget-export-xlsx"]')!.click();
+      await settle(context.harness);
+
+      const request = context.http.expectOne((r) => r.method === 'POST' && r.url.endsWith('/widget-exports'));
+      expect(request.request.body).toMatchObject({ version: 9 });
+      expect(request.request.body.config.display).toEqual({ color: 3, labels: { municipality: 'Comuna del año 9' } });
+      request.flush({ downloadUrl: '/api/v1/data-exports/x', fileName: 'x.xlsx', rowCount: 3, publishedAt: null, expiresAt: '2026-10-02T12:05:00Z' });
+      await settle(context.harness);
     });
 
     it('draws the version in its own palette and colors kept by value, and the dashboard in its own once back (Colors of a version)', async () => {
@@ -3581,6 +3858,24 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
   });
 
   describe('restoring a version', () => {
+    it('shows the source the restore brought back before the dashboard is read again, and none for a version recorded before sources (Source restored, UI part)', async () => {
+      const context = await open('analyst', [coverage], answer, {}, { source: 'Encuesta de mercado de la zona, ronda 2' });
+      const older = 'Encuesta de mercado de la zona, ronda 1';
+
+      await restore(context, historyOf([8, 7]), 7, restoreOf(9, 7, [coverage], { dashboard: dashboard([coverage], { version: 9, source: older }) }));
+
+      expect(text(byTestId(context.root, 'dashboard-source'))).toBe(`Source: ${older}`);
+      await answerLoad(context, [coverage], {}, 'd1', [], undefined, older);
+      await answerQueries(context, answer);
+      expect(text(byTestId(context.root, 'dashboard-source'))).toBe(`Source: ${older}`);
+
+      await restore(context, historyOf([10, 3]), 3, restoreOf(11, 3, [coverage], { dashboard: dashboard([coverage], { version: 11 }) }));
+      expect(byTestId(context.root, 'dashboard-source')).toBeNull();
+      await answerLoad(context, [coverage]);
+      await answerQueries(context, answer);
+      expect(byTestId(context.root, 'dashboard-source')).toBeNull();
+    });
+
     it('asks first, then restores, reads the dashboard again and says so in one message, with focus on the heading (Removed widget brought back)', async () => {
       const context = await open('analyst', [coverage], answer);
       await choose(context, historyOf([8, 7]), 7, 'restore');
@@ -4060,6 +4355,37 @@ describe('ProjectIndicators printing (dashboard printing)', () => {
       await paperOn(context);
 
       expect(text(byTestId(context.root, 'print-published'))).toBe('The data has not been published yet.');
+    });
+
+    it('gives the dashboard\'s source as a line of the header, in the interface\'s words, and none under the widgets on paper (Source in the print header)', async () => {
+      const source = 'Encuesta de mercado de la zona, 478 encuestas';
+      const context = await open('viewer', two, answer, {}, { source });
+      expect(byTestId(context.root, 'print-source')).toBeNull(); // only while printing
+
+      await paperOn(context);
+
+      expect(text(byTestId(context.root, 'print-source'))).toBe(`Source: ${source}`);
+      expect(byTestId(context.root, 'print-header')!.contains(byTestId(context.root, 'print-source'))).toBe(true);
+      // The line under the widgets stays on the screen, and the sheet has the header's alone.
+      expect(byTestId(context.root, 'dashboard-source')!.classList).toContain('paper:hidden');
+    });
+
+    it('says the source in Spanish with the word Fuente', async () => {
+      const context = await open('viewer', two, answer, {}, { source: 'Encuesta de mercado de la zona', lang: 'es' });
+
+      await paperOn(context);
+
+      expect(text(byTestId(context.root, 'print-source'))).toBe('Fuente: Encuesta de mercado de la zona');
+    });
+
+    it('prints no source line for a dashboard without one (No source printed)', async () => {
+      const context = await open('viewer', two, answer);
+
+      await paperOn(context);
+
+      expect(byTestId(context.root, 'print-header')).not.toBeNull();
+      expect(byTestId(context.root, 'print-source')).toBeNull();
+      expect(byTestId(context.root, 'dashboard-source')).toBeNull();
     });
 
     it('names the project, the dashboard and the day as the page\'s title while printing, and puts it back after (PDF file name)', async () => {

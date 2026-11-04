@@ -207,6 +207,200 @@ public static class IndicatorValidation
                 errors.Add(prefix + "display.ramp", "Only map and heatmap widgets have a scale.");
             }
         }
+
+        CheckLabels(display.Labels, prefix, errors);
+        CheckContext(display, prefix, errors);
+        CheckAnnotations(display, config, chartType, prefix, errors);
+    }
+
+    /// <summary>
+    /// A widget's reference lines, line interpolation and data labels (design D2 of the chart annotations). The shape rules (the count,
+    /// the kind, the value and the label of each line, the name of an interpolation) run on every request; the rules that depend on the
+    /// chart type, the series and the layout are skipped when <paramref name="chartType"/> is null, as the other per-kind rules are.
+    /// </summary>
+    private static void CheckAnnotations(WidgetDisplay display, WidgetConfig config, string? chartType, string prefix, FieldErrors errors)
+    {
+        var takesLines = chartType is null || chartType is ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line;
+        var layout = config.SeriesBy is not null && chartType is ChartTypes.Bar or ChartTypes.Column ? config.Layout : null;
+        if (display.ReferenceLines is { } lines)
+        {
+            var key = prefix + "display.referenceLines";
+            if (lines.Count > WidgetDisplay.MaxReferenceLines)
+            {
+                errors.Add(key, $"A widget has at most {WidgetDisplay.MaxReferenceLines} reference lines.");
+            }
+
+            if (!takesLines)
+            {
+                errors.Add(key, "Only bar, column and line widgets have reference lines.");
+            }
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            for (var i = 0; i < lines.Count; i++)
+            {
+                CheckReferenceLine(lines[i], $"{key}[{i}]", takesLines && chartType is not null, config, layout, seen, errors);
+            }
+        }
+
+        if (display.Interpolation is { } interpolation)
+        {
+            if (!LineInterpolations.IsKnown(interpolation))
+            {
+                errors.Add(prefix + "display.interpolation", $"The interpolation must be '{LineInterpolations.Linear}' or '{LineInterpolations.Step}'.");
+            }
+            else if (chartType is not null && chartType != ChartTypes.Line)
+            {
+                errors.Add(prefix + "display.interpolation", "Only a line chart has an interpolation.");
+            }
+        }
+
+        if (display.DataLabels is { } dataLabels)
+        {
+            if (chartType is not null && chartType is not (ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line or ChartTypes.Pie))
+            {
+                errors.Add(prefix + "display.dataLabels", "Only bar, column, line and pie widgets have data labels.");
+            }
+            else if (dataLabels && chartType is not null && SeriesLayouts.Adds(layout))
+            {
+                errors.Add(prefix + "display.dataLabels", "Stacked bars have no data labels.");
+            }
+        }
+    }
+
+    /// <summary>One reference line: <paramref name="key"/> is <c>…referenceLines[i]</c>, and <paramref name="perKind"/> asks for the rules that need the chart type, the series and the layout.</summary>
+    private static void CheckReferenceLine(
+        WidgetReferenceLine? line, string key, bool perKind, WidgetConfig config, string? layout, HashSet<string> seen, FieldErrors errors)
+    {
+        if (line is null)
+        {
+            errors.Add(key, "Each reference line needs a kind.");
+            return;
+        }
+
+        CheckReferenceLineLabel(line.Label, key + ".label", errors);
+        if (!ReferenceLineKinds.IsKnown(line.Kind))
+        {
+            errors.Add(key + ".kind", $"The kind must be '{ReferenceLineKinds.Mean}', '{ReferenceLineKinds.Median}', '{ReferenceLineKinds.Overall}' or '{ReferenceLineKinds.Value}'.");
+            return;
+        }
+
+        var kind = line.Kind!;
+        if (kind != ReferenceLineKinds.Value && !seen.Add(kind))
+        {
+            errors.Add(key + ".kind", $"The {kind} line is listed twice.");
+        }
+
+        if (kind == ReferenceLineKinds.Value && line.Value is null)
+        {
+            errors.Add(key + ".value", "A 'value' line needs its value.");
+        }
+        else if (kind != ReferenceLineKinds.Value && line.Value is not null)
+        {
+            errors.Add(key + ".value", "Only a 'value' line takes a value.");
+        }
+
+        if (!perKind)
+        {
+            return;
+        }
+
+        if (kind is ReferenceLineKinds.Mean or ReferenceLineKinds.Median && config.SeriesBy is not null)
+        {
+            errors.Add(key + ".kind", "A mean or median line needs a chart with no series.");
+        }
+        else if (kind == ReferenceLineKinds.Overall && config.Ratio is null)
+        {
+            errors.Add(key + ".kind", "An overall line needs a ratio: over a measure it would be the sum of every bar.");
+        }
+
+        if (kind == ReferenceLineKinds.Value && line.Value is { } value && layout == SeriesLayouts.Percent && (value < 0 || value > 1))
+        {
+            errors.Add(key + ".value", "In a 100% layout a value is a share from 0 to 1.");
+        }
+    }
+
+    // The length is that of the label once trimmed and the control characters are looked for in the label as sent, as CheckText does for
+    // the widget's texts; the messages are those of a label.
+    private static void CheckReferenceLineLabel(string? label, string key, FieldErrors errors)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return;
+        }
+
+        if (label.Trim().Length > WidgetDisplay.MaxReferenceLineLabel)
+        {
+            errors.Add(key, $"A reference line's label has at most {WidgetDisplay.MaxReferenceLineLabel} characters.");
+        }
+
+        if (label.Any(char.IsControl))
+        {
+            errors.Add(key, "A reference line's label cannot contain line breaks or other control characters.");
+        }
+    }
+
+    /// <summary>
+    /// A widget's texts (design D2 of the widget context), on every kind and with no rule per kind: a subtitle, a footnote, a caption
+    /// text and a unit within their lengths, counted after trimming as a title is, with no control character (a line break, a tab, NUL
+    /// or U+0085 among them), and a caption that has its own text is not also hidden. The form turns line breaks into spaces before
+    /// sending, so these rules only refuse an API or MCP client.
+    /// </summary>
+    private static void CheckContext(WidgetDisplay display, string prefix, FieldErrors errors)
+    {
+        CheckText(display.Subtitle, "subtitle", WidgetDisplay.MaxSubtitleLength, prefix + "display.subtitle", errors);
+        CheckText(display.Footnote, "footnote", WidgetDisplay.MaxFootnoteLength, prefix + "display.footnote", errors);
+        CheckText(display.Caption?.Text, "caption", WidgetDisplay.MaxCaptionLength, prefix + "display.caption.text", errors);
+        CheckText(display.Unit, "unit", ScriptEndpoints.MaxUnitLength, prefix + "display.unit", errors);
+        if (display.Caption is { Hidden: true } && !string.IsNullOrWhiteSpace(display.Caption.Text))
+        {
+            errors.Add(prefix + "display.caption", "Give the caption its own text or hide it, not both.");
+        }
+    }
+
+    private static void CheckText(string? input, string name, int max, string key, FieldErrors errors)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return;
+        }
+
+        // The length is that of the text once trimmed. The control characters are looked for in the text as sent: a line break at its end
+        // is one too, and trimming it would quietly save a text the author did not mean to send.
+        if (input.Trim().Length > max)
+        {
+            errors.Add(key, $"The {name} is longer than {max} characters.");
+        }
+
+        if (input.Any(char.IsControl))
+        {
+            errors.Add(key, $"The {name} cannot contain line breaks or other control characters.");
+        }
+    }
+
+    /// <summary>
+    /// A widget's own column labels (design D5 of the indicator column metadata): at most <see cref="ColumnLabels.MaxWidgetLabels"/>,
+    /// each keyed by a column's name and a label of 1 to <see cref="ColumnLabels.MaxLength"/> characters with no control character. No
+    /// rule per chart type, and none against the table: a label for a column the table lost does not make the widget stale.
+    /// </summary>
+    private static void CheckLabels(IReadOnlyDictionary<string, string>? labels, string prefix, FieldErrors errors)
+    {
+        if (labels is null)
+        {
+            return;
+        }
+
+        if (labels.Count > ColumnLabels.MaxWidgetLabels)
+        {
+            errors.Add(prefix + "display.labels", $"A widget labels at most {ColumnLabels.MaxWidgetLabels} columns.");
+        }
+
+        foreach (var (column, label) in labels)
+        {
+            if (ColumnLabels.CheckKey(column, prefix + "display.labels", errors))
+            {
+                ColumnLabels.CheckLabel(label, $"{prefix}display.labels.{column}", errors);
+            }
+        }
     }
 
     /// <summary>

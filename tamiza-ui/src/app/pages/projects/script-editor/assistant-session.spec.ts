@@ -9,7 +9,7 @@ import { AssistantSession } from './assistant-session';
 import type { FixTarget, RequestFrame } from './assistant-state';
 
 const completionsUrl = '/api/v1/projects/p1/assistant/completions';
-const details: IndicatorMetadata = { label: '  Piped water  ', description: ' ', unit: 'households ', format: 'percent' };
+const details: IndicatorMetadata = { label: '  Piped water  ', description: ' ', unit: 'households ', format: 'percent', columns: {} };
 const draft = 'def compute(cleaned, ctx):\n    return None\n';
 
 describe('AssistantSession', () => {
@@ -51,6 +51,15 @@ describe('AssistantSession', () => {
       draft,
       details: { label: 'Piped water', description: '', unit: 'households', format: 'percent' },
     });
+  });
+
+  it('sends the details without the column names, which the assistant neither reads nor proposes', () => {
+    session.setText('x');
+
+    const body = session.requestBody(frame({ details: { ...details, columns: { numerator: { label: 'Hogares' } } } }));
+
+    expect(body.details).toEqual({ label: 'Piped water', description: '', unit: 'households', format: 'percent' });
+    expect(JSON.stringify(body)).not.toContain('Hogares');
   });
 
   it('names no script for script 1 and sends no details', () => {

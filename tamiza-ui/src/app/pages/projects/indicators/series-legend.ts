@@ -43,6 +43,59 @@ export class SeriesLegend {
   readonly shape = input<'square' | 'line'>('square');
 }
 
+/** One reference line of a chart, as the key and the list under a table write it: its text and the dash pattern it is drawn in. */
+export interface ReferenceEntry {
+  text: string;
+  dash: string;
+}
+
+/**
+ * The key of the reference lines a chart draws (add-chart-annotations, design D5): a short swatch in each line's dash pattern, then its
+ * text, `{label}: {value}`. It lists every line drawn, whether or not its text fits at the line. It belongs to the chart, so it sits
+ * under the plot as a sibling of its box (`shrink-0`, taking its room before the plot does), and it wraps rather than scrolls, so on
+ * paper it is whole.
+ */
+@Component({
+  selector: 'app-reference-key',
+  imports: [TranslocoDirective],
+  template: `
+    <ul *transloco="let t" class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-body" [attr.aria-label]="t('indicators.referenceLines.key')" data-testid="reference-key">
+      @for (entry of entries(); track $index) {
+        <li class="flex min-w-0 items-center gap-1.5" data-testid="reference-key-item">
+          <svg aria-hidden="true" class="shrink-0" width="16" height="4" data-testid="reference-key-swatch">
+            <line class="stroke-heading" x1="0" y1="2" x2="16" y2="2" stroke-width="1.5" [attr.stroke-dasharray]="entry.dash" />
+          </svg>
+          <span class="min-w-0 break-words" data-testid="reference-key-text">{{ entry.text }}</span>
+        </li>
+      }
+    </ul>
+  `,
+  host: { class: 'block shrink-0' },
+})
+export class ReferenceKey {
+  readonly entries = input.required<readonly ReferenceEntry[]>();
+}
+
+/**
+ * The reference lines of a widget shown as a table (add-chart-annotations, design D9): one line of text for each, in the widget's order,
+ * under the table and above the widget's footnote. The table itself is untouched.
+ */
+@Component({
+  selector: 'app-reference-list',
+  imports: [TranslocoDirective],
+  template: `
+    <ul *transloco="let t" class="text-xs text-body" [attr.aria-label]="t('indicators.referenceLines.key')" data-testid="reference-list">
+      @for (entry of entries(); track $index) {
+        <li data-testid="reference-list-item">{{ entry.text }}</li>
+      }
+    </ul>
+  `,
+  host: { class: 'block shrink-0' },
+})
+export class ReferenceList {
+  readonly entries = input.required<readonly ReferenceEntry[]>();
+}
+
 /** The texts `app-series-notes` shows, for a picture of the widget: negatives left out of shares, then rows a pyramid or Likert left out. */
 export function seriesNoteTexts(
   notes: { negativeLeftOut: number; leftOut: number; kind: 'pyramid' | 'likert' | null },

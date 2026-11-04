@@ -5,7 +5,6 @@ Let a project member build their own view of the project's computed indicators: 
 
 ## Requirements
 
-
 ### Requirement: Widgets
 A member with the `analyst` or `admin` role SHALL be able to add, edit and remove widgets on any dashboard. Each widget SHALL belong to the one dashboard it is added on or moved to, and have a title, a chart type (stat, bar, column, line, histogram, pie, map, heat map, population pyramid, diverging Likert bars, cross table or box plot), and a query over exactly one indicator's published table. A dashboard SHALL hold at most the configured number of widgets. A `viewer` SHALL see every dashboard's widgets but SHALL NOT be able to add, edit, remove or arrange them.
 
@@ -64,14 +63,18 @@ A widget's query SHALL be able to name any column of its indicator's published t
 - **THEN** `water_source` and `value` are offered as series columns, and `municipality` is not
 
 ### Requirement: Stat tile
-A stat tile SHALL show one number for its indicator: the measure summed over every row the query matches, or the ratio of sums, formatted with the indicator's format and unit.
+A stat tile SHALL show one number for its indicator: the measure summed over every row the query matches, or the ratio of sums, formatted with the indicator's format and unit, the widget's own unit taking the place of the indicator's when the widget has one (see "Widget unit").
 
 #### Scenario: Single figure
 - **WHEN** a stat tile is configured for the indicator `households_visited` with no filters and the measure `value`
 - **THEN** it shows one number, the sum of `value` over every row
 
+#### Scenario: Stat tile with its own unit
+- **WHEN** the stat tile "Centro cultural o casa de la cultura" over `teatro_hoy`, whose format is `percent` and unit "de los hogares", has the unit "de quienes asistieron" and the value 0.2422
+- **THEN** it shows "24.22% de quienes asistieron" in the English interface
+
 ### Requirement: Line chart
-A line chart SHALL plot the group values of its indicator in their natural order, against the measure or ratio. Without a series it SHALL draw one line; with a series it SHALL draw one line per series value (see "Series in a widget"), and a series that has no value for a group SHALL have a gap there instead of a point. Natural order compares runs of digits as numbers, so `2` comes before `10`, and puts a missing group value last. A line chart SHALL NOT have an order (see "Bar and column order").
+A line chart SHALL plot the group values of its indicator in their natural order, against the measure or ratio. Without a series it SHALL draw one line; with a series it SHALL draw one line per series value (see "Series in a widget"), and a series that has no value for a group SHALL have a gap there instead of a point. Natural order compares runs of digits as numbers, so `2` comes before `10`, and puts a missing group value last. A line chart SHALL NOT have an order (see "Bar and column order"). Its points SHALL be joined by straight segments, or by steps when the widget says so (see "Step lines").
 
 #### Scenario: Trend over a grouped column
 - **WHEN** a line chart is configured for the indicator `attendance` grouped by a `round` column with values `1`, `2` and `3`
@@ -84,6 +87,10 @@ A line chart SHALL plot the group values of its indicator in their natural order
 #### Scenario: Gap in a line
 - **WHEN** in that line chart `Buga` has no row for round `2`
 - **THEN** the `Buga` line has points at rounds `1` and `3` and no segment through round `2`
+
+#### Scenario: Straight segments by default
+- **WHEN** a member opens the line chart "2.10. Cuánto pagaría por una boleta", saved without a choice of segments
+- **THEN** its points are joined by straight segments, as before
 
 ### Requirement: Histogram
 A histogram SHALL bucket the values of its measure or ratio, over the rows the query matches (or over the group values when it groups by a column), into equal-width ranges and count how many fall in each, with a configurable number of buckets.
@@ -165,7 +172,7 @@ Every project member SHALL be able to export the full published table of one ind
 - **THEN** they receive a single-use download link to a file with every published row and column of `coverage`
 
 ### Requirement: Indicator formatting
-A widget SHALL show its plotted values with the format and unit of its indicator: `count` as a whole number with thousands separators, `decimal` with two decimals, `percent` as the value times 100 followed by `%`, and `currency` with two decimals and the unit as the currency; any other unit SHALL be shown after the value. The same SHALL apply to a stat tile, axes, legends, tooltips and "Show as table"; a map's tooltip columns use their own format. A box plot over a `count` indicator SHALL show its figures as `decimal` does, with two decimals and the unit, because its quartiles, medians and means can fall between whole numbers; a box plot's numbers of values and of outliers SHALL be whole numbers whatever the indicator's format.
+A widget SHALL show its plotted values with the format and unit of its indicator, the widget's own unit taking the place of the indicator's when the widget has one (see "Widget unit"): `count` as a whole number with thousands separators, `decimal` with two decimals, `percent` as the value times 100 followed by `%`, and `currency` with two decimals and the unit as the currency; any other unit SHALL be shown after the value. The same SHALL apply to a stat tile, axes, legends, tooltips and "Show as table"; a map's tooltip columns use their own format. A box plot over a `count` indicator SHALL show its figures as `decimal` does, with two decimals and the unit, because its quartiles, medians and means can fall between whole numbers; a box plot's numbers of values and of outliers SHALL be whole numbers whatever the indicator's format.
 
 #### Scenario: Rate shown as a percentage
 - **WHEN** the indicator `piped_water_rate` has the format `percent` and a stat tile shows the value 0.42
@@ -183,6 +190,10 @@ A widget SHALL show its plotted values with the format and unit of its indicator
 - **WHEN** a box plot over the indicator `household_size`, whose format is `count` and unit `people`, has a box of 1,200 values whose median is 4.5
 - **THEN** the box's median reads `4.50 people` and its number of values reads `1,200`
 
+#### Scenario: Widget's own unit
+- **WHEN** a column chart over `households_visited`, whose format is `count` and unit `households`, has the unit `households with children` of its own and shows 12,450 for `Cali`
+- **THEN** the column's label reads `12,450 households with children`
+
 ### Requirement: Ratio of sums
 A widget SHALL be able to plot, instead of one measure, the ratio of the sums of two numeric columns of its indicator over the rows of each group, with no value for a group whose denominator sums to zero. A box plot SHALL instead divide each row's numerator by that row's own denominator (see "Box plot").
 
@@ -195,7 +206,7 @@ A widget SHALL be able to plot, instead of one measure, the ratio of the sums of
 - **THEN** the widget shows no value for that group
 
 ### Requirement: Indicators dashboard and its indicators
-Every project member SHALL be able to open any dashboard of the project, which SHALL list the project's indicators with their label, unit and format and whether each has published a table. The dashboard's widgets SHALL come first on the page; the list of indicators MAY follow them inside a disclosure that is collapsed once any indicator has published and opens on demand. While no indicator has published, every dashboard SHALL say so, with instructions, SHALL show the list of indicators expanded as part of that message, and SHALL still list the widgets already configured on it. A user who is not a member SHALL get the same answer as for a project that does not exist.
+Every project member SHALL be able to open any dashboard of the project, which SHALL list the project's indicators with their label, unit and format and whether each has published a table. The dashboard's widgets SHALL come first on the page, followed by the dashboard's source when it has one (see `custom-dashboards` "Dashboard source shown"); the list of indicators MAY follow them inside a disclosure that is collapsed once any indicator has published and opens on demand. While no indicator has published, every dashboard SHALL say so, with instructions, SHALL show the list of indicators expanded as part of that message, and SHALL still list the widgets already configured on it. A user who is not a member SHALL get the same answer as for a project that does not exist.
 
 #### Scenario: Viewer opens a published dashboard
 - **WHEN** a `viewer` opens a dashboard of a project where at least one indicator has published
@@ -220,6 +231,10 @@ Every project member SHALL be able to open any dashboard of the project, which S
 #### Scenario: Not a member
 - **WHEN** a user who is not a member of the project requests its indicators or one of its dashboards
 - **THEN** the API responds 404
+
+#### Scenario: Source after the widgets
+- **WHEN** a member opens "Teatro", whose source is "Encuesta de mercado del Centro Bicentenario de Duitama, 478 encuestas"
+- **THEN** the source is shown under the widgets and before the list of indicators
 
 ### Requirement: Widget query over one indicator
 A widget's query SHALL select one indicator, either a measure (a numeric column of its table, `value` by default when the table has it, otherwise its first numeric column) or a ratio of two numeric columns, a column to group by (required for bar, column, line, pie, map, heat map, population pyramid, diverging Likert and cross table widgets), an optional series column (see "Series in a widget"), and up to 50 filters built the same way as the clean data dashboard's. Rows matching the query that share the same group value, and the same series value when there is a series, SHALL be summed, or combined as a ratio of sums, before being plotted, except in a box plot, where each row gives one value of its group's box (see "Box plot"). The row limit SHALL count what the widget plots: its groups, its pairs of group and series value when it has a series, the rows of a histogram with no group column, or the boxes of a box plot. On a dashboard, the rows SHALL also match the dashboard filters that narrow the widget (see `dashboard-filters`); those filters do not count toward the widget's 50.
@@ -449,7 +464,7 @@ A map's zoom and position SHALL NOT be saved. They SHALL NOT change the widget f
 - **THEN** the dashboard sends no new query for that widget
 
 ### Requirement: Map tooltip
-Pointing at a shape, tapping it, or reaching it from the keyboard SHALL show its tooltip. The tooltip SHALL show the group value as its heading, then the plotted value with the indicator's label, format and unit, then the widget's tooltip columns in their order, each with its label. Its text, labels included, SHALL be shown as text, never as markup.
+Pointing at a shape, tapping it, or reaching it from the keyboard SHALL show its tooltip. The tooltip SHALL show the group value as its heading, then the plotted value with the indicator's label, format and unit, the widget's own caption text and unit taking the place of the indicator's label and unit when the widget has them (see "Widget caption text" and "Widget unit"), then the widget's tooltip columns in their order, each with its label. Its text, labels included, SHALL be shown as text, never as markup.
 
 #### Scenario: City block
 - **WHEN** a member points at block `0042` on a map of the indicator `survey_progress` (label "Survey progress", format `percent`) whose tooltip columns are `address` labelled "Dirección", `sample_target` labelled "Meta muestral" and `achieved` labelled "Encuestas logradas", and the block's row has `Cra 5 # 10-20`, 20, 9 and a value of 0.45
@@ -458,6 +473,10 @@ Pointing at a shape, tapping it, or reaching it from the keyboard SHALL show its
 #### Scenario: Markup in a value
 - **WHEN** a tooltip column holds the text `<img src=x onerror=alert(1)>`, or a tooltip column's label is that text
 - **THEN** the tooltip shows those characters as text, and nothing runs
+
+#### Scenario: Own caption text and unit in a map tooltip
+- **WHEN** the same map has the caption text "Avance de la muestra" and the unit "de la meta", and a member points at block `0042`
+- **THEN** the tooltip's line of the plotted value reads `Avance de la muestra: 45% de la meta`, and the tooltip columns read as before
 
 ### Requirement: Pinned map tooltip
 After a tap, a click or a keyboard selection, a shape's tooltip SHALL stay open until the member taps or clicks elsewhere, presses Escape, moves to another shape, scrolls the page or moves focus away, or the map's rows change. A tooltip opened by pointing SHALL close when the pointer leaves the shape.
@@ -604,7 +623,7 @@ When a basemap's tiles cannot be loaded, the map SHALL go on showing its shapes,
 - **THEN** the shapes are drawn at once, the map says "Basemap unavailable" once, and zoom, tooltips and "Show as table" keep working
 
 ### Requirement: Moving a widget to another dashboard
-When editing a widget, an `analyst` or `admin` SHALL be able to choose another dashboard of the project for it. The widget SHALL keep its title, chart type, query, orientation and the dashboard filters it ignores, and SHALL be placed below the widgets of its new dashboard. A move that changes nothing else SHALL be accepted even when the widget's query is stale. A move SHALL be refused with an error on the dashboard when that dashboard is full or is not one of the project's.
+When editing a widget, an `analyst` or `admin` SHALL be able to choose another dashboard of the project for it. The widget SHALL keep every setting it is saved with (its title, chart type, query, display settings, the dashboard filters it ignores and its size), and SHALL be placed below the widgets of its new dashboard. A move that changes nothing else SHALL be accepted even when the widget's query is stale. A move SHALL be refused with an error on the dashboard when that dashboard is full or is not one of the project's.
 
 #### Scenario: Widget moved to another dashboard
 - **WHEN** an `analyst` edits the widget "Coverage by municipality" on the dashboard "Health" and chooses the dashboard "Field"
@@ -637,6 +656,10 @@ When editing a widget, an `analyst` or `admin` SHALL be able to choose another d
 #### Scenario: Horizontal box plot moved
 - **WHEN** an `analyst` moves a horizontal box plot from "Health" to "Field"
 - **THEN** it is horizontal on "Field"
+
+#### Scenario: Column labels kept by a move
+- **WHEN** an `analyst` moves a column chart of "Teatro" whose own label for `denominator` is "Hogares que asistieron" to "Cruces"
+- **THEN** on "Cruces" the chart still names its denominator "Hogares que asistieron"
 
 ### Requirement: Ignoring dashboard filters
 When adding or editing a widget, an `analyst` or `admin` SHALL be able to choose which of the dashboard's filters the widget ignores. The choice SHALL be saved with the widget, by the filters' columns, so a filter removed and later defined again on the same column is still ignored. A widget SHALL ignore at most 8 filters. A dashboard with no filters SHALL offer no such choice.
@@ -1067,3 +1090,558 @@ The widget menu button SHALL be offered at every width from 360 pixels, with no 
 #### Scenario: Widget form preview
 - **WHEN** an `analyst` previews a widget in the widget form
 - **THEN** the preview offers no widget menu, and keeps its own switch between chart and table
+
+### Requirement: Column labels of a widget
+A widget of any kind SHALL be able to give its own label, of 1 to 80 characters, to up to 10 columns, as a setting of how it is drawn. The name shown for a column SHALL be the widget's label, else its indicator's label (see `pipeline` "Column labels of an indicator"), else the column's own name. A widget's label SHALL be trimmed, an empty one SHALL mean none, and it SHALL NOT be checked against the published table. Changing the chart type SHALL keep the labels.
+
+#### Scenario: Widget label over the indicator's
+- **WHEN** `teatro_hoy` labels `denominator` "Hogares", and the column chart "2.2. Con qué frecuencia asiste" over it labels `denominator` "Hogares que asistieron"
+- **THEN** that chart names its denominator "Hogares que asistieron", and the other widgets over `teatro_hoy` name it "Hogares"
+
+#### Scenario: Indicator label used
+- **WHEN** a widget over `teatro_hoy` gives `comuna` no label of its own, and `teatro_hoy` labels it "Comuna"
+- **THEN** the widget names the column "Comuna"
+
+#### Scenario: Column's own name
+- **WHEN** neither a widget nor its indicator labels `hogar_menores`
+- **THEN** the widget names the column `hogar_menores`
+
+#### Scenario: Labels on a stat tile
+- **WHEN** an `analyst` saves a stat tile with its own label for `numerator`
+- **THEN** the stat tile is saved with that label
+
+#### Scenario: Labelled column removed from the table
+- **WHEN** a widget labels `estrato`, which it neither groups nor splits by, and a script change removes `estrato` from the indicator's table
+- **THEN** the widget is drawn as before, with no message about a missing column
+
+#### Scenario: Chart type changed
+- **WHEN** an `analyst` changes a column chart with its own labels into a bar chart
+- **THEN** the bar chart keeps the labels
+
+### Requirement: Column labels of a widget that are refused
+Saving a widget SHALL be refused, with an error on its labels and nothing saved, when it has more than 10 labels, when a label is longer than 80 characters or holds a control character, or when a label is given for a name that an indicator table's column cannot have (lowercase letters, digits and underscores, not starting with a digit, up to 63 characters).
+
+#### Scenario: Too many labels
+- **WHEN** an `analyst` saves a widget with labels for 11 columns
+- **THEN** the API responds 400 with an error on the widget's labels saying a widget labels at most 10 columns
+
+#### Scenario: Label too long
+- **WHEN** an `analyst` saves a widget with a label of 81 characters for `numerator`
+- **THEN** the API responds 400 with an error on the label of `numerator`
+
+#### Scenario: Not a column's name
+- **WHEN** an AI client saves a widget with a label for `Comuna`
+- **THEN** the call is refused with an error on the widget's labels saying `Comuna` is not a column's name, and nothing is saved
+
+### Requirement: Column labels in widget texts
+Every text of a widget that names one of its columns SHALL use the name shown for it: the caption and accessible name of a chart, a stat tile's description, tooltips, a map's tooltip columns with no label of their own, and the headers of "Show as table" and cross tables. What is plotted SHALL read as the indicator's label and the names of its measure, or of its numerator and denominator. Filters, colors kept by value and the form's column choices SHALL keep the columns' own names.
+
+#### Scenario: Caption of a ratio
+- **WHEN** `teatro_hoy`, labelled "Teatro hoy", labels `numerator` "Hogares que asistieron", `denominator` "Hogares" and `comuna` "Comuna", and a column chart plots that ratio grouped by `comuna`
+- **THEN** its caption reads "Teatro hoy: Hogares que asistieron / Hogares by Comuna"
+
+#### Scenario: Stat tile description
+- **WHEN** a stat tile plots the ratio of `numerator`, labelled "Hogares que asistieron", to `denominator`, labelled "Hogares", of `teatro_hoy`, labelled "Teatro hoy"
+- **THEN** its description reads "Teatro hoy: Hogares que asistieron / Hogares"
+
+#### Scenario: Measure named
+- **WHEN** a stacked column chart over `teatro_conteo`, labelled "Teatro conteo", plots the measure `value`, labelled "Hogares", grouped by `pregunta`, labelled "Pregunta", with the series `respuesta`, labelled "Respuesta"
+- **THEN** its accessible name says it plots "Teatro conteo: Hogares" by "Pregunta" and "Respuesta"
+
+#### Scenario: Table headers
+- **WHEN** a member shows the column chart of "Caption of a ratio" as a table
+- **THEN** its headers read "Comuna" and "Teatro hoy: Hogares que asistieron / Hogares"
+
+#### Scenario: Cross table headers
+- **WHEN** a member shows the stacked column chart of "Measure named" as a table
+- **THEN** its first header reads "Pregunta" and its series headers keep the answers, such as "1. Sí" and "2. Tal vez"
+
+#### Scenario: Map tooltip column without a label
+- **WHEN** a map's tooltip has the column `registros` with no label of its own, which its indicator labels "Registros recibidos", and the column `meta` with the label "Meta"
+- **THEN** the tooltip and "Show as table" name them "Registros recibidos" and "Meta"
+
+#### Scenario: Colors kept by value
+- **WHEN** "Teatro" keeps color 8 for "1. Sí" of `respuesta`, and `teatro_conteo` labels `respuesta` "Respuesta"
+- **THEN** the segments of "1. Sí" are still drawn in color 8
+
+#### Scenario: Filters keep the column's name
+- **WHEN** a widget with a label for `categoria` filters `categoria` equals "Sí"
+- **THEN** the filter still names `categoria` in the widget form and keeps matching the rows whose `categoria` is "Sí"
+
+### Requirement: Column labels in the widget form
+The widget form SHALL offer a label for each column the widget shows: its measure, or its numerator and denominator, its group column and its series column. Each field SHALL show the indicator's label, else the column's name, as its placeholder, and the preview SHALL show the labels as typed without a new query. A form saved unchanged SHALL keep the widget's labels as saved. A column that the analyst replaces in the form SHALL lose the widget's label.
+
+#### Scenario: Labels offered
+- **WHEN** an `analyst` edits a column chart grouped by `comuna` of the ratio of `numerator` to `denominator` of `teatro_hoy`, which labels the three columns "Comuna", "Hogares que asistieron" and "Hogares"
+- **THEN** the form offers a label field for each of the three columns, with the indicator's labels as placeholders
+
+#### Scenario: Preview without a query
+- **WHEN** the `analyst` types "Hogares que asistieron" as the label of `denominator`
+- **THEN** the preview's caption reads it, and no query is sent
+
+#### Scenario: Saved unchanged
+- **WHEN** an `analyst` opens a widget of "Teatro" saved by an AI client with labels for `numerator` and `estrato`, which it does not show, and saves the form without changing anything
+- **THEN** the widget keeps both labels, and "Teatro" has no new version
+
+#### Scenario: Column replaced
+- **WHEN** an `analyst` changes the group column of a widget with its own label for `comuna` to `estrato`, and saves
+- **THEN** the saved widget has no label for `comuna`
+
+#### Scenario: Tooltip column placeholder
+- **WHEN** an `analyst` adds the tooltip column `registros`, which its indicator labels "Registros recibidos", to a map
+- **THEN** the tooltip column's label field shows "Registros recibidos" as its placeholder
+
+### Requirement: Widgets and indicators without column labels
+A widget with no labels, over an indicator with none, SHALL look, read and export exactly as before column labels existed, naming its columns by their own names. A widget saved before column labels SHALL keep its stored settings as they are, so opening its form and saving it unchanged makes no version. A widget that plots its indicator's default measure without naming it SHALL keep the indicator's label alone as what it plots.
+
+#### Scenario: Dashboard before labels
+- **WHEN** a member opens "Teatro" after the upgrade, and none of its 44 widgets or of their indicators labels a column
+- **THEN** every caption, description and table header names `numerator`, `denominator` and the group columns as before
+
+#### Scenario: Stored settings kept
+- **WHEN** the API reads and writes again a widget's settings stored before column labels existed
+- **THEN** the stored text is the same, byte for byte
+
+#### Scenario: Default measure
+- **WHEN** a widget of "Quién respondió" names no measure and no ratio, and its indicator labels `value` "Personas"
+- **THEN** its caption names what it plots with the indicator's label alone, as before
+
+### Requirement: Widget subtitle
+A widget of any chart type SHALL be able to have a subtitle of 1 to 200 characters, such as the question its chart answers, shown under its title in muted text to every member. The subtitle SHALL NOT change the widget's rows. A widget without a subtitle SHALL show none.
+
+#### Scenario: Subtitle under the title
+- **WHEN** an `analyst` gives the bar chart "2.4. En qué lugares" of "Teatro" the subtitle "¿En qué lugares ha visto teatro en el último año? (E4)"
+- **THEN** every member who opens "Teatro" sees that subtitle under the chart's title
+
+#### Scenario: Subtitle of a stat tile
+- **WHEN** the stat tile "Centro cultural o casa de la cultura" has the subtitle "% de quienes asistieron (E4)"
+- **THEN** the subtitle shows under the tile's title, above its figure
+
+### Requirement: Widget footnote
+A widget of any chart type SHALL be able to have a footnote of 1 to 500 characters, shown at its foot under its chart, its table, or its message that no row matches. The footnote SHALL NOT change the widget's rows. A widget without a footnote SHALL show none.
+
+#### Scenario: Footnote under the chart
+- **WHEN** the bar chart "2.4. En qué lugares" has the footnote "No suman 100 %: respuesta múltiple."
+- **THEN** the footnote shows under its bars
+
+#### Scenario: Footnote under the table
+- **WHEN** a member shows that bar chart as a table
+- **THEN** the footnote shows under the table
+
+### Requirement: Widget caption text
+A widget SHALL be able to name what it plots with its own text of 1 to 200 characters, which replaces the indicator's label and its measure or ratio wherever the widget names what it plots: the line above a chart with no series and above a pie, map, heat map or cross table, a stat tile's label, the tooltip line of the plotted value, the value column of "Show as table", and the chart's accessible name. The rest of each line SHALL stay.
+
+#### Scenario: Own text above the bars
+- **WHEN** a bar chart over the ratio of `numerator` to `denominator` of `teatro_hoy`, grouped by `categoria`, has the caption text "% de quienes asistieron", in the English interface
+- **THEN** the line above its bars reads "% de quienes asistieron by categoria"
+
+#### Scenario: Own text in the table
+- **WHEN** a member shows that bar chart as a table
+- **THEN** its value column is headed "% de quienes asistieron"
+
+#### Scenario: Own text on a stat tile
+- **WHEN** the stat tile "Centro cultural o casa de la cultura" over `teatro_hoy` has the caption text "de quienes asistieron"
+- **THEN** the label under its figure reads "de quienes asistieron"
+
+#### Scenario: Series legend kept
+- **WHEN** a bar chart of `teatro_conteo` by `comuna`, stacked to 100% with the series `respuesta`, has the caption text "Iría al teatro (I1)"
+- **THEN** its legend still lists "1. Sí", "2. Tal vez", "3. No" and "4. No sabe", and each mark's tooltip names its value "Iría al teatro (I1)"
+
+### Requirement: Widget caption hidden
+A widget SHALL be able to hide the line that names what it plots: the line above a chart with no series and above a pie, map, heat map or cross table, and a stat tile's label. Its accessible name, its tooltips, its "Show as table" view and the value columns of its email and workbook tables SHALL still name what is plotted. A series legend SHALL NOT be hidden by it.
+
+#### Scenario: Hidden above the columns
+- **WHEN** the column chart "2.1. Asistió, por comuna" hides its caption
+- **THEN** no line shows above its columns, and a screen reader still reads what the chart plots
+
+#### Scenario: Hidden on a stat tile
+- **WHEN** the stat tile "Fuera de Duitama" hides its caption
+- **THEN** it shows its title and its figure, with no label under the figure
+
+#### Scenario: Table header kept
+- **WHEN** a member shows the column chart "2.1. Asistió, por comuna" as a table
+- **THEN** its value column still names what is plotted
+
+#### Scenario: Legend kept
+- **WHEN** a stacked bar chart with the series `barrera_tipo` hides its caption
+- **THEN** its legend of "Acceso", "Interés" and "Otra" is still shown
+
+### Requirement: Widget unit
+A widget SHALL be able to have its own unit of 1 to 32 characters, which replaces its indicator's unit wherever the widget writes a value with its unit: its chart, tooltips, "Show as table", images, the scheduled email, both workbooks, and the values MCP formats for it. The indicator's format SHALL still apply, and the indicator's other widgets SHALL keep its unit.
+
+#### Scenario: Base of a subgroup
+- **WHEN** the column chart "2.2" over `teatro_hoy`, whose format is `percent` and unit "de los hogares", has the unit "de quienes asistieron", and one of its columns is 0.1121
+- **THEN** that column's value reads "11.21% de quienes asistieron" in the English interface
+
+#### Scenario: Other widgets keep the indicator's unit
+- **WHEN** another widget of "Teatro" plots `teatro_hoy` and has no unit of its own
+- **THEN** its values end with "de los hogares"
+
+#### Scenario: Unit of a box plot
+- **WHEN** a box plot over `teatro_precio_hogar`, whose format is `count` and unit "pesos", has the unit "pesos por boleta" and a median of 40,000
+- **THEN** its median reads "40,000.00 pesos por boleta" in the English interface
+
+### Requirement: Widget indicator description
+A widget SHALL be able to offer its indicator's description: with the option on and an indicator that has a description, its header SHALL have a button named after the indicator that opens the description next to it and closes it again, from the pointer or the keyboard. Without the option, or when the indicator has no description, there SHALL be no button. The description SHALL NOT be printed or exported.
+
+#### Scenario: Description opened
+- **WHEN** a `viewer` opens "Teatro", whose bar chart "2.4. En qué lugares" offers the description of `teatro_hoy`, and chooses the chart's description button
+- **THEN** the description of `teatro_hoy` opens next to the button
+
+#### Scenario: Closed with Escape
+- **WHEN** a keyboard user opens that description and presses Escape
+- **THEN** the description closes and focus is back on its button
+
+#### Scenario: Indicator without a description
+- **WHEN** a widget has the option on and its indicator has no description
+- **THEN** its header has no description button
+
+#### Scenario: Not printed or exported
+- **WHEN** a member prints "Teatro" and exports "2.4. En qué lugares" as a PNG image
+- **THEN** neither the sheet nor the image holds the description button or the description
+
+### Requirement: Widget context validation
+Saving a widget SHALL be refused, with an error on the field, when its subtitle passes 200 characters, its footnote 500, its caption text 200 or its unit 32, when one of these texts holds a line break or another control character, or when its caption has its own text and is also hidden. A text that is empty or only spaces SHALL count as not set, and texts SHALL be saved without surrounding spaces. Every chart type SHALL take them.
+
+#### Scenario: Long subtitle
+- **WHEN** a request saves a widget with a subtitle of 201 characters
+- **THEN** the API responds 400 with an error on `config.display.subtitle` naming 200 characters, and nothing is saved
+
+#### Scenario: Line break in a footnote
+- **WHEN** a request saves a widget whose footnote holds a line break
+- **THEN** the API responds 400 with an error on `config.display.footnote`, and nothing is saved
+
+#### Scenario: Caption with a text and hidden
+- **WHEN** a request saves a caption with the text "% de quienes asistieron" that is also hidden
+- **THEN** the API responds 400 with an error on `config.display.caption`, and nothing is saved
+
+#### Scenario: Long unit
+- **WHEN** a request saves a widget with a unit of 33 characters
+- **THEN** the API responds 400 with an error on `config.display.unit` naming 32 characters, and nothing is saved
+
+#### Scenario: Blank subtitle
+- **WHEN** a request saves the subtitle "   "
+- **THEN** the widget is saved with no subtitle
+
+#### Scenario: Every chart type
+- **WHEN** a request saves a subtitle, a footnote, a caption text and a unit on a map, a stat tile and a Likert widget
+- **THEN** each widget is saved with them
+
+#### Scenario: Chart type changed
+- **WHEN** an `analyst` turns a bar chart that has a subtitle and a unit into a pie chart
+- **THEN** the pie chart is saved with the same subtitle and unit
+
+### Requirement: Widget context in the widget form
+The widget form SHALL let an `analyst` or `admin` set a widget's subtitle, footnote, caption (default, own text or hidden), unit, with the indicator's unit given as a hint, and whether the description button shows, which SHALL be unavailable, saying why, when the indicator has no description. Changing any of them SHALL redraw the preview without querying the indicator again. An error from the API SHALL show on its field.
+
+#### Scenario: Preview without a query
+- **WHEN** an `analyst` types a footnote and hides the caption in the widget form
+- **THEN** the preview shows the footnote and no caption line, and no new query is sent
+
+#### Scenario: Unit hint
+- **WHEN** an `analyst` edits the unit of a widget over `teatro_hoy`
+- **THEN** the unit field says that the indicator's unit is "de los hogares"
+
+#### Scenario: Description option unavailable
+- **WHEN** the widget's indicator has no description
+- **THEN** the option to show the description is unavailable and says that the indicator has none
+
+#### Scenario: Saved option on an indicator that lost its description
+- **WHEN** a widget saved with the description option on is edited after its indicator lost its description
+- **THEN** the option stays available, still checked, so that it can be turned off
+
+#### Scenario: Error on its field
+- **WHEN** the API refuses a footnote of 501 characters
+- **THEN** the error shows on the footnote field
+
+### Requirement: Widget context in a tile
+A widget's tile SHALL keep its size: its subtitle and footnote SHALL take room from its plot. On screen each SHALL show at most two lines, or one on a tile two rows high, a cut text ending with an ellipsis, read whole by screen readers and shown whole on pointing. A chart that does not fit its room SHALL be cut at its own box, never over the texts, and a stat tile short of room SHALL keep its figure whole and cut its label.
+
+#### Scenario: Long subtitle on a column chart
+- **WHEN** a column chart 6 columns wide and 4 rows high has a subtitle of 180 characters that needs three lines
+- **THEN** its tile is as tall as before, the subtitle shows two lines ending with an ellipsis, and the columns are drawn in the room left
+
+#### Scenario: Stat tile two rows high
+- **WHEN** a stat tile 3 columns wide and 2 rows high has a subtitle and a footnote
+- **THEN** its tile is as tall as before, each text shows on one line, and its figure shows whole between them
+
+#### Scenario: Whole text on pointing
+- **WHEN** a member points at a cut subtitle
+- **THEN** its whole text is shown
+
+### Requirement: Widget context warning in the widget form
+The widget form SHALL warn, without refusing the save, when a widget whose tile is two rows high or less has a subtitle or a footnote, or when its subtitle and footnote printed whole would fill half of its tile. The warning SHALL say that the texts take room from the chart or the figure and that a taller tile shows more of them.
+
+#### Scenario: Warning in the form
+- **WHEN** an `analyst` adds a footnote to a stat tile 2 rows high
+- **THEN** the form says that the texts take room from the figure and that a taller tile shows more of them
+
+#### Scenario: Warning for long texts
+- **WHEN** an `analyst` gives a column chart 4 columns wide and 3 rows high a footnote of 500 characters
+- **THEN** the form says that the texts take room from the chart and that a taller tile shows more of them
+
+#### Scenario: No warning on a tall tile
+- **WHEN** an `analyst` gives a column chart 6 columns wide and 4 rows high a subtitle of 80 characters
+- **THEN** the form shows no warning
+
+### Requirement: Widget context kept with the widget
+A widget's subtitle, footnote, caption, unit and description option SHALL be saved with its other display settings: a dashboard version SHALL hold them, a restore SHALL bring them back, a duplicated dashboard's widgets SHALL have them, and a widget moved to another dashboard SHALL keep them. Changing one of them SHALL make a version, and saving the widget form unchanged SHALL make none.
+
+#### Scenario: Subtitle restored
+- **WHEN** an `analyst` adds a subtitle to a widget of "Teatro" and then restores the version before that change
+- **THEN** the widget has no subtitle again, and the restore is a new version
+
+#### Scenario: Copied with the dashboard
+- **WHEN** an `analyst` duplicates "Teatro", whose bar chart "2.4. En qué lugares" has a subtitle, a footnote and a hidden caption
+- **THEN** that bar chart in the copy has the same subtitle and footnote, and its caption is hidden
+
+#### Scenario: Moved widget
+- **WHEN** an `analyst` moves that bar chart to "Segmentos"
+- **THEN** it keeps its subtitle, footnote, caption, unit and description button
+
+#### Scenario: Saved unchanged
+- **WHEN** an `analyst` opens a widget that has a subtitle and saves the form without changing anything
+- **THEN** the dashboard has no new version
+
+#### Scenario: Unit changed
+- **WHEN** an `analyst` changes only the unit of a widget of "Teatro"
+- **THEN** "Teatro" has a new version saying the widget changed
+
+### Requirement: Widget context left unset
+A widget with no subtitle, footnote, caption setting, unit or description option SHALL look, print, export and be sent exactly as before these settings existed, and its stored settings SHALL stay byte for byte as they were saved, so its dashboard makes no version until someone changes it.
+
+#### Scenario: Widgets saved before
+- **WHEN** a member opens "Teatro", none of whose 44 widgets has any of these settings
+- **THEN** every widget shows the same title, caption, values and units as before
+
+#### Scenario: Form saved unchanged before
+- **WHEN** an `analyst` opens a column chart in color 2 saved before these settings existed and saves the form without changing anything
+- **THEN** its stored settings are unchanged and the dashboard has no new version
+
+### Requirement: Reference lines on bars, columns and lines
+An `analyst` or `admin` SHALL be able to give a bar, column or line widget up to 4 reference lines, saved with the widget for every member. Each line SHALL have a kind: `mean`, `median`, `overall` or `value`. A `value` line SHALL have its number. Any line MAY have a label of 1 to 40 characters; a line without one SHALL show its kind's default label in the interface language. A widget without reference lines SHALL be drawn as before.
+
+#### Scenario: Mean and overall lines on a column chart
+- **WHEN** an `analyst` saves the column chart "2.1. Asistió, por comuna" over `teatro_hoy` with a `mean` line and an `overall` line
+- **THEN** every member who opens the dashboard "2. Teatro" sees both lines across its columns
+
+#### Scenario: Default label in Spanish
+- **WHEN** a column chart over `teatro_hoy`, whose format is `percent` and unit `de los hogares`, has a `mean` line at 0.3417 with no label, and the browser entry that chose Spanish for a member is `es-CO`
+- **THEN** the line reads "Promedio: 34,17 % de los hogares"
+
+#### Scenario: Own label
+- **WHEN** a `value` line of 0.5 on a `percent` indicator with no unit has the label "Meta"
+- **THEN** the line reads "Meta: 50%"
+
+#### Scenario: Widget saved before reference lines
+- **WHEN** a member opens a column chart saved before reference lines existed
+- **THEN** it is drawn with no line and no key, on the same axis as before
+
+### Requirement: Mean and median reference lines
+A `mean` or `median` line SHALL be at the mean or the median of the values the chart draws: its bars, or the points of its line, after the widget's and the dashboard's filters, the bar of a missing group value included. The median of an even number of values SHALL be the mean of the two middle ones, as pandas computes it. When the widget reaches the row limit, these lines SHALL summarize the bars it draws.
+
+#### Scenario: Four bars
+- **WHEN** a column chart of `teatro_hoy` grouped by `comuna` draws the values 0.40, 0.50, 0.60 and 0.20, with a `mean` and a `median` line
+- **THEN** the mean line is at 0.425 and the median line at 0.45
+
+#### Scenario: Three bars
+- **WHEN** a column chart draws the values 0.20, 0.50 and 0.60, with a `median` line
+- **THEN** the median line is at 0.50
+
+#### Scenario: Dashboard filter in force
+- **WHEN** a member sets the dashboard filter "Estrato" to `Estrato 2` over a column chart of `teatro_hoy` grouped by `comuna` with a `mean` line
+- **THEN** the mean line is the mean of the columns drawn under that filter
+
+#### Scenario: Missing group value counted
+- **WHEN** a bar chart grouped by `comuna` with a `mean` line draws a "(none)" bar for the rows with no comuna
+- **THEN** that bar counts in the mean like any other bar
+
+### Requirement: Overall reference line
+An `overall` line SHALL be at the ratio of the sums of the widget's numerator and denominator over every row its query matches, with the widget's and the dashboard's filters, whatever bars are drawn and wherever the row limit falls: the figure a stat tile with the same indicator, ratio and filters shows. An `overall` line SHALL need a ratio. An `overall` line with no value, because the denominators sum to zero, SHALL NOT be drawn.
+
+#### Scenario: Same figure as a stat tile
+- **WHEN** a stat tile of `teatro_hoy` with the ratio of `numerator` to `denominator` and the filters `variable` = `Asistió (E1)` and `categoria` = `Sí` shows 46.85%, and a column chart grouped by `comuna` with the same ratio and filters has an `overall` line
+- **THEN** the overall line is at 46.85%
+
+#### Scenario: Overall unlike the mean
+- **WHEN** a column chart of that ratio draws `COMUNA 1` with 60 of 121 households and `COMUNA 7` with 3 of 16, with a `mean` and an `overall` line
+- **THEN** the mean line is at 34.17% and the overall line at 45.99%
+
+#### Scenario: Answers of one question
+- **WHEN** a bar chart of `teatro_hoy` grouped by `categoria` with the filter `variable` = `Lugar (E4)`, in which every place has the same denominator in every cell of the table, has a `mean` and an `overall` line
+- **THEN** both lines are at the same value
+
+#### Scenario: Rows past the row limit
+- **WHEN** a bar chart with an `overall` line matches more groups than the row limit
+- **THEN** it says that the limit was reached, and its overall line still covers every row its query matches
+
+### Requirement: Fixed-value reference line
+A `value` line SHALL be drawn at its number, read in the indicator's units: a fraction for a `percent` indicator, a number of its unit for a `count` or `decimal` one. It SHALL show its value formatted as the widget's values are, with their unit.
+
+#### Scenario: Target on a percent indicator
+- **WHEN** the bar chart "2.4. En qué lugares" over `teatro_hoy`, whose format is `percent` and unit `de los hogares`, has a `value` line of 0.25 labelled "Meta"
+- **THEN** the line is drawn at 25% and reads "Meta: 25% de los hogares"
+
+#### Scenario: Count with a unit
+- **WHEN** a column chart over `teatro_conteo`, whose format is `count` and unit `hogares`, has a `value` line of 100 with no label, in English
+- **THEN** the line reads "Reference: 100 hogares"
+
+### Requirement: Reference lines with a series
+A grouped bar or column widget and a line widget with a series SHALL take `overall` and `value` lines, the `overall` line at the widget's total over all its rows. A stacked widget SHALL take only `value` lines. A 100% widget SHALL take only `value` lines whose number is a share from 0 to 1, drawn at that share of each bar. No widget with a series SHALL take a `mean` or a `median` line.
+
+#### Scenario: Overall line on grouped columns
+- **WHEN** a grouped column chart of `teatro_hoy` grouped by `comuna` with the series `estrato` and the filters `variable` = `Asistió (E1)` and `categoria` = `Sí` has an `overall` line
+- **THEN** the line is at the total of all its rows, the grand total its "Show as table" view gives
+
+#### Scenario: Half of every bar
+- **WHEN** the 100% bar chart "2.8. Iría al teatro, por comuna" over `teatro_conteo`, with the series `respuesta`, has a `value` line of 0.5
+- **THEN** the line crosses every bar at half its length and reads "Reference: 50%"
+
+### Requirement: Reference line settings refused
+Saving a widget SHALL be rejected, with an error on its reference lines or on the line at fault, when it has more than 4 lines; a line with no kind or an unknown one; a second `mean`, `median` or `overall` line; a `value` line without its number, or another kind with one; a label longer than 40 characters or holding a line break or another control character; a line its chart type or layout does not take; or an `overall` line over a measure.
+
+#### Scenario: Five lines
+- **WHEN** an `analyst` saves a column chart with 5 reference lines
+- **THEN** the API responds 400 with an error on the reference lines naming the limit of 4
+
+#### Scenario: Line on a pie chart
+- **WHEN** an `analyst` saves a pie chart with a `mean` line
+- **THEN** the API responds 400 with an error on the reference lines
+
+#### Scenario: Mean line with a series
+- **WHEN** an `analyst` saves the 100% bar chart "2.8. Iría al teatro, por comuna", which has the series `respuesta`, with a `mean` line
+- **THEN** the API responds 400 with an error on that line's kind
+
+#### Scenario: Overall line over a measure
+- **WHEN** an `analyst` saves a bar chart that plots the measure `value` of `teatro_conteo` with an `overall` line
+- **THEN** the API responds 400 with an error on that line's kind, saying that an overall line needs a ratio
+
+#### Scenario: Value line without its number
+- **WHEN** an `analyst` saves a column chart with a `value` line that has no number
+- **THEN** the API responds 400 with an error on that line's value
+
+#### Scenario: Share past the whole bar
+- **WHEN** an `analyst` saves a 100% bar chart with a `value` line of 1.5
+- **THEN** the API responds 400 with an error on that line's value, saying that it is a share from 0 to 1
+
+#### Scenario: Line break in a label
+- **WHEN** an `analyst` saves through the API a column chart whose `value` line has the label "Meta" followed by a line break and "2027"
+- **THEN** the API responds 400 with an error on that line's label
+
+### Requirement: Reference lines drawn
+Each reference line SHALL be a dashed line across the plot at its value, vertical on a bar chart and horizontal on a column or line chart, in its own dash pattern and the text's ink, on an axis that reaches it. At its end it SHALL show its label and value, as tooltips write values, unless that text would not fit or would cover another's. A key under the plot, above the widget's footnote, SHALL list every line with that text, and the accessible description SHALL name each line and its value.
+
+#### Scenario: Mean line on horizontal bars
+- **WHEN** a member opens the bar chart "2.4. En qué lugares" with a `mean` line
+- **THEN** a vertical dashed line crosses the bars at their mean, labelled with "Mean" and its value
+
+#### Scenario: Axis widened
+- **WHEN** every column of a chart is below 30% and it has a `value` line at 0.5
+- **THEN** its axis reaches 50% and the line is drawn inside the plot
+
+#### Scenario: Lines close together
+- **WHEN** a column chart's `mean` and `median` lines are so close that their labels would overlap
+- **THEN** only the first line's label is drawn at the lines, and the key lists both with their values
+
+#### Scenario: Text too wide for the plot
+- **WHEN** a narrow column chart over `teatro_hoy` has a `value` line of 0.5 labelled "Meta del plan de desarrollo municipal", whose text with its value and unit is wider than the plot
+- **THEN** the line is drawn with no text at it, and the key reads "Meta del plan de desarrollo municipal: 50% de los hogares"
+
+#### Scenario: Screen reader
+- **WHEN** a screen reader reads a column chart with an `overall` line at 45.99%
+- **THEN** it hears the line's label and 45.99% after the chart's summary
+
+#### Scenario: Key above the footnote
+- **WHEN** the column chart "2.1. Asistió, por comuna", with the footnote "No suman 100 %: respuesta múltiple.", has a `mean` line
+- **THEN** the key listing the line shows under the columns, the footnote shows under the key, and the columns are drawn in the room left, as when a subtitle or a footnote takes room (see "Widget context in a tile")
+
+### Requirement: Reference lines in "Show as table"
+The "Show as table" view of a widget with reference lines SHALL keep its table as it is, and SHALL list under the table each line drawn, with its label and formatted value, in the order the widget lists them, above the widget's footnote.
+
+#### Scenario: Column chart as a table
+- **WHEN** a member switches the column chart "2.1. Asistió, por comuna" over `teatro_hoy`, with a `mean` line at 34.17% and an `overall` line at 45.99%, to "Show as table"
+- **THEN** the table lists the comunas as before, and under it reads "Mean: 34.17% de los hogares" and "Overall: 45.99% de los hogares"
+
+### Requirement: Step lines
+An `analyst` or `admin` SHALL be able to draw a line widget, with or without a series, with steps: each point's value SHALL hold until the next point, where the line SHALL move straight to the next value. The choice SHALL be saved with the widget for every member, and changing it SHALL NOT query the indicator again. A gap in a series SHALL stay a gap. Saving a choice of segments other than straight or steps, or any choice on a widget that is not a line chart, SHALL be rejected.
+
+#### Scenario: Demand curve with steps
+- **WHEN** a member opens a line chart of `teatro_demanda` grouped by `precio`, drawn with steps, whose first two points are 98.03% at `$0` and 60% at `$10.000`
+- **THEN** the line runs level at 98.03% from `$0` to `$10.000`, then drops straight to 60%
+
+#### Scenario: Steps per series
+- **WHEN** the line chart "Curva de demanda por comuna", with the series `comuna`, is drawn with steps
+- **THEN** each comuna's line is drawn with steps, in its color
+
+#### Scenario: Steps on a column chart
+- **WHEN** an `analyst` saves a column chart with steps
+- **THEN** the API responds 400 with an error on the choice of segments
+
+### Requirement: Data labels on bars, columns, lines and pies
+An `analyst` or `admin` SHALL be able to show data labels on a bar or column widget with no series or a grouped layout, and on a line or pie widget: each bar's formatted value at its end, each point's above it, each slice's on it. A label that does not fit its mark, or would cover a label already drawn, SHALL NOT be drawn. Data labels SHALL be off by default. Saving the setting on another kind, or data labels turned on with a stacked or 100% layout, SHALL be rejected.
+
+#### Scenario: Value at the end of a bar
+- **WHEN** a member opens the bar chart "2.4. En qué lugares" over `teatro_hoy` with data labels
+- **THEN** the bar of "Centro cultural o casa de la cultura" reads "24.22% de los hogares" at its end
+
+#### Scenario: Columns too narrow
+- **WHEN** a grouped column chart with data labels has columns narrower than their labels
+- **THEN** those labels are not drawn, and each column's tooltip still gives its value
+
+#### Scenario: Thin slice
+- **WHEN** a pie chart with data labels has a slice too thin for its label
+- **THEN** that slice has no label and the other slices have theirs
+
+#### Scenario: Off by default
+- **WHEN** a member opens a bar chart saved without data labels
+- **THEN** it draws no data label
+
+#### Scenario: Stacked bars
+- **WHEN** an `analyst` saves a stacked bar chart with data labels
+- **THEN** the API responds 400 with an error on the data labels
+
+### Requirement: Chart annotations in the widget form
+The widget form SHALL offer only the reference lines, steps and data labels the widget takes, SHALL take a percent target as a percent, and SHALL say that over the answers of one question an `overall` line is only the mean of the bars. Editing them SHALL redraw the preview without a new query, except adding or removing an `overall` line on a widget with no series, which SHALL query once. A change of chart type, series or layout SHALL drop what the widget no longer takes.
+
+#### Scenario: Label edited
+- **WHEN** an `analyst` changes the label of a `mean` line in the widget form
+- **THEN** the preview is redrawn without querying the indicator again
+
+#### Scenario: Overall line added
+- **WHEN** an `analyst` adds an `overall` line in the widget form of a column chart with no series
+- **THEN** the preview queries the indicator once and draws the line
+
+#### Scenario: Kinds offered with a series
+- **WHEN** an `analyst` adds a reference line to a grouped column chart of a ratio with a series
+- **THEN** the form offers only the `overall` and `value` kinds
+
+#### Scenario: Percent typed in the form
+- **WHEN** an `analyst` types 50 as the value of a `value` line on a `percent` indicator and saves
+- **THEN** the line is drawn at 50%, and the widget is saved with the number 0.5
+
+#### Scenario: Overall help
+- **WHEN** an `analyst` picks the `overall` kind for the bar chart "2.4. En qué lugares"
+- **THEN** the form says that when the bars are the answers of one question, such as places or reasons, the line is only their mean and not a total
+
+#### Scenario: Column chart turned into a pie chart
+- **WHEN** an `analyst` changes a column chart with a `mean` line and data labels into a pie chart
+- **THEN** the saved pie chart has data labels and no reference lines
+
+### Requirement: Chart annotations kept with the widget
+Reference lines, steps and data labels SHALL be saved with the widget's display settings: a dashboard version, a duplicated dashboard and a widget moved to another dashboard SHALL keep them. A widget saved before they existed SHALL keep its stored settings, and make no new version, when its form is saved without a change.
+
+#### Scenario: Line restored away
+- **WHEN** an `analyst` adds a `mean` line to a column chart of "2. Teatro" and then restores the version before that change
+- **THEN** the column chart has no mean line, and the restore is a new version
+
+#### Scenario: Steps duplicated
+- **WHEN** an `analyst` duplicates "2. Teatro", whose demand curve is drawn with steps
+- **THEN** the copy's demand curve is drawn with steps
+
+#### Scenario: Data labels moved
+- **WHEN** an `analyst` moves a bar chart with data labels from "2. Teatro" to "5. Centro"
+- **THEN** it shows its data labels on "5. Centro"
+
+#### Scenario: Form saved unchanged
+- **WHEN** an `analyst` opens a widget of "2. Teatro" saved before chart annotations existed and saves the form without changing anything
+- **THEN** "2. Teatro" has no new version, and the widget's stored settings are unchanged

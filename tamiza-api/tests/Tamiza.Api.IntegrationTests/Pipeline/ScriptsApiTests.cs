@@ -503,6 +503,314 @@ public sealed class ScriptsApiTests(PostgresFixture postgres) : IDisposable
             paths.GetProperty("/api/v1/projects/{projectId}/scripts/indicators/{name}/versions/{number}/restore").GetProperty("post").GetProperty("operationId").GetString());
     }
 
+    // Column labels of an indicator (design D3 and D4 of the indicator column metadata)
+
+    private static Task<HttpResponseMessage> PutColumnsAsync(
+        HttpClient client, IngestionHarness h, string name, object? columns, string code = Compute, string label = "Teatro hoy", string format = "percent") =>
+        client.PutAsJsonAsync(IndicatorUrl(h, name), new { code, label, format, columns });
+
+    /// <summary>A save that sends no <c>columns</c> member at all, as a client that does not know them does.</summary>
+    private static Task<HttpResponseMessage> PutWithoutColumnsAsync(HttpClient client, IngestionHarness h, string name, string code = Compute) =>
+        client.PutAsJsonAsync(IndicatorUrl(h, name), new { code, label = "Teatro hoy", format = "percent" });
+
+    private static Task<string?> StoredColumnsAsync(IngestionHarness h, string name, int number) =>
+        TestData.ScalarAsync<string?>(h.Db, $"SELECT columns::text FROM tamiza.script_versions WHERE name = '{name}' AND number = {number}")!;
+
+    /// <summary>The labels of a <c>columns</c> member as column to label, in any order; null when the member is null or absent.</summary>
+    private static Dictionary<string, string?>? LabelsOf(JsonElement version)
+    {
+        if (!version.TryGetProperty("columns", out var columns) || columns.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        return columns.EnumerateObject().ToDictionary(c => c.Name, c => c.Value.TryGetProperty("label", out var label) ? label.GetString() : null);
+    }
+
+    [Fact]
+    public async Task Labels_of_a_ratio_are_saved_listed_and_returned_with_the_version()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await PutColumnsAsync(h.Admin, h, "teatro_hoy", new
+        {
+            numerator = new { label = "Hogares que asistieron" },
+            denominator = new { label = "Hogares" },
+        });
+        var saved = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var expected = new Dictionary<string, string?> { ["numerator"] = "Hogares que asistieron", ["denominator"] = "Hogares" };
+        // Every path that projects a version gives them: the save's answer, the list (indicator and current), a version's details, and the overview.
+        Assert.Equal(expected, LabelsOf(saved));
+        var list = await h.Admin.GetFromJsonAsync<JsonElement>(Scripts(h));
+        var indicator = Assert.Single(list.GetProperty("indicators").EnumerateArray());
+        Assert.Equal(expected, LabelsOf(indicator));
+        Assert.Equal(expected, LabelsOf(indicator.GetProperty("current")));
+        Assert.Equal(expected, LabelsOf(await h.Admin.GetFromJsonAsync<JsonElement>($"{IndicatorUrl(h, "teatro_hoy")}/versions/1")));
+        var overview = await h.Admin.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{h.ProjectId}/indicators");
+        Assert.Equal(expected, LabelsOf(Assert.Single(overview.GetProperty("indicators").EnumerateArray())));
+        Assert.False(LabelsOf(saved)!.ContainsKey("comuna"));
+    }
+
+    [Fact]
+    public async Task A_label_is_trimmed_and_an_empty_one_is_no_label()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var saved = await ReadAsync(await PutColumnsAsync(h.Admin, h, "teatro_hoy", new
+        {
+            comuna = new { label = "  Comuna  " },
+            estrato = new { label = "   " },
+            barrio = new { label = (string?)null },
+            sector = (object?)null,
+        }));
+
+        Assert.Equal(new Dictionary<string, string?> { ["comuna"] = "Comuna" }, LabelsOf(saved));
+        Assert.Equal("""{"comuna": {"label": "Comuna"}}""", await StoredColumnsAsync(h, "teatro_hoy", 1));
+    }
+
+    [Fact]
+    public async Task A_label_cleared_leaves_the_column_with_none()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { comuna = new { label = "Comuna" }, numerator = new { label = "Hogares" } });
+
+        var saved = await ReadAsync(await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { numerator = new { label = "Hogares" }, comuna = new { label = "" } }));
+
+        Assert.Equal(new Dictionary<string, string?> { ["numerator"] = "Hogares" }, LabelsOf(saved));
+    }
+
+    [Fact]
+    public async Task A_label_can_be_saved_before_the_indicator_has_ever_published()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var saved = await ReadAsync(await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { grupo_edad = new { label = "Grupo de edad" } }));
+        var overview = await h.Admin.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{h.ProjectId}/indicators");
+
+        Assert.Equal(new Dictionary<string, string?> { ["grupo_edad"] = "Grupo de edad" }, LabelsOf(saved));
+        var entry = Assert.Single(overview.GetProperty("indicators").EnumerateArray());
+        Assert.False(entry.GetProperty("published").GetBoolean());
+        Assert.Equal(new Dictionary<string, string?> { ["grupo_edad"] = "Grupo de edad" }, LabelsOf(entry));
+    }
+
+    [Fact]
+    public async Task An_indicator_without_labels_has_columns_null()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var saved = await ReadAsync(await PutWithoutColumnsAsync(h.Admin, h, "teatro_hoy"));
+        var list = await h.Admin.GetFromJsonAsync<JsonElement>(Scripts(h));
+
+        Assert.Equal(JsonValueKind.Null, saved.GetProperty("columns").ValueKind);
+        Assert.Equal(JsonValueKind.Null, Assert.Single(list.GetProperty("indicators").EnumerateArray()).GetProperty("columns").ValueKind);
+        Assert.Null(await StoredColumnsAsync(h, "teatro_hoy", 1));
+    }
+
+    [Fact]
+    public async Task A_label_of_81_characters_is_refused_on_its_column_and_no_version_is_created()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { numerator = new { label = new string('a', 81) } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["A column label can have up to 80 characters."], Errors(await ReadAsync(response), "columns.numerator.label"));
+        Assert.Equal(0L, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+        Assert.Equal(HttpStatusCode.Created, (await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { numerator = new { label = new string('a', 80) } })).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_key_that_is_not_a_columns_name_is_refused_on_the_columns()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await PutColumnsAsync(h.Admin, h, "teatro_hoy", new Dictionary<string, object> { ["Hogar Menores"] = new { label = "Hogares con menores" } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await ReadAsync(response);
+        Assert.Equal(["columns"], problem.GetProperty("errors").EnumerateObject().Select(p => p.Name));
+        Assert.StartsWith("'Hogar Menores' is not a column's name", Assert.Single(Errors(problem, "columns")));
+        Assert.Equal(0L, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
+
+    [Theory]
+    [InlineData("Hogares\nque asistieron")]
+    [InlineData("Hogares\tque asistieron")]
+    [InlineData("Hogares\u0000")]
+    public async Task A_label_with_a_control_character_is_refused_on_its_column(string label)
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { numerator = new { label } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["A column label cannot hold a line break or another control character."], Errors(await ReadAsync(response), "columns.numerator.label"));
+        Assert.Equal(0L, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
+
+    [Fact]
+    public async Task Labels_for_101_columns_are_refused_and_100_are_accepted()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        Dictionary<string, object> Columns(int count) =>
+            Enumerable.Range(1, count).ToDictionary(i => $"columna_{i}", i => (object)new { label = $"Columna {i}" });
+
+        var many = await PutColumnsAsync(h.Admin, h, "teatro_hoy", Columns(101));
+        var enough = await PutColumnsAsync(h.Admin, h, "teatro_hoy", Columns(100));
+
+        Assert.Equal(HttpStatusCode.BadRequest, many.StatusCode);
+        Assert.Equal(["An indicator labels at most 100 columns."], Errors(await ReadAsync(many), "columns"));
+        Assert.Equal(HttpStatusCode.Created, enough.StatusCode);
+        Assert.Equal(1L, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
+
+    [Fact]
+    public async Task A_property_the_api_does_not_know_is_ignored_and_not_refused()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { numerator = new { label = "Hogares", colour = "red" }, denominator = new { colour = "blue" } });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(new Dictionary<string, string?> { ["numerator"] = "Hogares" }, LabelsOf(await ReadAsync(response)));
+        Assert.Equal("""{"numerator": {"label": "Hogares"}}""", await StoredColumnsAsync(h, "teatro_hoy", 1));
+    }
+
+    [Fact]
+    public async Task Every_problem_of_one_save_is_reported_at_once_with_the_label_and_format_errors()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await h.Admin.PutAsJsonAsync(IndicatorUrl(h, "teatro_hoy"), new
+        {
+            code = Compute,
+            label = new string('l', 121),
+            format = "ratio",
+            columns = new Dictionary<string, object>
+            {
+                ["numerator"] = new { label = new string('a', 81) },
+                ["Hogar Menores"] = new { label = "Hogares" },
+                ["comuna"] = new { label = "Co\nmuna" },
+            },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["columns", "columns.comuna.label", "columns.numerator.label", "format", "label"],
+            (await ReadAsync(response)).GetProperty("errors").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(0L, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
+
+    [Fact]
+    public async Task Code_saved_without_labels_keeps_those_of_the_current_version_as_they_are_stored()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { numerator = new { label = "Hogares que asistieron" } });
+        // A property of a later release, written into the stored text: a save that leaves the labels out moves the text whole.
+        await TestData.ExecuteAsync(h.Db, """
+            UPDATE tamiza.script_versions SET columns = '{"numerator": {"label": "Hogares que asistieron", "order": ["a", "b"]}}' WHERE number = 1
+            """);
+
+        var second = await ReadAsync(await PutWithoutColumnsAsync(h.Admin, h, "teatro_hoy", "# two\n" + Compute));
+        var third = await ReadAsync(await PutColumnsAsync(h.Admin, h, "teatro_hoy", null, "# three\n" + Compute));
+
+        Assert.Equal(new Dictionary<string, string?> { ["numerator"] = "Hogares que asistieron" }, LabelsOf(second));
+        Assert.Equal(new Dictionary<string, string?> { ["numerator"] = "Hogares que asistieron" }, LabelsOf(third));
+        Assert.Equal(await StoredColumnsAsync(h, "teatro_hoy", 1), await StoredColumnsAsync(h, "teatro_hoy", 2));
+        Assert.Equal(await StoredColumnsAsync(h, "teatro_hoy", 1), await StoredColumnsAsync(h, "teatro_hoy", 3));
+        Assert.Contains("\"order\"", await StoredColumnsAsync(h, "teatro_hoy", 3));
+    }
+
+    [Fact]
+    public async Task Labels_given_replace_all_the_labels_of_the_current_version()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { numerator = new { label = "Hogares que asistieron" }, denominator = new { label = "Hogares" } });
+
+        var second = await ReadAsync(await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { comuna = new { label = "Comuna" } }));
+
+        Assert.Equal(new Dictionary<string, string?> { ["comuna"] = "Comuna" }, LabelsOf(second));
+        Assert.Equal("""{"comuna": {"label": "Comuna"}}""", await StoredColumnsAsync(h, "teatro_hoy", 2));
+    }
+
+    [Fact]
+    public async Task An_empty_set_of_labels_clears_them_and_stores_null()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { numerator = new { label = "Hogares" } });
+
+        var second = await ReadAsync(await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { }));
+        var third = await ReadAsync(await PutWithoutColumnsAsync(h.Admin, h, "teatro_hoy", "# three\n" + Compute));
+
+        Assert.Null(LabelsOf(second));
+        Assert.Null(LabelsOf(third));
+        Assert.Null(await StoredColumnsAsync(h, "teatro_hoy", 2));
+        Assert.Null(await StoredColumnsAsync(h, "teatro_hoy", 3));
+    }
+
+    [Fact]
+    public async Task A_removed_indicator_saved_again_has_no_labels_and_restoring_a_version_before_the_removal_brings_them_back()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { numerator = new { label = "Hogares que asistieron" } });
+        var removed = await h.Admin.DeleteAsync(IndicatorUrl(h, "teatro_hoy"));
+
+        var again = await ReadAsync(await PutWithoutColumnsAsync(h.Admin, h, "teatro_hoy", "# again\n" + Compute));
+        var restored = await ReadAsync(await h.Admin.PostAsync($"{IndicatorUrl(h, "teatro_hoy")}/versions/1/restore", null));
+
+        Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
+        Assert.Null(await StoredColumnsAsync(h, "teatro_hoy", 2));
+        Assert.Null(LabelsOf(again));
+        Assert.Equal(new Dictionary<string, string?> { ["numerator"] = "Hogares que asistieron" }, LabelsOf(restored));
+    }
+
+    [Fact]
+    public async Task Column_labels_come_back_with_the_version_that_is_restored_and_a_property_this_release_does_not_know_is_kept()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { numerator = new { label = "Hogares que asistieron" } });
+        await TestData.ExecuteAsync(h.Db, """
+            UPDATE tamiza.script_versions SET columns = '{"numerator": {"label": "Hogares que asistieron", "order": ["a", "b"]}}' WHERE number = 1
+            """);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { }, "# three\n" + Compute);
+
+        var restore = await h.Admin.PostAsync($"{IndicatorUrl(h, "teatro_hoy")}/versions/1/restore", null);
+        var restored = await ReadAsync(restore);
+
+        Assert.Equal(HttpStatusCode.Created, restore.StatusCode);
+        Assert.Equal(3, restored.GetProperty("number").GetInt32());
+        Assert.Equal(new Dictionary<string, string?> { ["numerator"] = "Hogares que asistieron" }, LabelsOf(restored));
+        Assert.Equal(await StoredColumnsAsync(h, "teatro_hoy", 1), await StoredColumnsAsync(h, "teatro_hoy", 3));
+        Assert.Contains("\"order\"", await StoredColumnsAsync(h, "teatro_hoy", 3));
+    }
+
+    [Fact]
+    public async Task Column_labels_are_kept_apart_per_indicator_and_script_1_and_2_hold_none()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { numerator = new { label = "Hogares" } });
+        await SaveAsync(h.Admin, h, "clean", Clean);
+
+        var other = await ReadAsync(await PutWithoutColumnsAsync(h.Admin, h, "teatro_barreras"));
+
+        Assert.Null(LabelsOf(other));
+        Assert.Equal(1L, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions WHERE columns IS NOT NULL"));
+        Assert.Null(await TestData.ScalarAsync<string?>(h.Db, "SELECT columns::text FROM tamiza.script_versions WHERE kind = 'clean'")!);
+    }
+
+    [Fact]
+    public async Task The_openapi_document_describes_the_column_labels_of_a_save()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        using var client = h.Factory.CreateClient();
+
+        var document = await client.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        Assert.True(schemas.GetProperty("SaveIndicatorRequest").GetProperty("properties").TryGetProperty("columns", out _));
+        Assert.True(schemas.GetProperty("IndicatorColumnMetadata").GetProperty("properties").TryGetProperty("label", out _));
+    }
 
     public void Dispose() => _kobo.Dispose();
 }

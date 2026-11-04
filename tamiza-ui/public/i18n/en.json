@@ -615,6 +615,12 @@
       "unitHint": "Shown after the value, such as households. For the currency format, the currency code, such as COP.",
       "format": "Format"
     },
+    "columns": {
+      "title": "Column names",
+      "hint": "The name shown for the column in captions, tables, emails and workbooks. Empty: the column's own name.",
+      "notInTable": "Not in the table",
+      "afterTest": "The columns are listed after a test."
+    },
     "nameErrors": {
       "required": "Enter a name.",
       "invalid": "Use lowercase letters, digits and underscores only, starting with a letter, up to 63 characters.",
@@ -1556,7 +1562,8 @@
       "shownAsTable": "“{{ title }}” is shown as a table",
       "shownAsChart": "“{{ title }}” is shown as a chart",
       "editItem": "Edit widget",
-      "removeItem": "Remove widget"
+      "removeItem": "Remove widget",
+      "about": "About {{ label }}"
     },
     "widget": {
       "notPublished": "{{ label }} has not published yet.",
@@ -1571,6 +1578,16 @@
       "title": "This widget cannot be drawn",
       "columns": "The published table no longer has the columns: {{ names }}.",
       "help": "A script change removed them. Edit the widget to choose others, or restore them in the script."
+    },
+    "referenceLines": {
+      "key": "Reference lines",
+      "kinds": {
+        "mean": "Mean",
+        "median": "Median",
+        "overall": "Overall",
+        "value": "Reference"
+      },
+      "summary": "Reference lines: {{ lines }}."
     },
     "chart": {
       "noGroup": "(none)",
@@ -1758,6 +1775,43 @@
         "legend": "Color",
         "help": "One of the eight colors of the dashboard's palette. The chart keeps its number if the palette changes."
       },
+      "labels": {
+        "heading": "Column names",
+        "help": "The names this widget gives its columns in its caption, tables, images and emails; up to {{ max }} columns. Empty: the indicator's name for the column, else the column's own name."
+      },
+      "subtitle": {
+        "label": "Subtitle",
+        "hint": "Optional. The question the chart answers, under the title."
+      },
+      "context": {
+        "legend": "Text on the widget",
+        "help": "Words that go with the chart. They are shown as written, in the widget, its images, its emails and its workbooks.",
+        "caption": {
+          "legend": "Caption",
+          "help": "The line that names what the widget plots. Hidden, it still names it to screen readers, tooltips and tables.",
+          "default": "Default",
+          "text": "Own text",
+          "hidden": "Hidden",
+          "textLabel": "Caption text",
+          "line": "Reads: {{ line }}"
+        },
+        "unit": {
+          "label": "Unit",
+          "hint": "The indicator's unit is “{{ unit }}”. Leave this empty to use it.",
+          "hintNone": "The indicator has no unit. Leave this empty to show none."
+        },
+        "footnote": {
+          "label": "Footnote",
+          "hint": "Optional. A note at the foot of the widget."
+        },
+        "description": {
+          "label": "Show the indicator's description",
+          "help": "Adds a button to the widget's header that opens the indicator's description.",
+          "none": "The indicator has no description."
+        },
+        "crowded": "The texts take room from the chart. A taller tile shows more of them.",
+        "crowdedFigure": "The texts take room from the figure. A taller tile shows more of them."
+      },
       "ramp": {
         "legend": "Scale",
         "help": "The sequential scale the values are shaded on.",
@@ -1797,6 +1851,52 @@
         "vertical": "Vertical",
         "horizontal": "Horizontal",
         "help": "Vertical puts the first box on the left; horizontal puts it at the top and suits long names."
+      },
+      "referenceLines": {
+        "legend": "Reference lines",
+        "help": "Dashed lines across the chart to compare its bars or points with. Up to {{ max }}.",
+        "kind": "Kind of reference line {{ n }}",
+        "kinds": {
+          "mean": "Mean of the bars",
+          "median": "Median of the bars",
+          "overall": "Overall value",
+          "value": "Fixed value"
+        },
+        "kindHelp": {
+          "mean": "The mean of the values the chart draws, after every filter. Leave the label empty to write “Mean”.",
+          "median": "The median of the values the chart draws. With an even number of values it is the mean of the two middle ones.",
+          "overall": "The indicator’s value over all the widget’s rows, the figure a stat tile with the same filters shows. It needs a ratio.",
+          "value": "A number to compare with, such as a target. {{ units }}"
+        },
+        "unitsPercent": "Type it as a percent: 50 for 50%.",
+        "unitsPlain": "Type it in the indicator’s units, with no thousands separator.",
+        "overallCaution": "When the bars are the answers of one question, such as places or reasons, they share one base, and this line is only their mean, not a total. Use it when the bars are groups of households, such as comunas or estratos.",
+        "value": "Value of reference line {{ n }}",
+        "label": "Label of reference line {{ n }}",
+        "remove": "Remove reference line {{ n }}",
+        "add": "Add a reference line",
+        "full": "A widget has at most {{ max }} reference lines.",
+        "errors": {
+          "value": "Type a number for every fixed value.",
+          "separator": "“{{ text }}” can be read as a decimal or as thousands. Type the number with no thousands separator: 1500, or 1.5 for a decimal."
+        },
+        "dropped": {
+          "type": "This chart does not draw reference lines, so they are not saved. They come back if you change the chart type back.",
+          "series": "A mean or median line needs a chart with no series, so it is not saved. It comes back if you remove the series.",
+          "measure": "An overall line needs a ratio, so it is not saved. It comes back if you plot a ratio.",
+          "layout": "Stacked bars take only fixed values, so the other lines are not saved. They come back with the grouped layout."
+        }
+      },
+      "interpolation": {
+        "legend": "Line segments",
+        "linear": "Straight",
+        "step": "Steps",
+        "help": "Steps hold each value until the next point, as a demand curve reads."
+      },
+      "dataLabels": {
+        "label": "Show the values on the chart",
+        "help": "Writes each value at the end of its bar, above its point or on its slice. A label that does not fit is left out.",
+        "dropped": "Stacked bars have no data labels, so they are not saved. They come back with the grouped layout."
       }
     },
     "series": {
@@ -1922,6 +2022,7 @@
       "remove": "Remove",
       "filters": "Filters",
       "colors": "Colors",
+      "source": "Source",
       "report": "Scheduled email…",
       "versions": "Version history"
     },
@@ -1931,6 +2032,9 @@
       "first": "It is already the first dashboard.",
       "last": "It is already the last dashboard.",
       "moving": "The new order is being saved."
+    },
+    "source": {
+      "line": "Source: {{ source }}"
     },
     "nameDialog": {
       "title": {
@@ -2043,6 +2147,7 @@
         "renamed": "Renamed to “{{ dashboard }}”",
         "filtersChanged": "Filters changed",
         "colorsChanged": "Colors changed",
+        "sourceChanged": "Source changed",
         "widgetAdded": "Widget “{{ widget }}” added",
         "widgetChanged": "Widget “{{ widget }}” changed",
         "widgetRemoved": "Widget “{{ widget }}” removed",
@@ -2158,6 +2263,19 @@
     "save": "Save colors",
     "saving": "Saving…",
     "saved": "Colors saved."
+  },
+  "dashboardSource": {
+    "title": "Source of {{ name }}",
+    "intro": "Where the data of this dashboard comes from, such as the survey and its round. Everyone who opens the dashboard sees it under the widgets, and it goes into the images, workbooks and scheduled emails of the dashboard.",
+    "label": "Source",
+    "hint": "Up to {{ max }} characters, on one line. Leave it empty to remove the source.",
+    "save": "Save source",
+    "saving": "Saving…",
+    "saved": "Source saved.",
+    "removed": "Source removed.",
+    "errors": {
+      "long": "The source can have at most {{ max }} characters."
+    }
   },
   "colors": {
     "palettes": {

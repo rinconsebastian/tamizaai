@@ -464,6 +464,264 @@ public sealed class WidgetExportTests(PostgresFixture postgres)
         Assert.Contains(problem.GetProperty("errors").EnumerateObject(), p => p.Name.StartsWith("config", StringComparison.Ordinal));
     }
 
+    // Column labels (widget-export "Column labels in widget files")
+
+    private async Task<IndicatorsHarness> TeatroAsync(object? labels)
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("teatro_hoy", "comuna text, value numeric, numerator numeric, denominator numeric",
+            "('Zona 1', 0.5, 5, 10), ('Zona 2', 0.25, 5, 20)", label: "Teatro hoy", format: "decimal", labels: labels);
+        return h;
+    }
+
+    private static readonly object TeatroIndicatorLabels = new
+    {
+        numerator = new { label = "Hogares que asistieron" },
+        denominator = new { label = "Hogares" },
+        comuna = new { label = "Comuna" },
+    };
+
+    private static object TeatroConfig(object? display = null) => new
+    {
+        indicator = "teatro_hoy", ratio = new { numerator = "numerator", denominator = "denominator" }, groupBy = "comuna", display,
+    };
+
+    [Fact]
+    public async Task The_indicators_labels_name_the_columns_of_the_data_sheet_and_the_summary()
+    {
+        await using var h = await TeatroAsync(TeatroIndicatorLabels);
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("Asistencia", "column", TeatroConfig())));
+
+        var sheet = Rows(path, "Asistencia");
+        Assert.Equal(["Comuna", "Teatro hoy: Hogares que asistieron / Hogares"], sheet[0].Keys.Select(key => key.Split(" (")[0]));
+        Assert.Contains(Rows(path, "Summary").Select(Values), r => r.SequenceEqual(["Plotted", "Teatro hoy: Hogares que asistieron / Hogares"]));
+    }
+
+    [Fact]
+    public async Task A_widgets_own_label_in_the_request_is_written_in_the_headers_and_the_summary()
+    {
+        await using var h = await TeatroAsync(TeatroIndicatorLabels);
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("Asistencia", "column", TeatroConfig(new { labels = new { denominator = "Hogares de la base E1" } }))));
+
+        Assert.Equal(["Comuna", "Teatro hoy: Hogares que asistieron / Hogares de la base E1"], Rows(path, "Asistencia")[0].Keys.Select(key => key.Split(" (")[0]));
+        Assert.Contains(Rows(path, "Summary").Select(Values), r => r.SequenceEqual(["Plotted", "Teatro hoy: Hogares que asistieron / Hogares de la base E1"]));
+    }
+
+    [Fact]
+    public async Task The_labels_of_a_widget_of_a_version_are_those_the_request_carries()
+    {
+        await using var h = await TeatroAsync(TeatroIndicatorLabels);
+        var widget = await h.AddWidgetAsync(new { title = "Asistencia", chartType = "column", config = TeatroConfig(new { labels = new { denominator = "Hogares hoy" } }) });
+        var version = await CurrentVersionAsync(h);
+        Assert.Equal(HttpStatusCode.NoContent, (await h.Analyst.DeleteAsync(h.WidgetUrl(widget.GetProperty("id").GetGuid()))).StatusCode);
+
+        var export = await ExportAsync(h, Body("Asistencia", "column", TeatroConfig(new { labels = new { denominator = "Hogares de la versión" } }), version: version), h.Analyst);
+
+        var path = await DownloadAsync(h, export);
+        Assert.Equal(["Comuna", "Teatro hoy: Hogares que asistieron / Hogares de la versión"], Rows(path, "Asistencia")[0].Keys.Select(key => key.Split(" (")[0]));
+    }
+
+    [Fact]
+    public async Task A_request_without_a_display_and_an_indicator_without_labels_gives_the_workbook_it_gave_before()
+    {
+        await using var h = await TeatroAsync(null);
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("Asistencia", "column", TeatroConfig())));
+
+        Assert.Equal(["comuna", "Teatro hoy: numerator / denominator"], Rows(path, "Asistencia")[0].Keys.Select(key => key.Split(" (")[0]));
+        Assert.Contains(Rows(path, "Summary").Select(Values), r => r.SequenceEqual(["Plotted", "Teatro hoy: numerator / denominator"]));
+    }
+
+    [Fact]
+    public async Task Labels_that_a_save_would_refuse_are_refused_and_leave_no_file()
+    {
+        await using var h = await TeatroAsync(null);
+
+        var (response, problem) = await PostAsync(h, Body("Asistencia", "column", TeatroConfig(new { labels = new { denominator = new string('a', 81) } })));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains(problem.GetProperty("errors").EnumerateObject(), p => p.Name.Contains("display.labels", StringComparison.Ordinal));
+        Assert.Empty(h.ExportFiles);
+    }
+
+    // Widget context (widget-export "Widget context in a widget workbook", "Summary of a widget workbook")
+
+    private static object Ratio(object display) => TeatroConfig(display);
+
+    [Fact]
+    public async Task Own_text_and_unit_in_the_header()
+    {
+        await using var h = await TeatroAsync(TeatroIndicatorLabels);
+        var display = new { caption = new { text = "% de quienes asistieron" }, unit = "de quienes asistieron" };
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("2.2", "column", Ratio(display))));
+
+        Assert.Equal(["Comuna", "% de quienes asistieron (de quienes asistieron)"], Rows(path, "2.2")[0].Keys);
+        Assert.Contains(Rows(path, "Summary").Select(Values), r => r.SequenceEqual(["Plotted", "% de quienes asistieron"]));
+    }
+
+    [Fact]
+    public async Task Hidden_caption_in_the_workbook()
+    {
+        await using var h = await TeatroAsync(TeatroIndicatorLabels);
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("2.2", "column", Ratio(new { caption = new { hidden = true } }))));
+
+        Assert.Equal(["Comuna", "Teatro hoy: Hogares que asistieron / Hogares"], Rows(path, "2.2")[0].Keys);
+        Assert.Contains(Rows(path, "Summary").Select(Values), r => r.SequenceEqual(["Plotted", "Teatro hoy: Hogares que asistieron / Hogares"]));
+    }
+
+    [Fact]
+    public async Task Map_tooltip_labels()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("campo", "comuna text, value numeric, geometry text, registros bigint, meta bigint",
+            "('Zona 1', 0.5, 'POINT(1 1)', 12, 2000), ('Zona 2', 0.25, 'POINT(2 2)', 8, 3000)", label: "Campo", format: "decimal",
+            labels: new { registros = new { label = "Registros recibidos" } });
+        var config = new
+        {
+            indicator = "campo", measure = "value", groupBy = "comuna", geometryColumn = "geometry",
+            tooltip = new object[] { new { column = "registros" }, new { column = "meta", label = "Meta muestral", format = "count" } },
+        };
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("Mapa", "map", config)));
+
+        var sheet = Rows(path, "Mapa");
+        Assert.Equal(["comuna", "Campo: value", "Registros recibidos", "Meta muestral"], sheet[0].Keys);
+        Assert.Equal(2000d, Convert.ToDouble(sheet[0]["Meta muestral"], System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(12d, Convert.ToDouble(sheet[0]["Registros recibidos"], System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public async Task Widget_texts_in_the_summary_with_the_dashboards_source_and_with_a_versions_source()
+    {
+        await using var h = await TeatroAsync(TeatroIndicatorLabels);
+        await h.SaveSourceAsync("Encuesta de mercado, 478 encuestas");
+        await h.AddWidgetAsync(new { title = "2.4", chartType = "column", config = TeatroConfig() });
+        var version = await CurrentVersionAsync(h);
+        await h.SaveSourceAsync("Otra fuente");
+        var display = new { subtitle = "¿En qué lugares ha visto teatro?", footnote = "No suman 100 %: respuesta múltiple.", caption = new { text = "% de quienes asistieron" } };
+
+        var current = await DownloadAsync(h, await ExportAsync(h, Body("2.4", "column", Ratio(display))));
+        var past = await DownloadAsync(h, await ExportAsync(h, Body("2.4", "column", Ratio(display), version: version), h.Analyst));
+
+        var summary = Rows(current, "Summary").Select(Values).ToList();
+        Assert.Contains(summary, r => r.SequenceEqual(["Source", "Otra fuente"]));
+        Assert.Contains(summary, r => r.SequenceEqual(["Subtitle", "¿En qué lugares ha visto teatro?"]));
+        Assert.Contains(summary, r => r.SequenceEqual(["Plotted", "% de quienes asistieron"]));
+        Assert.Contains(summary, r => r.SequenceEqual(["Footnote", "No suman 100 %: respuesta múltiple."]));
+        Assert.Contains(Rows(past, "Summary").Select(Values), r => r.SequenceEqual(["Source", "Encuesta de mercado, 478 encuestas"]));
+    }
+
+    // Reference lines (widget-export "Reference lines in a widget workbook")
+
+    private async Task<IndicatorsHarness> TeatroPercentAsync()
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("teatro_hoy", "comuna text, value numeric, numerator numeric, denominator numeric",
+            "('Zona 1', 0.5, 5, 10), ('Zona 2', 0.25, 5, 20)", label: "Teatro hoy", format: "percent", unit: "de los hogares");
+        return h;
+    }
+
+    [Fact]
+    public async Task Reference_lines_are_one_item_of_the_summary_after_what_is_plotted_and_the_data_sheet_is_unchanged()
+    {
+        await using var h = await TeatroPercentAsync();
+        var display = new
+        {
+            referenceLines = new object[] { new { kind = "mean" }, new { kind = "overall" }, new { kind = "value", value = 0.5, label = "Meta" } },
+        };
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("2.1", "column", Ratio(display))));
+
+        var summary = Rows(path, "Summary").Select(Values).ToList();
+        var plotted = summary.FindIndex(r => r[0] == "Plotted");
+        Assert.Equal(["Reference lines", "Mean: 37.5% de los hogares · Overall: 33.33% de los hogares · Meta: 50% de los hogares"], summary[plotted + 1]);
+        Assert.Equal(["Zona 1", "Zona 2"], Rows(path, "2.1").Select(r => Values(r)[0]));
+        Assert.Equal(2, Rows(path, "2.1")[0].Count);
+    }
+
+    [Fact]
+    public async Task Reference_lines_of_a_spanish_member_use_the_spanish_labels_and_formats()
+    {
+        await using var h = await TeatroPercentAsync();
+        var display = new { referenceLines = new object[] { new { kind = "mean" }, new { kind = "overall" } } };
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("2.1", "column", Ratio(display), locale: "es-CO")));
+
+        Assert.Contains(
+            Rows(path, "Resumen").Select(Values),
+            r => r.SequenceEqual(["Líneas de referencia", "Promedio: 37,5% de los hogares · Valor general: 33,33% de los hogares"]));
+    }
+
+    [Fact]
+    public async Task A_widget_without_reference_lines_has_no_such_item_in_its_summary()
+    {
+        await using var h = await TeatroPercentAsync();
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("2.1", "column", Ratio(new { subtitle = "¿Cuántos?" }))));
+
+        Assert.DoesNotContain(Rows(path, "Summary").Select(Values), r => r[0] == "Reference lines");
+    }
+
+    [Fact]
+    public async Task A_request_with_no_texts_on_a_dashboard_with_no_source_has_no_line_for_them()
+    {
+        await using var h = await TeatroAsync(TeatroIndicatorLabels);
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("2.2", "column", TeatroConfig())));
+
+        Assert.DoesNotContain(Rows(path, "Summary").Select(Values), r => r[0] is "Source" or "Subtitle" or "Footnote");
+        Assert.Equal(["Comuna", "Teatro hoy: Hogares que asistieron / Hogares"], Rows(path, "2.2")[0].Keys);
+    }
+
+    [Fact]
+    public async Task A_widget_sent_with_its_ignored_filters_in_its_config_or_in_each_filter_gives_the_same_rows()
+    {
+        await using var h = await HarnessAsync();
+        await h.SaveFiltersAsync(new[] { MunicipalityFilter() });
+        var cali = new[] { new { column = "municipality", kind = "text", values = new[] { "Cali" }, ignored = false } };
+        var caliIgnored = new[] { new { column = "municipality", kind = "text", values = new[] { "Cali" }, ignored = true } };
+        var inConfig = new { indicator = "households_by_source", measure = "value", groupBy = "municipality", ignoredDashboardFilters = new[] { "municipality" } };
+
+        var byFlag = await DownloadAsync(h, await ExportAsync(h, Body("W", "bar", Configs["bar"], caliIgnored)));
+        var byConfig = await DownloadAsync(h, await ExportAsync(h, Body("W", "bar", inConfig, cali)));
+        var byBoth = await DownloadAsync(h, await ExportAsync(h, Body("W", "bar", inConfig, caliIgnored)));
+
+        foreach (var path in new[] { byFlag, byConfig, byBoth })
+        {
+            Assert.Equal(["Buga", "Cali", "Palmira"], Rows(path, "W").Select(r => Values(r)[0]).Order());
+            Assert.Contains(Rows(path, "Summary").Select(Values), r => r.SequenceEqual(["Not filtered by", "Municipality"]));
+        }
+    }
+
+    [Fact]
+    public async Task A_subtitle_of_201_characters_is_refused_on_the_configs_display_and_leaves_no_file()
+    {
+        await using var h = await TeatroAsync(null);
+
+        var (response, problem) = await PostAsync(h, Body("2.2", "column", Ratio(new { subtitle = new string('s', 201), unit = new string('u', 33) })));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var fields = problem.GetProperty("errors").EnumerateObject().Select(p => p.Name).ToList();
+        Assert.Contains("config.display.subtitle", fields);
+        Assert.Contains("config.display.unit", fields);
+        Assert.Empty(h.ExportFiles);
+    }
+
+    [Fact]
+    public async Task A_caption_with_a_text_and_hidden_is_refused_on_the_configs_caption()
+    {
+        await using var h = await TeatroAsync(null);
+
+        var (response, problem) = await PostAsync(h, Body("2.2", "column", Ratio(new { caption = new { text = "x", hidden = true } })));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("config.display.caption", problem.GetProperty("errors").EnumerateObject().Select(p => p.Name));
+    }
+
     // Language (widget-export "Language of widget files")
 
     [Fact]

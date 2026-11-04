@@ -1,8 +1,9 @@
+import { dashOf } from '../chart-annotations';
 import { ExportKeyGlyph, ExportLegend, ExportLegendEntry, ExportParts } from '../export-parts';
 import { TableLabels, TableTheme, drawTable, fitText } from './svg-table';
 
-// Lays out the picture of a widget (add-widget-export, design D8): the title, the notes above the chart, the caption, the body (the
-// chart's own plot, a stat tile's figure or a table), the whole legend, key or scale, the notes below, and the footer. It is the one
+// Lays out the picture of a widget (add-widget-export, design D8): the title, the subtitle, the notes above the chart, the caption, the body
+// (the chart's own plot, a stat tile's figure or a table), the whole legend, key or scale, the notes below, the footnote, and the footer. It is the one
 // place the picture is composed, so the SVG file and the PNG made from it are the same drawing. Pure but for the DOM it builds nodes in.
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -28,6 +29,10 @@ export interface ImageInput {
   /** The width of the widget's body on screen plus the picture's margins; a wide table makes the picture wider. */
   width: number;
   title: string;
+  /** The widget's whole subtitle, drawn under the title; null when it has none (add-widget-context, design D8). */
+  subtitle: string | null;
+  /** The widget's whole footnote, drawn after the notes and before the footer; null when it has none. */
+  footnote: string | null;
   /** The tile's notes above the chart ("Not filtered by …", the row limit). */
   notesAbove: string[];
   parts: ExportParts;
@@ -131,6 +136,9 @@ export function composeImage(input: ImageInput): ImageLayout {
   }
 
   paragraph(input.title, titleSize, 500, theme.heading, maxTitleLines);
+  if (input.subtitle) {
+    paragraph(input.subtitle, noteSize, 400, theme.body);
+  }
   for (const note of input.notesAbove) {
     paragraph(note, noteSize, 400, theme.body);
   }
@@ -146,7 +154,9 @@ export function composeImage(input: ImageInput): ImageLayout {
     const value = input.parts.stat.value;
     add(body, 'text', { x: margin, y: y + 36, 'font-size': 36, 'font-weight': 600, fill: theme.heading }, value);
     y += 36 + gap + 4;
-    paragraph(input.parts.stat.description, 14, 400, theme.body);
+    if (input.parts.stat.description) {
+      paragraph(input.parts.stat.description, 14, 400, theme.body);
+    }
   } else if (input.plot) {
     const height = Number(input.plot.getAttribute('height')) || 0;
     const plotWidth = Number(input.plot.getAttribute('width')) || 0;
@@ -162,6 +172,9 @@ export function composeImage(input: ImageInput): ImageLayout {
   }
   for (const note of [...(table?.notes ?? []), ...input.parts.notes, ...input.notesExtra]) {
     paragraph(note, noteSize, 400, theme.body);
+  }
+  if (input.footnote) {
+    paragraph(input.footnote, noteSize, 400, theme.body);
   }
 
   if (input.footer.length) {
@@ -229,9 +242,11 @@ export function composeImage(input: ImageInput): ImageLayout {
     return top + (row + 1) * line + gap;
   }
 
-  /** A legend swatch: a square, a short stroke, or a square with a hairline. */
+  /** A legend swatch: a square, a short stroke, a dashed stroke in the heading color (a reference line), or a square with a hairline. */
   function swatch(parent: Element, entry: ExportLegendEntry, at: { x: number; y: number }, color: string): void {
-    if (entry.swatch === 'line') {
+    if (entry.swatch === 'dashed') {
+      add(parent, 'line', { x1: at.x, y1: at.y + 7, x2: at.x + 14, y2: at.y + 7, stroke: theme.heading, 'stroke-width': 1.5, 'stroke-dasharray': dashOf(entry.dash ?? 0) });
+    } else if (entry.swatch === 'line') {
       add(parent, 'line', { x1: at.x, y1: at.y + 7, x2: at.x + 14, y2: at.y + 7, stroke: color, 'stroke-width': 2, 'stroke-linecap': 'round' });
     } else {
       add(parent, 'rect', { x: at.x, y: at.y + 2, width: 10, height: 10, rx: 2, fill: color, ...(entry.swatch === 'outlined' ? { stroke: theme.strong, 'stroke-width': 1 } : {}) });

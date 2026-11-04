@@ -1,0 +1,916 @@
+{
+ "_comment": "Shared by the API's ReferenceLinesTests and the UI's reference-lines spec (add-chart-annotations, design D3). Each case gives the widget's chart type and config, the answer of its query (rows, the overall value of a widget with no series, the totals of one with a series) and the lines that are drawn, in the widget's order: kind, the widget's own label (null for the kind's default) and value. The values are worked out by hand and compared to 12 decimals: mean is the sum of the rows' values added in the answer's order over their count, median is the middle value (the mean of the two middle ones for an even count, as pandas computes it), overall is the answer's overall or, with a series, the grand total, a value line keeps its number, and a line with no value is left out. \"Answers of one question\" is three bars over one shared base (30 of 100, 50 of 100 and 70 of 100): its overall value is the mean of the bars, not a total.",
+ "tolerance": 1e-12,
+ "cases": [
+  {
+   "name": "Four bars",
+   "chartType": "column",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "median"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 0.4
+     },
+     {
+      "group": "Zona 2",
+      "value": 0.5
+     },
+     {
+      "group": "Zona 3",
+      "value": 0.6
+     },
+     {
+      "group": "Zona 4",
+      "value": 0.2
+     }
+    ]
+   },
+   "expected": [
+    {
+     "kind": "mean",
+     "label": null,
+     "value": 0.425
+    },
+    {
+     "kind": "median",
+     "label": null,
+     "value": 0.45
+    }
+   ]
+  },
+  {
+   "name": "Three bars",
+   "chartType": "column",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "median"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 0.2
+     },
+     {
+      "group": "Zona 2",
+      "value": 0.5
+     },
+     {
+      "group": "Zona 3",
+      "value": 0.6
+     }
+    ]
+   },
+   "expected": [
+    {
+     "kind": "mean",
+     "label": null,
+     "value": 0.4333333333333333
+    },
+    {
+     "kind": "median",
+     "label": null,
+     "value": 0.5
+    }
+   ]
+  },
+  {
+   "name": "One value",
+   "chartType": "bar",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "median"
+      },
+      {
+       "kind": "mean"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 0.3
+     }
+    ]
+   },
+   "expected": [
+    {
+     "kind": "median",
+     "label": null,
+     "value": 0.3
+    },
+    {
+     "kind": "mean",
+     "label": null,
+     "value": 0.3
+    }
+   ]
+  },
+  {
+   "name": "Missing group value counted",
+   "chartType": "bar",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "median"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 0.3
+     },
+     {
+      "group": "Zona 2",
+      "value": 0.5
+     },
+     {
+      "group": null,
+      "value": 0.1
+     }
+    ]
+   },
+   "expected": [
+    {
+     "kind": "mean",
+     "label": null,
+     "value": 0.3
+    },
+    {
+     "kind": "median",
+     "label": null,
+     "value": 0.3
+    }
+   ]
+  },
+  {
+   "name": "Unsorted rows",
+   "chartType": "line",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "median"
+      },
+      {
+       "kind": "mean"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 0.9
+     },
+     {
+      "group": "Zona 2",
+      "value": 0.1
+     },
+     {
+      "group": "Zona 3",
+      "value": 0.5
+     }
+    ]
+   },
+   "expected": [
+    {
+     "kind": "median",
+     "label": null,
+     "value": 0.5
+    },
+    {
+     "kind": "mean",
+     "label": null,
+     "value": 0.5
+    }
+   ]
+  },
+  {
+   "name": "Overall unlike the mean",
+   "chartType": "column",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "overall"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 0.49586776859504134
+     },
+     {
+      "group": "Zona 7",
+      "value": 0.1875
+     }
+    ],
+    "overall": 0.4599
+   },
+   "expected": [
+    {
+     "kind": "mean",
+     "label": null,
+     "value": 0.34168388429752067
+    },
+    {
+     "kind": "overall",
+     "label": null,
+     "value": 0.4599
+    }
+   ]
+  },
+  {
+   "name": "Answers of one question",
+   "chartType": "bar",
+   "config": {
+    "indicator": "encuesta_lugares",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "categoria",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "overall"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Teatro",
+      "value": 0.3
+     },
+     {
+      "group": "Cine",
+      "value": 0.5
+     },
+     {
+      "group": "Biblioteca",
+      "value": 0.7
+     }
+    ],
+    "overall": 0.5
+   },
+   "expected": [
+    {
+     "kind": "mean",
+     "label": null,
+     "value": 0.5
+    },
+    {
+     "kind": "overall",
+     "label": null,
+     "value": 0.5
+    }
+   ]
+  },
+  {
+   "name": "Overall from the grand total of a widget with a series",
+   "chartType": "column",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "seriesBy": "estrato",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "overall"
+      },
+      {
+       "kind": "value",
+       "value": 0.4
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "series": "Estrato 1",
+      "seriesKind": "value",
+      "value": 0.7
+     },
+     {
+      "group": "Zona 1",
+      "series": "Estrato 2",
+      "seriesKind": "value",
+      "value": 0.2
+     }
+    ],
+    "totals": {
+     "groups": [],
+     "series": [],
+     "all": {
+      "value": 0.5234,
+      "rows": 40
+     }
+    }
+   },
+   "expected": [
+    {
+     "kind": "overall",
+     "label": null,
+     "value": 0.5234
+    },
+    {
+     "kind": "value",
+     "label": null,
+     "value": 0.4
+    }
+   ]
+  },
+  {
+   "name": "Overall that the engine could not give",
+   "chartType": "column",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "overall"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 0.2
+     },
+     {
+      "group": "Zona 2",
+      "value": 0.4
+     }
+    ]
+   },
+   "expected": [
+    {
+     "kind": "mean",
+     "label": null,
+     "value": 0.30000000000000004
+    }
+   ]
+  },
+  {
+   "name": "Overall of a widget with a series whose grand total has no value",
+   "chartType": "line",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "seriesBy": "estrato",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "overall"
+      },
+      {
+       "kind": "value",
+       "value": 0.1
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [],
+    "totals": {
+     "groups": [],
+     "series": [],
+     "all": {
+      "value": null,
+      "rows": 40
+     }
+    }
+   },
+   "expected": [
+    {
+     "kind": "value",
+     "label": null,
+     "value": 0.1
+    }
+   ]
+  },
+  {
+   "name": "Overall of a widget with a series and no totals",
+   "chartType": "bar",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "seriesBy": "estrato",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "overall"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": []
+   },
+   "expected": []
+  },
+  {
+   "name": "Value lines keep their number and their label",
+   "chartType": "column",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "value",
+       "value": 0.5,
+       "label": "Meta"
+      },
+      {
+       "kind": "value",
+       "value": 150
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 0.2
+     }
+    ]
+   },
+   "expected": [
+    {
+     "kind": "value",
+     "label": "Meta",
+     "value": 0.5
+    },
+    {
+     "kind": "value",
+     "label": null,
+     "value": 150
+    }
+   ]
+  },
+  {
+   "name": "Own labels of the other kinds",
+   "chartType": "column",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "mean",
+       "label": "Promedio de zonas"
+      },
+      {
+       "kind": "overall",
+       "label": "Total"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 0.2
+     },
+     {
+      "group": "Zona 2",
+      "value": 0.4
+     }
+    ],
+    "overall": 0.35
+   },
+   "expected": [
+    {
+     "kind": "mean",
+     "label": "Promedio de zonas",
+     "value": 0.30000000000000004
+    },
+    {
+     "kind": "overall",
+     "label": "Total",
+     "value": 0.35
+    }
+   ]
+  },
+  {
+   "name": "The lines come in the order the widget lists them",
+   "chartType": "column",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "value",
+       "value": 0.3
+      },
+      {
+       "kind": "overall"
+      },
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "median"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 0.2
+     },
+     {
+      "group": "Zona 2",
+      "value": 0.4
+     }
+    ],
+    "overall": 0.35
+   },
+   "expected": [
+    {
+     "kind": "value",
+     "label": null,
+     "value": 0.3
+    },
+    {
+     "kind": "overall",
+     "label": null,
+     "value": 0.35
+    },
+    {
+     "kind": "mean",
+     "label": null,
+     "value": 0.30000000000000004
+    },
+    {
+     "kind": "median",
+     "label": null,
+     "value": 0.30000000000000004
+    }
+   ]
+  },
+  {
+   "name": "Sums that depend on the order of addition",
+   "chartType": "bar",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "median"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 10000000000000000
+     },
+     {
+      "group": "Zona 2",
+      "value": 1
+     },
+     {
+      "group": "Zona 3",
+      "value": -10000000000000000
+     }
+    ]
+   },
+   "expected": [
+    {
+     "kind": "mean",
+     "label": null,
+     "value": 0
+    },
+    {
+     "kind": "median",
+     "label": null,
+     "value": 1
+    }
+   ]
+  },
+  {
+   "name": "No bars",
+   "chartType": "column",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "median"
+      },
+      {
+       "kind": "overall"
+      },
+      {
+       "kind": "value",
+       "value": 0.5
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": []
+   },
+   "expected": [
+    {
+     "kind": "value",
+     "label": null,
+     "value": 0.5
+    }
+   ]
+  },
+  {
+   "name": "A mean or a median with a series is left out",
+   "chartType": "column",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "seriesBy": "estrato",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "median"
+      },
+      {
+       "kind": "value",
+       "value": 0.5
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "series": "Estrato 1",
+      "seriesKind": "value",
+      "value": 0.7
+     }
+    ],
+    "totals": {
+     "groups": [],
+     "series": [],
+     "all": {
+      "value": 0.7,
+      "rows": 40
+     }
+    }
+   },
+   "expected": [
+    {
+     "kind": "value",
+     "label": null,
+     "value": 0.5
+    }
+   ]
+  },
+  {
+   "name": "A null line and a line of an unknown kind are left out",
+   "chartType": "column",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      null,
+      {
+       "kind": "average"
+      },
+      {
+       "kind": "mean"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 0.2
+     },
+     {
+      "group": "Zona 2",
+      "value": 0.4
+     }
+    ]
+   },
+   "expected": [
+    {
+     "kind": "mean",
+     "label": null,
+     "value": 0.30000000000000004
+    }
+   ]
+  },
+  {
+   "name": "A widget that is not a bar, a column or a line has no line",
+   "chartType": "pie",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "value",
+       "value": 0.5
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 0.2
+     },
+     {
+      "group": "Zona 2",
+      "value": 0.4
+     }
+    ]
+   },
+   "expected": []
+  },
+  {
+   "name": "A widget with no lines has none",
+   "chartType": "column",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "groupBy": "zona"
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Zona 1",
+      "value": 0.2
+     },
+     {
+      "group": "Zona 2",
+      "value": 0.4
+     }
+    ],
+    "overall": 0.35
+   },
+   "expected": []
+  }
+ ]
+}

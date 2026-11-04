@@ -10,13 +10,13 @@ internal static class ReportSamples
     public static readonly DateTimeOffset Generated = new(2026, 10, 28, 12, 0, 0, TimeSpan.Zero);
 
     public static ReportModel Model(IReadOnlyList<ReportWidget> widgets, string locale = "en-US", IReadOnlyList<ReportFilterLine>? filters = null,
-        string project = "Census 2026", string dashboard = "Housing")
+        string project = "Census 2026", string dashboard = "Housing", string? source = null)
     {
         var text = ReportText.For(locale);
         return new ReportModel(
             Guid.Parse("00000000-0000-0000-0000-0000000000aa"), project, Guid.Parse("00000000-0000-0000-0000-0000000000d1"), dashboard,
             Generated, Generated.AddHours(-7), filters ?? [new ReportFilterLine("Round", "3")], widgets,
-            "https://tamiza.test/projects/aa/dashboards/d1", new ReportFormat(text.Culture, ReportFormat.ZoneOf("America/Bogota")), text);
+            "https://tamiza.test/projects/aa/dashboards/d1", new ReportFormat(text.Culture, ReportFormat.ZoneOf("America/Bogota")), text, source);
     }
 
     public static ReportWidget Stat(int position, string title, string value) =>

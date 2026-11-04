@@ -5,14 +5,19 @@ import { TableModel } from './widget-table';
 // widget's template reads and never from its DOM. Each chart and tile registers with the `WidgetExportHost` of the `WidgetView` it
 // sits in; a chart without one (the script editor's view of an indicator) simply registers nowhere.
 
-/** How a legend entry's mark looks: a square swatch, a short stroke (a line chart), or a square with a hairline (a Likert neutral). */
-export type ExportSwatch = 'square' | 'line' | 'outlined';
+/**
+ * How a legend entry's mark looks: a square swatch, a short stroke (a line chart), a square with a hairline (a Likert neutral), or a short
+ * dashed stroke in the heading color (a reference line, add-chart-annotations design D9), whose pattern is the entry's `dash`.
+ */
+export type ExportSwatch = 'square' | 'line' | 'outlined' | 'dashed';
 
 export interface ExportLegendEntry {
   label: string;
   /** A CSS color (`var(--tmz-pal-tamiza-1)` or a plain one): the image resolves it in the light theme. */
   color: string;
   swatch?: ExportSwatch;
+  /** The place in the widget's list of reference lines whose dash pattern a `dashed` swatch is drawn in (`dashOf`). */
+  dash?: number;
   /** Written after the label, in the body color: a pie slice's value and share. */
   detail?: string;
 }
@@ -34,8 +39,8 @@ export interface ExportParts {
   legend: ExportLegend | null;
   /** What the widget says under its chart: rows left out, negatives set aside, outliers or groups not drawn. */
   notes: string[];
-  /** A stat tile's figure and what it measures. */
-  stat: { value: string; description: string } | null;
+  /** A stat tile's figure and what it measures; the description is null in a picture of a widget that hides its caption (add-widget-context, design D8). */
+  stat: { value: string; description: string | null } | null;
   /** The table the widget shows instead of a chart (a cross table always); null while it draws a chart. */
   table: TableModel | null;
 }

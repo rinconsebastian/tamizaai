@@ -34,14 +34,39 @@ public static class ReportWorkbook
         summary.AddRange(model.Filters.Count == 0
             ? [Line(Item("filters"), Item("noFilters"))]
             : model.Filters.Select(f => Line($"{Item("filters")}: {f.Label}", f.Value)));
+        if (model.Source is { } source)
+        {
+            summary.Add(Line(Item("source"), source));
+        }
+
         foreach (var stat in model.Stats)
         {
             summary.Add(Line(stat.Title, stat.StatValue ?? stat.Reason ?? ""));
         }
 
-        foreach (var widget in model.Widgets.Where(w => w.Notes.Count > 0 || (!w.IsStat && w.Reason is not null)))
+        // A widget's subtitle and footnote, then its reference lines, come before its notes, each under the widget's title.
+        foreach (var widget in model.Widgets.Where(w =>
+                     w.Subtitle is not null || w.Footnote is not null || w.ReferenceLines.Count > 0 || w.Notes.Count > 0 || (!w.IsStat && w.Reason is not null)))
         {
-            summary.Add(Line($"{Item("notes")}: {widget.Title}", string.Join(" ", widget.Notes.Prepend(widget.IsStat ? null : widget.Reason).OfType<string>())));
+            if (widget.Subtitle is { } subtitle)
+            {
+                summary.Add(Line($"{Item("subtitle")}: {widget.Title}", subtitle));
+            }
+
+            if (widget.Footnote is { } footnote)
+            {
+                summary.Add(Line($"{Item("footnote")}: {widget.Title}", footnote));
+            }
+
+            if (widget.ReferenceLines.Count > 0)
+            {
+                summary.Add(Line($"{Item("referenceLines")}: {widget.Title}", string.Join(" · ", widget.ReferenceLines.Select(l => l.Line))));
+            }
+
+            if (widget.Notes.Count > 0 || (!widget.IsStat && widget.Reason is not null))
+            {
+                summary.Add(Line($"{Item("notes")}: {widget.Title}", string.Join(" ", widget.Notes.Prepend(widget.IsStat ? null : widget.Reason).OfType<string>())));
+            }
         }
 
         // The summary holds text, which a number format leaves as it is: its headers never block a widget sheet's format.

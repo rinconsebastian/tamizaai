@@ -881,6 +881,24 @@ describe('map widget', () => {
       expect(lines().slice(2)).toEqual(['Dirección: Cra 5 # 10-20', 'sample_target: 1,200', 'Avance: 45%']);
     });
 
+    it('names a column with no label of its own by the label of the indicator, in the tooltip and the table (Map tooltip column without a label)', async () => {
+      const labelled = indicator('survey_progress', {
+        label: 'Survey progress',
+        format: 'percent',
+        columns: { achieved: { label: 'Registros recibidos' }, sample_target: { label: 'Indicator Meta' } },
+      });
+      const items: WidgetTooltipItem[] = [{ column: 'achieved', label: null, format: null }, { column: 'sample_target', label: 'Meta', format: null }];
+      const context = await show([block({ tooltip: [9, 20] })], { settings: { indicator: 'survey_progress', tooltip: items }, indicators: [labelled], answer: { tooltipTypes: ['integer', 'integer'] } });
+
+      hover(regions(context)[0]);
+      expect(lines().slice(2)).toEqual(['Registros recibidos: 9', 'Meta: 20']);
+
+      await toggleTable(context);
+      await settle(context.harness);
+      const headers = Array.from(context.root.querySelectorAll('[data-testid="widget-table"] thead th')).map(text);
+      expect(headers).toEqual(['municipality', 'Survey progress', 'Registros recibidos', 'Meta', 'Geometry']);
+    });
+
     it('says how many rows a block combines, and nothing about it for one row', async () => {
       const context = await survey_progress(columns, [block({ rows: 2, tooltip: ['Cra 5 # 10-20', 20, 9] }), block({ group: '0043', geometry: square(-76.5, 3.4, 0.002) })]);
 
@@ -935,6 +953,55 @@ describe('map widget', () => {
       const first = all(context.root, 'widget-table-row')[0].children;
       expect(Array.from(first).map((cell) => cell.className.includes('text-end'))).toEqual([false, true, false, true, true, false]);
       expect(Array.from(context.root.querySelectorAll('[data-testid="widget-table"] thead th')).map((cell) => cell.className.includes('text-end'))).toEqual([false, true, false, true, true, false]);
+    });
+
+    describe('caption and unit of the widget (add-widget-context)', () => {
+      const own = { caption: { text: 'Avance de la muestra' }, unit: 'de la meta' };
+      const withDisplay = (display: WidgetConfig['display']) =>
+        show([block()], { settings: { indicator: 'survey_progress', tooltip: columns, display }, indicators: [survey], answer: { tooltipTypes: types } });
+
+      it('names the plotted value with the caption text and the unit of the widget, and leaves the tooltip columns as they were (Own caption text and unit in a map tooltip)', async () => {
+        const context = await withDisplay(own);
+
+        hover(regions(context)[0]);
+
+        expect(lines()).toEqual(['0042', 'Avance de la muestra: 45% de la meta', 'Dirección: Cra 5 # 10-20', 'Meta muestral: 20', 'Encuestas logradas: 9']);
+      });
+
+      it('keeps the indicator\'s label in the tooltip while the caption is hidden, and takes the line out of sight', async () => {
+        const context = await withDisplay({ caption: { hidden: true } });
+
+        hover(regions(context)[0]);
+
+        expect(lines()[1]).toBe('Survey progress: 45%');
+        expect(byTestId(context.root, 'chart-caption')!.classList).toContain('sr-only');
+        expect(text(byTestId(context.root, 'chart-caption'))).toBe('Survey progress by municipality');
+      });
+
+      it('writes the plotted value with the unit of the widget and the label of the indicator when only the unit is set', async () => {
+        const unitOnly = await withDisplay({ unit: 'de la meta' });
+        hover(regions(unitOnly)[0]);
+        expect(lines()[1]).toBe('Survey progress: 45% de la meta');
+      });
+
+      it('heads the value column of the table with the caption text and writes the values with the unit', async () => {
+        const context = await withDisplay(own);
+
+        await toggleTable(context);
+        await settle(context.harness);
+
+        const headers = Array.from(context.root.querySelectorAll('[data-testid="widget-table"] thead th')).map(text);
+        expect(headers).toEqual(['municipality', 'Avance de la muestra', 'Dirección', 'Meta muestral', 'Encuestas logradas', 'Geometry']);
+        expect(all(context.root, 'widget-table-row').map((r) => Array.from(r.children).map(text))).toEqual([['0042', '45% de la meta', 'Cra 5 # 10-20', '20', '9', 'Region']]);
+      });
+
+      it('puts the caption text on the line above the map, and keeps the rest of it', async () => {
+        const context = await withDisplay(own);
+
+        const line = byTestId(context.root, 'chart-caption')!;
+        expect(text(line)).toBe('Avance de la muestra by municipality');
+        expect(line.classList).not.toContain('sr-only');
+      });
     });
   });
 

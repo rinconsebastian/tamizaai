@@ -109,8 +109,13 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
     /// <see cref="DataTimeoutException"/> when the read takes too long.
     /// </summary>
     /// <param name="dashboardFilters">The dashboard filter values in force that narrow the rows too (design D3); null or empty for none.</param>
+    /// <param name="overall">
+    /// Also reads the overall value of a plain grouped query (<see cref="IndicatorQueryResponse.Overall"/>, design D4 of add-chart-annotations),
+    /// after its rows and in the same transaction. A caller derives it from the saved widget (<see cref="WidgetQuery.Overall"/>).
+    /// </param>
     public async Task<IndicatorQueryOutcome> QueryAsync(
-        Guid projectId, WidgetConfigInput input, string? chartType, CancellationToken ct, IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null)
+        Guid projectId, WidgetConfigInput input, string? chartType, CancellationToken ct, IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null,
+        bool overall = false)
     {
         var config = input.Normalize();
         var errors = new FieldErrors();
@@ -137,7 +142,7 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
 
             var plan = IndicatorQueryBuilder.Plan(
                 config, columns, project.TimeZone, From(projectId, config.Indicator), maxRows, perRow: chartType == ChartTypes.Histogram, dashboardFilters,
-                chartType);
+                chartType, overall);
             if (plan.Errors is not null)
             {
                 return new IndicatorQueryOutcome(null, plan.Errors);
@@ -167,10 +172,11 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
             // A pie's domain is read before its rows (design D8 of dashboard palettes); no other kind has one.
             var domain = plan.Domain is null ? null : await ReadPieDomainAsync(connection, transaction, plan.Domain, group?.Type, ct);
             var (rows, limitReached) = await ReadRowsAsync(connection, transaction, plan.Sql!, group?.Type, maxRows, ct);
+            var overallValue = plan.Overall is null ? null : await ReadOverallAsync(connection, transaction, plan.Overall, ct);
             return new IndicatorQueryOutcome(
                 new IndicatorQueryResponse(
                     true, rows, limitReached, MissingReferences.None, plan.Sql!.TooltipTypes, dashboardFilters is { Count: > 0 } ? plan.NotFiltered : null,
-                    Domain: domain),
+                    Domain: domain, Overall: overallValue),
                 null);
         }, ct), ct);
     }
@@ -504,6 +510,22 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
 
     /// <summary>NaN and infinity have no number in JSON.</summary>
     private static double? FiniteOrNull(double value) => double.IsFinite(value) ? value : null;
+
+    /// <summary>
+    /// The overall value (design D4 of add-chart-annotations): the value of the first row of a stat tile's statement. No row, because the
+    /// denominators sum to zero, or a value that is not a number, is null.
+    /// </summary>
+    private static async Task<double?> ReadOverallAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, CancellationToken ct)
+    {
+        await using var command = new NpgsqlCommand(sql.Sql, connection, transaction);
+        foreach (var parameter in sql.Parameters)
+        {
+            command.Parameters.Add(parameter.ToParameter());
+        }
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) && !reader.IsDBNull(1) ? FiniteOrNull(reader.GetDouble(1)) : null;
+    }
 
     private static async Task<(List<IndicatorRow> Rows, bool LimitReached)> ReadRowsAsync(
         NpgsqlConnection connection, NpgsqlTransaction transaction, IndicatorSql sql, DataColumnType? groupType, int maxRows, CancellationToken ct)

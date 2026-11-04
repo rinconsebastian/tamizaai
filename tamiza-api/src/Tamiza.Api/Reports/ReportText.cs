@@ -80,6 +80,16 @@ public sealed partial class ReportText
         ["rows"] = "Rows",
         ["notFilteredBy"] = "Not filtered by",
         ["allValues"] = "All",
+        // The dashboard's source and a widget's subtitle and footnote (add-widget-context).
+        ["source"] = "Source",
+        ["subtitle"] = "Subtitle",
+        ["footnote"] = "Footnote",
+        // The reference lines of a chart and the default label of each kind (add-chart-annotations); as in tamiza-ui's en.json.
+        ["referenceLines"] = "Reference lines",
+        ["referenceMean"] = "Mean",
+        ["referenceMedian"] = "Median",
+        ["referenceOverall"] = "Overall",
+        ["referenceValue"] = "Reference",
     };
 
     private static readonly IReadOnlyDictionary<string, string> Spanish = new Dictionary<string, string>
@@ -153,6 +163,14 @@ public sealed partial class ReportText
         ["rows"] = "Filas",
         ["notFilteredBy"] = "Sin filtrar por",
         ["allValues"] = "Todos",
+        ["source"] = "Fuente",
+        ["subtitle"] = "Subtítulo",
+        ["footnote"] = "Nota al pie",
+        ["referenceLines"] = "Líneas de referencia",
+        ["referenceMean"] = "Promedio",
+        ["referenceMedian"] = "Mediana",
+        ["referenceOverall"] = "Valor general",
+        ["referenceValue"] = "Referencia",
     };
 
     private readonly IReadOnlyDictionary<string, string> _texts;
@@ -209,6 +227,15 @@ public sealed partial class ReportText
     }
 
     public string this[string key] => _texts[key];
+
+    /// <summary>The key of the default label of a kind of reference line (<see cref="Indicators.ReferenceLineKinds"/>): "Mean", "Median", "Overall" or "Reference".</summary>
+    public static string ReferenceLabelKey(string kind) => kind switch
+    {
+        Indicators.ReferenceLineKinds.Mean => "referenceMean",
+        Indicators.ReferenceLineKinds.Median => "referenceMedian",
+        Indicators.ReferenceLineKinds.Overall => "referenceOverall",
+        _ => "referenceValue",
+    };
 
     public string Format(string key, params object?[] values) => string.Format(Culture, _texts[key], values);
 

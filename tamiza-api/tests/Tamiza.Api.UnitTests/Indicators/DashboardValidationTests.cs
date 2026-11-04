@@ -340,4 +340,44 @@ public sealed class DashboardValidationTests
             [new ValueColor("zone", "Rural", 3), new ValueColor("sex", "Female", 5), new ValueColor("sex", "Male", 1)],
             colors.ValueColors);
     }
+
+    // The source (design D7 of the widget context)
+
+    private static (string? Source, string Errors) CheckSource(string? input)
+    {
+        var errors = new Tamiza.Api.Http.FieldErrors();
+        var source = DashboardValidation.Source(input, errors);
+        return (source, errors.ToDictionary().TryGetValue("source", out var messages) ? string.Join(" | ", messages) : "");
+    }
+
+    [Fact]
+    public void A_source_is_trimmed_and_a_blank_one_is_null_with_no_error()
+    {
+        Assert.Equal(("Encuesta de ejemplo", ""), CheckSource("  Encuesta de ejemplo  "));
+        Assert.Equal((null, ""), CheckSource(null));
+        Assert.Equal((null, ""), CheckSource(""));
+        Assert.Equal((null, ""), CheckSource("     "));
+        Assert.Equal(("Encuesta <b>2026</b> & \"otra\"", ""), CheckSource("Encuesta <b>2026</b> & \"otra\""));
+    }
+
+    [Fact]
+    public void A_source_of_300_characters_is_kept_and_301_are_refused_on_source_naming_300()
+    {
+        Assert.Equal((new string('s', 300), ""), CheckSource(new string('s', 300)));
+        Assert.Equal((new string('s', 300), ""), CheckSource("  " + new string('s', 300) + "  ")); // counted once trimmed
+        Assert.Equal((null, "The source is longer than 300 characters."), CheckSource(new string('s', 301)));
+        Assert.Equal((null, "The source is longer than 300 characters."), CheckSource("  " + new string('s', 301) + "  "));
+        Assert.Equal(300, DashboardValidation.MaxSourceLength);
+    }
+
+    [Theory]
+    [InlineData("Encuesta\0 de ejemplo")]
+    [InlineData("Encuesta\nde ejemplo")]
+    [InlineData("Encuesta\r\nde ejemplo")]
+    [InlineData("Encuesta\tde ejemplo")]
+    [InlineData("Encuesta\u0085de ejemplo")]
+    [InlineData("Encuesta de ejemplo\n")] // trimming would drop it, so the source as sent is checked
+    [InlineData("\tEncuesta de ejemplo")]
+    public void A_source_with_a_control_character_is_refused_on_source(string input) =>
+        Assert.Equal((null, "The source cannot contain line breaks or other control characters."), CheckSource(input));
 }

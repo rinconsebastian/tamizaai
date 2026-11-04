@@ -2184,6 +2184,54 @@ describe('the widget dialog and a widget\'s display', () => {
     expect('display' in body.config).toBe(false);
   });
 
+  it('saves a widget with every text of the widget unchanged: subtitle, footnote, caption, unit and description button (Saved unchanged)', async () => {
+    const display = {
+      color: 3,
+      subtitle: '¿En qué zona ha visto teatro en el último año?',
+      footnote: 'No suman 100 %: respuesta múltiple.',
+      caption: { text: '% de quienes asistieron' },
+      unit: 'de quienes asistieron',
+      showDescription: true as const,
+    };
+    const context = await openDialog({ existing: widget('w1', { config: config({ display }) }) });
+
+    const body = await saveEdited(context);
+
+    expect(body.config.display).toEqual(display);
+    expect(body.config).toEqual(config({ display }));
+  });
+
+  it('keeps a hidden caption when the form is saved unchanged', async () => {
+    const display = { caption: { hidden: true as const } };
+    const context = await openDialog({ existing: widget('w1', { config: config({ display }) }) });
+
+    const body = await saveEdited(context);
+
+    expect(body.config.display).toEqual(display);
+  });
+
+  it('keeps the texts of a widget when it changes its chart type (the texts take every kind)', async () => {
+    const display = { subtitle: 'Hogares por zona', footnote: 'Fuente propia.', unit: 'hogares' };
+    const context = await openDialog({ existing: widget('w1', { config: config({ display }) }) });
+    await change(context, field('dialog-chart-type'), 'pie');
+
+    const body = await saveEdited(context);
+
+    expect(body.chartType).toBe('pie');
+    expect(body.config.display).toEqual(display);
+  });
+
+  it('keeps the preview from asking again for a widget with texts of its own', async () => {
+    const context = await openDialog({ existing: widget('w1', { config: config({ display: { subtitle: 'Hogares por zona', unit: 'hogares' } }) }) });
+    await wait(previewDelayMs + 100);
+    await settle(context.harness);
+    const previews = context.http.match(isQuery).filter((r) => !r.cancelled);
+
+    expect(previews).toHaveLength(1);
+    expect(previews[0].request.body.config).not.toHaveProperty('display');
+    previews[0].flush(result([row('Cali', 75)]));
+  });
+
   it('keeps the color of a chart with no series when it saves, and the preview is not asked again for it', async () => {
     const context = await openDialog({ existing: widget('w1', { config: config({ display: { color: 3 } }) }) });
     await wait(previewDelayMs + 100);
@@ -2779,5 +2827,1269 @@ describe('the widget dialog for a box plot (add-boxplot-widget, design D7)', () 
     expect(fields('dialog-error')).toHaveLength(0);
     await click(context, field('dialog-orientation-vertical'));
     expect(field('dialog-orientation').querySelector('[data-testid="field-error"]')).toBeNull();
+  });
+});
+
+describe('the widget dialog column names (add-indicator-column-metadata, design D9)', () => {
+  afterEach(clearOverlay);
+
+  const ratio = { numerator: 'numerator', denominator: 'denominator' };
+  /** `coverage`, labelled, with the names a member typed for the ratio's two columns and its dimension. */
+  const teatro = indicator('coverage', {
+    label: 'Coverage',
+    columns: { numerator: { label: 'Hogares que asistieron' }, denominator: { label: 'Hogares' }, municipality: { label: 'Comuna' } },
+  });
+  const withRound = catalog({ columns: [...catalog().columns, { name: 'estrato', type: 'text', label: null }] });
+  const saved = async (context: Context) => {
+    await click(context, field('dialog-save'));
+    return context.http.expectOne((r) => isCreate(r) || isPatch(r)).request.body as { title: string; chartType: ChartType; config: WidgetConfig };
+  };
+  const labelFields = () => fields('dialog-label') as HTMLInputElement[];
+  const labelOf = (column: string) => labelFields().find((input) => input.dataset['column'] === column)!;
+  const edit = (overrides: Partial<WidgetConfig>, chartType: ChartType = 'column') => widget('w1', { chartType, config: config(overrides) });
+  const edited = (existing: Widget, extra: Setup = {}) => openDialog({ existing, indicators: [teatro, indicator('target')], columns: withRound, ...extra });
+
+  it('offers a field for each column the widget shows, with the names of the indicator as placeholders (Labels offered)', async () => {
+    const context = await edited(edit({ ratio }));
+
+    expect(labelFields().map((input) => input.dataset['column'])).toEqual(['numerator', 'denominator', 'municipality']);
+    expect(labelFields().map((input) => input.placeholder)).toEqual(['Hogares que asistieron', 'Hogares', 'Comuna']);
+    expect(labelFields().map((input) => input.value)).toEqual(['', '', '']);
+    expect(labelFields().every((input) => input.maxLength === 80)).toBe(true);
+    expect(text(field('dialog-labels').querySelector('h3'))).toBe('Column names');
+    expect(context.http.match(isQuery).filter((r) => !r.cancelled).length).toBeLessThanOrEqual(1);
+  });
+
+  it('offers the measure when the widget names one, and the group and series columns of a chart that has them', async () => {
+    const context = await edited(edit({ measure: 'round', seriesBy: 'estrato' }));
+
+    expect(labelFields().map((input) => input.dataset['column'])).toEqual(['round', 'municipality', 'estrato']);
+    await change(context, field('dialog-chart-type'), 'stat');
+    expect(labelFields().map((input) => input.dataset['column'])).toEqual(['round']);
+    await change(context, field('dialog-chart-type'), 'pie');
+    expect(labelFields().map((input) => input.dataset['column'])).toEqual(['round', 'municipality']);
+  });
+
+  it('offers a column nothing but the default measure when the widget names none, and the placeholder is the column\'s own name when its indicator has no name for it', async () => {
+    await edited(edit({}), { indicators: [indicator('coverage'), indicator('target')] });
+
+    expect(labelFields().map((input) => [input.dataset['column'], input.placeholder])).toEqual([['municipality', 'municipality']]);
+  });
+
+  it('shows what is typed in the preview without asking for the rows again, and saves it (Preview without a query)', async () => {
+    const context = await edited(edit({ ratio }));
+    await previewAnswer(context, result([row('Cali', 0.5)]));
+    const caption = () => text(overlay().querySelector('[data-testid="dialog-preview"] [data-testid="chart-caption"]'));
+    expect(caption()).toBe('Coverage: Hogares que asistieron / Hogares by Comuna');
+
+    await change(context, labelOf('denominator'), 'Hogares de la base E1');
+    await wait(previewDelayMs + 100);
+    await settle(context.harness);
+
+    expect(context.http.match(isQuery).filter((r) => !r.cancelled)).toHaveLength(0);
+    expect(caption()).toBe('Coverage: Hogares que asistieron / Hogares de la base E1 by Comuna');
+    expect((await saved(context)).config.display).toEqual({ labels: { denominator: 'Hogares de la base E1' } });
+  });
+
+  it('saves the labels of a widget it did not touch as they were saved, the ones of columns it does not show too (Saved unchanged)', async () => {
+    const context = await edited(edit({ display: { labels: { numerator: 'Hogares que asistieron', estrato: 'Estrato del hogar' } } }));
+
+    const body = await saved(context);
+
+    expect(JSON.stringify(body.config.display)).toBe('{"labels":{"numerator":"Hogares que asistieron","estrato":"Estrato del hogar"}}');
+  });
+
+  it('keeps the labels of every column it saved when only the chart type changes (Chart type changed)', async () => {
+    const context = await edited(edit({ display: { labels: { municipality: 'Comuna', numerator: 'Hogares que asistieron' } } }));
+    await change(context, field('dialog-chart-type'), 'bar');
+    expect((await saved(context)).config.display).toEqual({ labels: { municipality: 'Comuna', numerator: 'Hogares que asistieron' } });
+  });
+
+  it('keeps the labels of a column chart turned into a stat tile, the group column\'s too (Chart type changed)', async () => {
+    const context = await edited(edit({ display: { labels: { municipality: 'Comuna' } } }));
+    await change(context, field('dialog-chart-type'), 'stat');
+
+    const body = await saved(context);
+
+    expect(body.chartType).toBe('stat');
+    expect(body.config.display).toEqual({ labels: { municipality: 'Comuna' } });
+  });
+
+  it('drops the label of a column the member replaced (Column replaced)', async () => {
+    const context = await edited(edit({ display: { labels: { municipality: 'Comuna' } } }));
+
+    await change(context, field('dialog-group-by'), 'estrato');
+    const body = await saved(context);
+
+    expect(body.config.groupBy).toBe('estrato');
+    expect('display' in body.config).toBe(false);
+  });
+
+  it('holds only the labels of the columns it shows once a label is typed, and brings back the others with their column', async () => {
+    const context = await edited(edit({ ratio, display: { labels: { estrato: 'Estrato del hogar', numerator: 'Hogares que asistieron' } } }));
+
+    await change(context, labelOf('denominator'), 'Hogares');
+    const body = await saved(context);
+
+    expect(body.config.display).toEqual({ labels: { numerator: 'Hogares que asistieron', denominator: 'Hogares' } });
+  });
+
+  it('saves no display for a label emptied again', async () => {
+    const context = await edited(edit({ ratio, display: { labels: { numerator: 'Hogares que asistieron' } } }));
+
+    await change(context, labelOf('numerator'), '   ');
+    const body = await saved(context);
+
+    expect('display' in body.config).toBe(false);
+  });
+
+  it('adds a widget with its labels, besides its color', async () => {
+    const context = await openDialog({ indicators: [teatro], columns: withRound });
+    await change(context, field('dialog-title'), 'Asistencia');
+    await change(context, field('dialog-mode'), 'ratio');
+    await change(context, labelOf('numerator'), 'Asistentes');
+
+    const body = await saved(context);
+
+    expect(body.config.display).toEqual({ labels: { numerator: 'Asistentes' } });
+    expect(body.config.ratio).toEqual(ratio);
+  });
+
+  it('proposes the name the indicator gives a tooltip column that has no label of its own (Tooltip column placeholder)', async () => {
+    const registros = indicator('coverage', { label: 'Coverage', columns: { value: { label: 'Registros recibidos' } } });
+    const context = await openDialog({ indicators: [registros], columns: catalog() });
+    await change(context, field('dialog-chart-type'), 'map');
+    await change(context, field('dialog-geometry'), 'geometry');
+    await click(context, field('tooltip-add'));
+    expect((fields('tooltip-label')[0] as HTMLInputElement).placeholder).toBe('Label (optional)');
+
+    await change(context, fields('tooltip-column')[0], 'value');
+    expect((fields('tooltip-label')[0] as HTMLInputElement).placeholder).toBe('Registros recibidos');
+    await change(context, fields('tooltip-column')[0], 'round');
+    expect((fields('tooltip-label')[0] as HTMLInputElement).placeholder).toBe('round');
+  });
+
+  it('names the columns of the form as they are, whatever the widget calls them (Filters keep the column\'s name)', async () => {
+    const filter: WidgetConfig['filters'][number] = { column: 'municipality', op: 'in', values: ['Cali'] };
+    const context = await edited(edit({ filters: [filter], display: { labels: { municipality: 'Comuna' } } }));
+
+    expect(optionsOf('dialog-group-by')).toContain('municipality');
+    expect(optionTexts('dialog-group-by')).toContain('municipality');
+    expect(optionTexts('dialog-group-by')).not.toContain('Comuna');
+    expect(Array.from(field<HTMLSelectElement>('filter-column').options).map((o) => o.value)).toContain('municipality');
+    expect(fields('dialog-filter-edit')[0].getAttribute('aria-label')).toContain('municipality');
+    expect(text(fields('dialog-filter-edit')[0])).toContain('municipality');
+    expect((await saved(context)).config.filters).toEqual([filter]);
+  });
+
+  it('shows what the server refused about the labels, next to the group and next to the field (Too many labels, Label too long)', async () => {
+    const context = await edited(edit({ ratio, display: { labels: { numerator: 'x'.repeat(81) } } }));
+    await click(context, field('dialog-save'));
+
+    context.http.expectOne(isPatch).flush(
+      {
+        title: 'x',
+        errors: { 'config.display.labels': ['A widget labels at most 10 columns.'], 'config.display.labels.numerator': ['A column label can have up to 80 characters.'] },
+      },
+      { status: 400, statusText: 'Bad Request' },
+    );
+    await settle(context.harness);
+
+    expect(text(field('labels-error'))).toBe('A widget labels at most 10 columns.');
+    expect(text(labelOf('numerator').closest('tmz-form-field'))).toContain('up to 80 characters');
+    expect(text(labelOf('denominator').closest('tmz-form-field'))).not.toContain('80 characters');
+    expect(fields('dialog-error')).toHaveLength(0);
+    expect(field('dialog-labels').querySelector('details')!.open).toBe(true);
+    await change(context, labelOf('numerator'), 'Hogares');
+    expect(text(labelOf('numerator').closest('tmz-form-field'))).not.toContain('80 characters');
+  });
+
+  it('opens the group only for a widget that has names of its own', async () => {
+    await edited(edit({ ratio }));
+    expect(field('dialog-labels').querySelector('details')!.open).toBe(false);
+  });
+
+  it('opens the group for a widget that has names of its own', async () => {
+    await edited(edit({ ratio, display: { labels: { numerator: 'Hogares' } } }));
+    expect(field('dialog-labels').querySelector('details')!.open).toBe(true);
+  });
+});
+
+// A widget's words (add-widget-context, design D11): subtitle, caption, unit, footnote and the description button.
+describe('the widget dialog text on the widget (add-widget-context, design D11)', () => {
+  afterEach(clearOverlay);
+
+  const saved = async (context: Context) => {
+    await click(context, field('dialog-save'));
+    return context.http.expectOne((r) => isCreate(r) || isPatch(r)).request.body as { title: string; chartType: ChartType; config: WidgetConfig };
+  };
+  const edit = (display: NonNullable<WidgetConfig['display']> | undefined, overrides: Partial<Widget> = {}) =>
+    widget('w1', { config: config(display ? { display } : {}), ...overrides });
+  const radio = (mode: string) => field<HTMLInputElement>(`dialog-caption-${mode}`);
+  const typeAndSettle = (context: Context, id: string, value: string) => change(context, field(id), value);
+  const refuse = async (context: Context, errors: Record<string, string[]>) => {
+    await click(context, field('dialog-save'));
+    context.http.expectOne(isPatch).flush({ title: 'x', errors }, { status: 400, statusText: 'Bad Request' });
+    await settle(context.harness);
+  };
+  const warning = () => dialog().querySelector('[data-testid="dialog-context-warning"]');
+  /** A pasted block of text: the stat tile's size is 3x2, a column chart's 6x4. */
+  const wordy = (length: number) => 'palabra '.repeat(Math.ceil(length / 8)).slice(0, length);
+
+  it('offers the subtitle under the title, and a group of fields after the colors (every field is reached with the keyboard)', async () => {
+    await openDialog({ indicators: [indicator('coverage', { description: 'About coverage' })] });
+
+    const ids = ['dialog-title', 'dialog-subtitle', 'dialog-caption-default', 'dialog-caption-text', 'dialog-caption-hidden', 'dialog-unit', 'dialog-footnote', 'dialog-show-description'];
+    const present = ids.filter((id) => fields(id).length).map((id) => field(id));
+    expect(present.map((e) => e.dataset['testid'])).toEqual(ids);
+    // The caption's own text field only exists under "Own text".
+    expect(fields('dialog-caption-own')).toHaveLength(0);
+    for (const control of present) {
+      expect((control as HTMLInputElement).disabled).toBe(false);
+      expect(control.tabIndex).toBe(0);
+    }
+    // In the order the form reads, the subtitle follows the title, and the group of texts is its own fieldset.
+    for (let i = 1; i < present.length; i++) {
+      expect(present[i - 1].compareDocumentPosition(present[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(field('dialog-subtitle').getAttribute('maxlength')).toBe('200');
+    expect(field('dialog-footnote').getAttribute('maxlength')).toBe('500');
+    expect(field('dialog-unit').getAttribute('maxlength')).toBe('32');
+    expect(field('dialog-footnote').tagName).toBe('TEXTAREA');
+    expect(field('dialog-context').querySelector('legend')!.textContent!.trim()).toBe('Text on the widget');
+    expect(field('dialog-subtitle').closest('tmz-form-field')!.querySelector('label')!.textContent!.trim()).toBe('Subtitle');
+  });
+
+  it('reaches the text of an own caption with the keyboard too, once Own text is chosen', async () => {
+    const context = await openDialog();
+    expect(fields('dialog-caption-own')).toHaveLength(0);
+
+    await click(context, radio('text'));
+
+    expect(field('dialog-caption-own').getAttribute('maxlength')).toBe('200');
+    expect(field<HTMLInputElement>('dialog-caption-own').tabIndex).toBe(0);
+    expect(text(field('dialog-caption-own').closest('tmz-form-field')!.querySelector('label'))).toBe('Caption text');
+  });
+
+  it('starts every field as the widget was saved: the default caption, and no unit, footnote or button for a widget saved before', async () => {
+    await openDialog({ existing: edit(undefined) });
+
+    expect(radio('default').checked).toBe(true);
+    expect(radio('text').checked).toBe(false);
+    expect(radio('hidden').checked).toBe(false);
+    expect(field<HTMLInputElement>('dialog-subtitle').value).toBe('');
+    expect(field<HTMLInputElement>('dialog-unit').value).toBe('');
+    expect(field<HTMLTextAreaElement>('dialog-footnote').value).toBe('');
+    expect(field<HTMLInputElement>('dialog-show-description').checked).toBe(false);
+  });
+
+  it('shows what the widget was saved with in each field, and an own caption in its text field', async () => {
+    await openDialog({
+      existing: edit({ subtitle: 'Hogares por zona', footnote: 'Sin ponderar.', caption: { text: '% de quienes asistieron' }, unit: 'de quienes asistieron' }),
+    });
+
+    expect(field<HTMLInputElement>('dialog-subtitle').value).toBe('Hogares por zona');
+    expect(field<HTMLTextAreaElement>('dialog-footnote').value).toBe('Sin ponderar.');
+    expect(field<HTMLInputElement>('dialog-unit').value).toBe('de quienes asistieron');
+    expect(radio('text').checked).toBe(true);
+    expect(field<HTMLInputElement>('dialog-caption-own').value).toBe('% de quienes asistieron');
+  });
+
+  it('shows a hidden caption as chosen', async () => {
+    await openDialog({ existing: edit({ caption: { hidden: true } }) });
+
+    expect(radio('hidden').checked).toBe(true);
+    expect(fields('dialog-caption-own')).toHaveLength(0);
+  });
+
+  it('says what the indicator\'s unit is next to the unit field (Unit hint)', async () => {
+    await openDialog({ indicators: [indicator('coverage', { unit: 'de los hogares' })] });
+
+    expect(text(field('dialog-unit').closest('tmz-form-field'))).toContain('The indicator\'s unit is “de los hogares”.');
+  });
+
+  it('says so when the indicator has no unit', async () => {
+    await openDialog({ indicators: [indicator('coverage', { unit: null })] });
+
+    expect(text(field('dialog-unit').closest('tmz-form-field'))).toContain('The indicator has no unit.');
+  });
+
+  it('names the unit in Spanish in the Spanish interface', async () => {
+    await openDialog({ indicators: [indicator('coverage', { unit: 'de los hogares' })], lang: 'es' });
+
+    expect(text(field('dialog-unit').closest('tmz-form-field'))).toContain('La unidad del indicador es «de los hogares».');
+    expect(text(field('dialog-context').querySelector('legend'))).toBe('Textos del widget');
+  });
+
+  it('makes the description option unavailable, and says the indicator has none (Description option unavailable)', async () => {
+    await openDialog({ indicators: [indicator('coverage', { description: null })] });
+
+    expect(field<HTMLInputElement>('dialog-show-description').disabled).toBe(true);
+    expect(text(field('dialog-show-description-help'))).toBe('The indicator has no description.');
+  });
+
+  it('offers the description option when the indicator has a description', async () => {
+    const context = await openDialog({ indicators: [indicator('coverage', { description: 'Share of households.' })] });
+    await change(context, field('dialog-title'), 'Asistencia');
+
+    expect(field<HTMLInputElement>('dialog-show-description').disabled).toBe(false);
+    await click(context, field('dialog-show-description'));
+    expect((await saved(context)).config.display).toEqual({ showDescription: true });
+  });
+
+  it('lets a widget saved with the option on turn it off though its indicator has lost its description', async () => {
+    const context = await openDialog({ existing: edit({ showDescription: true }) });
+
+    const box = field<HTMLInputElement>('dialog-show-description');
+    expect(box.disabled).toBe(false);
+    expect(box.checked).toBe(true);
+    await click(context, box);
+    expect('display' in (await saved(context)).config).toBe(false);
+  });
+
+  it('reads the line an own caption text makes as "{text} by {group}" (the caption\'s hint)', async () => {
+    const context = await openDialog();
+    await click(context, radio('text'));
+
+    await typeAndSettle(context, 'dialog-caption-own', '% de quienes asistieron');
+
+    expect(text(field('dialog-caption-own').closest('tmz-form-field'))).toContain('Reads: % de quienes asistieron by municipality');
+  });
+
+  it('reads the caption of a stat tile as its text alone', async () => {
+    const context = await openDialog();
+    await change(context, field('dialog-chart-type'), 'stat');
+    await click(context, radio('text'));
+
+    await typeAndSettle(context, 'dialog-caption-own', 'de quienes asistieron');
+
+    expect(text(field('dialog-caption-own').closest('tmz-form-field'))).toContain('Reads: de quienes asistieron');
+    expect(text(field('dialog-caption-own').closest('tmz-form-field'))).not.toContain(' by ');
+  });
+
+  it('shows the subtitle and the footnote in the preview and hides the caption, without asking for the rows again (Preview without a query)', async () => {
+    const context = await openDialog({ existing: edit(undefined) });
+    await previewAnswer(context, result([row('Cali', 75)]));
+    const preview = () => field('dialog-preview');
+    expect(preview().querySelector('[data-testid="widget-footnote"]')).toBeNull();
+    expect(preview().querySelector('[data-testid="chart-caption"]')!.classList.contains('sr-only')).toBe(false);
+
+    await typeAndSettle(context, 'dialog-subtitle', '¿Quién fue al evento?');
+    await typeAndSettle(context, 'dialog-footnote', 'No suman 100 %: respuesta múltiple.');
+    await click(context, radio('hidden'));
+    await wait(previewDelayMs + 100);
+    await settle(context.harness);
+
+    expect(context.http.match(isQuery).filter((r) => !r.cancelled)).toHaveLength(0);
+    expect(text(preview().querySelector('[data-testid="dialog-preview-subtitle"]'))).toBe('¿Quién fue al evento?');
+    expect(text(preview().querySelector('[data-testid="widget-footnote"]'))).toBe('No suman 100 %: respuesta múltiple.');
+    expect(preview().querySelector('[data-testid="chart-caption"]')!.classList.contains('sr-only')).toBe(true);
+  });
+
+  it('shows an own caption text, a unit and the subtitle of a new widget in the preview as typed', async () => {
+    const context = await openDialog();
+    await typeAndSettle(context, 'dialog-subtitle', 'Hogares por zona');
+    await click(context, radio('text'));
+    await typeAndSettle(context, 'dialog-caption-own', 'Hogares con niños');
+    await previewAnswer(context, result([row('Cali', 12450)]));
+
+    expect(text(field('dialog-preview').querySelector('[data-testid="dialog-preview-subtitle"]'))).toBe('Hogares por zona');
+    expect(text(field('dialog-preview').querySelector('[data-testid="chart-caption"]'))).toBe('Hogares con niños by municipality');
+
+    await typeAndSettle(context, 'dialog-unit', 'hogares');
+    expect(context.http.match(isQuery).filter((r) => !r.cancelled)).toHaveLength(0);
+    expect(all(field('dialog-preview'), 'chart-mark').length).toBeGreaterThan(0);
+  });
+
+  it('saves the texts of a new widget trimmed, besides its other settings', async () => {
+    const context = await openDialog();
+    await change(context, field('dialog-title'), 'Asistencia');
+    await typeAndSettle(context, 'dialog-subtitle', '  ¿Quién fue al evento?  ');
+    await typeAndSettle(context, 'dialog-footnote', '  Sin ponderar.  ');
+    await typeAndSettle(context, 'dialog-unit', ' de quienes asistieron ');
+    await click(context, radio('text'));
+    await typeAndSettle(context, 'dialog-caption-own', ' % de quienes asistieron ');
+
+    const body = await saved(context);
+
+    expect(body.config.display).toEqual({
+      subtitle: '¿Quién fue al evento?',
+      footnote: 'Sin ponderar.',
+      caption: { text: '% de quienes asistieron' },
+      unit: 'de quienes asistieron',
+    });
+  });
+
+  it('saves a hidden caption as hidden, and the default caption as nothing', async () => {
+    const context = await openDialog({ existing: edit(undefined) });
+    await click(context, radio('hidden'));
+    expect((await saved(context)).config.display).toEqual({ caption: { hidden: true } });
+  });
+
+  it('saves nothing for a caption that goes back to Default, with the text typed kept out', async () => {
+    const context = await openDialog({ existing: edit(undefined) });
+    await click(context, radio('text'));
+    await typeAndSettle(context, 'dialog-caption-own', 'Hogares con niños');
+    await click(context, radio('default'));
+
+    expect('display' in (await saved(context)).config).toBe(false);
+  });
+
+  it('saves no caption for an own text left empty or blank', async () => {
+    const context = await openDialog({ existing: edit(undefined) });
+    await click(context, radio('text'));
+    await typeAndSettle(context, 'dialog-caption-own', '   ');
+
+    expect('display' in (await saved(context)).config).toBe(false);
+  });
+
+  it('saves a pasted line break as a space', async () => {
+    const context = await openDialog({ existing: edit(undefined) });
+    await typeAndSettle(context, 'dialog-footnote', 'No suman 100 %:\nrespuesta múltiple.\r\n\tVer nota.');
+
+    expect((await saved(context)).config.display).toEqual({ footnote: 'No suman 100 %: respuesta múltiple. Ver nota.' });
+  });
+
+  it('saves a widget with a subtitle and nothing else changed as it was saved (Saved unchanged)', async () => {
+    const display = { color: 2, subtitle: 'Hogares por zona', caption: { hidden: true as const } };
+    const context = await openDialog({ existing: edit(display) });
+
+    const body = await saved(context);
+
+    expect(body.config).toEqual(config({ display }));
+    expect(JSON.stringify(body.config.display)).toBe(JSON.stringify(display));
+  });
+
+  it('saves a column chart in color 2 saved before these texts with no new key (Form saved unchanged before)', async () => {
+    const context = await openDialog({ existing: edit({ color: 2 }) });
+
+    const body = await saved(context);
+
+    expect(body.config.display).toEqual({ color: 2 });
+    expect(Object.keys(body.config.display!)).toEqual(['color']);
+  });
+
+  it('changes only the unit, and sends it (Unit changed)', async () => {
+    const context = await openDialog({ existing: edit({ unit: 'hogares' }) });
+    await typeAndSettle(context, 'dialog-unit', 'de los hogares');
+
+    expect((await saved(context)).config.display).toEqual({ unit: 'de los hogares' });
+  });
+
+  describe('a refusal', () => {
+    it('shows a refused subtitle on the subtitle field and not on the title (Error on its field)', async () => {
+      const context = await openDialog({ existing: edit({ subtitle: 'x'.repeat(5) }) });
+
+      await refuse(context, { 'config.display.subtitle': ['The subtitle is longer than 200 characters.'] });
+
+      expect(text(field('dialog-subtitle').closest('tmz-form-field'))).toContain('The subtitle is longer than 200 characters.');
+      expect(text(field('dialog-title').closest('tmz-form-field'))).not.toContain('subtitle');
+      expect(field('dialog-title').getAttribute('aria-invalid')).toBeNull();
+      expect(field('dialog-subtitle').getAttribute('aria-invalid')).toBe('true');
+      expect(fields('dialog-error')).toHaveLength(0);
+    });
+
+    it('shows a refused footnote and a refused unit on their fields', async () => {
+      const context = await openDialog({ existing: edit({ footnote: 'Nota.', unit: 'hogares' }) });
+
+      await refuse(context, {
+        'config.display.footnote': ['The footnote is longer than 500 characters.'],
+        'config.display.unit': ['The unit is longer than 32 characters.'],
+      });
+
+      expect(text(field('dialog-footnote').closest('tmz-form-field'))).toContain('The footnote is longer than 500 characters.');
+      expect(text(field('dialog-unit').closest('tmz-form-field'))).toContain('The unit is longer than 32 characters.');
+      expect(fields('dialog-error')).toHaveLength(0);
+    });
+
+    it('shows a refused caption on the caption\'s radios', async () => {
+      const context = await openDialog({ existing: edit({ caption: { text: 'Hogares' } }) });
+
+      await refuse(context, { 'config.display.caption': ['Give the caption its own text or hide it, not both.'] });
+
+      expect(text(field('dialog-caption').querySelector('[data-testid="field-error"]'))).toBe('Give the caption its own text or hide it, not both.');
+      expect(field('dialog-caption').getAttribute('aria-describedby')).toBe('widgetCaption-error');
+      expect(fields('dialog-error')).toHaveLength(0);
+    });
+
+    it('shows a refused caption text on the text field', async () => {
+      const context = await openDialog({ existing: edit({ caption: { text: 'Hogares' } }) });
+
+      await refuse(context, { 'config.display.caption.text': ['The caption is longer than 200 characters.'] });
+
+      expect(text(field('dialog-caption-own').closest('tmz-form-field'))).toContain('The caption is longer than 200 characters.');
+      expect(field('dialog-caption').querySelector('#widgetCaption-error')).toBeNull();
+    });
+
+    it('lets the error go once the field is changed', async () => {
+      const context = await openDialog({ existing: edit({ subtitle: 'Hogares' }) });
+      await refuse(context, { 'config.display.subtitle': ['The subtitle is longer than 200 characters.'] });
+
+      await typeAndSettle(context, 'dialog-subtitle', 'Hogares por zona');
+
+      expect(text(field('dialog-subtitle').closest('tmz-form-field'))).not.toContain('longer than');
+    });
+  });
+
+  describe('the warning that the texts crowd the tile (Widget context warning in the widget form)', () => {
+    const crowded = 'The texts take room from the chart. A taller tile shows more of them.';
+    const crowdedFigure = 'The texts take room from the figure. A taller tile shows more of them.';
+
+    it('warns that a footnote takes room from the figure of a new stat tile at its default 3×2 (Warning in the form)', async () => {
+      const context = await openDialog();
+      await change(context, field('dialog-chart-type'), 'stat');
+      expect(warning()).toBeNull();
+
+      await typeAndSettle(context, 'dialog-footnote', 'Sin ponderar.');
+
+      expect(text(warning())).toBe(crowdedFigure);
+    });
+
+    it('warns for an existing tile two rows high', async () => {
+      const context = await openDialog({ existing: edit({ subtitle: 'Hogares por zona' }, { layout: { x: 0, y: 0, w: 6, h: 2 } }) });
+
+      expect(text(warning())).toBe(crowded);
+      await typeAndSettle(context, 'dialog-subtitle', '');
+      expect(warning()).toBeNull();
+    });
+
+    it('warns for a footnote of 500 characters on a column chart 4 columns wide and 3 rows high (Warning for long texts)', async () => {
+      await openDialog({ existing: edit({ footnote: wordy(500) }, { layout: { x: 0, y: 0, w: 4, h: 3 } }) });
+
+      expect(text(warning())).toBe(crowded);
+    });
+
+    it('does not warn for a subtitle of 80 characters on a column chart 6 columns wide and 4 rows high (No warning on a tall tile)', async () => {
+      await openDialog({ existing: edit({ subtitle: wordy(80) }, { layout: { x: 0, y: 0, w: 6, h: 4 } }) });
+
+      expect(warning()).toBeNull();
+    });
+
+    it('does not warn for a widget with no texts, nor for blank ones', async () => {
+      const context = await openDialog({ existing: edit(undefined, { layout: { x: 0, y: 0, w: 3, h: 2 } }) });
+      expect(warning()).toBeNull();
+
+      await typeAndSettle(context, 'dialog-subtitle', '   ');
+      await typeAndSettle(context, 'dialog-footnote', ' ');
+      expect(warning()).toBeNull();
+    });
+
+    it('does not refuse the save: the warning is a hint', async () => {
+      const context = await openDialog({ existing: edit({ footnote: 'Sin ponderar.' }, { layout: { x: 0, y: 0, w: 3, h: 2 } }) });
+      expect(warning()).not.toBeNull();
+
+      expect((await saved(context)).config.display).toEqual({ footnote: 'Sin ponderar.' });
+    });
+  });
+});
+
+describe('the widget dialog and the chart annotations (add-chart-annotations, design D8)', () => {
+  afterEach(clearOverlay);
+
+  const twoDimensions = catalog({ columns: [...catalog().columns, { name: 'water_source', type: 'text', label: null }] });
+  const queries = (context: Context) => context.http.match(isQuery).filter((r) => !r.cancelled);
+  const saved = async (context: Context) => {
+    await click(context, field('dialog-save'));
+    return context.http.expectOne((r) => isCreate(r) || isPatch(r)).request.body as { title: string; chartType: ChartType; config: WidgetConfig };
+  };
+  const edit = (display: NonNullable<WidgetConfig['display']> | undefined, overrides: Partial<WidgetConfig> = {}, widgetOverrides: Partial<Widget> = {}) =>
+    widget('w1', { config: config({ ...(display ? { display } : {}), ...overrides }), ...widgetOverrides });
+  const lineRows = () => fields('reference-line');
+  const kindSelect = (index: number) => lineRows()[index].querySelector<HTMLSelectElement>('[data-testid="reference-kind"]')!;
+  const kindsOf = (index: number) => Array.from(kindSelect(index).options).map((o) => o.value);
+  const valueInput = (index: number) => lineRows()[index].querySelector<HTMLInputElement>('[data-testid="reference-value"]')!;
+  const labelInput = (index: number) => lineRows()[index].querySelector<HTMLInputElement>('[data-testid="reference-label"]')!;
+  const add = (context: Context) => click(context, field('reference-add'));
+  const withSeries = (extra: Partial<WidgetConfig> = {}) => ({ seriesBy: 'water_source', ...extra });
+  const ratio = { ratio: { numerator: 'numerator', denominator: 'denominator' } };
+
+  describe('which kinds the form offers', () => {
+    it('offers a mean, a median and a fixed value for a measure with no series, and an overall line too for a ratio', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      await add(context);
+      expect(kindsOf(0)).toEqual(['mean', 'median', 'value']);
+      expect(kindSelect(0).value).toBe('mean');
+
+      await change(context, field('dialog-mode'), 'ratio');
+      expect(kindsOf(0)).toEqual(['mean', 'median', 'overall', 'value']);
+    });
+
+    it('offers only the overall and fixed value kinds to a grouped chart of a ratio with a series (Kinds offered with a series)', async () => {
+      const context = await openDialog({ existing: edit(undefined, withSeries(ratio)), columns: twoDimensions });
+      await add(context);
+
+      expect(kindsOf(0)).toEqual(['overall', 'value']);
+      expect(kindSelect(0).value).toBe('overall');
+    });
+
+    it('offers only a fixed value to a measure with a series, and to each stacked layout', async () => {
+      const context = await openDialog({ existing: edit(undefined, withSeries()), columns: twoDimensions });
+      await add(context);
+      expect(kindsOf(0)).toEqual(['value']);
+      await click(context, field('dialog-layout-stacked'));
+      expect(kindsOf(0)).toEqual(['value']);
+      await click(context, field('dialog-layout-percent'));
+      expect(kindsOf(0)).toEqual(['value']);
+      await click(context, field('dialog-layout-grouped'));
+      expect(kindsOf(0)).toEqual(['value']);
+    });
+
+    it('offers the same kinds to a line chart, and none to a chart that draws no lines', async () => {
+      const context = await openDialog({ existing: edit(undefined, ratio, { chartType: 'line' }) });
+      await add(context);
+      expect(kindsOf(0)).toEqual(['mean', 'median', 'overall', 'value']);
+
+      for (const type of ['pie', 'stat', 'histogram', 'map']) {
+        await change(context, field('dialog-chart-type'), type);
+        expect(fields('dialog-reference-lines'), type).toHaveLength(0);
+      }
+    });
+
+    it('offers a kind once: a line takes the next kind that no line has, and a fixed value can be added again', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      await add(context);
+      await add(context);
+      await add(context);
+
+      expect(lineRows().map((_, i) => kindSelect(i).value)).toEqual(['mean', 'median', 'value']);
+      expect(kindsOf(0)).toEqual(['mean', 'value']);
+      expect(kindsOf(2)).toEqual(['value']);
+    });
+
+    it('does not let a fifth line be added, and says why', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      for (let i = 0; i < 4; i++) {
+        await add(context);
+      }
+
+      expect(lineRows()).toHaveLength(4);
+      expect(field<HTMLButtonElement>('reference-add').disabled).toBe(true);
+      expect(text(field('reference-full'))).toBe('A widget has at most 4 reference lines.');
+      await click(context, field('reference-add'));
+      expect(lineRows()).toHaveLength(4);
+
+      await click(context, lineRows()[1].querySelector<HTMLElement>('[data-testid="reference-remove"]')!);
+      expect(lineRows()).toHaveLength(3);
+      expect(field<HTMLButtonElement>('reference-add').disabled).toBe(false);
+    });
+
+    it('says what each kind is, and the caution of the overall line (Overall help)', async () => {
+      const context = await openDialog({ existing: edit(undefined, { ...ratio, groupBy: 'municipality' }, { chartType: 'bar' }) });
+      await add(context);
+      expect(lineRows()[0].querySelector('[data-testid="reference-overall-help"]')).toBeNull();
+      expect(text(lineRows()[0].querySelector('[data-testid="reference-help"]'))).toContain('mean of the values the chart draws');
+
+      await change(context, kindSelect(0), 'overall');
+
+      expect(text(lineRows()[0].querySelector('[data-testid="reference-overall-help"]'))).toContain(
+        'When the bars are the answers of one question, such as places or reasons, they share one base, and this line is only their mean, not a total.',
+      );
+      expect(text(lineRows()[0].querySelector('[data-testid="reference-help"]'))).toContain('stat tile with the same filters');
+    });
+  });
+
+  describe('the value of a fixed line', () => {
+    const percentIndicator = [indicator('piped_water_rate')];
+    const percentWidget = (display?: NonNullable<WidgetConfig['display']>, overrides: Partial<WidgetConfig> = {}) =>
+      edit(display, { indicator: 'piped_water_rate', ...overrides });
+
+    it('takes a percent typed as a percent and saves the fraction: 50 is 0.5 (Percent typed in the form)', async () => {
+      const context = await openDialog({ existing: percentWidget(), indicators: percentIndicator });
+      await add(context);
+      await add(context);
+      await add(context);
+      await change(context, valueInput(2), '50');
+
+      expect(text(lineRows()[2].querySelector('[data-testid="reference-unit"]'))).toBe('%');
+      const body = await saved(context);
+
+      expect(body.config.display?.referenceLines).toEqual([{ kind: 'mean' }, { kind: 'median' }, { kind: 'value', value: 0.5 }]);
+    });
+
+    it('moves the decimal point of what is typed instead of dividing: 33.3 is 0.333, and a comma is a point', async () => {
+      const context = await openDialog({ existing: percentWidget({ referenceLines: [{ kind: 'value', value: 0.1 }] }), indicators: percentIndicator });
+
+      await change(context, valueInput(0), '33.3');
+      expect((await saved(context)).config.display?.referenceLines).toEqual([{ kind: 'value', value: 0.333 }]);
+    });
+
+    it('reads a comma as a point and ignores a percent sign: 33,3 % is 0.333', async () => {
+      const context = await openDialog({ existing: percentWidget({ referenceLines: [{ kind: 'value', value: 0.1 }] }), indicators: percentIndicator });
+
+      await change(context, valueInput(0), '33,3 %');
+      const first = (await saved(context)).config.display?.referenceLines;
+      expect(first).toEqual([{ kind: 'value', value: 0.333 }]);
+    });
+
+    it('shows a saved fraction as a percent, and keeps the saved number as it is until the input is edited', async () => {
+      const context = await openDialog({ existing: percentWidget({ referenceLines: [{ kind: 'value', value: 0.3333333333, label: 'Meta' }] }), indicators: percentIndicator });
+      expect(valueInput(0).value).toBe('33.33333333');
+
+      const body = await saved(context);
+      expect(body.config.display?.referenceLines).toEqual([{ kind: 'value', value: 0.3333333333, label: 'Meta' }]);
+    });
+
+    it('writes a small saved number as a percent too: 1e-7 shows as 0.00001', async () => {
+      await openDialog({ existing: percentWidget({ referenceLines: [{ kind: 'value', value: 1e-7 }] }), indicators: percentIndicator });
+      expect(valueInput(0).value).toBe('0.00001');
+    });
+
+    it('takes a count in the indicator\'s units, with its unit beside the input', async () => {
+      const context = await openDialog({ existing: edit(undefined, { indicator: 'households_visited' }), indicators: [indicator('households_visited')] });
+      await add(context);
+      await add(context);
+      await add(context);
+      await change(context, valueInput(2), '100');
+
+      expect(text(lineRows()[2].querySelector('[data-testid="reference-unit"]'))).toBe('households');
+      expect((await saved(context)).config.display?.referenceLines).toEqual([{ kind: 'mean' }, { kind: 'median' }, { kind: 'value', value: 100 }]);
+    });
+
+    it('takes the share of a 100% layout as a percent', async () => {
+      const context = await openDialog({ existing: edit(undefined, withSeries()), columns: twoDimensions });
+      await click(context, field('dialog-layout-percent'));
+      await add(context);
+      await change(context, valueInput(0), '50');
+
+      expect(text(lineRows()[0].querySelector('[data-testid="reference-unit"]'))).toBe('%');
+      expect((await saved(context)).config.display?.referenceLines).toEqual([{ kind: 'value', value: 0.5 }]);
+    });
+
+    it('asks for the number of a fixed value before saving, and does not blank the preview meanwhile', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      await previewAnswer(context, result([row('Cali', 75)]));
+      await add(context);
+      await add(context);
+      await add(context);
+      await click(context, field('dialog-save'));
+
+      expect(context.http.match(isPatch)).toHaveLength(0);
+      expect(text(field('reference-list-error'))).toBe('Type a number for every fixed value.');
+      expect(fields('view-idle')).toHaveLength(0);
+
+      await change(context, valueInput(2), '12');
+      expect(fields('reference-list-error')).toHaveLength(0);
+    });
+
+    it('shows the number again, in the units now in force, when the units change under a text typed (Units changed under a typed value)', async () => {
+      const context = await openDialog({ existing: edit(undefined, withSeries()), columns: twoDimensions, indicators: [indicator('households_visited')] });
+      await add(context);
+      await change(context, valueInput(0), '0.5');
+      expect(valueInput(0).value).toBe('0.5');
+
+      // The 100% layout takes a share as a percent: the 0.5 that is saved is 50%, and the input must say so.
+      await click(context, field('dialog-layout-percent'));
+      expect(text(lineRows()[0].querySelector('[data-testid="reference-unit"]'))).toBe('%');
+      expect(valueInput(0).value).toBe('50');
+      expect((await saved(context)).config.display?.referenceLines).toEqual([{ kind: 'value', value: 0.5 }]);
+    });
+
+    it('keeps the text as typed while the units stay, and goes back to it when they do', async () => {
+      const context = await openDialog({ existing: edit(undefined, withSeries()), columns: twoDimensions, indicators: [indicator('households_visited')] });
+      await add(context);
+      await change(context, valueInput(0), '0.50');
+      await click(context, field('dialog-layout-percent'));
+      expect(valueInput(0).value).toBe('50');
+
+      await click(context, field('dialog-layout-grouped'));
+      expect(valueInput(0).value).toBe('0.50');
+    });
+
+    it.each([
+      ['1.500', 'a point'],
+      ['1,500', 'a comma'],
+      ['-12.345', 'a negative number'],
+    ])('does not guess whether %s (%s) is thousands or a decimal in a count: it blocks saving and says so (Thousands separator)', async (typed) => {
+      const context = await openDialog({ existing: edit(undefined, { indicator: 'households_visited' }), indicators: [indicator('households_visited')] });
+      await add(context);
+      await add(context);
+      await add(context);
+      await change(context, valueInput(2), typed);
+      await click(context, field('dialog-save'));
+
+      expect(context.http.match(isPatch)).toHaveLength(0);
+      expect(text(field('reference-list-error'))).toContain(`“${typed}” can be read as a decimal or as thousands`);
+      expect(valueInput(2).getAttribute('aria-invalid')).toBe('true');
+      expect(valueInput(2).value).toBe(typed);
+    });
+
+    it.each([
+      ['33.3', 33.3],
+      ['.5', 0.5],
+      ['5,', 5],
+      ['0.125', 0.125],
+      ['1.5000', 1.5],
+      ['1500', 1500],
+      ['12.34', 12.34],
+    ])('reads %s as %s in a count', async (typed, expected) => {
+      const context = await openDialog({ existing: edit(undefined, { indicator: 'households_visited' }), indicators: [indicator('households_visited')] });
+      await add(context);
+      await add(context);
+      await add(context);
+      await change(context, valueInput(2), typed);
+
+      expect((await saved(context)).config.display?.referenceLines).toEqual([{ kind: 'mean' }, { kind: 'median' }, { kind: 'value', value: expected }]);
+    });
+
+    it('reads 33.333 in a percent as a share, since a percent has no thousands', async () => {
+      const context = await openDialog({ existing: percentWidget({ referenceLines: [{ kind: 'value', value: 0.1 }] }), indicators: percentIndicator });
+      await change(context, valueInput(0), '33.333');
+
+      expect((await saved(context)).config.display?.referenceLines).toEqual([{ kind: 'value', value: 0.33333 }]);
+    });
+
+    it('tells a count not to use a thousands separator', async () => {
+      const context = await openDialog({ existing: edit(undefined, { indicator: 'households_visited' }), indicators: [indicator('households_visited')] });
+      await add(context);
+      await add(context);
+      await add(context);
+
+      expect(text(lineRows()[2].querySelector('[data-testid="reference-help"]'))).toContain('with no thousands separator');
+    });
+  });
+
+  describe('the lines for the keyboard and assistive technology', () => {
+    const idsOf = (element: Element) => (element.getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean);
+    const textOf = (id: string) => text(document.getElementById(id));
+
+    it('describes each control by the texts that belong to it', async () => {
+      const context = await openDialog({ existing: edit(undefined, { ...ratio, indicator: 'piped_water_rate', groupBy: 'municipality' }), indicators: [indicator('piped_water_rate')] });
+      await add(context);
+      await change(context, kindSelect(0), 'overall');
+      await add(context);
+      await change(context, kindSelect(1), 'value');
+
+      expect(idsOf(kindSelect(0))).toEqual(['referenceHelp0', 'referenceCaution0']);
+      expect(textOf('referenceHelp0')).toContain('stat tile');
+      expect(textOf('referenceCaution0')).toContain('answers of one question');
+      expect(idsOf(kindSelect(1))).toEqual(['referenceHelp1']);
+      expect(idsOf(valueInput(1))).toEqual(['referenceValue1-unit']);
+      expect(textOf('referenceValue1-unit')).not.toBe('');
+      expect(valueInput(1).getAttribute('aria-invalid')).toBeNull();
+    });
+
+    it('marks a fixed value that has no number once Save was tried, and points it at the message', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      await add(context);
+      await add(context);
+      await add(context);
+      expect(valueInput(2).getAttribute('aria-invalid')).toBeNull();
+
+      await click(context, field('dialog-save'));
+
+      expect(valueInput(2).getAttribute('aria-invalid')).toBe('true');
+      expect(idsOf(valueInput(2))).toContain('widgetLines-error');
+      expect(textOf('widgetLines-error')).toBe('Type a number for every fixed value.');
+      // The other rows are fine.
+      expect(kindSelect(0).getAttribute('aria-invalid')).toBeNull();
+      expect(labelInput(2).getAttribute('aria-invalid')).toBeNull();
+
+      await change(context, valueInput(2), '12');
+      expect(valueInput(2).getAttribute('aria-invalid')).toBeNull();
+      expect(idsOf(valueInput(2))).not.toContain('widgetLines-error');
+    });
+
+    it('marks what the server refused in a row and describes the control by the message', async () => {
+      const context = await openDialog({ existing: edit({ referenceLines: [{ kind: 'mean' }, { kind: 'value', value: 0.5, label: 'Meta' }] }) });
+      await click(context, field('dialog-save'));
+      context.http.expectOne(isPatch).flush(
+        {
+          title: 'x',
+          errors: {
+            'config.display.referenceLines[1].label': ["A reference line's label has at most 40 characters."],
+            'config.display.referenceLines[1].value': ['A value must be a number.'],
+            'config.display.referenceLines[0].kind': ['The kind is not valid.'],
+          },
+        },
+        { status: 400, statusText: 'Bad Request' },
+      );
+      await settle(context.harness);
+
+      expect(labelInput(1).getAttribute('aria-invalid')).toBe('true');
+      expect(idsOf(labelInput(1))).toEqual(['referenceLabel1-error']);
+      expect(textOf('referenceLabel1-error')).toContain('at most 40');
+      expect(valueInput(1).getAttribute('aria-invalid')).toBe('true');
+      expect(idsOf(valueInput(1))).toEqual(['referenceValue1-error']);
+      expect(textOf('referenceValue1-error')).toBe('A value must be a number.');
+      expect(kindSelect(0).getAttribute('aria-invalid')).toBe('true');
+      expect(idsOf(kindSelect(0))).toEqual(['referenceHelp0', 'referenceKind0-error']);
+      expect(labelInput(0).getAttribute('aria-invalid')).toBeNull();
+    });
+
+    it('puts the keyboard on the kind of a new line', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      await add(context);
+      expect(document.activeElement).toBe(kindSelect(0));
+      await add(context);
+      expect(document.activeElement).toBe(kindSelect(1));
+    });
+
+    it('puts the keyboard on the line that takes the place of a removed one, the one before it, or the button that adds one', async () => {
+      const context = await openDialog({ existing: edit({ referenceLines: [{ kind: 'mean' }, { kind: 'median' }, { kind: 'value', value: 1 }] }) });
+      const remove = (index: number) => click(context, lineRows()[index].querySelector<HTMLElement>('[data-testid="reference-remove"]')!);
+
+      await remove(1);
+      expect(document.activeElement).toBe(kindSelect(1));
+      expect(kindSelect(1).value).toBe('value');
+      await remove(1);
+      expect(document.activeElement).toBe(kindSelect(0));
+      await remove(0);
+      expect(document.activeElement).toBe(field('reference-add'));
+    });
+  });
+
+  describe('what a line saves', () => {
+    it('saves the label as one line of text, trimmed, and none for a blank one', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      await add(context);
+      await add(context);
+      await change(context, labelInput(0), '  Promedio de zonas  ');
+      await change(context, labelInput(1), '   ');
+
+      expect(labelInput(0).getAttribute('maxlength')).toBe('40');
+      expect((await saved(context)).config.display?.referenceLines).toEqual([{ kind: 'mean', label: 'Promedio de zonas' }, { kind: 'median' }]);
+    });
+
+    it('proposes the default label of the kind as the placeholder', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      await add(context);
+      expect(labelInput(0).placeholder).toBe('Mean');
+      await change(context, kindSelect(0), 'median');
+      expect(labelInput(0).placeholder).toBe('Median');
+    });
+
+    it('saves a line removed as no line, and no display at all when nothing else is set', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      await add(context);
+      await click(context, lineRows()[0].querySelector<HTMLElement>('[data-testid="reference-remove"]')!);
+
+      expect('display' in (await saved(context)).config).toBe(false);
+    });
+  });
+
+  describe('previewing the lines', () => {
+    it('redraws without a new query when a line\'s label or kind changes (Label edited)', async () => {
+      const context = await openDialog({ existing: edit({ referenceLines: [{ kind: 'mean' }] }) });
+      await previewAnswer(context, result([row('Cali', 75), row('Buga', 55)]));
+
+      await change(context, labelInput(0), 'Promedio');
+      await change(context, kindSelect(0), 'median');
+      await wait(previewDelayMs + 100);
+      await settle(context.harness);
+
+      expect(queries(context)).toHaveLength(0);
+    });
+
+    it('asks once, for the overall value, when an overall line is added to a chart with no series (Overall line added)', async () => {
+      const context = await openDialog({ existing: edit(undefined, ratio) });
+      const first = await previewAnswer(context, result([row('Cali', 0.75)]));
+      expect('overall' in first).toBe(false);
+
+      await add(context);
+      await change(context, kindSelect(0), 'overall');
+      const second = await previewAnswer(context, result([row('Cali', 0.75)], { overall: 0.6 }));
+
+      expect((second as unknown as { overall: boolean }).overall).toBe(true);
+      expect('display' in second.config).toBe(false); // the lines themselves are never part of the query
+    });
+
+    it('does not ask again for an overall line over a series, which reads its totals', async () => {
+      const context = await openDialog({ existing: edit(undefined, withSeries(ratio)), columns: twoDimensions });
+      await previewAnswer(context, seriesResult([cell('Cali', 'Piped', 0.5)], ['Piped']));
+
+      await add(context);
+      await wait(previewDelayMs + 100);
+      await settle(context.harness);
+
+      expect(queries(context)).toHaveLength(0);
+    });
+  });
+
+  describe('steps and data labels', () => {
+    const steps = () => ({ linear: field<HTMLInputElement>('dialog-interpolation-linear'), step: field<HTMLInputElement>('dialog-interpolation-step') });
+
+    it('offers Straight and Steps to a line chart only, straight to begin with', async () => {
+      const context = await openDialog({ existing: edit(undefined, {}, { chartType: 'line' }) });
+
+      expect(Array.from(dialog().querySelectorAll('[data-testid="dialog-interpolation"] label')).map(text)).toEqual(['Straight', 'Steps']);
+      expect(steps().linear.checked).toBe(true);
+      expect(steps().step.checked).toBe(false);
+      await change(context, field('dialog-chart-type'), 'column');
+      expect(fields('dialog-interpolation')).toHaveLength(0);
+    });
+
+    it('saves steps, and previews them without a new query', async () => {
+      const context = await openDialog({ existing: edit(undefined, {}, { chartType: 'line' }) });
+      await previewAnswer(context, result([row('A', 1), row('B', 2)]));
+
+      await click(context, steps().step);
+      await wait(previewDelayMs + 100);
+      await settle(context.harness);
+
+      expect(queries(context)).toHaveLength(0);
+      expect((await saved(context)).config.display).toEqual({ interpolation: 'step' });
+    });
+
+    it('stores straight only when the widget had a choice saved: picking it on a widget saved without one leaves it without one', async () => {
+      const context = await openDialog({ existing: edit(undefined, {}, { chartType: 'line' }) });
+      await click(context, steps().step);
+      await click(context, steps().linear);
+
+      expect('display' in (await saved(context)).config).toBe(false);
+    });
+
+    it('keeps a saved "linear" as it is, and moves from steps back to it', async () => {
+      const context = await openDialog({ existing: edit({ interpolation: 'step' }, {}, { chartType: 'line' }) });
+      expect(steps().step.checked).toBe(true);
+      await click(context, steps().linear);
+
+      expect((await saved(context)).config.display).toEqual({ interpolation: 'linear' });
+    });
+
+    it('drops the steps of a widget that is no longer a line, and brings them back with the line', async () => {
+      const context = await openDialog({ existing: edit({ interpolation: 'step' }, {}, { chartType: 'line' }) });
+      await change(context, field('dialog-chart-type'), 'column');
+      await change(context, field('dialog-chart-type'), 'line');
+
+      expect((await saved(context)).config.display).toEqual({ interpolation: 'step' });
+    });
+
+    it('offers the data labels to a bar, column, line and pie, and not to stacked bars', async () => {
+      const context = await openDialog({ existing: edit(undefined, withSeries()), columns: twoDimensions });
+      expect(fields('dialog-data-labels')).toHaveLength(1);
+      await click(context, field('dialog-layout-stacked'));
+      expect(fields('dialog-data-labels')).toHaveLength(0);
+      await click(context, field('dialog-layout-percent'));
+      expect(fields('dialog-data-labels')).toHaveLength(0);
+      await click(context, field('dialog-layout-grouped'));
+      expect(fields('dialog-data-labels')).toHaveLength(1);
+
+      for (const type of ['bar', 'line', 'pie']) {
+        await change(context, field('dialog-chart-type'), type);
+        expect(fields('dialog-data-labels'), type).toHaveLength(1);
+      }
+      for (const type of ['stat', 'histogram', 'map', 'boxplot']) {
+        await change(context, field('dialog-chart-type'), type);
+        expect(fields('dialog-data-labels'), type).toHaveLength(0);
+      }
+    });
+
+    it('saves data labels, and none by default; unchecking a setting the widget never had leaves it out', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      expect(field<HTMLInputElement>('dialog-data-labels').checked).toBe(false);
+      await click(context, field('dialog-data-labels'));
+      await click(context, field('dialog-data-labels'));
+      expect('display' in (await saved(context)).config).toBe(false);
+    });
+
+    it('saves checked data labels', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      await click(context, field('dialog-data-labels'));
+
+      expect((await saved(context)).config.display).toEqual({ dataLabels: true });
+    });
+
+    it('keeps a saved "false" as it is when the box is unchecked, and checked when it was', async () => {
+      const context = await openDialog({ existing: edit({ dataLabels: true }) });
+      expect(field<HTMLInputElement>('dialog-data-labels').checked).toBe(true);
+      await click(context, field('dialog-data-labels'));
+
+      expect((await saved(context)).config.display).toEqual({ dataLabels: false });
+    });
+  });
+
+  describe('a widget saved unchanged (Form saved unchanged)', () => {
+    it('sends no display for a widget saved before the three settings', async () => {
+      const context = await openDialog({ existing: edit(undefined, { ...ratio }) });
+      const body = await saved(context);
+
+      expect(body.config).toEqual(config(ratio));
+      expect('display' in body.config).toBe(false);
+    });
+
+    it('sends the settings of a column chart saved with "false", two lines and its color', async () => {
+      const display = { color: 2, referenceLines: [{ kind: 'mean' as const }, { kind: 'value' as const, value: 0.5, label: 'Meta' }], dataLabels: false };
+      const context = await openDialog({ existing: edit(display) });
+
+      expect((await saved(context)).config.display).toEqual(display);
+    });
+
+    it('sends the "linear" of a line chart, and its two lines', async () => {
+      const display = { referenceLines: [{ kind: 'median' as const, label: 'Mediana' }, { kind: 'value' as const, value: 120 }], interpolation: 'linear' as const, dataLabels: false };
+      const context = await openDialog({ existing: edit(display, {}, { chartType: 'line' }) });
+
+      expect((await saved(context)).config.display).toEqual(display);
+    });
+
+    it('sends a chart with a series saved with no layout without one: grouped is shown but nothing is written', async () => {
+      const context = await openDialog({ existing: edit({ referenceLines: [{ kind: 'overall' }] }, withSeries(ratio)), columns: twoDimensions });
+      expect(field<HTMLInputElement>('dialog-layout-grouped').checked).toBe(true);
+
+      const body = await saved(context);
+
+      expect('layout' in body.config).toBe(false);
+      expect(body.config.display).toEqual({ referenceLines: [{ kind: 'overall' }] });
+    });
+
+    it('writes the layout once the member picks one, and goes back to none when grouped is picked again on a widget saved with none', async () => {
+      const context = await openDialog({ existing: edit(undefined, withSeries()), columns: twoDimensions });
+      await click(context, field('dialog-layout-stacked'));
+      await click(context, field('dialog-layout-grouped'));
+
+      expect('layout' in (await saved(context)).config).toBe(false);
+    });
+
+    it('saves the layout it was saved with, grouped included', async () => {
+      const context = await openDialog({ existing: edit(undefined, withSeries({ layout: 'grouped' })), columns: twoDimensions });
+
+      expect((await saved(context)).config.layout).toBe('grouped');
+    });
+
+    it('still saves grouped for a new widget with a series', async () => {
+      const context = await openDialog({ columns: twoDimensions });
+      await change(context, field('dialog-title'), 'Water');
+      await change(context, field('dialog-series-by'), 'water_source');
+
+      expect((await saved(context)).config.layout).toBe('grouped');
+    });
+  });
+
+  describe('what the widget no longer takes', () => {
+    const lineDisplay = { referenceLines: [{ kind: 'mean' as const }, { kind: 'value' as const, value: 0.5 }], dataLabels: true };
+
+    it('keeps the data labels and drops the lines of a column chart turned into a pie chart (Column chart turned into a pie chart)', async () => {
+      const context = await openDialog({ existing: edit(lineDisplay) });
+      await change(context, field('dialog-chart-type'), 'pie');
+
+      expect(fields('dialog-reference-lines')).toHaveLength(0);
+      expect(text(field('dialog-annotations-note'))).toBe('This chart does not draw reference lines, so they are not saved. They come back if you change the chart type back.');
+      const body = await saved(context);
+
+      expect(body.chartType).toBe('pie');
+      expect(body.config.display).toEqual({ dataLabels: true });
+    });
+
+    it('saves no mean line for a column chart that gains a series, shows the note, and brings the line back when the series goes', async () => {
+      const context = await openDialog({ existing: edit(lineDisplay), columns: twoDimensions });
+      expect(fields('dialog-annotations-note')).toHaveLength(0);
+
+      await change(context, field('dialog-series-by'), 'water_source');
+      expect(text(field('dialog-annotations-note'))).toBe('A mean or median line needs a chart with no series, so it is not saved. It comes back if you remove the series.');
+      expect(lineRows()).toHaveLength(2); // still in the form
+
+      await change(context, field('dialog-series-by'), '');
+      expect(fields('dialog-annotations-note')).toHaveLength(0);
+      expect((await saved(context)).config.display).toEqual(lineDisplay);
+    });
+
+    it('saves only the fixed value of a column chart that gains a series, with the note', async () => {
+      const context = await openDialog({ existing: edit(lineDisplay), columns: twoDimensions });
+      await change(context, field('dialog-series-by'), 'water_source');
+
+      expect((await saved(context)).config.display).toEqual({ referenceLines: [{ kind: 'value', value: 0.5 }], dataLabels: true });
+    });
+
+    it('brings the line back when the chart type changes back before saving', async () => {
+      const context = await openDialog({ existing: edit(lineDisplay) });
+      await change(context, field('dialog-chart-type'), 'stat');
+      await change(context, field('dialog-chart-type'), 'column');
+
+      expect(fields('dialog-annotations-note')).toHaveLength(0);
+      expect((await saved(context)).config.display).toEqual(lineDisplay);
+    });
+
+    it('drops an overall line when the plot becomes a measure, with its note', async () => {
+      const context = await openDialog({ existing: edit({ referenceLines: [{ kind: 'overall' }] }, ratio) });
+      await change(context, field('dialog-mode'), 'measure');
+
+      expect(text(field('dialog-annotations-note'))).toBe('An overall line needs a ratio, so it is not saved. It comes back if you plot a ratio.');
+      expect('display' in (await saved(context)).config).toBe(false);
+    });
+
+    it('drops the lines but the fixed value of a stacked layout, and the data labels, with their notes', async () => {
+      const context = await openDialog({
+        existing: edit({ referenceLines: [{ kind: 'value', value: 100 }, { kind: 'mean' }], dataLabels: true }, withSeries()),
+        columns: twoDimensions,
+      });
+      expect(fields('dialog-annotations-note')).toHaveLength(1); // the mean needs no series
+
+      await click(context, field('dialog-layout-stacked'));
+      expect(text(field('dialog-annotations-note'))).toBe('Stacked bars take only fixed values, so the other lines are not saved. They come back with the grouped layout.');
+      expect(text(field('dialog-data-labels-note'))).toBe('Stacked bars have no data labels, so they are not saved. They come back with the grouped layout.');
+      const body = await saved(context);
+
+      expect(body.config.display).toEqual({ referenceLines: [{ kind: 'value', value: 100 }] });
+    });
+  });
+
+  describe('a refusal', () => {
+    const refuse = async (context: Context, errors: Record<string, string[]>) => {
+      await click(context, field('dialog-save'));
+      context.http.expectOne(isPatch).flush({ title: 'x', errors }, { status: 400, statusText: 'Bad Request' });
+      await settle(context.harness);
+    };
+
+    it('shows a refused label on its line and not on the others', async () => {
+      const context = await openDialog({ existing: edit({ referenceLines: [{ kind: 'mean' }, { kind: 'value', value: 0.5, label: 'Meta' }] }) });
+
+      await refuse(context, { 'config.display.referenceLines[1].label': ['A reference line\'s label has at most 40 characters.'] });
+
+      expect(text(lineRows()[1])).toContain('A reference line\'s label has at most 40 characters.');
+      expect(text(lineRows()[0])).not.toContain('at most 40');
+      expect(fields('dialog-error')).toHaveLength(0);
+    });
+
+    it('shows a refused kind and a refused value on their lines', async () => {
+      const context = await openDialog({ existing: edit({ referenceLines: [{ kind: 'value', value: 0.2 }, { kind: 'value', value: 1.5 }] }, withSeries()), columns: twoDimensions });
+      await click(context, field('dialog-layout-percent'));
+
+      await refuse(context, {
+        'config.display.referenceLines[0].kind': ["The kind must be 'mean', 'median', 'overall' or 'value'."],
+        'config.display.referenceLines[1].value': ['In a 100% layout a value is a share from 0 to 1.'],
+      });
+
+      expect(text(lineRows()[0])).toContain('The kind must be');
+      expect(text(lineRows()[1])).toContain('In a 100% layout a value is a share from 0 to 1.');
+      expect(text(lineRows()[0])).not.toContain('share from 0 to 1');
+    });
+
+    it('shows the refusal of the lines as a whole under the list, and lets it go with the next change', async () => {
+      const context = await openDialog({ existing: edit({ referenceLines: [{ kind: 'mean' }] }) });
+      await refuse(context, { 'config.display.referenceLines': ['A widget has at most 4 reference lines.'] });
+
+      expect(text(field('reference-list-error'))).toBe('A widget has at most 4 reference lines.');
+      expect(field('dialog-reference-lines').getAttribute('aria-describedby')).toBe('widgetLines-error');
+      expect(fields('dialog-error')).toHaveLength(0);
+      await add(context);
+      expect(fields('reference-list-error')).toHaveLength(0);
+    });
+
+    it('maps a refusal to the row the member sees when the form holds a line the widget does not save', async () => {
+      // The mean is not saved with a series, so the server's second line is the form's third.
+      const context = await openDialog({
+        existing: edit({ referenceLines: [{ kind: 'value', value: 1 }, { kind: 'mean' }, { kind: 'value', value: 2, label: 'x' }] }, withSeries()),
+        columns: twoDimensions,
+      });
+
+      await refuse(context, { 'config.display.referenceLines[1].label': ['A reference line\'s label has at most 40 characters.'] });
+
+      expect(text(lineRows()[2])).toContain('at most 40');
+      expect(text(lineRows()[1])).not.toContain('at most 40');
+    });
+
+    it('shows a refused choice of segments on its field', async () => {
+      const context = await openDialog({ existing: edit({ interpolation: 'step' }, {}, { chartType: 'line' }) });
+      await refuse(context, { 'config.display.interpolation': ['Only a line chart has an interpolation.'] });
+
+      expect(text(field('dialog-interpolation').querySelector('[data-testid="field-error"]'))).toBe('Only a line chart has an interpolation.');
+      expect(field('dialog-interpolation').getAttribute('aria-describedby')).toBe('widgetInterpolation-error');
+    });
+
+    it('shows refused data labels on their field', async () => {
+      const context = await openDialog({ existing: edit({ dataLabels: true }) });
+      await refuse(context, { 'config.display.dataLabels': ['Stacked bars have no data labels.'] });
+
+      expect(text(dialog().querySelector('[data-testid="dialog-data-labels-group"] [data-testid="field-error"]'))).toBe('Stacked bars have no data labels.');
+    });
   });
 });

@@ -6,6 +6,7 @@ using Npgsql;
 using Tamiza.Api.Auth;
 using Tamiza.Api.Data;
 using Tamiza.Api.Http;
+using Tamiza.Api.Indicators;
 using Tamiza.Api.Projects;
 
 namespace Tamiza.Api.Pipeline;
@@ -44,7 +45,8 @@ public static class ScriptEndpoints
     }
 
     internal static readonly Expression<Func<ScriptVersion, ScriptVersionDetails>> ToDetails = v => new ScriptVersionDetails(
-        v.Id, v.Kind, v.Name, v.Number, v.Code == null, v.Code, v.Label, v.Description, v.Unit, v.Format,
+        // The stored columns are read in the final projection, which EF evaluates on the client; every use of ToDetails ends a query.
+        v.Id, v.Kind, v.Name, v.Number, v.Code == null, v.Code, v.Label, v.Description, v.Unit, v.Format, ColumnMetadata.Read(v.Columns),
         new Person(v.Author!.Id, v.Author.Name), v.CreatedAt, v.Origin);
 
     /// <summary>The current version of every indicator the project has: the latest of each name, unless it marks the indicator removed.</summary>
@@ -68,7 +70,7 @@ public static class ScriptEndpoints
         var indicators = latest
             .Where(v => v.Kind == ScriptKind.Indicator && !v.Removed)
             .OrderBy(v => v.Name, StringComparer.Ordinal)
-            .Select(v => new IndicatorScript(v.Name!, v.Label!, v.Description, v.Unit, v.Format!, v))
+            .Select(v => new IndicatorScript(v.Name!, v.Label!, v.Description, v.Unit, v.Format!, v.Columns, v))
             .ToList();
         return TypedResults.Ok(new ScriptList(
             new ProjectScript(ScriptKind.Clean, latest.SingleOrDefault(v => v.Kind == ScriptKind.Clean)),
@@ -287,7 +289,12 @@ public static class ScriptEndpoints
             errors.Add("format", "Choose a format: count, decimal, percent or currency.");
         }
 
-        return new Metadata(request.Code, label, description, unit, format);
+        ColumnMetadata.Check(request.Columns, errors);
+
+        // Columns left out keep those of the current version; given, they replace them all and an empty set clears them.
+        return request.Columns is null
+            ? new Metadata(request.Code, label, description, unit, format, KeepColumns: true)
+            : new Metadata(request.Code, label, description, unit, format, ColumnMetadata.Write(ColumnMetadata.Normalize(request.Columns)));
     }
 
     /// <summary>True when the name has no current version and the project already has the maximum number of indicators.</summary>
@@ -320,7 +327,7 @@ public static class ScriptEndpoints
         TamizaDbContext db, Guid projectId, ScriptKind kind, string? name, int number, Guid authorId, DateTimeOffset now, ScriptWrite write, CancellationToken ct)
     {
         var source = await Versions(db, projectId, kind, name).Where(v => v.Number == number)
-            .Select(v => new { v.Code, v.Label, v.Description, v.Unit, v.Format }).SingleOrDefaultAsync(ct);
+            .Select(v => new { v.Code, v.Label, v.Description, v.Unit, v.Format, v.Columns }).SingleOrDefaultAsync(ct);
         if (source is null)
         {
             return ScriptOutcome.Missing();
@@ -332,7 +339,8 @@ public static class ScriptEndpoints
         }
 
         return ScriptOutcome.Saved(await AddVersionAsync(
-            db, projectId, kind, name, new Metadata(source.Code, source.Label, source.Description, source.Unit, source.Format), authorId, now, write, ct));
+            db, projectId, kind, name, new Metadata(source.Code, source.Label, source.Description, source.Unit, source.Format, source.Columns),
+            authorId, now, write, ct));
     }
 
     internal static async Task<List<ScriptVersionSummary>> SummariesAsync(
@@ -342,8 +350,13 @@ public static class ScriptEndpoints
             .Select(v => new ScriptVersionSummary(v.Id, v.Kind, v.Name, v.Label, v.Number, v.Code == null, new Person(v.Author!.Id, v.Author.Name), v.CreatedAt, v.Origin))
             .ToListAsync(ct);
 
-    /// <summary>The code of a version and, for an indicator, the metadata saved with it; all null for a removal.</summary>
-    private sealed record Metadata(string? Code, string? Label = null, string? Description = null, string? Unit = null, string? Format = null);
+    /// <summary>
+    /// The code of a version and, for an indicator, the metadata saved with it; all null for a removal. <c>Columns</c> is the stored text of
+    /// the column metadata, and <c>KeepColumns</c> asks for the text of the version the new one follows instead.
+    /// </summary>
+    private sealed record Metadata(
+        string? Code, string? Label = null, string? Description = null, string? Unit = null, string? Format = null, string? Columns = null,
+        bool KeepColumns = false);
 
     /// <summary>Adds the next version number for the script; retries when two saves race for the same number.</summary>
     private static async Task<ScriptVersionDetails> AddVersionAsync(
@@ -360,6 +373,10 @@ public static class ScriptEndpoints
             }
 
             var number = latest + 1;
+            // Read with the number this version follows, so a save that races another keeps the labels of the version it is numbered after.
+            var columns = metadata.KeepColumns && latest > 0
+                ? await Versions(db, projectId, kind, name).Where(v => v.Number == latest && v.Code != null).Select(v => v.Columns).FirstOrDefaultAsync(ct)
+                : metadata.Columns;
             var version = new ScriptVersion
             {
                 Id = Guid.CreateVersion7(now),
@@ -372,6 +389,7 @@ public static class ScriptEndpoints
                 Description = metadata.Description,
                 Unit = metadata.Unit,
                 Format = metadata.Format,
+                Columns = columns,
                 AuthorId = authorId,
                 Origin = write.Origin,
                 CreatedAt = now,

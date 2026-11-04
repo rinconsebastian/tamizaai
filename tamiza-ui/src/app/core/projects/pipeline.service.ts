@@ -41,13 +41,34 @@ export interface ScriptVersionSummary {
   origin: ScriptVersionOrigin;
 }
 
+/**
+ * The facts an indicator keeps about one column of its table (`IndicatorColumnMetadata` in tamiza-api). Today only the name shown for
+ * the column; later changes add their own optional properties. A property that is not set is left out.
+ */
+export interface ColumnMetadata {
+  label?: string;
+}
+
+/** The column facts of an indicator version, keyed by the column's name as its table publishes it. The keys' order means nothing. */
+export type ColumnMetadataMap = Record<string, ColumnMetadata>;
+
+/** The row of the details form for one column, as it is typed (design D8); later properties add their fields here. */
+export interface ColumnDraft {
+  label: string;
+}
+
 /** An indicator's metadata, saved with each version of its script. */
 export interface IndicatorMetadata {
   label: string;
   description: string;
   unit: string;
   format: IndicatorFormat;
+  /** The facts about the columns, one row per column of the table the form lists. */
+  columns: Record<string, ColumnDraft>;
 }
+
+/** What saving an indicator sends: its code and metadata, with the column names as `{ column: { label } }` (an empty map clears them). */
+export type IndicatorSave = { code: string } & Omit<IndicatorMetadata, 'columns'> & { columns: ColumnMetadataMap };
 
 /** The code of a version and, for an indicator, its metadata; all null for a removal. */
 export interface ScriptVersionDetails extends ScriptVersionSummary {
@@ -55,6 +76,8 @@ export interface ScriptVersionDetails extends ScriptVersionSummary {
   description: string | null;
   unit: string | null;
   format: IndicatorFormat | null;
+  /** The column facts of an indicator version; null when it has none (and for the other scripts). */
+  columns?: ColumnMetadataMap | null;
 }
 
 export interface ProjectScript {
@@ -69,6 +92,7 @@ export interface IndicatorScript {
   description: string | null;
   unit: string | null;
   format: IndicatorFormat;
+  columns?: ColumnMetadataMap | null;
   current: ScriptVersionDetails;
 }
 
@@ -328,7 +352,7 @@ export class PipelineService {
   }
 
   /** Saves script 1 or 2 with `{ code }`, or an indicator with its metadata too; the first save of a name creates the indicator. */
-  save(projectId: string, script: ScriptRef, body: { code: string } | ({ code: string } & IndicatorMetadata)): Observable<ScriptVersionDetails> {
+  save(projectId: string, script: ScriptRef, body: { code: string } | IndicatorSave): Observable<ScriptVersionDetails> {
     return this.http.put<ScriptVersionDetails>(scriptUrl(projectId, script), body);
   }
 

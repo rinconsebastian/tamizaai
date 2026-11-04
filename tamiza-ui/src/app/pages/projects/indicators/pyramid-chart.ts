@@ -7,7 +7,7 @@ import { ChartColors } from './chart-colors';
 import { registerExportParts } from './export-parts';
 import { bandScale, charWidth, linearScale, niceAxis, truncate } from './chart-scales';
 import { CrosstabWidget } from './crosstab-widget';
-import { ValueFormatter, plotted } from './format';
+import { ColumnNamer, ValueFormatter, named, plotted, rawNames } from './format';
 import { MarkPoint, markTooltips } from './mark-tooltips';
 import { LegendEntry, SeriesLegend, SeriesNotes, seriesName, seriesNoteTexts } from './series-legend';
 import { Hit, Label, Line, Rect } from './series-plot';
@@ -148,7 +148,7 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
     <ng-container *transloco="let t">
       <app-series-legend [entries]="legend()" />
       @if (asTable()) {
-        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" chartType="pyramid" />
+        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" [names]="names()" chartType="pyramid" />
       } @else {
         <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
           <svg
@@ -230,6 +230,8 @@ export class PyramidChart {
   /** The indicator's label and the formatter of its values. */
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
+  /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
+  readonly names = input<ColumnNamer>(rawNames);
   readonly asTable = input(false);
   /** The colors of the widget, from the dashboard's palette and its colors kept by value. */
   readonly colors = input.required<ChartColors>();
@@ -238,7 +240,9 @@ export class PyramidChart {
   private readonly svg = viewChild<ElementRef<SVGElement>>('chartSvg');
   protected readonly size = observeSize(() => this.box());
 
-  protected readonly what = computed(() => plotted(this.config(), this.label()));
+  protected readonly what = computed(() => plotted(this.config(), this.label(), this.names()));
+  /** The group column under its name shown. */
+  protected readonly groupShown = computed(() => named(this.names(), this.config().groupBy));
   protected readonly table = computed(() => orderedSeriesTable(this.answer(), 'pyramid', null));
   private readonly tr = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
 
@@ -255,7 +259,7 @@ export class PyramidChart {
     };
     return [find(pyramid?.left, 0), find(pyramid?.right, 1)];
   });
-  private readonly names = computed<readonly [string, string]>(() => {
+  private readonly sideNames = computed<readonly [string, string]>(() => {
     const columns = this.table().columns;
     const [a, b] = this.sides();
     return [columns[a] ? seriesName(columns[a], this.tr) : '', columns[b] ? seriesName(columns[b], this.tr) : ''];
@@ -269,7 +273,7 @@ export class PyramidChart {
     );
     return [left, right];
   });
-  protected readonly legend = computed<LegendEntry[]>(() => this.names().map((name, i) => ({ name, color: this.sideColors()[i] })));
+  protected readonly legend = computed<LegendEntry[]>(() => this.sideNames().map((name, i) => ({ name, color: this.sideColors()[i] })));
 
   protected readonly plot = computed(() =>
     pyramidPlot({
@@ -277,7 +281,7 @@ export class PyramidChart {
       sides: this.sides(),
       width: Math.max(160, this.size().width),
       height: Math.max(120, this.size().height),
-      names: this.names(),
+      names: this.sideNames(),
       colors: this.sideColors(),
       groupLabel: (group) => group ?? this.tr('indicators.chart.noGroup'),
       value: this.format(),
@@ -305,7 +309,7 @@ export class PyramidChart {
   }
 
   protected summary(t: Translate): string {
-    const [left, right] = this.names();
+    const [left, right] = this.sideNames();
     const bars = this.table()
       .rows.filter((row) => row.group !== null)
       .flatMap((row) => this.sides().map((column, side) => ({ group: row.group!, side, value: row.cells[column] })))
@@ -317,7 +321,7 @@ export class PyramidChart {
     const groups = new Set(bars.map((bar) => bar.group)).size;
     return t('indicators.pyramid.summary', {
       what: this.what(),
-      group: this.config().groupBy,
+      group: this.groupShown(),
       left,
       right,
       groups: t(countKey('indicators.series.groupsCount', groups, this.transloco.getActiveLang()), { count: groups }),

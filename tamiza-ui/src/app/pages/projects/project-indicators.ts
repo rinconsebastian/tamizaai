@@ -32,13 +32,15 @@ import { DashboardFiltersData, DashboardFiltersDialog, DashboardFiltersResult } 
 import { DashboardNameAction, DashboardNameData, DashboardNameDialog, DashboardNameResult } from './indicators/dashboard-name-dialog';
 import { DashboardPrint, isoDay, printTitle } from './indicators/dashboard-print';
 import { DashboardReportData, DashboardReportDialog, DashboardReportResult } from './indicators/dashboard-report-dialog';
+import { DashboardSourceData, DashboardSourceDialog, DashboardSourceResult } from './indicators/dashboard-source-dialog';
 import { DashboardVersionsData, DashboardVersionsDialog, DashboardVersionsResult, VersionToRestore } from './indicators/dashboard-versions-dialog';
+import { captionShown } from './indicators/format';
 import { Placed } from './indicators/grid-layout';
 import { WidgetDialog, WidgetDialogData, WidgetDialogResult } from './indicators/widget-dialog';
 import { WidgetFileExtension, widgetFileName } from './indicators/widget-export/file-name';
 import { loadExporter } from './indicators/widget-export/load';
 import { WidgetExportChoice, WidgetGrid } from './indicators/widget-grid';
-import { queryFor } from './indicators/widget-view';
+import { savedConfig } from './indicators/widget-view';
 import { ProjectContext } from './project-context';
 import { countKey, isSingular } from '../../core/i18n/plural';
 
@@ -142,6 +144,9 @@ export const layoutSaveDelayMs = 400;
               <p data-testid="print-published">{{ t('dashboards.print.publishedAt', { time: when(publishedAt) }) }}</p>
             } @else {
               <p data-testid="print-published">{{ t('dashboards.print.notPublished') }}</p>
+            }
+            @if (source(); as source) {
+              <p data-testid="print-source">{{ t('dashboards.source.line', { source }) }}</p>
             }
           </div>
         }
@@ -357,6 +362,11 @@ export const layoutSaveDelayMs = 400;
           }
         }
 
+        <!-- The dashboard's source (add-widget-context, design D7): under the widgets, before the list of indicators. On paper the print header holds it once. -->
+        @if (source(); as source) {
+          <p class="break-words text-sm text-body paper:hidden" data-testid="dashboard-source">{{ t('dashboards.source.line', { source }) }}</p>
+        }
+
         @if (anyPublished() && overview.indicators.length) {
           <tmz-disclosure
             class="paper:hidden"
@@ -439,6 +449,7 @@ export class ProjectIndicators {
       { id: 'moveRight', label: t('dashboards.menu.moveRight'), disabled: moving || last, description: moveHint(last, 'last'), testId: 'dashboard-move-right' },
       { id: 'filters', label: t('dashboards.menu.filters'), testId: 'dashboard-filters' },
       { id: 'colors', label: t('dashboards.menu.colors'), testId: 'dashboard-colors' },
+      { id: 'source', label: t('dashboards.menu.source'), testId: 'dashboard-source' },
       ...(this.emailEnabled() ? [{ id: 'report', label: t('dashboards.menu.report'), testId: 'dashboard-report' }] : []),
       { id: 'versions', label: t('dashboards.menu.versions'), testId: 'dashboard-versions' },
       {
@@ -508,6 +519,13 @@ export class ProjectIndicators {
   protected readonly colors = computed<DashboardColors>(() => {
     const version = this.viewing();
     return version ? colorsOf(version) : this.dashboardColors();
+  });
+  /** The open dashboard's source as it is; null while it has none or until it is read (add-widget-context, design D7). */
+  protected readonly dashboardSource = signal<string | null>(null);
+  /** The source shown under the widgets and in the print header: the version's while one is shown, so it reads as it did; the dashboard's otherwise. */
+  protected readonly source = computed<string | null>(() => {
+    const version = this.viewing();
+    return (version ? version.source : this.dashboardSource()) || null;
   });
   /** The filters of an address that no longer apply, named, until the member changes a value or another dashboard opens. */
   protected readonly dropped = signal<string[]>([]);
@@ -632,6 +650,7 @@ export class ProjectIndicators {
         this.filters.set(dashboard.filters ?? []);
         this.filtersRead.set(true);
         this.dashboardColors.set(colorsOf(dashboard));
+        this.dashboardSource.set(dashboard.source || null);
         this.widgets.set(dashboard.widgets);
         this.error.set(null);
         this.loading.set(false);
@@ -680,6 +699,7 @@ export class ProjectIndicators {
     this.filters.set([]);
     this.filtersRead.set(false);
     this.dashboardColors.set(defaultColors);
+    this.dashboardSource.set(null);
     this.dropped.set([]);
     this.allTables.set(false);
     this.exporting.set(null);
@@ -779,6 +799,9 @@ export class ProjectIndicators {
       {
         format,
         title: widget.title,
+        subtitle: widget.config.display?.subtitle ?? null,
+        footnote: widget.config.display?.footnote ?? null,
+        captionHidden: !captionShown(widget.config),
         bodyWidth: view.bodyWidth(),
         registration,
         notesAbove: view.exportNotesAbove(),
@@ -788,6 +811,7 @@ export class ProjectIndicators {
           project: this.context.project()?.name ?? '',
           dashboard: this.shownName(),
           version: version ? t('dashboards.print.version', { number: version.number, author: version.author.name, time: this.when(version.savedAt) }) : null,
+          source: this.source() ? t('dashboards.source.line', { source: this.source() }) : null,
           filters: this.shownFilters().map((filter) => `${filter.label}: ${describeValue(filter, this.filterValues()[filter.column], t)}`),
           published: indicator?.publishedAt ? t('dashboards.print.publishedAt', { time: this.when(indicator.publishedAt) }) : t('dashboards.print.notPublished'),
           exported: t('indicators.widgetExport.footerExported', { time: this.when(now), zone: this.timeZone() }),
@@ -808,12 +832,13 @@ export class ProjectIndicators {
   private async exportWorkbook({ widget, view }: WidgetExportChoice): Promise<void> {
     const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
     const ignored = widget.config.ignoredDashboardFilters ?? [];
+    // The workbook is built from what the screen shows: the widget as it is saved, its display included (labels, tooltip labels and formats, texts, unit).
     const result = await firstValueFrom(
       this.service.exportWidget(this.projectId, this.dashboardId(), {
         format: 'xlsx',
         title: widget.title,
         chartType: widget.chartType,
-        config: queryFor(widget.chartType, widget.config),
+        config: savedConfig(widget.chartType, widget.config),
         filters: this.active().map(({ filter, value }) => ({
           column: filter.column,
           kind: filter.kind,
@@ -1101,6 +1126,9 @@ export class ProjectIndicators {
       case 'colors':
         this.editColors();
         break;
+      case 'source':
+        this.editSource();
+        break;
       case 'report':
         this.editReport();
         break;
@@ -1237,6 +1265,42 @@ export class ProjectIndicators {
         }
         this.dashboardColors.set(saved);
         this.toasts.success(this.transloco.translate('dashboardColors.saved'));
+      });
+  }
+
+  /**
+   * Gives the dashboard a source, changes it or removes it (add-widget-context, design D7). Once saved, the line under the widgets
+   * follows at once and nothing is queried again. Saving what the dashboard already has closes the form and changes nothing. A
+   * dashboard another member removed meanwhile is handled as for any change to it. Focus returns to the actions button.
+   */
+  private editSource(): void {
+    const dashboard = this.current();
+    if (!dashboard) {
+      return;
+    }
+    this.dialog
+      .open<DashboardSourceResult, DashboardSourceData>(DashboardSourceDialog, {
+        data: { projectId: this.projectId, dashboardId: dashboard.id, name: dashboard.name, source: this.dashboardSource() },
+        ariaLabelledBy: 'dashboard-source-dialog-title',
+        autoFocus: 'first-tabbable',
+        restoreFocus: true,
+        backdropClass: ['cdk-overlay-dark-backdrop'],
+        maxWidth: '100vw',
+        maxHeight: '100dvh',
+      })
+      .closed.subscribe((saved) => {
+        if (!saved) {
+          return;
+        }
+        if ('gone' in saved) {
+          this.gone(dashboard);
+          return;
+        }
+        if (!this.showing(dashboard.id)) {
+          return; // another dashboard opened meanwhile: it reads its own source
+        }
+        this.dashboardSource.set(saved.source);
+        this.toasts.success(this.transloco.translate(saved.source ? 'dashboardSource.saved' : 'dashboardSource.removed'));
       });
   }
 
@@ -1422,6 +1486,7 @@ export class ProjectIndicators {
       // The palette and colors kept by value the restore brought back, at once: until the dashboard is read again, the widgets would be
       // drawn in the colors the restore replaced, or in the version's, which are no longer shown.
       this.dashboardColors.set(colorsOf(restore.dashboard));
+      this.dashboardSource.set(restore.dashboard.source || null);
       this.loads.next(dashboard.id);
       this.focusHeading();
     }

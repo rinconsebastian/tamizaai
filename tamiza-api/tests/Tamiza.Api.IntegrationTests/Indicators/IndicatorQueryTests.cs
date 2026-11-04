@@ -1097,4 +1097,152 @@ public sealed class IndicatorQueryTests(PostgresFixture postgres)
         Assert.True(withoutDomain.Remove("domain"));
         Assert.Equal(column.GetRawText(), withoutDomain.ToJsonString());
     }
+
+    // The overall value (dashboard-indicators: Overall reference line; design D4 of add-chart-annotations)
+
+    private static readonly object CoverageRate = new { numerator = "numerator", denominator = "denominator" };
+
+    private async Task<IndicatorsHarness> WithComunasAsync(Dictionary<string, string?>? settings = null)
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres, settings);
+        // municipality, value, numerator, denominator, year, geometry
+        await h.PublishAsync(
+            "teatro_hoy", Columns,
+            "('Zona 1', 0, 60, 121, 2025, NULL), ('Zona 1', 0, 0, 0, 2026, NULL), ('Zona 2', 0, 3, 16, 2025, NULL), ('Zona 3', 0, 10, 20, 2026, NULL)");
+        return h;
+    }
+
+    private static double Overall(JsonElement result) => result.GetProperty("overall").GetDouble();
+
+    private static double Tile(JsonElement result) => result.GetProperty("rows")[0].GetProperty("value").GetDouble();
+
+    [Fact]
+    public async Task The_overall_value_of_a_column_chart_is_the_figure_of_a_stat_tile_over_the_same_ratio_and_filters()
+    {
+        await using var h = await WithComunasAsync();
+        var chart = new { indicator = "teatro_hoy", ratio = CoverageRate, groupBy = "municipality" };
+        var tile = new { indicator = "teatro_hoy", ratio = CoverageRate };
+
+        var column = await h.QueryAsync(chart, "column", overall: true);
+
+        Assert.Equal(["Zona 1|0.5", "Zona 2|0.19", "Zona 3|0.5"], IndicatorsHarness.Rows(column));
+        // 73 of 157 households, whatever the bars are.
+        Assert.Equal(73.0 / 157, Overall(column), 12);
+        Assert.Equal(Tile(await h.QueryAsync(tile, "stat")), Overall(column));
+
+        // With a dashboard filter the chart and the tile narrow the same rows.
+        var filter = new[] { Text("municipality", "Zona 1", "Zona 2") };
+        var filtered = await h.QueryAsync(chart, "column", dashboardFilters: filter, overall: true);
+        Assert.Equal(63.0 / 137, Overall(filtered), 12);
+        Assert.Equal(Tile(await h.QueryAsync(tile, "stat", dashboardFilters: filter)), Overall(filtered));
+
+        // And with a filter of the widget's own, and both together.
+        var own = new[] { new { column = "year", op = "range", value = (string?)null, values = (string[]?)null, min = (string?)"2025", max = (string?)"2025" } };
+        var ownChart = new { indicator = "teatro_hoy", ratio = CoverageRate, groupBy = "municipality", filters = own };
+        var ownTile = new { indicator = "teatro_hoy", ratio = CoverageRate, filters = own };
+        Assert.Equal(Tile(await h.QueryAsync(ownTile, "stat", dashboardFilters: filter)), Overall(await h.QueryAsync(ownChart, "bar", dashboardFilters: filter, overall: true)));
+        Assert.Equal(Tile(await h.QueryAsync(ownTile, "stat")), Overall(await h.QueryAsync(ownChart, "line", overall: true)));
+    }
+
+    [Fact]
+    public async Task The_overall_value_is_not_the_mean_of_the_bars()
+    {
+        await using var h = await WithComunasAsync();
+
+        var column = await h.QueryAsync(new { indicator = "teatro_hoy", ratio = CoverageRate, groupBy = "municipality" }, "column", overall: true);
+
+        var values = column.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("value").GetDouble()).ToArray();
+        Assert.NotEqual(values.Average(), Overall(column), 6);
+    }
+
+    [Fact]
+    public async Task Bars_that_share_one_denominator_have_an_overall_value_that_is_the_mean_of_the_bars_the_answers_of_one_question()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("teatro_hoy", IndicatorsHarness.StandardColumns, "('Teatro', 0, 30, 100), ('Cine', 0, 50, 100), ('Biblioteca', 0, 70, 100)");
+
+        var bar = await h.QueryAsync(new { indicator = "teatro_hoy", ratio = CoverageRate, groupBy = "municipality" }, "bar", overall: true);
+
+        var values = bar.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("value").GetDouble()).ToArray();
+        Assert.Equal(3, values.Length);
+        Assert.Equal(0.5, Overall(bar), 12);
+        Assert.Equal(values.Average(), Overall(bar), 12);
+    }
+
+    [Fact]
+    public async Task The_overall_value_covers_every_row_when_the_bars_pass_the_row_limit()
+    {
+        await using var h = await WithComunasAsync(new() { ["IndicatorDashboard:MaxWidgetQueryRows"] = "2" });
+
+        var column = await h.QueryAsync(new { indicator = "teatro_hoy", ratio = CoverageRate, groupBy = "municipality" }, "column", overall: true);
+
+        Assert.Equal(2, column.GetProperty("rows").GetArrayLength());
+        Assert.True(column.GetProperty("rowLimitReached").GetBoolean());
+        Assert.Equal(73.0 / 157, Overall(column), 12);
+    }
+
+    [Fact]
+    public async Task Denominators_that_sum_to_zero_give_no_overall_value()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("teatro_hoy", IndicatorsHarness.StandardColumns, "('Zona 1', 0, 3, 0), ('Zona 2', 0, 4, 0)");
+
+        var column = await h.QueryAsync(new { indicator = "teatro_hoy", ratio = CoverageRate, groupBy = "municipality" }, "column", overall: true);
+
+        Assert.Empty(column.GetProperty("rows").EnumerateArray());
+        Assert.False(column.TryGetProperty("overall", out _));
+    }
+
+    [Fact]
+    public async Task A_query_that_does_not_ask_for_the_overall_value_answers_without_it()
+    {
+        await using var h = await WithComunasAsync();
+        var chart = new { indicator = "teatro_hoy", ratio = CoverageRate, groupBy = "municipality" };
+
+        var withoutFlag = await h.QueryAsync(chart, "column");
+
+        Assert.False(withoutFlag.TryGetProperty("overall", out _));
+        // The same answer as one that asks, less the overall value: the rows are those of the statement that was always run.
+        var asked = System.Text.Json.Nodes.JsonNode.Parse((await h.QueryAsync(chart, "column", overall: true)).GetRawText())!.AsObject();
+        Assert.True(asked.Remove("overall"));
+        Assert.Equal(withoutFlag.GetRawText(), asked.ToJsonString());
+    }
+
+    [Fact]
+    public async Task A_stat_tile_a_series_and_a_box_plot_answer_without_an_overall_value_even_when_asked()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync(
+            "teatro_hoy", IndicatorsHarness.StandardColumns + ", water_source text",
+            "('Zona 1', 0, 6, 10, 'Piped'), ('Zona 1', 0, 2, 10, 'Well'), ('Zona 2', 0, 4, 10, 'Piped')");
+
+        var tile = await h.QueryAsync(new { indicator = "teatro_hoy", ratio = CoverageRate }, "stat", overall: true);
+        var series = await h.QueryAsync(new { indicator = "teatro_hoy", ratio = CoverageRate, groupBy = "municipality", seriesBy = "water_source" }, "column", overall: true);
+        var box = await h.QueryAsync(new { indicator = "teatro_hoy", measure = "numerator", groupBy = "municipality" }, "boxplot", overall: true);
+
+        Assert.False(tile.TryGetProperty("overall", out _));
+        Assert.False(series.TryGetProperty("overall", out _));
+        Assert.False(box.TryGetProperty("overall", out _));
+        // A series carries its grand total, which an overall line reads instead.
+        Assert.True(series.GetProperty("totals").GetProperty("all").GetProperty("value").GetDouble() > 0);
+    }
+
+    [Fact]
+    public async Task The_openapi_document_describes_the_overall_flag_of_the_request_and_the_overall_value_of_the_response()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        using var anonymous = h.Factory.CreateClient();
+
+        var document = await anonymous.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        var request = schemas.GetProperty("IndicatorQueryRequest").GetProperty("properties").GetProperty("overall");
+        var response = schemas.GetProperty("IndicatorQueryResponse").GetProperty("properties").GetProperty("overall");
+        Assert.Contains("Derived from the widget", request.GetProperty("description").GetString());
+        Assert.Contains("no widget stores it", request.GetProperty("description").GetString());
+        Assert.Contains("stat tile", response.GetProperty("description").GetString());
+        // No widget stores the flag, and no widget tool or endpoint schema offers it as a setting.
+        Assert.False(schemas.GetProperty("WidgetConfigInput").GetProperty("properties").TryGetProperty("overall", out _));
+        Assert.False(schemas.GetProperty("WidgetDisplay").GetProperty("properties").TryGetProperty("overall", out _));
+    }
 }

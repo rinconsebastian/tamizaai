@@ -5,6 +5,7 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using Tamiza.Api.Auth;
 using Tamiza.Api.Data;
+using Tamiza.Api.Indicators;
 using Tamiza.Api.Pipeline;
 using Tamiza.Api.Projects;
 
@@ -17,6 +18,11 @@ public sealed class McpScriptTools(
     : McpToolBase(gate, call, options)
 {
     private const string KindHelp = "clean (script 1), output (script 2) or indicator (one per indicator, with a name).";
+
+    /// <summary>The <c>columns</c> argument of <c>save_script</c> (design D11 of the indicator column metadata).</summary>
+    private const string ColumnsHelp =
+        "Optional, for an indicator: { column: { label } } names columns of its table for people, 1 to 80 characters with no line break, at most 100 columns, keyed by the column's name in lower case " +
+        "(for example numerator and denominator). Left out, the current version's labels are kept; {} clears them; given, it replaces them all. A property other than label is ignored.";
 
     [McpServerTool(Name = "get_authoring_guide", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Get the script authoring guide"),
      Description("The rules for writing a script in Tamiza: the function contract of each kind, the conventions of the data (labels not codes, nullable integers, select_multiple joined by '; '), " +
@@ -51,7 +57,7 @@ public sealed class McpScriptTools(
         });
 
     [McpServerTool(Name = "get_script", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Get a script's code"),
-     Description("The code of a script and, for an indicator, its label, description, unit and format. The current version unless you name one.")]
+     Description("The code of a script and, for an indicator, its label, description, unit, format and column labels (columns). The current version unless you name one.")]
     public Task<CallToolResult> GetScript(
         [Description("The project's id, from list_projects.")] Guid projectId,
         [Description(KindHelp)] string kind,
@@ -87,6 +93,7 @@ public sealed class McpScriptTools(
      Description("Saves a script as a new version (earlier versions stay and can be restored). Test the draft with test_script first. " +
                  "Pass baseVersion = the version number you read with list_scripts or get_script (omit it for a script that does not exist yet): if someone saved in the meantime the call is refused with mcp.scriptChanged and nothing changes. " +
                  "An indicator needs a name (lowercase letters, digits, underscores; it becomes its table's name and cannot change), a label, a format (count, decimal, percent or currency) and optionally a description and a unit. " +
+                 "It can also name columns of its table for people with columns = { column: { label } }, such as numerator and denominator, which widgets then show: unlike the label, description and unit, which each save replaces, columns left out keeps the current version's labels, {} clears them, and given it replaces them all. " +
                  "Code that imports os, subprocess, socket and similar, calls eval, exec or open, or holds a web address is refused.")]
     public Task<CallToolResult> SaveScript(
         [Description("The project's id, from list_projects.")] Guid projectId,
@@ -98,6 +105,7 @@ public sealed class McpScriptTools(
         [Description("The indicator's unit, such as '%'. Optional.")] string? unit = null,
         [Description("The indicator's format: count, decimal, percent (a fraction shown as a percentage) or currency.")] string? format = null,
         [Description("The version number you last read as current; omit for a script that does not exist yet.")] int? baseVersion = null,
+        [Description(ColumnsHelp)] IReadOnlyDictionary<string, IndicatorColumnMetadata?>? columns = null,
         CancellationToken ct = default) =>
         RunAsync(async () =>
         {
@@ -110,8 +118,9 @@ public sealed class McpScriptTools(
 
             var write = ScriptWrite.Mcp(baseVersion);
             var now = time.GetUtcNow();
+            // columns is for an indicator only: script 1 and script 2 hold none, as they hold no label.
             var outcome = await GuardedAsync(() => scriptKind == ScriptKind.Indicator
-                ? ScriptEndpoints.SaveIndicatorCoreAsync(db, projectId, scriptName!, new SaveIndicatorRequest(code, label, description, unit, format), user.Id, now, write, ct)
+                ? ScriptEndpoints.SaveIndicatorCoreAsync(db, projectId, scriptName!, new SaveIndicatorRequest(code, label, description, unit, format, columns), user.Id, now, write, ct)
                 : ScriptEndpoints.SaveFixedCoreAsync(db, projectId, scriptKind, code, user.Id, now, write, ct));
             return Saved(outcome);
         });
@@ -201,7 +210,7 @@ public sealed class McpScriptTools(
         }
 
         var v = outcome.Version!;
-        return new { saved = true, v.Kind, v.Name, version = v.Number, v.Removed, v.Label, v.Description, v.Unit, v.Format, v.Author, savedAt = v.CreatedAt, v.Origin };
+        return new { saved = true, v.Kind, v.Name, version = v.Number, v.Removed, v.Label, v.Description, v.Unit, v.Format, v.Columns, v.Author, savedAt = v.CreatedAt, v.Origin };
     }
 
     /// <summary>Whether the person is an analyst or an admin of at least one project that AI clients may use.</summary>

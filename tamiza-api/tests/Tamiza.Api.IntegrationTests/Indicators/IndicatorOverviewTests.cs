@@ -449,4 +449,133 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
         // A response of another kind has no boxes, and the widget kinds the API accepts end with the box plot.
         Assert.Equal("boxplot", Tamiza.Api.Indicators.ChartTypes.All[^1]);
     }
+
+    [Fact]
+    public async Task The_openapi_document_describes_the_texts_of_a_widget_and_its_caption()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        using var anonymous = h.Factory.CreateClient();
+
+        var document = await anonymous.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        var display = schemas.GetProperty("WidgetDisplay").GetProperty("properties");
+        foreach (var name in new[] { "subtitle", "footnote", "caption", "unit", "showDescription" })
+        {
+            Assert.True(display.TryGetProperty(name, out var field), $"WidgetDisplay.{name}");
+            Assert.False(string.IsNullOrWhiteSpace(field.TryGetProperty("description", out var text) ? text.GetString() : field.GetRawText()), $"WidgetDisplay.{name} description");
+        }
+
+        Assert.Contains("200", display.GetProperty("subtitle").GetProperty("description").GetString());
+        Assert.Contains("500", display.GetProperty("footnote").GetProperty("description").GetString());
+        Assert.Contains("32", display.GetProperty("unit").GetProperty("description").GetString());
+        var caption = schemas.GetProperty("WidgetCaption").GetProperty("properties");
+        Assert.Equal(["hidden", "text"], caption.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Contains("200", caption.GetProperty("text").GetProperty("description").GetString());
+        Assert.Contains("true", caption.GetProperty("hidden").GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public async Task The_openapi_document_describes_the_reference_lines_the_interpolation_and_the_data_labels_of_a_widget()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        using var anonymous = h.Factory.CreateClient();
+
+        var document = await anonymous.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        var display = schemas.GetProperty("WidgetDisplay").GetProperty("properties");
+        foreach (var name in new[] { "referenceLines", "interpolation", "dataLabels" })
+        {
+            Assert.True(display.TryGetProperty(name, out var field), $"WidgetDisplay.{name}");
+            Assert.False(string.IsNullOrWhiteSpace(field.TryGetProperty("description", out var text) ? text.GetString() : field.GetRawText()), $"WidgetDisplay.{name} description");
+        }
+
+        Assert.Contains("4", display.GetProperty("referenceLines").GetProperty("description").GetString());
+        Assert.Contains("step", display.GetProperty("interpolation").GetProperty("description").GetString());
+        Assert.Contains("true", display.GetProperty("dataLabels").GetProperty("description").GetString());
+        var line = schemas.GetProperty("WidgetReferenceLine").GetProperty("properties");
+        Assert.Equal(["kind", "label", "value"], line.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Contains("median", line.GetProperty("kind").GetProperty("description").GetString());
+        Assert.Contains("40", line.GetProperty("label").GetProperty("description").GetString());
+        Assert.Contains("0.5", line.GetProperty("value").GetProperty("description").GetString());
+    }
+
+    // Column labels of an indicator (design D4 of the indicator column metadata)
+
+    [Fact]
+    public async Task An_indicator_with_labels_lists_them_and_one_without_has_columns_null()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("coverage", Columns, Rows, labels: new { numerator = new { label = "Hogares que asistieron" }, denominator = new { label = "Hogares" } });
+        await h.PublishAsync("attendance", IndicatorsHarness.StandardColumns, "('Cali', 1, 1, 1)");
+
+        var overview = await h.GetAsync(client: h.Viewer);
+
+        var labelled = Entry(overview, "coverage").GetProperty("columns");
+        Assert.Equal(["denominator", "numerator"], labelled.EnumerateObject().Select(c => c.Name).Order(StringComparer.Ordinal));
+        Assert.Equal("Hogares que asistieron", labelled.GetProperty("numerator").GetProperty("label").GetString());
+        Assert.Equal("Hogares", labelled.GetProperty("denominator").GetProperty("label").GetString());
+        Assert.Equal(JsonValueKind.Null, Entry(overview, "attendance").GetProperty("columns").ValueKind);
+    }
+
+    [Fact]
+    public async Task Labels_changed_without_a_run_show_in_the_overview_at_once()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("coverage", Columns, Rows, labels: new { numerator = new { label = "Hogares" } });
+        await h.LabelColumnsAsync("coverage", new { numerator = new { label = "Hogares encuestados" } });
+
+        var overview = await h.GetAsync(client: h.Viewer);
+
+        Assert.Equal("Hogares encuestados", Entry(overview, "coverage").GetProperty("columns").GetProperty("numerator").GetProperty("label").GetString());
+    }
+
+    [Fact]
+    public async Task The_columns_endpoint_gives_a_labelled_column_its_label_and_the_others_none()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("coverage", Columns, Rows, labels: new { numerator = new { label = "Hogares que asistieron" }, estrato_hogar = new { label = "Estrato" } });
+
+        var columns = await h.GetAsync("/coverage/columns");
+
+        var list = columns.GetProperty("columns").EnumerateArray().ToDictionary(c => c.GetProperty("name").GetString()!);
+        Assert.Equal("Hogares que asistieron", list["numerator"].GetProperty("label").GetString());
+        Assert.Equal(JsonValueKind.Null, list["municipality"].GetProperty("label").ValueKind);
+        Assert.Equal(JsonValueKind.Null, list["denominator"].GetProperty("label").ValueKind);
+        Assert.False(list.ContainsKey("estrato_hogar")); // a label for a column the table lacks lists nothing
+        Assert.Equal(["municipality", "value", "numerator", "denominator", "year", "geometry", "ok"], list.Keys);
+    }
+
+    [Fact]
+    public async Task An_indicator_that_has_not_published_lists_no_columns_even_when_it_labels_some()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.AddIndicatorAsync("coverage", columns: new { numerator = new { label = "Hogares" } });
+
+        var columns = await h.GetAsync("/coverage/columns");
+
+        Assert.False(columns.GetProperty("published").GetBoolean());
+        Assert.Empty(columns.GetProperty("columns").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task The_openapi_document_describes_the_column_labels_of_an_indicator()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        using var anonymous = h.Factory.CreateClient();
+
+        var document = await anonymous.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        Assert.True(schemas.GetProperty("IndicatorEntry").GetProperty("properties").TryGetProperty("columns", out _));
+        Assert.True(schemas.GetProperty("ScriptVersionDetails").GetProperty("properties").TryGetProperty("columns", out _));
+        Assert.True(schemas.GetProperty("IndicatorScript").GetProperty("properties").TryGetProperty("columns", out _));
+        Assert.True(schemas.GetProperty("SaveIndicatorRequest").GetProperty("properties").TryGetProperty("columns", out _));
+        Assert.True(schemas.GetProperty("IndicatorColumnMetadata").GetProperty("properties").TryGetProperty("label", out var label));
+        Assert.Contains("1 to 80 characters", label.GetProperty("description").GetString());
+        // A widget's own labels are described too (the widget-form side of the same names).
+        Assert.True(schemas.GetProperty("WidgetDisplay").GetProperty("properties").TryGetProperty("labels", out var labels));
+        Assert.Contains("Up to 10 of the widget's columns", labels.GetProperty("description").GetString());
+    }
 }

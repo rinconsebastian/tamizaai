@@ -6,7 +6,6 @@ Let a project organize its indicator widgets into up to 10 dashboards of its own
 
 ## Requirements
 
-
 ### Requirement: Project dashboards
 A project SHALL have at least 1 and at most 10 dashboards of its own, in an order. Each dashboard SHALL have a name and its own widgets (see `dashboard-indicators`). Every project member SHALL see every dashboard of the project. The Performance and Clean data dashboards SHALL NOT count among them: they cannot be renamed, moved, duplicated or removed, and they always come before the project's own dashboards.
 
@@ -129,7 +128,7 @@ An `analyst` or `admin` SHALL be able to move a dashboard one place to the left 
 - **THEN** it ends up third of 4
 
 ### Requirement: Duplicating a dashboard
-An `analyst` or `admin` SHALL be able to duplicate a dashboard under a new name, proposed as the original's name followed by " (copy)" and shortened to fit 40 characters. The copy SHALL be placed right after the original and SHALL hold a copy of each of its widgets, with the same title, chart type, query, ignored filters, color, orientation, position and size, a copy of its filters, in the same order with the same defaults, and its palette and colors kept by value. Later changes to one SHALL NOT change the other. The copy SHALL have no scheduled email (see `dashboard-reports`). Duplicating SHALL be refused when the project already has 10 dashboards.
+An `analyst` or `admin` SHALL be able to duplicate a dashboard under a new name, proposed as the original's name followed by " (copy)" and shortened to fit 40 characters. The copy SHALL be placed right after the original and SHALL hold a copy of each of its widgets with every setting the widget is saved with (its title, chart type, query, display settings, the dashboard filters it ignores, its position and its size), and a copy of the dashboard's settings other than its name: its filters, in the same order with the same defaults, its palette, its colors kept by value and its other display settings. Later changes to one SHALL NOT change the other. The copy SHALL have no scheduled email (see `dashboard-reports`). Duplicating SHALL be refused when the project already has 10 dashboards.
 
 #### Scenario: Dashboard duplicated
 - **WHEN** an `analyst` duplicates "Housing", which holds 8 widgets, as "Housing 2026"
@@ -186,6 +185,14 @@ An `analyst` or `admin` SHALL be able to duplicate a dashboard under a new name,
 #### Scenario: Duplicate of a seventh dashboard
 - **WHEN** a project has 7 dashboards and an `analyst` duplicates one
 - **THEN** the copy is added, and the project has 8 dashboards
+
+#### Scenario: Column labels duplicated
+- **WHEN** an `analyst` duplicates "Teatro", which holds a column chart whose own label for `denominator` is "Hogares que asistieron"
+- **THEN** the copy of the chart in "Teatro (copy)" names its denominator "Hogares que asistieron"
+
+#### Scenario: Column labels of a copy are independent
+- **WHEN** the `analyst` then changes that label in "Teatro (copy)" to "Hogares"
+- **THEN** the chart in "Teatro" still names its denominator "Hogares que asistieron"
 
 ### Requirement: Removing a dashboard
 An `analyst` or `admin` SHALL be able to remove a dashboard together with all its widgets, after confirming a message that says how many widgets will be removed. The last dashboard of a project SHALL NOT be removable. After a removal the member SHALL be told what was removed and taken to the dashboard now in its place, or to the new last dashboard when the removed one was last.
@@ -307,3 +314,52 @@ After a member adds, duplicates or removes a dashboard, or a refused change open
 #### Scenario: Focus after a refusal
 - **WHEN** a keyboard user's change is refused because its dashboard was removed
 - **THEN** the project's first dashboard opens and focus is on its heading
+
+### Requirement: Dashboard source
+An `analyst` or `admin` SHALL be able to give a dashboard a source of 1 to 300 characters, such as the survey its data comes from, and to change or remove it, from the **Source** action of its actions menu. A source longer than 300 characters, or holding a line break or another control character, SHALL be refused; an empty source SHALL remove it. A `viewer` SHALL NOT be able to change it.
+
+#### Scenario: Source saved
+- **WHEN** an `analyst` chooses **Source** in the actions of "Teatro" and saves "Encuesta de mercado del Centro Bicentenario de Duitama, 478 encuestas"
+- **THEN** every member who opens "Teatro" sees that source
+
+#### Scenario: Source removed
+- **WHEN** the `analyst` empties the source of "Teatro" and saves
+- **THEN** "Teatro" has no source
+
+#### Scenario: Long source
+- **WHEN** a request saves a source of 301 characters
+- **THEN** the API responds 400 with an error on `source` naming 300 characters, and the source is unchanged
+
+#### Scenario: Viewer cannot change the source
+- **WHEN** a `viewer` asks the API to change the source of "Teatro"
+- **THEN** the API responds 403
+
+#### Scenario: Source action offered
+- **WHEN** an `analyst` opens the actions of a dashboard
+- **THEN** **Source** is among them, right after **Colors**
+
+### Requirement: Dashboard source shown
+A dashboard that has a source SHALL show it to every member under its widgets, after the interface's word for it ("Source:", "Fuente:"), as its author wrote it. While a version is shown, the page SHALL show that version's source. A dashboard or a version without a source SHALL show no source line.
+
+#### Scenario: Under the widgets
+- **WHEN** a `viewer` opens "Teatro", whose source is "Encuesta de mercado del Centro Bicentenario de Duitama, 478 encuestas", in the English interface
+- **THEN** "Source: Encuesta de mercado del Centro Bicentenario de Duitama, 478 encuestas" is shown under its widgets
+
+#### Scenario: Version without a source
+- **WHEN** an `analyst` views version 18 of "Teatro", recorded before it had a source
+- **THEN** no source line is shown
+
+#### Scenario: No source
+- **WHEN** a member opens "Escuelas", which has no source
+- **THEN** no source line is shown
+
+### Requirement: Dashboard source in a copy
+Duplicating a dashboard SHALL copy its source to the copy. Changing the source of the copy or of the original afterwards SHALL NOT change the other.
+
+#### Scenario: Source duplicated
+- **WHEN** an `analyst` duplicates "Teatro", which has a source
+- **THEN** "Teatro (copy)" has the same source
+
+#### Scenario: Source of a copy is independent
+- **WHEN** the `analyst` then removes the source of "Teatro (copy)"
+- **THEN** "Teatro" keeps its source
