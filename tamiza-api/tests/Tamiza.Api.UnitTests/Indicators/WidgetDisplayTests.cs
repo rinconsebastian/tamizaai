@@ -140,12 +140,14 @@ public sealed class WidgetDisplayTests
     public void A_query_never_carries_the_display(string chartType)
     {
         var config = new WidgetConfigInput(
-            "coverage", GroupBy: "municipality", SeriesBy: "water_source", GeometryColumn: "geometry", Display: new WidgetDisplay(3, "green")).Normalize();
+            "coverage", GroupBy: "municipality", SeriesBy: "water_source", GeometryColumn: "geometry",
+            Display: new WidgetDisplay(3, "green", Order: new WidgetCategoryOrder(["Cali"], ["Piped"]))).Normalize();
 
         var query = WidgetQuery.For(chartType, config);
 
         Assert.Null(query.Display);
         Assert.DoesNotContain("display", JsonSerializer.Serialize(query, Json));
+        Assert.DoesNotContain("order", JsonSerializer.Serialize(query, Json));
     }
 
     // Column labels (design D5 of the indicator column metadata)
@@ -453,5 +455,113 @@ public sealed class WidgetDisplayTests
 
         Assert.Null(query.Display);
         Assert.DoesNotContain("referenceLines", JsonSerializer.Serialize(query, Json));
+    }
+
+    // The declared category order (design D7 of add-declared-category-order)
+
+    /// <summary>The display as the stored text holds it, read back as JSON so that the way the serializer escapes a letter does not matter.</summary>
+    private static JsonNode? StoredDisplay(WidgetConfig config) => JsonNode.Parse(JsonSerializer.Serialize(config, Json))!["display"];
+
+    [Fact]
+    public void A_display_with_an_order_of_series_round_trips_unchanged()
+    {
+        const string stored = """{"order":{"series":["Acceso","Interés","Otra"]}}""";
+
+        var config = Read("""{"indicator":"encuesta_hoy","display":""" + stored + "}");
+
+        Assert.Equal(["Acceso", "Interés", "Otra"], config.Display!.Order!.Series);
+        Assert.Null(config.Display.Order.Group);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(stored), StoredDisplay(config)));
+        Assert.Equal(JsonSerializer.Serialize(config, Json), JsonSerializer.Serialize(Read(JsonSerializer.Serialize(config, Json)), Json));
+    }
+
+    [Fact]
+    public void An_order_of_groups_and_of_series_is_written_group_first_and_exact()
+    {
+        const string stored = """{"order":{"group":["1. Sí"," 2. Tal vez ","","Sin dato"],"series":["a"]}}""";
+
+        var config = Read("""{"indicator":"encuesta_hoy","display":""" + stored + "}");
+
+        Assert.Equal(["1. Sí", " 2. Tal vez ", "", "Sin dato"], config.Display!.Order!.Group);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(stored), StoredDisplay(config)));
+    }
+
+    [Fact]
+    public void A_display_with_everything_writes_the_order_last()
+    {
+        var config = Read(
+            """{"indicator":"encuesta_hoy","display":{"order":{"group":["a"]},"dataLabels":true,"interpolation":"linear","referenceLines":[{"kind":"overall"}],"showDescription":true,"unit":"hogares","caption":{"hidden":true},"footnote":"Nota","subtitle":"Pregunta","labels":{"value":"Hogares"},"orientation":"vertical","ramp":"green","color":3}}""");
+
+        var display = JsonNode.Parse(JsonSerializer.Serialize(config, Json))!["display"]!.AsObject();
+
+        Assert.Equal(
+            ["color", "ramp", "orientation", "labels", "subtitle", "footnote", "caption", "unit", "showDescription", "referenceLines", "interpolation", "dataLabels", "order"],
+            display.Select(member => member.Key));
+    }
+
+    [Fact]
+    public void A_display_holding_only_an_order_is_kept()
+    {
+        var config = Read("""{"indicator":"encuesta_hoy","display":{"order":{"group":["Sí"]}}}""");
+
+        Assert.NotNull(config.Display);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse("""{"order":{"group":["Sí"]}}"""), StoredDisplay(config)));
+    }
+
+    [Theory]
+    [InlineData("""{"indicator":"encuesta_hoy","display":{"order":{"group":[]}}}""")]
+    [InlineData("""{"indicator":"encuesta_hoy","display":{"order":{"group":[],"series":[]}}}""")]
+    [InlineData("""{"indicator":"encuesta_hoy","display":{"order":{}}}""")]
+    [InlineData("""{"indicator":"encuesta_hoy","display":{"order":null}}""")]
+    public void A_display_holding_only_an_empty_order_is_no_display(string stored)
+    {
+        var config = Read(stored);
+
+        Assert.Null(config.Display);
+        Assert.DoesNotContain("display", JsonSerializer.Serialize(config, Json));
+    }
+
+    [Fact]
+    public void An_empty_list_next_to_a_real_one_and_next_to_another_setting_is_left_out()
+    {
+        var one = Read("""{"indicator":"encuesta_hoy","display":{"order":{"group":[],"series":["No"]}}}""");
+        var other = Read("""{"indicator":"encuesta_hoy","display":{"color":2,"order":{"series":[]}}}""");
+
+        Assert.Contains(""","display":{"order":{"series":["No"]}},""", JsonSerializer.Serialize(one, Json));
+        Assert.Equal(new WidgetDisplay(Color: 2), other.Display);
+        Assert.Contains(""","display":{"color":2},""", JsonSerializer.Serialize(other, Json));
+    }
+
+    [Fact]
+    public void A_null_value_in_an_order_is_kept_for_validation_to_name()
+    {
+        var config = Read("""{"indicator":"encuesta_hoy","display":{"order":{"group":["Sí",null,"No"]}}}""");
+
+        var group = config.Display!.Order!.Group!;
+        Assert.Equal(3, group.Count);
+        Assert.Null(group[1]);
+    }
+
+    [Fact]
+    public void A_display_without_an_order_serializes_as_it_did_before()
+    {
+        const string stored = """{"color":3,"labels":{"value":"Hogares"},"subtitle":"Pregunta","referenceLines":[{"kind":"mean"}],"interpolation":"step","dataLabels":true}""";
+
+        var json = JsonSerializer.Serialize(Read("""{"indicator":"encuesta_hoy","display":""" + stored + "}"), Json);
+
+        Assert.Contains(",\"display\":" + stored + ",", json);
+        Assert.DoesNotContain("order", json);
+    }
+
+    [Fact]
+    public void A_query_carries_no_order()
+    {
+        var config = new WidgetConfigInput(
+            "encuesta_hoy", GroupBy: "zona", SeriesBy: "respuesta", Display: new WidgetDisplay(Order: new WidgetCategoryOrder(["Zona 2"], ["Sí", "No"]))).Normalize();
+
+        var query = WidgetQuery.For(ChartTypes.Column, config);
+
+        Assert.Null(query.Display);
+        Assert.DoesNotContain("order", JsonSerializer.Serialize(query, Json));
     }
 }

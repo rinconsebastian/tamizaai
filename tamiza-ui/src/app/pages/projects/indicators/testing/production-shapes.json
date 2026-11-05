@@ -1003,6 +1003,14 @@
      "type": "integer"
     }
    ],
+   "indicatorColumns": {
+    "precio": {
+     "label": "Precio"
+    },
+    "canal": {
+     "label": "Canal"
+    }
+   },
    "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"precio\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"canal\",\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
    "query": {
     "indicator": "encuesta_hoy",
@@ -1096,6 +1104,11 @@
      "type": "decimal"
     }
    ],
+   "indicatorColumns": {
+    "grupo": {
+     "label": "Grupo"
+    }
+   },
    "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"puntaje\",\"ratio\":null,\"groupBy\":\"grupo\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"value\",\"column\":null,\"compareAs\":null,\"direction\":\"asc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"color\":2,\"orientation\":\"horizontal\"},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
    "query": {
     "indicator": "encuesta_hoy",
@@ -1494,6 +1507,14 @@
      "type": "integer"
     }
    ],
+   "indicatorColumns": {
+    "pregunta": {
+     "label": "Pregunta"
+    },
+    "respuesta": {
+     "label": "Respuesta"
+    }
+   },
    "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"pregunta\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"respuesta\",\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[{\"value\":\"1. Muy en desacuerdo\",\"side\":\"negative\"},{\"value\":\"2. En desacuerdo\",\"side\":\"negative\"},{\"value\":\"3. Neutral\",\"side\":\"neutral\"},{\"value\":\"4. De acuerdo\",\"side\":\"positive\"},{\"value\":\"5. Muy de acuerdo\",\"side\":\"positive\"}]}",
    "query": {
     "indicator": "encuesta_hoy",
@@ -1679,6 +1700,14 @@
      "type": "integer"
     }
    ],
+   "indicatorColumns": {
+    "zona": {
+     "label": "Zona"
+    },
+    "canal": {
+     "label": "Canal"
+    }
+   },
    "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"canal\",\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
    "query": {
     "indicator": "encuesta_hoy",
@@ -1772,6 +1801,11 @@
      "type": "integer"
     }
    ],
+   "indicatorColumns": {
+    "canal": {
+     "label": "Canal"
+    }
+   },
    "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"canal\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
    "query": {
     "indicator": "encuesta_hoy",
@@ -2407,6 +2441,14 @@
      "type": "integer"
     }
    ],
+   "indicatorColumns": {
+    "pregunta": {
+     "label": "Pregunta"
+    },
+    "respuesta": {
+     "label": "Respuesta"
+    }
+   },
    "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"pregunta\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"respuesta\",\"layout\":null,\"pyramid\":null,\"display\":{\"subtitle\":\"\\u00BFQu\\u00E9 tan de acuerdo est\\u00E1 con cada afirmaci\\u00F3n?\"},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[{\"value\":\"1. Muy en desacuerdo\",\"side\":\"negative\"},{\"value\":\"2. En desacuerdo\",\"side\":\"negative\"},{\"value\":\"3. Neutral\",\"side\":\"neutral\"},{\"value\":\"4. De acuerdo\",\"side\":\"positive\"},{\"value\":\"5. Muy de acuerdo\",\"side\":\"positive\"}]}",
    "query": {
     "indicator": "encuesta_hoy",
@@ -3177,6 +3219,327 @@
       }
      ]
     }
+   }
+  },
+  {
+   "name": "column chart sorted by orden as text over a numbered question column",
+   "chartType": "column",
+   "columns": [
+    {
+     "name": "pregunta",
+     "type": "text"
+    },
+    {
+     "name": "orden",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "indicatorColumns": {
+    "pregunta": {
+     "label": "Pregunta"
+    }
+   },
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"pregunta\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"column\",\"column\":\"orden\",\"compareAs\":\"text\",\"direction\":\"asc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "text",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"pregunta\"::text, (sum(\"conteo\")::double precision), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"conteo\" IS NOT NULL\nGROUP BY \"pregunta\"\nHAVING (sum(\"conteo\")::double precision) IS NOT NULL\nORDER BY min(NULLIF(\"orden\"::text, '')) ASC NULLS LAST, \"p_x_indicators\".\"encuesta_hoy\".\"pregunta\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "text",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "text",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "text",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   }
+  },
+  {
+   "name": "100% bar over counts with a numbered series column",
+   "chartType": "bar",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "respuesta",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "indicatorColumns": {
+    "zona": {
+     "label": "Zona"
+    },
+    "respuesta": {
+     "label": "Respuesta"
+    }
+   },
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"respuesta\",\"layout\":\"percent\",\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": "percent",
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "series": {
+     "maxSeries": 8,
+     "naturalGroups": false,
+     "domain": {
+      "sql": "(SELECT \"respuesta\"::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"respuesta\" IS NOT NULL\n GROUP BY \"respuesta\" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap)\nUNION ALL\n(SELECT NULL::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"respuesta\" IS NULL\n HAVING count(*) > 0)",
+      "parameters": [
+       "cap"
+      ]
+     },
+     "cells": {
+      "sql": "WITH src AS (\n  SELECT \"p_x_indicators\".\"encuesta_hoy\".*, CASE WHEN \"respuesta\"::text = ANY(@kept) THEN \"respuesta\"::text END AS \"__series\", CASE WHEN \"respuesta\" IS NULL THEN 'none' WHEN \"respuesta\"::text = ANY(@kept) THEN 'value' ELSE 'other' END AS \"__kind\"\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE \"conteo\" IS NOT NULL\n),\ngrp AS (\n  SELECT \"zona\" AS g, (sum(\"conteo\")::double precision) AS v, count(*) AS n, row_number() OVER (ORDER BY src.\"zona\" NULLS LAST) AS rk\n  FROM src GROUP BY \"zona\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n),\ncell AS (\n  SELECT \"zona\" AS g, \"__kind\" AS k, \"__series\" AS s, (sum(\"conteo\")::double precision) AS v, count(*) AS n\n  FROM src GROUP BY \"zona\", \"__kind\", \"__series\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n)\n(SELECT 0 AS part, g::text, NULL::text, NULL::text, v, n, rk FROM grp ORDER BY rk LIMIT @limit)\nUNION ALL\n(SELECT 1, cell.g::text, cell.k, cell.s, cell.v, cell.n, grp.rk\n FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g\n ORDER BY grp.rk, cell.k, cell.s LIMIT @limit)\nUNION ALL\n(SELECT 2, NULL::text, \"__kind\", \"__series\", (sum(\"conteo\")::double precision), count(*), NULL::bigint\n FROM src GROUP BY \"__kind\", \"__series\")\nUNION ALL\n(SELECT 3, NULL::text, NULL::text, NULL::text, (sum(\"conteo\")::double precision), count(*), NULL::bigint FROM src)",
+      "parameters": [
+       "kept",
+       "limit"
+      ]
+     }
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": "percent"
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": "percent"
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": "percent"
+   }
+  },
+  {
+   "name": "heat map of two numbered columns",
+   "chartType": "heatmap",
+   "columns": [
+    {
+     "name": "pregunta",
+     "type": "text"
+    },
+    {
+     "name": "respuesta",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "indicatorColumns": {
+    "pregunta": {
+     "label": "Pregunta"
+    },
+    "respuesta": {
+     "label": "Respuesta"
+    }
+   },
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"pregunta\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"respuesta\",\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "series": {
+     "maxSeries": 30,
+     "naturalGroups": true,
+     "domain": {
+      "sql": "(SELECT \"respuesta\"::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"respuesta\" IS NOT NULL\n GROUP BY \"respuesta\" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap)\nUNION ALL\n(SELECT NULL::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"respuesta\" IS NULL\n HAVING count(*) > 0)",
+      "parameters": [
+       "cap"
+      ]
+     },
+     "cells": {
+      "sql": "WITH src AS (\n  SELECT \"p_x_indicators\".\"encuesta_hoy\".*, CASE WHEN \"respuesta\"::text = ANY(@kept) THEN \"respuesta\"::text END AS \"__series\", CASE WHEN \"respuesta\" IS NULL THEN 'none' WHEN \"respuesta\"::text = ANY(@kept) THEN 'value' ELSE 'other' END AS \"__kind\"\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE \"conteo\" IS NOT NULL\n),\ngrp AS (\n  SELECT \"pregunta\" AS g, (sum(\"conteo\")::double precision) AS v, count(*) AS n, row_number() OVER (ORDER BY src.\"pregunta\" NULLS LAST) AS rk\n  FROM src GROUP BY \"pregunta\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n),\ncell AS (\n  SELECT \"pregunta\" AS g, \"__kind\" AS k, \"__series\" AS s, (sum(\"conteo\")::double precision) AS v, count(*) AS n\n  FROM src GROUP BY \"pregunta\", \"__kind\", \"__series\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n)\n(SELECT 0 AS part, g::text, NULL::text, NULL::text, v, n, rk FROM grp ORDER BY rk LIMIT @limit)\nUNION ALL\n(SELECT 1, cell.g::text, cell.k, cell.s, cell.v, cell.n, grp.rk\n FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g\n ORDER BY grp.rk, cell.k, cell.s LIMIT @limit)\nUNION ALL\n(SELECT 2, NULL::text, \"__kind\", \"__series\", (sum(\"conteo\")::double precision), count(*), NULL::bigint\n FROM src GROUP BY \"__kind\", \"__series\")\nUNION ALL\n(SELECT 3, NULL::text, NULL::text, NULL::text, (sum(\"conteo\")::double precision), count(*), NULL::bigint FROM src)",
+      "parameters": [
+       "kept",
+       "limit"
+      ]
+     }
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta"
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta"
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta"
    }
   }
  ],

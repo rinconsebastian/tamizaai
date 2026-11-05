@@ -109,6 +109,10 @@ export const maxSourceLength = 300;
 export const maxReferenceLines = 4;
 /** A reference line's label, once trimmed (`WidgetDisplay.MaxReferenceLineLabel`). */
 export const maxReferenceLineLabel = 40;
+/** The most values an order lists, for a widget and for an indicator's column (`CategoryOrder.MaxValues`). */
+export const maxOrderValues = 100;
+/** The most values an indicator's column keeps at the end (`CategoryOrder.MaxLast`). */
+export const maxKeptLast = 20;
 
 /**
  * The kinds of dashboard filter (`DashboardFilterKinds`). Each narrows a family of column types: text, true/false, integer or decimal
@@ -259,6 +263,9 @@ export interface DashboardColors {
  * The chart annotations (add-chart-annotations, design D1), none of them in its query: `referenceLines` (up to `maxReferenceLines`, on a
  * bar, column or line), `interpolation` (a line chart only; a saved `linear` is kept as it is) and `dataLabels` (bar, column, line and
  * pie; a saved `false` is kept as it is).
+ *
+ * `order` (add-declared-category-order, design D1) is the widget's own order of its groups and of its series, which replaces the order its
+ * indicator declares for the column; it is a display setting, so changing it never queries again.
  */
 export interface WidgetDisplay {
   color?: number;
@@ -273,6 +280,16 @@ export interface WidgetDisplay {
   referenceLines?: WidgetReferenceLine[];
   interpolation?: LineInterpolation;
   dataLabels?: boolean;
+  order?: WidgetCategoryOrder;
+}
+
+/**
+ * A widget's own order of values (add-declared-category-order, design D1): the groups and the series it lists, as full text, in the order
+ * to draw them (up to `maxOrderValues` each). The values it does not list follow in the chart's order. It is never part of a query.
+ */
+export interface WidgetCategoryOrder {
+  group?: string[];
+  series?: string[];
 }
 
 /**

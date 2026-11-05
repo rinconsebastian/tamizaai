@@ -1,5 +1,6 @@
 import { SeriesLayout } from '../../../core/projects/indicators.service';
 import { ChartTooltipContent } from '../../../shared/ui';
+import { CategoryOrders } from './category-order';
 import { MarkAt, MarkGrid, MarkPoint } from './mark-tooltips';
 import { Point, bandScale, charWidth, linePath, linearScale, niceAxis, stepPath, truncate } from './chart-scales';
 import {
@@ -82,6 +83,8 @@ export interface SeriesPlotInput {
   names: readonly string[];
   colors: readonly string[];
   groupLabel: (group: string | null) => string;
+  /** What the widget declares for the order of its groups (add-declared-category-order); the table's columns are arranged already. */
+  orders?: CategoryOrders | null;
   /** The value with the indicator's format and unit, and an axis tick; a share as a percent (and a tick of a 100% axis). */
   value: ValueFormatter;
   share: (share: number) => string;
@@ -152,7 +155,7 @@ function stacks(values: readonly (number | null)[]): Segment[][] {
 
 export function seriesPlot(input: SeriesPlotInput): SeriesPlot {
   const { kind, table, width: w, height: h } = input;
-  const rows = chartOrder(table, kind);
+  const rows = chartOrder(table, kind, input.orders ?? null);
   const count = rows.length;
   const series = table.columns.length;
   const categories = rows.map((row) => input.groupLabel(row.group));

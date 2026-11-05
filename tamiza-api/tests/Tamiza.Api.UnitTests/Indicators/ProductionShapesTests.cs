@@ -164,7 +164,7 @@ public sealed class ProductionShapesTests
         }
 
         var names = shapes.Select(s => s!["name"]!.GetValue<string>()).ToList();
-        Assert.Equal(25, names.Count);
+        Assert.Equal(28, names.Count);
         Assert.Equal(names.Count, names.Distinct().Count());
         Assert.Equal(
             [ChartTypes.Column, ChartTypes.Column, ChartTypes.Bar, ChartTypes.Bar, ChartTypes.Bar, ChartTypes.Bar, ChartTypes.Stat, ChartTypes.Stat, ChartTypes.Line,
@@ -172,7 +172,9 @@ public sealed class ProductionShapesTests
              // The shapes of the widget texts (add-widget-context)
              ChartTypes.Bar, ChartTypes.Column, ChartTypes.Stat, ChartTypes.Map, ChartTypes.Likert,
              // The shapes of the chart annotations (add-chart-annotations)
-             ChartTypes.Column, ChartTypes.Bar, ChartTypes.Line, ChartTypes.Bar, ChartTypes.Column],
+             ChartTypes.Column, ChartTypes.Bar, ChartTypes.Line, ChartTypes.Bar, ChartTypes.Column,
+             // The shapes of the declared category order (add-declared-category-order)
+             ChartTypes.Column, ChartTypes.Bar, ChartTypes.Heatmap],
             shapes.Select(s => s!["chartType"]!.GetValue<string>()));
         Assert.All(shapes, s => Assert.True(ChartTypes.IsKnown(s!["chartType"]!.GetValue<string>())));
     }
@@ -329,22 +331,47 @@ public sealed class ProductionShapesTests
     }
 
     [Fact]
-    public void Only_the_last_five_shapes_hold_the_annotations_and_each_holds_its_own_kind()
+    public void Only_the_five_annotation_shapes_hold_the_annotations_and_each_holds_its_own_kind()
     {
         if (Shapes() is not { } shapes)
         {
             return;
         }
 
+        var annotated = shapes.Skip(20).Take(5).ToList();
         var held = shapes.Where(s => HoldsAnnotations(s!)).Select(s => s!["name"]!.GetValue<string>()).ToList();
-        Assert.Equal(shapes.Skip(20).Select(s => s!["name"]!.GetValue<string>()), held);
+        Assert.Equal(annotated.Select(s => s!["name"]!.GetValue<string>()), held);
 
-        var displays = shapes.Skip(20).Select(s => (JsonObject)JsonNode.Parse(s!["stored"]!.GetValue<string>())!["display"]!).ToList();
+        var displays = annotated.Select(s => (JsonObject)JsonNode.Parse(s!["stored"]!.GetValue<string>())!["display"]!).ToList();
         Assert.Equal(["mean", "overall"], displays[0]["referenceLines"]!.AsArray().Select(l => l!["kind"]!.GetValue<string>()));
         Assert.True(displays[1]["dataLabels"]!.GetValue<bool>());
         Assert.Equal("step", displays[2]["interpolation"]!.GetValue<string>());
         Assert.Equal(0.5, displays[3]["referenceLines"]![0]!["value"]!.GetValue<double>());
         Assert.Equal(["overall"], displays[4]["referenceLines"]!.AsArray().Select(l => l!["kind"]!.GetValue<string>()));
+    }
+
+    /// <summary>
+    /// An indicator that gives its group and series columns only a label declares no order and no hidden prefixes (add-declared-category-order,
+    /// task 1.1): no order applies to the shapes that carry such columns, so every consumer runs today's code for them.
+    /// </summary>
+    [Fact]
+    public void No_order_applies_to_a_shape_whose_indicator_only_labels_its_group_and_series_columns()
+    {
+        if (Shapes() is not { } shapes)
+        {
+            return;
+        }
+
+        var labelled = shapes.Where(s => s!["indicatorColumns"] is not null).ToList();
+        Assert.Equal(9, labelled.Count);
+        foreach (var shape in labelled)
+        {
+            var columns = ColumnMetadata.Read(shape!["indicatorColumns"]!.ToJsonString());
+
+            var orders = CategoryOrder.For(shape["chartType"]!.GetValue<string>(), Read(shape["stored"]!.GetValue<string>()), columns);
+
+            Assert.True(orders is null, shape["name"]!.GetValue<string>());
+        }
     }
 
     /// <summary>

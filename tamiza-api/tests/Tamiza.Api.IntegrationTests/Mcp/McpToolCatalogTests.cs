@@ -82,10 +82,10 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         await using var h = await McpProjectHarness.CreateAsync(postgres);
         var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
 
-        const string warning = "To change the chart type of a widget that has a color, a scale, an orientation, reference lines, steps or data labels, also send a config without the display fields the new type does not take: a new chartType alone keeps the old config";
+        const string warning = "To change the chart type of a widget that has a color, a scale, an orientation, reference lines, steps, data labels or an order, also send a config without the display fields the new type does not take: a new chartType alone keeps the old config";
         var update = tools["update_widget"].Description;
         Assert.Contains(warning, update);
-        Assert.Contains("config.display.color, config.display.ramp, config.display.orientation, config.display.referenceLines, config.display.interpolation or config.display.dataLabels", update);
+        Assert.Contains("config.display.color, config.display.ramp, config.display.orientation, config.display.referenceLines, config.display.interpolation, config.display.dataLabels or config.display.order", update);
         // update_widget says what a new config replaces, which is why the chart type alone is not enough.
         Assert.Contains("What you leave out keeps its value; a new config replaces the old one whole", update);
 
@@ -226,8 +226,8 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         }
 
         // The template of create_widget lists the widget's texts after the labels (add-widget-context), and the chart annotations after them (add-chart-annotations).
-        Assert.Contains("display: { color, ramp, orientation, labels, subtitle, footnote, caption, unit, showDescription, referenceLines, interpolation, dataLabels } }", tools["create_widget"].Description);
-        Assert.Contains("display: { labels, referenceLines } }", tools["query_indicator"].Description);
+        Assert.Contains("display: { color, ramp, orientation, labels, subtitle, footnote, caption, unit, showDescription, referenceLines, interpolation, dataLabels, order } }", tools["create_widget"].Description);
+        Assert.Contains("display: { labels, referenceLines, order } }", tools["query_indicator"].Description);
         Assert.Contains("labels", tools["query_indicator"].Description);
         Assert.Contains("labels gives the name shown for each column it names", tools["get_widget_data"].Description);
     }
@@ -423,5 +423,40 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         }
 
         return null;
+    }
+
+    [Fact]
+    public async Task The_tools_name_the_declared_order_of_a_widget_and_of_an_indicators_column()
+    {
+        await using var h = await McpProjectHarness.CreateAsync(postgres);
+        var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
+
+        // The widget tools say what config.display.order is, after the chart annotations, and name it in their template.
+        foreach (var name in new[] { "create_widget", "update_widget" })
+        {
+            var description = tools[name].Description;
+            Assert.Contains("config.display.order = { group, series } lists values, as full text, in the order to draw them (up to 100 each); the others follow in the chart's order.", description);
+            Assert.Contains("group is refused with a sort (a boxplot's median order included), series without a series column and on a pyramid or likert.", description);
+            Assert.True(description.IndexOf("config.display also takes referenceLines", StringComparison.Ordinal) < description.IndexOf("config.display.order =", StringComparison.Ordinal));
+            var display = tools[name].JsonSchema.GetProperty("properties").GetProperty("config").GetProperty("properties").GetProperty("display").GetProperty("properties");
+            Assert.Contains("up to 100", display.GetProperty("order").GetProperty("description").GetString());
+            Assert.Equal(["group", "series"], display.GetProperty("order").GetProperty("properties").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        }
+
+        Assert.Contains("the order of its values", tools["update_widget"].JsonSchema.GetProperty("properties").GetProperty("config").GetProperty("description").GetString());
+
+        // save_script takes the three properties of a column, and says that the map is replaced whole.
+        var save = tools["save_script"];
+        var argument = save.JsonSchema.GetProperty("properties").GetProperty("columns").GetProperty("description").GetString()!;
+        Assert.Contains("order (its values as full text, in the order to draw them, up to 100)", argument);
+        Assert.Contains("last (up to 20 values kept at the end", argument);
+        Assert.Contains("stripPrefix: true", argument);
+        Assert.Contains("The map is replaced whole, so send each column's order, last and stripPrefix again with its name", argument);
+        Assert.DoesNotContain("A property other than label is ignored.", argument);
+        var column = save.JsonSchema.GetProperty("properties").GetProperty("columns").GetProperty("additionalProperties").ToString();
+        foreach (var property in new[] { "label", "order", "last", "stripPrefix" })
+        {
+            Assert.Contains(property, column);
+        }
     }
 }

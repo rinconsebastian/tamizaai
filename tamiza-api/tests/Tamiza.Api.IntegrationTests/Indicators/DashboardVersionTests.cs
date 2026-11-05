@@ -1796,6 +1796,74 @@ public sealed class DashboardVersionTests(PostgresFixture postgres)
         Assert.True(await SameContentAsync(h, housing, 2, 4));
     }
 
+    // The own order of a widget's values and the order of an indicator's column (dashboard-versions: Declared category order in dashboard versions)
+
+    [Fact]
+    public async Task A_widgets_own_order_comes_back_with_the_version_that_held_it()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var created = await h.AddWidgetAsync(new
+        {
+            title = "Coverage", chartType = "column",
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { order = new { group = new[] { "Palmira", "Cali" } } } },
+        }, dashboardId: housing);
+        var id = created.GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new
+        {
+            config = new { indicator = "coverage", groupBy = "municipality" },
+        })).StatusCode);
+        Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
+
+        var restore = await RestoredAsync(h, housing, 2);
+
+        var order = restore.GetProperty("dashboard").GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("order");
+        Assert.Equal(["Palmira", "Cali"], IndicatorsHarness.Strings(order.GetProperty("group")));
+        Assert.Equal(["Palmira", "Cali"], IndicatorsHarness.Strings((await h.GetWidgetsAsync(housing))[0].GetProperty("config").GetProperty("display").GetProperty("order").GetProperty("group")));
+        Assert.False((await ContentAsync(h, housing, 3)).GetProperty("widgets")[0].GetProperty("config").TryGetProperty("display", out _));
+        Assert.True(await SameContentAsync(h, housing, 2, 4));
+    }
+
+    [Fact]
+    public async Task Restoring_the_version_before_an_own_order_leaves_the_widget_without_one_as_a_new_version()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var created = await h.AddWidgetAsync(new
+        {
+            title = "Coverage", chartType = "column",
+            config = new { indicator = "coverage", groupBy = "municipality" },
+        }, dashboardId: housing);
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(created.GetProperty("id").GetGuid(), housing), new
+        {
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { order = new { group = new[] { "Palmira" } } } },
+        })).StatusCode);
+        Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
+
+        var restore = await RestoredAsync(h, housing, 2);
+
+        Assert.False(restore.GetProperty("dashboard").GetProperty("widgets")[0].GetProperty("config").TryGetProperty("display", out _));
+        Assert.Equal(new[] { 1, 2, 3, 4 }, await NumbersAsync(h, housing));
+    }
+
+    [Fact]
+    public async Task A_new_order_for_a_column_the_widgets_plot_makes_no_version_of_their_dashboard()
+    {
+        await using var h = await PublishedAsync();
+        await AddWidgetAsync(h, "Coverage", h.DashboardId);
+        var versions = await AllVersionsAsync(h);
+        var widgets = (await h.GetWidgetsAsync()).GetRawText();
+
+        await h.LabelColumnsAsync("coverage", new { municipality = new { order = new[] { "Palmira", "Cali" }, last = new[] { "Buga" }, stripPrefix = true } });
+        await h.LabelColumnsAsync("coverage", new { municipality = new { order = new[] { "Cali", "Palmira" } } });
+
+        var overview = await h.GetAsync(client: h.Viewer);
+        var coverage = overview.GetProperty("indicators").EnumerateArray().Single(i => i.GetProperty("name").GetString() == "coverage");
+        Assert.Equal(["Cali", "Palmira"], IndicatorsHarness.Strings(coverage.GetProperty("columns").GetProperty("municipality").GetProperty("order")));
+        Assert.Equal(versions, await AllVersionsAsync(h));
+        Assert.Equal(widgets, (await h.GetWidgetsAsync()).GetRawText());
+    }
+
     // The texts of a widget (dashboard-indicators: Widget context kept with the widget)
 
     [Fact]

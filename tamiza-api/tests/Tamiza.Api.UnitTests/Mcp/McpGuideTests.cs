@@ -216,4 +216,16 @@ public sealed class McpGuideTests
         Assert.Contains("Leave the dashboard's palette as it is unless I ask for another", text);
         Assert.Contains("valueColors", text);
     }
+
+    [Fact]
+    public void The_instructions_tell_a_client_to_declare_the_order_of_answers_instead_of_numbering_labels()
+    {
+        var text = McpGuide.Instructions;
+
+        Assert.Contains("Answers in the order of the question (Sí, Tal vez, No, No sabe): declare `order`", text);
+        Assert.Contains("and `last` for answers such as No sabe, Otro or Sin dato, in `save_script`'s `columns`, instead of numbering labels or publishing an order column", text);
+        Assert.Contains("`stripPrefix` hides numbers already in the data, while filters and colors kept by value still use the full text", text);
+        Assert.Contains("Declaring an order can recolor series that have no color kept.", text);
+        Assert.Contains("`display.order`", text);
+    }
 }

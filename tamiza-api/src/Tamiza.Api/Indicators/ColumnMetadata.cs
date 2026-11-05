@@ -13,9 +13,32 @@ namespace Tamiza.Api.Indicators;
 /// with it, since <see cref="ColumnMetadata"/> and <see cref="ColumnLabels"/> are the rule.
 /// </summary>
 /// <param name="Label">The name shown for the column instead of its own, 1 to 80 characters; left out, the column's own name.</param>
+/// <param name="Order">
+/// The values of the column in the order widgets show them (design D1 of add-declared-category-order), up to
+/// <see cref="CategoryOrder.MaxValues"/> texts of up to 500 characters, none twice. Values it does not list follow in the chart's own order.
+/// </param>
+/// <param name="Last">
+/// Values kept at the end whatever the order or the sort, up to <see cref="CategoryOrder.MaxLast"/>, such as "Otro", "No sabe" or "Sin dato".
+/// A value is not in both this list and <paramref name="Order"/>.
+/// </param>
+/// <param name="StripPrefix">
+/// Hides a leading number ("1. ", "2) ", "3 - ") in the text widgets show for the column's values; filters and colors kept by value still
+/// use the full value. Only <c>true</c> is stored.
+/// </param>
 public sealed record IndicatorColumnMetadata(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("The name people read for the column in captions, tables, emails and workbooks, 1 to 80 characters with no line break; left out, the column's own name.")] string? Label = null);
+     Description("The name people read for the column in captions, tables, emails and workbooks, 1 to 80 characters with no line break; left out, the column's own name.")] string? Label = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("The column's values, as full text, in the order widgets draw them (up to 100, none twice, each up to 500 characters); values not listed follow in the chart's own order. Left out, the chart's own order.")] IReadOnlyList<string?>? Order = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("Values, as full text, that widgets keep at the end whatever the order or the sort, such as 'Otro', 'No sabe' or 'Sin dato' (up to 20, none twice, none also in order).")] IReadOnlyList<string?>? Last = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("true hides a leading number such as '1. ', '2) ' or '3 - ' in the text widgets show for the column's values; filters and colors kept by value still use the full value. Only true is stored.")] bool? StripPrefix = null)
+{
+    /// <summary>Whether the entry says anything: a label, an order, values kept last or hidden prefixes.</summary>
+    internal bool HasAny =>
+        (Label is { } label && !string.IsNullOrWhiteSpace(label)) || Order is { Count: > 0 } || Last is { Count: > 0 } || StripPrefix is true;
+}
 
 /// <summary>
 /// The map from a column's name to what an indicator says about it, stored as JSON with the indicator's version
@@ -30,8 +53,9 @@ public static class ColumnMetadata
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 
     /// <summary>
-    /// The map as saved: a label is trimmed, and a null entry or one with no property left is dropped. An empty map is null. The keys are
-    /// kept as given; <see cref="Check"/> is what refuses them.
+    /// The map as saved: a label is trimmed, an empty list of values is none, <c>stripPrefix: false</c> is none (so "off" is never
+    /// stored), and a null entry or one with no property left is dropped. An empty map is null. The keys are kept as given;
+    /// <see cref="Check"/> is what refuses them. The values of a list are exact text: they are never trimmed.
     /// </summary>
     public static Dictionary<string, IndicatorColumnMetadata>? Normalize(IReadOnlyDictionary<string, IndicatorColumnMetadata?>? columns)
     {
@@ -43,21 +67,30 @@ public static class ColumnMetadata
         var normalized = new Dictionary<string, IndicatorColumnMetadata>(StringComparer.Ordinal);
         foreach (var (column, entry) in columns)
         {
-            var label = entry?.Label is { } text && !string.IsNullOrWhiteSpace(text) ? text.Trim() : null;
-            if (label is not null)
+            if (entry is null || !entry.HasAny)
             {
-                normalized[column] = entry! with { Label = label };
+                continue;
             }
+
+            normalized[column] = entry with
+            {
+                Label = entry.Label is { } text && !string.IsNullOrWhiteSpace(text) ? text.Trim() : null,
+                Order = entry.Order is { Count: > 0 } ? entry.Order : null,
+                Last = entry.Last is { Count: > 0 } ? entry.Last : null,
+                StripPrefix = entry.StripPrefix is true ? true : null,
+            };
         }
 
         return normalized.Count == 0 ? null : normalized;
     }
 
     /// <summary>
-    /// Adds to <paramref name="errors"/> what refuses the map as sent (design D3): more than <see cref="MaxColumns"/> columns with a
-    /// property, a key that is not a column's name (on <c>columns</c>, never in a field path), and a label too long or with a control
-    /// character (on <c>columns.{column}.label</c>). A column with no property left is not counted or checked, as <see cref="Normalize"/>
-    /// drops it.
+    /// Adds to <paramref name="errors"/> what refuses the map as sent (design D3 of the indicator column metadata and D6 of
+    /// add-declared-category-order): more than <see cref="MaxColumns"/> columns with a property, a key that is not a column's name (on
+    /// <c>columns</c>, never in a field path), a label too long or with a control character (on <c>columns.{column}.label</c>), and the
+    /// rules of an order and of the values kept last (on <c>columns.{column}.order</c> and <c>.last</c>, an item on its <c>[i]</c>). A
+    /// column with no property left is not counted or checked, as <see cref="Normalize"/> drops it. No type check: a column may be an
+    /// integer, a date or true/false, and its values are compared as a widget's rows write them.
     /// </summary>
     public static void Check(IReadOnlyDictionary<string, IndicatorColumnMetadata?>? columns, FieldErrors errors)
     {
@@ -66,7 +99,7 @@ public static class ColumnMetadata
             return;
         }
 
-        var kept = columns.Where(pair => pair.Value?.Label is { } label && !string.IsNullOrWhiteSpace(label)).ToList();
+        var kept = columns.Where(pair => pair.Value is { HasAny: true }).ToList();
         if (kept.Count > MaxColumns)
         {
             errors.Add("columns", $"An indicator labels at most {MaxColumns} columns.");
@@ -79,7 +112,29 @@ public static class ColumnMetadata
                 continue;
             }
 
-            ColumnLabels.CheckLabel(entry!.Label, $"columns.{column}.label", errors);
+            if (!string.IsNullOrWhiteSpace(entry!.Label))
+            {
+                ColumnLabels.CheckLabel(entry.Label, $"columns.{column}.label", errors);
+            }
+
+            CheckValues(column, entry, errors);
+        }
+    }
+
+    private static void CheckValues(string column, IndicatorColumnMetadata entry, FieldErrors errors)
+    {
+        var order = entry.Order ?? [];
+        var last = entry.Last ?? [];
+        CategoryOrder.CheckValues(order, CategoryOrder.MaxValues, $"An order lists at most {CategoryOrder.MaxValues} values.", $"columns.{column}.order", errors);
+        CategoryOrder.CheckValues(last, CategoryOrder.MaxLast, $"At most {CategoryOrder.MaxLast} values are kept last.", $"columns.{column}.last", errors);
+
+        var ordered = order.Where(value => value is not null).ToHashSet(StringComparer.Ordinal);
+        for (var i = 0; i < last.Count; i++)
+        {
+            if (last[i] is { } value && ordered.Contains(value))
+            {
+                errors.Add($"columns.{column}.last[{i}]", $"'{value}' is already in the order.");
+            }
         }
     }
 

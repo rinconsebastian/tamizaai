@@ -619,7 +619,19 @@
       "title": "Column names",
       "hint": "The name shown for the column in captions, tables, emails and workbooks. Empty: the column's own name.",
       "notInTable": "Not in the table",
-      "afterTest": "The columns are listed after a test."
+      "afterTest": "The columns are listed after a test.",
+      "order": {
+        "title": "Order",
+        "values": "Order of the values",
+        "last": "Keep at the end",
+        "lastHelp": "Values such as “Other”, “Don’t know” or “No data” that stay at the end whatever the order or the sort.",
+        "strip": "Hide numbered prefixes (“1. ”, “2) ”, “3 - ”)",
+        "note": "The order applies to every widget of this indicator that has no order of its own, on every dashboard, and can give other colors to values with no color kept by value.",
+        "summaryOrdered": "Ordered: {{ count }}",
+        "summaryLast": "At the end: {{ count }}",
+        "summaryStrip": "Numbers hidden",
+        "summaryNone": "Not set"
+      }
     },
     "nameErrors": {
       "required": "Enter a name.",
@@ -1897,6 +1909,20 @@
         "label": "Show the values on the chart",
         "help": "Writes each value at the end of its bar, above its point or on its slice. A label that does not fit is left out.",
         "dropped": "Stacked bars have no data labels, so they are not saved. They come back with the grouped layout."
+      },
+      "order": {
+        "legend": "Order of values",
+        "help": "Choose the order in which the chart lists its values. Values you do not list follow in the chart’s order.",
+        "group": "Groups ({{ column }})",
+        "series": "Series ({{ column }})",
+        "own": "Own order",
+        "sorted": "The sort decides the order of the bars.",
+        "sortedBoxes": "The order by median decides the order of the boxes.",
+        "colors": "Values with no color kept by value take the palette’s colors in this order. Use Colors to keep a value’s color.",
+        "default": {
+          "indicator": "Default order (the indicator’s order)",
+          "chart": "Default order (the chart’s order)"
+        }
       }
     },
     "series": {
@@ -2006,6 +2032,16 @@
       "columnsNotShown": "{{ count }} columns not shown in the image.",
       "columnsNotShownOne": "1 column not shown in the image.",
       "inWorkbook": "The Excel workbook has them all."
+    },
+    "valueOrder": {
+      "up": "Move {{ value }} up",
+      "down": "Move {{ value }} down",
+      "remove": "Remove {{ value }}",
+      "notShown": "Listed, but not in the chart now:",
+      "addLabel": "Add a value",
+      "addPlaceholder": "Another value",
+      "add": "Add",
+      "full": "An order lists at most {{ count }} values."
     }
   },
   "dashboards": {

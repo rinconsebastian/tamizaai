@@ -602,3 +602,76 @@ describe('the kinds of reference line and the data labels a widget takes', () =>
     }
   });
 });
+
+describe('queryFor with an own order of values (add-declared-category-order, design D7)', () => {
+  /** A config with a widget's own order of groups and of series, as the form would hold it. */
+  const ordered = (seriesBy: string | undefined): WidgetConfig => ({
+    ...config(null),
+    seriesBy,
+    display: { color: 2, order: { group: ['Palmira', 'Cali'], series: ['Well', 'Piped'] } },
+  });
+
+  it('leaves the order out of the query of every kind, so moving a value never queries again', () => {
+    for (const type of chartTypes) {
+      const seriesBy = type === 'heatmap' || type === 'crosstab' || type === 'pyramid' || type === 'likert' ? 'water_source' : undefined;
+      const query = queryFor(type, ordered(seriesBy));
+      expect('display' in query, type).toBe(false);
+      expect(JSON.stringify(query), type).not.toContain('order');
+      expect(JSON.stringify(query), type).toBe(JSON.stringify(queryFor(type, { ...ordered(seriesBy), display: undefined })));
+      expect(JSON.stringify(query), type).toBe(
+        JSON.stringify(queryFor(type, { ...ordered(seriesBy), display: { order: { group: ['Buga'], series: ['River'] } } })),
+      );
+    }
+  });
+});
+
+describe('savedConfig with an own order of values (add-declared-category-order, design D7)', () => {
+  const own = { group: ['Palmira', 'Cali'], series: ['Well', 'Piped'] };
+  const withOrder = (overrides: Partial<WidgetConfig> = {}): WidgetConfig => ({ ...config(null), seriesBy: 'water_source', display: { order: own }, ...overrides });
+
+  it('keeps the order of groups on every kind that has groups, and the order of series on those that take one', () => {
+    const groups = ['bar', 'column', 'line', 'pie', 'heatmap', 'pyramid', 'likert', 'crosstab', 'boxplot'] as const;
+    const series = ['bar', 'column', 'line', 'heatmap', 'crosstab'] as const;
+    for (const type of groups) {
+      const saved = savedConfig(type, withOrder({ seriesBy: type === 'pie' || type === 'boxplot' ? undefined : 'water_source' }));
+      expect(saved.display?.order?.group, type).toEqual(own.group);
+      expect(saved.display?.order?.series, type).toEqual((series as readonly string[]).includes(type) ? own.series : undefined);
+    }
+  });
+
+  it('drops the order of groups of a stat tile, a histogram and a map', () => {
+    for (const type of ['stat', 'histogram', 'map'] as const) {
+      expect('display' in savedConfig(type, withOrder({ seriesBy: undefined })), type).toBe(false);
+    }
+  });
+
+  it('drops the order of series where there is no series column, and on a pie, a pyramid and a Likert widget', () => {
+    expect(savedConfig('column', withOrder({ seriesBy: null })).display?.order).toEqual({ group: own.group });
+    expect(savedConfig('column', withOrder({ seriesBy: '' })).display?.order).toEqual({ group: own.group });
+    for (const type of ['pie', 'pyramid', 'likert'] as const) {
+      expect(savedConfig(type, withOrder()).display?.order?.series, type).toBeUndefined();
+    }
+  });
+
+  it('drops the order of groups under a sort, and keeps the order of series', () => {
+    for (const type of ['bar', 'column'] as const) {
+      expect(savedConfig(type, withOrder({ sort: byValue })).display?.order, type).toEqual({ series: own.series });
+      expect(savedConfig(type, withOrder({ sort: byColumn })).display?.order, type).toEqual({ series: own.series });
+    }
+  });
+
+  it('drops the order of boxes under an order by median, and keeps it with no sort', () => {
+    expect(savedConfig('boxplot', withOrder({ seriesBy: undefined, sort: byValue })).display).toBeUndefined();
+    expect(savedConfig('boxplot', withOrder({ seriesBy: undefined })).display?.order).toEqual({ group: own.group });
+  });
+
+  it('drops the order of groups without a group column', () => {
+    expect(savedConfig('column', withOrder({ groupBy: null, seriesBy: undefined })).display).toBeUndefined();
+    expect(savedConfig('boxplot', withOrder({ groupBy: null, seriesBy: undefined })).display).toBeUndefined();
+  });
+
+  it('leaves out an empty order, so a widget saved unchanged keeps its stored text', () => {
+    expect(savedConfig('column', withOrder({ display: { order: { group: [], series: [] } } })).display).toBeUndefined();
+    expect(savedConfig('column', withOrder({ display: { color: 2, order: { group: [] } }, seriesBy: undefined })).display).toEqual({ color: 2 });
+  });
+});

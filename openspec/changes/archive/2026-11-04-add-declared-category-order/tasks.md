@@ -15,7 +15,7 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 1. Production-shapes fixture (before any other change)
 
-- [ ] 1.1 Add to `tamiza-ui/src/app/pages/projects/indicators/testing/production-shapes.json` (design D13 of `add-indicator-column-metadata`) three shapes this change touches that it does not hold yet, with invented names and values that keep the structure (the fixture's `encuesta_hoy`, `pregunta`, `respuesta`…):
+- [x] 1.1 Add to `tamiza-ui/src/app/pages/projects/indicators/testing/production-shapes.json` (design D13 of `add-indicator-column-metadata`) three shapes this change touches that it does not hold yet, with invented names and values that keep the structure (the fixture's `encuesta_hoy`, `pregunta`, `respuesta`…):
   - a column chart sorted by `orden` compared as text and grouped by a numbered question column (`pregunta`: "1. Opción A" … "4. Opción D", whose colors the `dashboard` entry already keeps);
   - a 100% bar over a count indicator with a numbered series column (`respuesta`);
   - a heat map whose rows and columns are numbered columns (`pregunta` by `respuesta`).
@@ -26,17 +26,17 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 2. API: the widget's order and the column metadata
 
-- [ ] 2.1 Add `WidgetCategoryOrder` and `WidgetDisplay.Order` (design D7): `WhenWritingNull`, declared last (after `ShowDescription`, or after `DataLabels` once `add-chart-annotations` is in), with a `Description` on each member. `WidgetCategoryOrder.Normalize()` turns an empty list into none and keeps null items, and `WidgetDisplay.Normalize()` returns null only when every member, the order included, is unset. Verify `WidgetDisplayTests`:
+- [x] 2.1 Add `WidgetCategoryOrder` and `WidgetDisplay.Order` (design D7): `WhenWritingNull`, declared last (after `ShowDescription`, or after `DataLabels` once `add-chart-annotations` is in), with a `Description` on each member. `WidgetCategoryOrder.Normalize()` turns an empty list into none and keeps null items, and `WidgetDisplay.Normalize()` returns null only when every member, the order included, is unset. Verify `WidgetDisplayTests`:
   - every pinned stored text of a config without an order is unchanged (`MinimalBefore`, `RichBefore` and the texts of the earlier changes);
   - `{"display":{"order":{"series":["Acceso","Interés","Otra"]}}}` round-trips unchanged;
   - a display that holds only an order is kept, and `{"order":{"group":[]}}` is no display;
   - `A_query_never_carries_the_display` covers the order, and a `WidgetQueryTests` case says `WidgetQuery.For` of a config with an order equals the one without (its UI twin comes in 3.3).
-- [ ] 2.2 Add the rules of the first D6 table to `IndicatorValidation.CheckDisplay`, skipped per kind when the chart type is null. Verify `IndicatorValidationTests`: each row with its key and message, including a sorted bar with an order of groups, a box plot ordered by median with an order of groups, a box plot with no group column, an order of series on a pyramid and on a Likert widget, 101 values, a NUL, a value listed twice, and a chart type change from a column chart with an order of series to a pie (refused on `config.display.order.series`).
-- [ ] 2.3 Add `Order`, `Last` and `StripPrefix` to the record `IndicatorColumnMetadata` in `tamiza-api/src/Tamiza.Api/Indicators/ColumnMetadata.cs` (the record holds only `Label` today), `WhenWritingNull`, each with a `[Description]`; make `ColumnMetadata.Normalize` keep an entry while any property is set and turn empty lists and `false` into none; add the rules of the second D6 table to `ColumnMetadata.Check`, which `ScriptEndpoints.ValidateMetadata` already calls (`Pipeline/ScriptEndpoints.cs` does not change), and make it count and check every entry that has any property toward `MaxColumns` (design D6); add `CategoryOrder.MaxValues` and `MaxLast` (100 and 20). Verify:
+- [x] 2.2 Add the rules of the first D6 table to `IndicatorValidation.CheckDisplay`, skipped per kind when the chart type is null. Verify `IndicatorValidationTests`: each row with its key and message, including a sorted bar with an order of groups, a box plot ordered by median with an order of groups, a box plot with no group column, an order of series on a pyramid and on a Likert widget, 101 values, a NUL, a value listed twice, and a chart type change from a column chart with an order of series to a pie (refused on `config.display.order.series`).
+- [x] 2.3 Add `Order`, `Last` and `StripPrefix` to the record `IndicatorColumnMetadata` in `tamiza-api/src/Tamiza.Api/Indicators/ColumnMetadata.cs` (the record holds only `Label` today), `WhenWritingNull`, each with a `[Description]`; make `ColumnMetadata.Normalize` keep an entry while any property is set and turn empty lists and `false` into none; add the rules of the second D6 table to `ColumnMetadata.Check`, which `ScriptEndpoints.ValidateMetadata` already calls (`Pipeline/ScriptEndpoints.cs` does not change), and make it count and check every entry that has any property toward `MaxColumns` (design D6); add `CategoryOrder.MaxValues` and `MaxLast` (100 and 20). Verify:
   - `ColumnMetadataTests`: each rule with its key and message, an entry holding only `stripPrefix` kept, an entry with only empty lists and `false` dropped, a 101st column that holds only an order refused with the existing message, and the existing cases passing unchanged;
   - `ScriptsApiTests`: a version saved with an order, values kept last and `stripPrefix` reads back the same from the script and from the indicators overview (`Order saved`, API part); a value in both lists and 101 values are refused with no version made (`Value in both lists`, `Too many values`); restoring a version without an order gives a new version without one (`Restored with a version`); a save that leaves `columns` out keeps the order.
-- [ ] 2.4 Describe `display.order` and the three column properties in OpenAPI. Verify: an OpenAPI test after the pattern of `IndicatorOverviewTests.The_openapi_document_describes_the_series_of_a_widget_and_its_four_new_kinds` finds `WidgetDisplay.order`, `WidgetCategoryOrder.group`/`series` and `IndicatorColumnMetadata.order`/`last`/`stripPrefix`.
-- [ ] 2.5 Integration tests through the widget endpoints:
+- [x] 2.4 Describe `display.order` and the three column properties in OpenAPI. Verify: an OpenAPI test after the pattern of `IndicatorOverviewTests.The_openapi_document_describes_the_series_of_a_widget_and_its_four_new_kinds` finds `WidgetDisplay.order`, `WidgetCategoryOrder.group`/`series` and `IndicatorColumnMetadata.order`/`last`/`stripPrefix`.
+- [x] 2.5 Integration tests through the widget endpoints:
   - create and update with an order (`Own order of answers`, API part), and an empty order saved as none (`Empty order`);
   - each 400 of 2.2 with its key (`Order of groups on a stat tile`, `Order of groups without a group column`, `Order of series without a series`, `Order of series of a pyramid or a Likert widget`, `Too many values`, `Value listed twice`, `Sort and own order of groups refused`, `Order by median and own order of boxes refused`);
   - a `PATCH` of an unchanged widget with an order makes no version;
@@ -47,7 +47,7 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 3. Shared ordering rule
 
-- [ ] 3.1 Write the shared fixture `tamiza-ui/src/app/pages/projects/indicators/testing/category-orders.json` (design D2, D3, D5), worked out by hand. Cases for `arrange`:
+- [x] 3.1 Write the shared fixture `tamiza-ui/src/app/pages/projects/indicators/testing/category-orders.json` (design D2, D3, D5), worked out by hand. Cases for `arrange`:
   - no declaration, and a declaration with nothing that applies (`sorted` with only an `order`), each give back the same list;
   - an indicator `order`, a widget order that replaces it, and values not listed that keep the given order (listed and natural);
   - `last`, a widget order that lists a value kept last, and `last` with `sorted`;
@@ -57,7 +57,7 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
   Cases for the shown text: each separator (`.`, `)`, `:`, `-`, `–`), spaces before the separator, `10 - 14`, `0 - 4`, `1.5 horas`, `1.Sí`, `100.000`, `$10.000`, `1234. x`, a prefix with nothing after it, and `1. Otro` with `6. Otro` (alike values keep their text).
 
   Verify: `CategoryOrderTests.The_fixture_has_the_cases_the_design_lists` counts them, as `SeriesTableTests` does.
-- [ ] 3.2 Write `tamiza-api/src/Tamiza.Api/Indicators/CategoryOrder.cs` (design D3, D5):
+- [x] 3.2 Write `tamiza-api/src/Tamiza.Api/Indicators/CategoryOrder.cs` (design D3, D5):
   - `Arrange`, `Shown`/`ShownValues` and `For(chartType, config, columns)`, with the resolution table of D3;
   - `ArrangeTable(SeriesTable, orders)`, which moves each column with its cells, shares and total, and the rows.
 
@@ -65,12 +65,12 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
   - `CategoryOrderTests` runs every fixture case through `PromptKitChecks.FindUp`;
   - unit cases of `For` for every kind of the D4 table (pyramid and Likert series never arranged; stat, histogram and map groups never arranged; a box plot sorted only by median with a group column; null when the indicator gives the group and series columns only labels, which `ProductionShapesTests` also asserts for every shape of task 1.1 with its `indicatorColumns`);
   - `ArrangeTable` keeps every cell with its column.
-- [ ] 3.3 In `core/projects/indicators.service.ts`, add `WidgetDisplay.order` and the limits `maxOrderValues = 100` and `maxKeptLast = 20`; in `core/projects/pipeline.service.ts`, add `order`, `last` and `stripPrefix` to `ColumnMetadata`. Verify: `npx ng build` type-checks, `indicators.service.spec.ts` passes, a `query-for.spec.ts` case (twin of the 2.1 `WidgetQueryTests` case) says `queryFor` leaves the order out, and a guard in `CategoryOrderTests` fails when the TS limits differ from `CategoryOrder`'s.
-- [ ] 3.4 Write `tamiza-ui/src/app/pages/projects/indicators/category-order.ts`: `arrange`, `shownValues`, `ordersFor` and `arrangeColumns`, the twins of 3.2. Verify: `category-order.spec.ts` runs every fixture case, plus the same `ordersFor` and `arrangeColumns` cases as 3.2, and `production-shapes.spec.ts` asserts that `ordersFor` is null for every shape of task 1.1 with its `indicatorColumns`.
+- [x] 3.3 In `core/projects/indicators.service.ts`, add `WidgetDisplay.order` and the limits `maxOrderValues = 100` and `maxKeptLast = 20`; in `core/projects/pipeline.service.ts`, add `order`, `last` and `stripPrefix` to `ColumnMetadata`. Verify: `npx ng build` type-checks, `indicators.service.spec.ts` passes, a `query-for.spec.ts` case (twin of the 2.1 `WidgetQueryTests` case) says `queryFor` leaves the order out, and a guard in `CategoryOrderTests` fails when the TS limits differ from `CategoryOrder`'s.
+- [x] 3.4 Write `tamiza-ui/src/app/pages/projects/indicators/category-order.ts`: `arrange`, `shownValues`, `ordersFor` and `arrangeColumns`, the twins of 3.2. Verify: `category-order.spec.ts` runs every fixture case, plus the same `ordersFor` and `arrangeColumns` cases as 3.2, and `production-shapes.spec.ts` asserts that `ordersFor` is null for every shape of task 1.1 with its `indicatorColumns`.
 
 ## 4. UI: the order and the text in every chart
 
-- [ ] 4.1 Thread the orders (design D4, D8):
+- [x] 4.1 Thread the orders (design D4, D8):
   - `widget-view.ts` computes `ordersFor(chartType(), config(), indicator()?.columns)` and passes it to the chart as a new input `orders`, default null;
   - `pivot`, `chartOrder` and `arrangeColumns` take it at the call sites of D4 (`axis-chart.ts`, `series-plot.ts`, `heatmap-chart.ts`, `pyramid-chart.ts`, `likert-chart.ts`, `crosstab-widget.ts`), and so do the pie's parts, table and color domain and the box plot's boxes;
   - the pie's summary names the largest slice by value, not `slices[0]`;
@@ -81,20 +81,20 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
   - the same specs with `orders` null give today's output (`Largest slice first without a declared order`, `Demand curve`, `Sorted by an order column`);
   - `widget-view.spec.ts`: `savedConfig` drops an order the kind does not take, the order of groups under a sort or an order by median, and the order of groups without a group column;
   - `series-table.spec.ts` passes on the unchanged `series-tables.json`.
-- [ ] 4.2 Show values with their prefixes hidden (design D5) in every label helper: the `groupLabel` callbacks, `seriesName`, `pivot`'s categories (sorted by the raw value, labelled with the shown text), `crossTableModel`, the map tooltip's heading and the map's table, the accessible summaries and the export parts' legends and captions. Verify: specs that the legend of a 100% bar over `respuesta` reads `Sí` … `No sabe` in the same order (`Numbered answers`), that a tooltip and "Show as table" read `Sí` (`Everywhere the value is shown`), that `10 - 14` and `1.5 horas` keep their text (`Ranges are not prefixes`), that `1. Otro` and `6. Otro` keep their text (`Values that would read alike`), and that the widget filter editor and the Colors form still offer `1. Sí` (`Filters offer the full values`).
-- [ ] 4.3 Colors (design D10): the legend passes the arranged columns to `forValues`, and the pie arranges its color domain. Verify specs for the scenarios of the dashboard-colors delta (`Colors follow the order`, `Color kept whatever the order`, `Slices colored in their declared order`, `Bars keep their color`) and `Color kept for the full value`.
-- [ ] 4.4 Keyboard: check that `markTooltips` steps through the marks in the arranged order. Verify: a heat map spec with a declared order of columns steps right through its cells in that order (`Keyboard order`), and a series bar spec steps through its segments in the declared order.
-- [ ] 4.5 Images: the export parts of a series chart, a pie and a heat map carry the arranged legend with the shown text. Verify: `export-parts.spec.ts` and `image-layout.spec.ts` cases for `Image in the declared order`.
-- [ ] 4.6 Print: `dashboard-print.spec.ts` cases for a heat map in a declared order whose column labels hide their prefixes (`Heat map in a declared order`) and for a column chart in a declared order shown as a table (`Table in a declared order`). Verify: the print specs pass.
+- [x] 4.2 Show values with their prefixes hidden (design D5) in every label helper: the `groupLabel` callbacks, `seriesName`, `pivot`'s categories (sorted by the raw value, labelled with the shown text), `crossTableModel`, the map tooltip's heading and the map's table, the accessible summaries and the export parts' legends and captions. Verify: specs that the legend of a 100% bar over `respuesta` reads `Sí` … `No sabe` in the same order (`Numbered answers`), that a tooltip and "Show as table" read `Sí` (`Everywhere the value is shown`), that `10 - 14` and `1.5 horas` keep their text (`Ranges are not prefixes`), that `1. Otro` and `6. Otro` keep their text (`Values that would read alike`), and that the widget filter editor and the Colors form still offer `1. Sí` (`Filters offer the full values`).
+- [x] 4.3 Colors (design D10): the legend passes the arranged columns to `forValues`, and the pie arranges its color domain. Verify specs for the scenarios of the dashboard-colors delta (`Colors follow the order`, `Color kept whatever the order`, `Slices colored in their declared order`, `Bars keep their color`) and `Color kept for the full value`.
+- [x] 4.4 Keyboard: check that `markTooltips` steps through the marks in the arranged order. Verify: a heat map spec with a declared order of columns steps right through its cells in that order (`Keyboard order`), and a series bar spec steps through its segments in the declared order.
+- [x] 4.5 Images: the export parts of a series chart, a pie and a heat map carry the arranged legend with the shown text. Verify: `export-parts.spec.ts` and `image-layout.spec.ts` cases for `Image in the declared order`.
+- [x] 4.6 Print: `dashboard-print.spec.ts` cases for a heat map in a declared order whose column labels hide their prefixes (`Heat map in a declared order`) and for a column chart in a declared order shown as a table (`Table in a declared order`). Verify: the print specs pass.
 
 ## 5. UI: the forms and the documentation
 
-- [ ] 5.1 Write `indicators/value-order-editor.ts` (design D9), made like the Likert scale editor:
+- [x] 5.1 Write `indicators/value-order-editor.ts` (design D9), made like the Likert scale editor:
   - one row per value with Move up, Move down and Remove, focus kept on the moved value, and `aria-label`s that name the value;
   - an Add a value field with a `<datalist>` of the values offered.
 
   Add its strings in both languages. Verify: its spec covers moving with the keyboard, removing, adding an offered and a typed value, and the labels; `translations.spec.ts` passes.
-- [ ] 5.2 In `widget-view.ts`, add the output of the values the widget shows (design D8). In `widget-dialog.ts`, add the **Order of values** fieldset (design D9):
+- [x] 5.2 In `widget-view.ts`, add the output of the values the widget shows (design D8). In `widget-dialog.ts`, add the **Order of values** fieldset (design D9):
   - the Default/Own pairs for groups and series, with the source of the default worded;
   - seeding from the preview's new output;
   - values listed but not shown, kept apart;
@@ -107,7 +107,7 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
   - `Saved unchanged`: a widget with no order, saved unchanged, sends the same config, and `production-shapes.spec.ts` still gives every `formSaved` golden;
   - a server error on `display.order.group` shows on its field;
   - `Order dropped by a kind change` and `Order of groups off while sorted`.
-- [ ] 5.3 In the "Column names" section (design D9):
+- [x] 5.3 In the "Column names" section (design D9):
   - `ColumnDraft` in `core/projects/pipeline.service.ts`, the row `IndicatorMetadata.columns` holds per column, gains `order`, `last` and `stripPrefix` next to `label`;
   - `draftsOf`, `columnsOf` and `sameColumns` in `pages/projects/column-names.ts` carry them (`metadataOf`, `sameMetadata`, `emptyMetadata` and `save()` in `project-scripts.ts` already go through them);
   - `project-scripts.ts` passes the component the values of the latest test's dashboard view, and its `shownColumns` lists a viewed version's properties;
@@ -119,38 +119,38 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
   - `Values of the latest test`, and `Order of a column the latest test lacks`;
   - the test's dashboard view in `indicator-view.ts` still names the columns with the labels being typed;
   - a refused value shows on its row (an error on `columns.{column}.order[i]` reaches that row), a reopened form shows what was saved, and a column with only a name sends no order.
-- [ ] 5.4 Document the feature in `docs/indicators-dashboard.md` and `docs/scripts.md` (design D14), and mark this change in the program's list of `docs/tamiza-brief.md` section 8. Verify: `IndicatorDocsTests` pass, every behavior of the dashboard-indicators, dashboard-colors, pipeline and dashboard-versions deltas is described, every sentence D14 lists no longer says a kind has no order, and the limits table shows 100 values per order and 20 kept last.
+- [x] 5.4 Document the feature in `docs/indicators-dashboard.md` and `docs/scripts.md` (design D14), and mark this change in the program's list of `docs/tamiza-brief.md` section 8. Verify: `IndicatorDocsTests` pass, every behavior of the dashboard-indicators, dashboard-colors, pipeline and dashboard-versions deltas is described, every sentence D14 lists no longer says a kind has no order, and the limits table shows 100 values per order and 20 kept last.
 
 ## 6. Scheduled emails and the widget workbook
 
-- [ ] 6.1 In `ReportDataBuilder` (design D11), compute the orders in `ReadWidgetAsync`, beside its `names`, from `meta.Columns`, arrange `AxisTable`, `PieTable`, `SeriesReportTable` and `BoxplotTable`, and write group and series values with `CategoryOrder.Shown`. Verify `ReportDataTests`:
+- [x] 6.1 In `ReportDataBuilder` (design D11), compute the orders in `ReadWidgetAsync`, beside its `names`, from `meta.Columns`, arrange `AxisTable`, `PieTable`, `SeriesReportTable` and `BoxplotTable`, and write group and series values with `CategoryOrder.Shown`. Verify `ReportDataTests`:
   - `Answers in order without their numbers` (a 100% bar over `respuesta` with prefixes hidden);
   - `Value kept last` (`comuna` with `Sin dato` kept last);
   - `Widget's own order` (a pie with its own order);
   - a box plot by median with a value kept last;
   - `Nothing declared`: `Shapes_each_widget_like_its_show_as_table_view_in_reading_order` and `Every_chart_type_builds_a_table_or_a_value` pass unchanged.
-- [ ] 6.2 Check the body and plain text with the new order. Verify: a `ReportHtmlTests` case and its plain-text twin show the series headers `Sí` … `No sabe` in order, with 10 rows per block as before.
-- [ ] 6.3 Check that the widget workbook request, which already sends `savedConfig(widget.chartType, widget.config)` (`exportWorkbook` in `project-indicators.ts`), carries `display.order` to `BuildWidgetExportAsync` (design D11). Verify: a `WidgetExportTests` case lists a widget's series in its own order (`Workbook in the widget's order`), a `project-indicators.spec.ts` case checks that the request carries `display.order`, and the workbook of a version's widget follows the order that version had (`Workbook of a version`).
+- [x] 6.2 Check the body and plain text with the new order. Verify: a `ReportHtmlTests` case and its plain-text twin show the series headers `Sí` … `No sabe` in order, with 10 rows per block as before.
+- [x] 6.3 Check that the widget workbook request, which already sends `savedConfig(widget.chartType, widget.config)` (`exportWorkbook` in `project-indicators.ts`), carries `display.order` to `BuildWidgetExportAsync` (design D11). Verify: a `WidgetExportTests` case lists a widget's series in its own order (`Workbook in the widget's order`), a `project-indicators.spec.ts` case checks that the request carries `display.order`, and the workbook of a version's widget follows the order that version had (`Workbook of a version`).
 
 ## 7. MCP
 
-- [ ] 7.1 Arrange the results of `query_indicator` and `get_widget_data` (design D12): the `Row` lists, `SeriesPayload.From` through `ArrangeTable`, and `BoxPayload.From`, with full values and no step at all when nothing is declared. Verify `McpDashboardToolsTests`:
+- [x] 7.1 Arrange the results of `query_indicator` and `get_widget_data` (design D12): the `Row` lists, `SeriesPayload.From` through `ArrangeTable`, and `BoxPayload.From`, with full values and no step at all when nothing is declared. Verify `McpDashboardToolsTests`:
   - `Full values in results`: `get_widget_data` of a widget whose indicator declares an order and hides the prefixes of `respuesta` lists the series in order with `1. Sí`;
   - `Results of a widget that declares nothing`: a `query_indicator` of a line that declares nothing gives the same result text as before the change, and the existing cases pass unchanged.
-- [ ] 7.2 Update the tool texts of D12:
+- [x] 7.2 Update the tool texts of D12:
   - `WidgetDisplay.Order`'s and `WidgetCategoryOrder`'s `Description`s, and `WidgetConfigInput.Display`'s;
   - a new `OrderHelp` constant after `ContextHelp` in `create_widget` and `update_widget` (`DisplayHelp`'s pinned sentence stays as it is), and `ChartTypeChangeHelp`;
   - the `create_widget` and `query_indicator` templates, which name `order`;
   - `ColumnsHelp` and the description of `save_script` (the sentence "A property other than label is ignored." goes; the pinned sentences stay, and the order words follow them).
 
   Update in the same step the sentence pinned by `McpToolCatalogTests.Only_update_widget_warns_that_a_new_chart_type_alone_keeps_the_config_and_so_the_color_or_scale` and the template assertions of `The_tools_name_the_column_labels_they_take_and_return`. Verify: `McpToolCatalogTests` passes (those tests, no enums, every tool documented), and a new sibling checks the order words of `OrderHelp` and of `save_script`.
-- [ ] 7.3 Add MCP write tests:
+- [x] 7.3 Add MCP write tests:
   - `Widget order through MCP`: `create_widget` for a stacked column chart with an order of series is saved and read back by `get_dashboard`;
   - `Order of groups with a sort refused`: `mcp.validation` with the key, and nothing is saved;
   - `Order through save_script`: `columns` holding an order, a value kept last and `stripPrefix` is read back by `get_script`, `list_indicators` and `get_indicator_columns`.
 
   Verify: the tests pass in `McpDashboardToolsTests` and `McpScriptToolsTests`.
-- [ ] 7.4 Write the guidance:
+- [x] 7.4 Write the guidance:
   - the `Mcp/Instructions.md` bullet of D12;
   - `docs/mcp.md`: `display.order`, the `columns` properties, full values in results and the chart type sentence;
   - the `docs/mcp.md` sentences pinned by `IndicatorDocsTests.The_mcp_documentation_warns_that_changing_the_chart_type_of_a_widget_with_a_color_or_a_scale_needs_a_config` and `…gives_the_chart_type_sentence_to_update_widget_only_as_the_tool_descriptions_do`, with those tests; `The_mcp_documentation_explains_the_column_labels_the_tools_take_and_return` pins sentences that stay as they are (`{}` clears them, and given, it replaces them all; a column given an unknown property is saved with its label only).
@@ -159,12 +159,12 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
 ## 8. Script guide
 
-- [ ] 8.1 Add the bullet of design D13 to `Assistant/Prompts/system.md` "The indicator contract" and raise `AssistantPrompts.Version` by one. Verify: `PromptKitTests` (size bound), the assistant prompt tests and `McpGuideTests` (the guide equals `AssistantPrompts`) pass.
+- [x] 8.1 Add the bullet of design D13 to `Assistant/Prompts/system.md` "The indicator contract" and raise `AssistantPrompts.Version` by one. Verify: `PromptKitTests` (size bound), the assistant prompt tests and `McpGuideTests` (the guide equals `AssistantPrompts`) pass.
 
 ## 9. Integration checks
 
-- [ ] 9.1 Run `npx ng build` and `scripts/check-ui-safety.sh`. Verify: the initial bundle stays under the 675 kB budget (the new code sits in the lazy dashboard and scripts chunks), no component style passes 4 kB, the sizes are recorded in design.md, and the safety script is clean.
-- [ ] 9.2 Run every suite:
+- [x] 9.1 Run `npx ng build` and `scripts/check-ui-safety.sh`. Verify: the initial bundle stays under the 675 kB budget (the new code sits in the lazy dashboard and scripts chunks), no component style passes 4 kB, the sizes are recorded in design.md, and the safety script is clean.
+- [x] 9.2 Run every suite:
   - the whole API suite, unit then integration, in the background (about 25 to 35 minutes), with its output saved to a file;
   - the UI suite with `TZ=UTC`.
 
@@ -186,7 +186,7 @@ Every UI string goes into both `public/i18n/en.json` and `es.json` in the task t
 
   Verify: findings and fixes are recorded in design.md.
 - [ ] 9.4 Send a scheduled email of that dashboard to Mailpit. Verify: the body's tables, the plain text and the workbook list groups and series in the widget's order with the prefixes hidden, matching "Show as table".
-- [ ] 9.5 Run `openspec validate add-declared-category-order --strict`. Verify: it passes.
+- [x] 9.5 Run `openspec validate add-declared-category-order --strict`. Verify: it passes.
 
 ## Workflow follow-up
 

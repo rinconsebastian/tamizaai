@@ -1,6 +1,7 @@
 import { DataColumnType, DataValue } from '../../../core/projects/data.service';
 import { QueryRow, WidgetTooltipItem } from '../../../core/projects/indicators.service';
 import { ChartTooltipContent, dateText, timestampText } from '../../../shared/ui';
+import { shown } from './category-order';
 import { ColumnNamer, ValueFormatter, rawNames, valueFormatter } from './format';
 
 // What a map's tooltip says (design D6, D9): the group as its heading, the plotted value with the indicator's format and unit, the
@@ -21,6 +22,8 @@ export interface TooltipContext {
   t: Translate;
   /** The name shown for a column that has no label of its own (add-indicator-column-metadata); the column's name when left out. */
   names?: ColumnNamer;
+  /** The text each group value is shown with when its column hides numbered prefixes (add-declared-category-order, design D5). */
+  groupText?: ReadonlyMap<string, string> | null;
 }
 
 const numeric = (type: DataColumnType | undefined) => type === 'integer' || type === 'decimal';
@@ -65,7 +68,7 @@ export function tooltipContent(row: QueryRow, context: TooltipContext): ChartToo
   const { items, types, t } = context;
   const values = tooltipValues(row, context);
   return {
-    heading: row.group ?? t('indicators.chart.noGroup'),
+    heading: shown(context.groupText, row.group) ?? t('indicators.chart.noGroup'),
     lines: [
       { label: context.label, value: context.format(row.value), align: 'end' },
       ...items.map((item, i) => ({ label: tooltipLabel(item, context.names), value: values[i], align: numeric(types?.[i]) || typeof row.tooltip?.[i] === 'number' ? ('end' as const) : ('start' as const) })),

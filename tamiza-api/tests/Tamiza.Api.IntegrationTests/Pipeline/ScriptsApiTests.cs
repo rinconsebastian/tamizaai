@@ -813,4 +813,173 @@ public sealed class ScriptsApiTests(PostgresFixture postgres) : IDisposable
     }
 
     public void Dispose() => _kobo.Dispose();
+
+    // The declared category order of a column (design D6 and D7 of add-declared-category-order)
+
+    /// <summary>An order, values kept last and a prefix choice as one text, so two of them compare by value.</summary>
+    private static string Declared(string[]? order, string[]? last, bool? stripPrefix) =>
+        $"order=[{string.Join('|', order ?? [])}] last=[{string.Join('|', last ?? [])}] strip={stripPrefix}";
+
+    /// <summary>The order, the values kept last and the prefix choice of one column of a version's <c>columns</c> member.</summary>
+    private static string OrderOf(JsonElement version, string column)
+    {
+        if (!version.TryGetProperty("columns", out var columns) || columns.ValueKind == JsonValueKind.Null || !columns.TryGetProperty(column, out var entry))
+        {
+            return Declared(null, null, null);
+        }
+
+        string[]? Strings(string name) =>
+            entry.TryGetProperty(name, out var list) && list.ValueKind == JsonValueKind.Array ? list.EnumerateArray().Select(v => v.GetString()!).ToArray() : null;
+
+        return Declared(Strings("order"), Strings("last"), entry.TryGetProperty("stripPrefix", out var strip) ? strip.GetBoolean() : null);
+    }
+
+    private static readonly object RespuestaOrder = new
+    {
+        respuesta = new { label = "Respuesta", order = new[] { "1. Sí", "2. Tal vez", "3. No" }, last = new[] { "4. No sabe" }, stripPrefix = true },
+    };
+
+    [Fact]
+    public async Task An_order_values_kept_last_and_the_prefix_choice_are_saved_and_returned_by_every_path()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await PutColumnsAsync(h.Admin, h, "teatro_hoy", RespuestaOrder);
+        var saved = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var expected = Declared(["1. Sí", "2. Tal vez", "3. No"], ["4. No sabe"], true);
+        Assert.Equal(expected, OrderOf(saved, "respuesta"));
+        var list = await h.Admin.GetFromJsonAsync<JsonElement>(Scripts(h));
+        var indicator = Assert.Single(list.GetProperty("indicators").EnumerateArray());
+        Assert.Equal(expected, OrderOf(indicator, "respuesta"));
+        Assert.Equal(expected, OrderOf(indicator.GetProperty("current"), "respuesta"));
+        Assert.Equal(expected, OrderOf(await h.Admin.GetFromJsonAsync<JsonElement>($"{IndicatorUrl(h, "teatro_hoy")}/versions/1"), "respuesta"));
+        var overview = await h.Admin.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{h.ProjectId}/indicators");
+        Assert.Equal(expected, OrderOf(Assert.Single(overview.GetProperty("indicators").EnumerateArray()), "respuesta"));
+        Assert.Equal("Respuesta", saved.GetProperty("columns").GetProperty("respuesta").GetProperty("label").GetString());
+    }
+
+    [Fact]
+    public async Task A_column_with_only_the_prefix_choice_is_saved()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var saved = await ReadAsync(await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { respuesta = new { stripPrefix = true } }));
+
+        Assert.Equal(Declared(null, null, true), OrderOf(saved, "respuesta"));
+        Assert.Equal("""{"respuesta": {"stripPrefix": true}}""", await StoredColumnsAsync(h, "teatro_hoy", 1));
+    }
+
+    [Fact]
+    public async Task Empty_lists_and_an_unticked_prefix_choice_are_not_saved()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var saved = await ReadAsync(await PutColumnsAsync(h.Admin, h, "teatro_hoy", new
+        {
+            respuesta = new { order = Array.Empty<string>(), last = Array.Empty<string>(), stripPrefix = false },
+            comuna = new { label = "Comuna", order = Array.Empty<string>(), stripPrefix = false },
+        }));
+
+        Assert.Equal("""{"comuna": {"label": "Comuna"}}""", await StoredColumnsAsync(h, "teatro_hoy", 1));
+        Assert.Equal(Declared(null, null, null), OrderOf(saved, "comuna"));
+    }
+
+    [Fact]
+    public async Task A_value_in_both_lists_is_refused_on_the_values_kept_last_and_no_version_is_made()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { respuesta = new { order = new[] { "Sí", "No sabe" }, last = new[] { "No sabe" } } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["'No sabe' is already in the order."], Errors(await ReadAsync(response), "columns.respuesta.last[0]"));
+        Assert.Equal(0L, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
+
+    [Fact]
+    public async Task An_order_of_101_values_is_refused_on_the_order_and_100_are_accepted()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        string[] Values(int count) => Enumerable.Range(1, count).Select(i => $"Valor {i}").ToArray();
+
+        var many = await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { categoria = new { order = Values(101) } });
+        var enough = await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { categoria = new { order = Values(100) } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, many.StatusCode);
+        Assert.Equal(["An order lists at most 100 values."], Errors(await ReadAsync(many), "columns.categoria.order"));
+        Assert.Equal(HttpStatusCode.Created, enough.StatusCode);
+        Assert.Equal(1L, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
+
+    [Fact]
+    public async Task Twenty_one_values_kept_last_a_value_twice_and_a_null_value_are_refused_on_their_own_keys()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await PutColumnsAsync(h.Admin, h, "teatro_hoy", new
+        {
+            categoria = new { last = Enumerable.Range(1, 21).Select(i => $"Valor {i}").ToArray() },
+            respuesta = new { order = new string?[] { "Sí", "No", "Sí", null } },
+        });
+        var problem = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["At most 20 values are kept last."], Errors(problem, "columns.categoria.last"));
+        Assert.Equal(["'Sí' is listed twice."], Errors(problem, "columns.respuesta.order[2]"));
+        Assert.Equal(["Each value is a text of up to 500 characters."], Errors(problem, "columns.respuesta.order[3]"));
+    }
+
+    [Fact]
+    public async Task Restoring_a_version_without_an_order_gives_a_new_version_without_one()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { respuesta = new { label = "Respuesta" } });
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", RespuestaOrder, "# two\n" + Compute);
+
+        var restore = await h.Admin.PostAsync($"{IndicatorUrl(h, "teatro_hoy")}/versions/1/restore", null);
+        var restored = await ReadAsync(restore);
+
+        Assert.Equal(HttpStatusCode.Created, restore.StatusCode);
+        Assert.Equal(3, restored.GetProperty("number").GetInt32());
+        Assert.Equal(Declared(null, null, null), OrderOf(restored, "respuesta"));
+        Assert.Equal("""{"respuesta": {"label": "Respuesta"}}""", await StoredColumnsAsync(h, "teatro_hoy", 3));
+        Assert.Contains("\"order\"", await StoredColumnsAsync(h, "teatro_hoy", 2));
+    }
+
+    [Fact]
+    public async Task Restoring_a_version_with_an_order_brings_it_back()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", RespuestaOrder);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { }, "# two\n" + Compute);
+
+        var restored = await ReadAsync(await h.Admin.PostAsync($"{IndicatorUrl(h, "teatro_hoy")}/versions/1/restore", null));
+
+        Assert.Equal(Declared(["1. Sí", "2. Tal vez", "3. No"], ["4. No sabe"], true), OrderOf(restored, "respuesta"));
+        Assert.Equal(await StoredColumnsAsync(h, "teatro_hoy", 1), await StoredColumnsAsync(h, "teatro_hoy", 3));
+    }
+
+    [Fact]
+    public async Task A_save_that_leaves_columns_out_keeps_the_order()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", RespuestaOrder);
+
+        var second = await ReadAsync(await PutWithoutColumnsAsync(h.Admin, h, "teatro_hoy", "# two\n" + Compute));
+
+        Assert.Equal(Declared(["1. Sí", "2. Tal vez", "3. No"], ["4. No sabe"], true), OrderOf(second, "respuesta"));
+        Assert.Equal(await StoredColumnsAsync(h, "teatro_hoy", 1), await StoredColumnsAsync(h, "teatro_hoy", 2));
+    }
+
+    [Fact]
+    public async Task A_column_missing_from_the_table_keeps_its_order()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var saved = await ReadAsync(await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { columna_que_no_existe = new { last = new[] { "Sin dato" } } }));
+
+        Assert.Equal(Declared(null, ["Sin dato"], null), OrderOf(saved, "columna_que_no_existe"));
+    }
 }

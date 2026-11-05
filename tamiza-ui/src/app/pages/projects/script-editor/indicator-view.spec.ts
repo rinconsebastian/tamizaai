@@ -138,7 +138,7 @@ describe('IndicatorView', () => {
     const { fixture, q, host } = await render();
     expect(q('view-ratio-tile')!.querySelector('[data-testid="stat-label"]')!.textContent).toBe('Households with piped water: numerator / denominator');
 
-    host.metadata.set({ ...percent, columns: { numerator: { label: 'Hogares que asistieron' }, denominator: { label: '  ' } } });
+    host.metadata.set({ ...percent, columns: { numerator: { label: 'Hogares que asistieron', order: [], last: [], stripPrefix: false }, denominator: { label: '  ', order: [], last: [], stripPrefix: false } } });
     fixture.detectChanges();
 
     expect(q('view-ratio-tile')!.querySelector('[data-testid="stat-label"]')!.textContent).toBe('Households with piped water: Hogares que asistieron / denominator');

@@ -3599,6 +3599,39 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
       await settle(context.harness);
     });
 
+    it('sends the own order of the widget of the version shown with its workbook request (Workbook of a version)', async () => {
+      const old = widget('w1', { title: 'Coverage by municipality', config: config({ display: { order: { group: ['Palmira', 'Cali'] } } }) });
+      const context = await open('analyst', [coverage], answer, {}, { dashboards: indicatorsAndField });
+      await view(context, historyOf([12, 9]), versionOf(9, [old]));
+      await answerQueries(context, answer);
+
+      all(context.root, 'widget-menu')[0].click();
+      await settle(context.harness);
+      document.querySelector<HTMLElement>('[data-testid="widget-export-xlsx"]')!.click();
+      await settle(context.harness);
+
+      const request = context.http.expectOne((r) => r.method === 'POST' && r.url.endsWith('/widget-exports'));
+      expect(request.request.body).toMatchObject({ version: 9 });
+      expect(request.request.body.config.display).toEqual({ order: { group: ['Palmira', 'Cali'] } });
+      request.flush({ downloadUrl: '/api/v1/data-exports/x', fileName: 'x.xlsx', rowCount: 3, publishedAt: null, expiresAt: '2026-10-02T12:05:00Z' });
+      await settle(context.harness);
+    });
+
+    it('sends the own order of a widget with its workbook request, and none for a widget that has none (display.order reaches the workbook)', async () => {
+      const ordered = widget('w1', { title: 'Coverage by municipality', config: config({ display: { order: { group: ['Palmira', 'Cali'] } } }) });
+      const context = await open('analyst', [ordered], answer);
+
+      all(context.root, 'widget-menu')[0].click();
+      await settle(context.harness);
+      document.querySelector<HTMLElement>('[data-testid="widget-export-xlsx"]')!.click();
+      await settle(context.harness);
+
+      const request = context.http.expectOne((r) => r.method === 'POST' && r.url.endsWith('/widget-exports'));
+      expect(request.request.body.config.display).toEqual({ order: { group: ['Palmira', 'Cali'] } });
+      request.flush({ downloadUrl: '/api/v1/data-exports/x', fileName: 'x.xlsx', rowCount: 3, publishedAt: null, expiresAt: '2026-10-02T12:05:00Z' });
+      await settle(context.harness);
+    });
+
     it('draws the version in its own palette and colors kept by value, and the dashboard in its own once back (Colors of a version)', async () => {
       const current = { palette: 'earth' as const, valueColors: [{ column: 'sex', value: 'Female', color: 2 }] };
       const context = await open('analyst', [coverage], answer, {}, { colors: current });

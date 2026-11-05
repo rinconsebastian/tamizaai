@@ -1686,4 +1686,234 @@ public sealed class IndicatorValidationTests
         Assert.Equal(["config.display.subtitle"], errors.Keys.Order(StringComparer.Ordinal));
         Assert.Equal(["config.display.color", "config.display.subtitle"], CheckLines(new WidgetDisplay(Color: 3, Subtitle: new string('a', 201), DataLabels: true), ChartTypes.Pie).Keys.Order(StringComparer.Ordinal));
     }
+
+    // A widget's own order of values (design D6 of add-declared-category-order)
+
+    private static WidgetDisplay OrderOf(IReadOnlyList<string?>? group = null, IReadOnlyList<string?>? series = null) =>
+        new(Order: new WidgetCategoryOrder(group, series));
+
+    private static IDictionary<string, string[]> CheckOrder(WidgetConfig config, WidgetDisplay display, string? chartType) =>
+        Check(config with { Display = display }, chartType);
+
+    private static readonly WidgetSort ByPlottedValue = new(SortValues.ByValue, null, null, SortValues.Desc);
+
+    [Theory]
+    [InlineData(ChartTypes.Bar)]
+    [InlineData(ChartTypes.Column)]
+    [InlineData(ChartTypes.Line)]
+    [InlineData(ChartTypes.Pie)]
+    [InlineData(ChartTypes.Boxplot)]
+    public void An_order_of_groups_is_accepted_with_a_group_column_and_no_sort(string chartType)
+    {
+        Assert.Empty(CheckOrder(WithSeries(seriesBy: null), OrderOf(["Cali", "Buga"]), chartType));
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Heatmap)]
+    [InlineData(ChartTypes.Crosstab)]
+    [InlineData(ChartTypes.Pyramid)]
+    [InlineData(ChartTypes.Likert)]
+    public void An_order_of_groups_is_accepted_on_the_kinds_with_a_series_that_have_groups(string chartType)
+    {
+        var config = WithSeries(pyramid: chartType == ChartTypes.Pyramid ? Sides : null, scale: chartType == ChartTypes.Likert ? FiveStep : null);
+
+        Assert.Empty(CheckOrder(config, OrderOf(["Cali", "Buga"]), chartType));
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Bar)]
+    [InlineData(ChartTypes.Column)]
+    [InlineData(ChartTypes.Line)]
+    [InlineData(ChartTypes.Heatmap)]
+    [InlineData(ChartTypes.Crosstab)]
+    public void An_order_of_series_is_accepted_with_a_series_column(string chartType)
+    {
+        Assert.Empty(CheckOrder(WithSeries(), OrderOf(series: ["River", "Well"]), chartType));
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Stat)]
+    [InlineData(ChartTypes.Histogram)]
+    [InlineData(ChartTypes.Map)]
+    public void An_order_of_groups_is_refused_on_a_stat_tile_a_histogram_and_a_map(string chartType)
+    {
+        var errors = CheckOrder(WithSeries(seriesBy: null), OrderOf(["Cali"]), chartType);
+
+        Assert.Equal([$"A {chartType} widget has no groups to order."], errors["config.display.order.group"]);
+    }
+
+    [Fact]
+    public void An_order_of_groups_is_refused_without_a_group_column()
+    {
+        var errors = CheckOrder(Boxed(groupBy: null), OrderOf(["Cali"]), ChartTypes.Boxplot);
+
+        Assert.Equal(["Ordering groups needs a column to group by."], errors["config.display.order.group"]);
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Bar)]
+    [InlineData(ChartTypes.Column)]
+    public void An_order_of_groups_is_refused_with_a_sort(string chartType)
+    {
+        var errors = CheckOrder(WithSeries(seriesBy: null, sort: ByPlottedValue), OrderOf(["Cali"]), chartType);
+
+        Assert.Equal(
+            ["A sorted widget takes the order of its groups from its sort: remove the sort or this order."], errors["config.display.order.group"]);
+    }
+
+    [Fact]
+    public void An_order_of_groups_is_refused_with_a_sort_by_a_column_too()
+    {
+        var errors = CheckOrder(WithSeries(seriesBy: null, sort: ByColumn), OrderOf(["Cali"]), ChartTypes.Column);
+
+        Assert.Equal(
+            ["A sorted widget takes the order of its groups from its sort: remove the sort or this order."], errors["config.display.order.group"]);
+    }
+
+    [Fact]
+    public void An_order_of_boxes_is_refused_with_an_order_by_median()
+    {
+        var errors = CheckOrder(Boxed(sort: ByPlottedValue), OrderOf(["Cali"]), ChartTypes.Boxplot);
+
+        Assert.Equal(
+            ["A box plot ordered by median takes the order of its boxes from their medians: remove that order or this one."],
+            errors["config.display.order.group"]);
+    }
+
+    [Fact]
+    public void An_order_of_series_is_still_accepted_with_a_sort()
+    {
+        Assert.Empty(CheckOrder(WithSeries(sort: ByPlottedValue), OrderOf(series: ["River"]), ChartTypes.Bar));
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Bar)]
+    [InlineData(ChartTypes.Column)]
+    [InlineData(ChartTypes.Line)]
+    public void An_order_of_series_is_refused_without_a_series_column(string chartType)
+    {
+        var errors = CheckOrder(WithSeries(seriesBy: null), OrderOf(series: ["River"]), chartType);
+
+        Assert.Equal(["Only a widget with a series has an order of series."], errors["config.display.order.series"]);
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Stat)]
+    [InlineData(ChartTypes.Pie)]
+    [InlineData(ChartTypes.Histogram)]
+    [InlineData(ChartTypes.Map)]
+    [InlineData(ChartTypes.Boxplot)]
+    public void An_order_of_series_is_refused_on_a_kind_that_takes_none(string chartType)
+    {
+        var errors = CheckOrder(WithSeries(seriesBy: null), OrderOf(series: ["River"]), chartType);
+
+        Assert.Equal(["Only a widget with a series has an order of series."], errors["config.display.order.series"]);
+    }
+
+    [Fact]
+    public void An_order_of_series_is_refused_on_a_pyramid()
+    {
+        var errors = CheckOrder(WithSeries(pyramid: Sides), OrderOf(series: ["Male", "Female"]), ChartTypes.Pyramid);
+
+        Assert.Equal(["A population pyramid's sides are its left and right values."], errors["config.display.order.series"]);
+    }
+
+    [Fact]
+    public void An_order_of_series_is_refused_on_a_Likert_widget()
+    {
+        var errors = CheckOrder(WithSeries(scale: FiveStep), OrderOf(series: ["Agree"]), ChartTypes.Likert);
+
+        Assert.Equal(["A Likert widget's answers follow its scale."], errors["config.display.order.series"]);
+    }
+
+    [Fact]
+    public void Changing_a_column_chart_with_an_order_of_series_into_a_pie_is_refused_on_the_order_of_series()
+    {
+        var config = WithSeries(seriesBy: null);
+
+        var errors = CheckOrder(config, OrderOf(series: ["River", "Well"]), ChartTypes.Pie);
+
+        Assert.Equal(["config.display.order.series"], errors.Keys);
+    }
+
+    [Theory]
+    [InlineData(100, false)]
+    [InlineData(101, true)]
+    public void An_order_lists_at_most_a_hundred_values(int count, bool refused)
+    {
+        var values = Enumerable.Range(1, count).Select(i => (string?)$"Value {i}").ToList();
+
+        var groups = CheckOrder(WithSeries(seriesBy: null), OrderOf(values), ChartTypes.Column);
+        var series = CheckOrder(WithSeries(), OrderOf(series: values), ChartTypes.Column);
+
+        if (refused)
+        {
+            Assert.Equal(["An order lists at most 100 values."], groups["config.display.order.group"]);
+            Assert.Equal(["An order lists at most 100 values."], series["config.display.order.series"]);
+        }
+        else
+        {
+            Assert.Empty(groups);
+            Assert.Empty(series);
+        }
+    }
+
+    [Fact]
+    public void A_null_value_and_a_value_over_500_characters_are_refused_on_their_own_item()
+    {
+        var errors = CheckOrder(WithSeries(), OrderOf(["Cali", null, new string('a', 501), new string('b', 500)], ["No", new string('c', 501)]), ChartTypes.Column);
+
+        Assert.Equal(
+            ["config.display.order.group[1]", "config.display.order.group[2]", "config.display.order.series[1]"],
+            errors.Keys.Order(StringComparer.Ordinal));
+        Assert.All(errors.Values, messages => Assert.Equal(["Each value is a text of up to 500 characters."], messages));
+    }
+
+    [Fact]
+    public void A_value_with_a_NUL_character_is_refused()
+    {
+        var errors = CheckOrder(WithSeries(), OrderOf(["Cali", "Bu\0ga"]), ChartTypes.Column);
+
+        Assert.Equal(["The value cannot contain a NUL character."], errors["config.display.order.group[1]"]);
+    }
+
+    [Fact]
+    public void A_value_listed_twice_is_refused_on_the_second_one()
+    {
+        var errors = CheckOrder(WithSeries(), OrderOf(series: ["Sí", "No sabe", "No", "No sabe"]), ChartTypes.Column);
+
+        Assert.Equal(["config.display.order.series[3]"], errors.Keys);
+        Assert.Equal(["'No sabe' is listed twice."], errors["config.display.order.series[3]"]);
+    }
+
+    [Fact]
+    public void Values_are_exact_text_so_a_different_case_or_the_empty_text_are_values()
+    {
+        Assert.Empty(CheckOrder(WithSeries(), OrderOf(["Sí", "sí", "SÍ", "", " "]), ChartTypes.Column));
+        var errors = CheckOrder(WithSeries(), OrderOf(["", ""]), ChartTypes.Column);
+        Assert.Equal(["'' is listed twice."], errors["config.display.order.group[1]"]);
+    }
+
+    [Fact]
+    public void An_empty_order_checks_nothing()
+    {
+        Assert.Empty(CheckOrder(WithSeries(seriesBy: null, sort: ByPlottedValue), OrderOf(group: [], series: []), ChartTypes.Bar));
+    }
+
+    [Fact]
+    public void With_no_chart_type_only_the_shape_of_the_lists_is_checked()
+    {
+        Assert.Empty(CheckOrder(WithSeries(seriesBy: null, sort: ByPlottedValue), OrderOf(["Cali"], ["River"]), null));
+
+        var errors = CheckOrder(WithSeries(), OrderOf(["Cali", "Cali"], [null]), null);
+        Assert.Equal(["config.display.order.group[1]", "config.display.order.series[0]"], errors.Keys.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void An_order_comes_with_the_other_settings_without_changing_their_errors()
+    {
+        var errors = CheckOrder(WithSeries(), new WidgetDisplay(Color: 3, Order: new WidgetCategoryOrder(["Cali"], ["River"])), ChartTypes.Column);
+
+        Assert.Equal(["config.display.color"], errors.Keys);
+    }
 }

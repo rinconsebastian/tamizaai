@@ -619,7 +619,19 @@
       "title": "Nombres de columnas",
       "hint": "El nombre que se muestra para la columna en títulos, tablas, correos y libros de Excel. Vacío: el nombre propio de la columna.",
       "notInTable": "No está en la tabla",
-      "afterTest": "Las columnas se listan después de una prueba."
+      "afterTest": "Las columnas se listan después de una prueba.",
+      "order": {
+        "title": "Orden",
+        "values": "Orden de los valores",
+        "last": "Dejar al final",
+        "lastHelp": "Valores como «Otro», «No sabe» o «Sin dato» que quedan al final sin importar el orden ni el ordenamiento.",
+        "strip": "Ocultar los números del inicio («1. », «2) », «3 - »)",
+        "note": "El orden se aplica a todos los widgets de este indicador que no tienen un orden propio, en todos los tableros, y puede dar otros colores a los valores sin color fijado por valor.",
+        "summaryOrdered": "Ordenados: {{ count }}",
+        "summaryLast": "Al final: {{ count }}",
+        "summaryStrip": "Números ocultos",
+        "summaryNone": "Sin definir"
+      }
     },
     "nameErrors": {
       "required": "Escribe un nombre.",
@@ -1897,6 +1909,20 @@
         "label": "Mostrar los valores en el gráfico",
         "help": "Escribe cada valor al final de su barra, sobre su punto o en su porción. Una etiqueta que no cabe se omite.",
         "dropped": "Las barras apiladas no tienen etiquetas de datos, así que no se guardan. Vuelven con la disposición agrupada."
+      },
+      "order": {
+        "legend": "Orden de los valores",
+        "help": "Elija el orden en que el gráfico lista sus valores. Los valores que no liste siguen en el orden del gráfico.",
+        "group": "Grupos ({{ column }})",
+        "series": "Series ({{ column }})",
+        "own": "Orden propio",
+        "sorted": "El orden de las barras lo decide su ordenamiento.",
+        "sortedBoxes": "El orden de las cajas lo decide el orden por mediana.",
+        "colors": "Los valores sin color fijado por valor toman los colores de la paleta en este orden. Use Colores para fijar el color de un valor.",
+        "default": {
+          "indicator": "Orden predeterminado (el del indicador)",
+          "chart": "Orden predeterminado (el del gráfico)"
+        }
       }
     },
     "series": {
@@ -2006,6 +2032,16 @@
       "columnsNotShown": "{{ count }} columnas no se muestran en la imagen.",
       "columnsNotShownOne": "1 columna no se muestra en la imagen.",
       "inWorkbook": "El libro de Excel las tiene todas."
+    },
+    "valueOrder": {
+      "up": "Subir {{ value }}",
+      "down": "Bajar {{ value }}",
+      "remove": "Quitar {{ value }}",
+      "notShown": "En la lista, pero ahora no están en el gráfico:",
+      "addLabel": "Agregar un valor",
+      "addPlaceholder": "Otro valor",
+      "add": "Agregar",
+      "full": "Un orden lista como máximo {{ count }} valores."
     }
   },
   "dashboards": {

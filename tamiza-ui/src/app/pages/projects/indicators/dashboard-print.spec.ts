@@ -685,3 +685,52 @@ describe('chart annotations on paper (add-chart-annotations, "Chart annotations 
     expect(path).not.toContain('L');
   });
 });
+
+describe('the declared category order on paper (add-declared-category-order, "Declared category order on paper")', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearOverlay();
+    document.documentElement.classList.remove(printingClass);
+    document.getElementById('tmz-print-page')?.remove();
+  });
+
+  const teatro = indicator('teatro_conteo', {
+    label: 'Teatro conteo',
+    columns: { comuna: { order: ['COMUNA 2', 'COMUNA 1'], last: ['Sin dato'] }, respuesta: { order: ['1. Sí', '2. No'], stripPrefix: true } },
+  });
+  const answer = () =>
+    seriesResult(
+      [cell('COMUNA 1', '2. No', 10), cell('COMUNA 1', '1. Sí', 30), cell('Sin dato', '1. Sí', 3), cell('COMUNA 2', '1. Sí', 20), cell('COMUNA 2', '2. No', 25)],
+      ['2. No', '1. Sí'],
+    );
+
+  async function show(chartType: ChartType) {
+    const context = await open('viewer', [widget('w1', { chartType, config: config({ indicator: 'teatro_conteo', groupBy: 'comuna', seriesBy: 'respuesta', measure: 'value', layout: chartType === 'column' ? 'stacked' : undefined }) })], null, { indicators: [teatro] });
+    const requests = context.http.match(isQuery);
+    expect(requests).toHaveLength(1);
+    requests[0].flush(answer());
+    await settle(context.harness);
+    return context;
+  }
+
+  it('prints a heat map with its rows in the declared order and its column labels without their numbers (Heat map in a declared order)', async () => {
+    const context = await show('heatmap');
+
+    await paperOn(context);
+
+    expect(all(context.root, 'heat-row-label').map(text)).toEqual(['COMUNA 2', 'COMUNA 1', 'Sin dato']);
+    expect(all(context.root, 'heat-column-label').map(text)).toEqual(['Sí', 'No']);
+  });
+
+  it('prints a column chart shown as a table with its groups in the declared order (Table in a declared order)', async () => {
+    const context = await show('column');
+    await toggleTable(context);
+    await settle(context.harness);
+
+    await paperOn(context);
+
+    const rows = all(context.root, 'widget-table-row').map((r) => text(r.children[0]));
+    expect(rows.slice(0, 3)).toEqual(['COMUNA 2', 'COMUNA 1', 'Sin dato']);
+    expect(Array.from(context.root.querySelectorAll('[data-testid="widget-table"] th[scope="col"]')).map(text).slice(0, 3)).toEqual(['comuna', 'Sí', 'No']);
+  });
+});

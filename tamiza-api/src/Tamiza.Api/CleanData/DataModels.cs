@@ -11,8 +11,18 @@ public enum DataColumnType
     Text,
 }
 
-/// <summary>A column of a published table; <paramref name="Label"/> is the question label stored as the column's comment.</summary>
-public sealed record TableColumn(string Name, DataColumnType Type, string? Label);
+/// <summary>
+/// A column of a published table; <paramref name="Label"/> is the question label stored as the column's comment. An indicator's column
+/// catalog also gives what the indicator declares for the column (add-declared-category-order): its order, the values kept last and
+/// whether numbered prefixes are hidden. Those three are left out of the JSON while they are not set, so every other response reads as before.
+/// </summary>
+public sealed record TableColumn(
+    string Name,
+    DataColumnType Type,
+    string? Label,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string?>? Order = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string?>? Last = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] bool? StripPrefix = null);
 
 public static class ColumnTypes
 {

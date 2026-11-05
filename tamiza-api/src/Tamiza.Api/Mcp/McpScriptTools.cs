@@ -22,7 +22,10 @@ public sealed class McpScriptTools(
     /// <summary>The <c>columns</c> argument of <c>save_script</c> (design D11 of the indicator column metadata).</summary>
     private const string ColumnsHelp =
         "Optional, for an indicator: { column: { label } } names columns of its table for people, 1 to 80 characters with no line break, at most 100 columns, keyed by the column's name in lower case " +
-        "(for example numerator and denominator). Left out, the current version's labels are kept; {} clears them; given, it replaces them all. A property other than label is ignored.";
+        "(for example numerator and denominator). Left out, the current version's labels are kept; {} clears them; given, it replaces them all. " +
+        "A column that widgets group or split by can also take order (its values as full text, in the order to draw them, up to 100), last (up to 20 values kept at the end whatever the order or the sort, such as Otro, No sabe or Sin dato, none also in order) " +
+        "and stripPrefix: true (hides a leading number such as \"1. \" in what widgets show; filters and colors kept by value still use the full text). A column may have only these. " +
+        "The map is replaced whole, so send each column's order, last and stripPrefix again with its name, or get_script shows what the current version has. A property that is not one of these is ignored.";
 
     [McpServerTool(Name = "get_authoring_guide", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Get the script authoring guide"),
      Description("The rules for writing a script in Tamiza: the function contract of each kind, the conventions of the data (labels not codes, nullable integers, select_multiple joined by '; '), " +

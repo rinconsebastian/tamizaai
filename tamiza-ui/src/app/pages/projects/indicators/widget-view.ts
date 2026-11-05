@@ -13,6 +13,7 @@ import {
   IndicatorsService,
   QueryResult,
   WidgetCaption,
+  WidgetCategoryOrder,
   WidgetConfig,
   ReferenceLineKind,
   WidgetDisplay,
@@ -24,6 +25,9 @@ import {
 } from '../../../core/projects/indicators.service';
 import { Alert, ApiLang, Button, Skeleton } from '../../../shared/ui';
 import { AxisChart, AxisKind } from './axis-chart';
+import { CategoryOrders, arrange, entryOf, ordersFor } from './category-order';
+import { pivot } from './chart-data';
+import { isSeriesAnswer, orderedSeriesTable } from './series-table';
 import { BoxplotChart } from './boxplot-chart';
 import { ChartColors, chartColors, defaultColors } from './chart-colors';
 import { CrosstabWidget } from './crosstab-widget';
@@ -81,7 +85,7 @@ function seriesSettings(type: ChartType, config: WidgetConfig): Partial<WidgetCo
  * labels, texts or annotations saves exactly what it did.
  */
 function displayFor(type: ChartType, config: WidgetConfig): { display?: WidgetDisplay } {
-  const { color, ramp, orientation, labels, subtitle, footnote, caption, unit, showDescription, referenceLines, interpolation, dataLabels } = config.display ?? {};
+  const { color, ramp, orientation, labels, subtitle, footnote, caption, unit, showDescription, referenceLines, interpolation, dataLabels, order } = config.display ?? {};
   const named = labels ? Object.entries(labels).filter(([, label]) => label.trim()) : [];
   const captionText = caption?.text?.trim() ? caption.text : null;
   const captionKept: WidgetCaption | null = caption?.hidden && !captionText ? { hidden: true } : captionText ? { text: captionText } : null;
@@ -102,8 +106,55 @@ function displayFor(type: ChartType, config: WidgetConfig): { display?: WidgetDi
     ...(lines.length ? { referenceLines: lines } : {}),
     ...(type === 'line' && interpolation ? { interpolation } : {}),
     ...(dataLabelsKept ? { dataLabels } : {}),
+    ...orderKept(type, config, order),
   };
   return Object.keys(kept).length ? { display: kept } : {};
+}
+
+/**
+ * A widget's own order of values that the kind takes (add-declared-category-order, design D7): the order of groups on every kind but a
+ * stat tile, a histogram and a map, when the widget has a group column and no sort (or order by median) decides it; the order of series on
+ * a bar, column, line, heat map or cross table that has a series column. A change of kind, a cleared column or a new sort drops them, as a
+ * change of kind drops an orientation, so the form never saves what the API refuses.
+ */
+function orderKept(type: ChartType, config: WidgetConfig, order: WidgetCategoryOrder | undefined): { order?: WidgetCategoryOrder } {
+  const groupTakes = type !== 'stat' && type !== 'histogram' && type !== 'map' && !!config.groupBy && !sortOf(type, config);
+  const seriesTakes = (type === 'bar' || type === 'column' || type === 'line' || type === 'heatmap' || type === 'crosstab') && !!config.seriesBy;
+  const kept: WidgetCategoryOrder = {
+    ...(groupTakes && order?.group?.length ? { group: order.group } : {}),
+    ...(seriesTakes && order?.series?.length ? { series: order.series } : {}),
+  };
+  return kept.group || kept.series ? { order: kept } : {};
+}
+
+/** The group and series values a widget draws, in order, in full text. */
+export interface ShownValues {
+  groups: string[];
+  series: string[];
+}
+
+/**
+ * The values a chart of `type` draws for an answer, in the order it draws them (add-declared-category-order, design D8): the groups of
+ * every kind that has groups and the series of a bar, column, line, heat map and cross table. A pie draws from the largest unless a
+ * declared order applies; a stat tile, a histogram and a map have no groups to list.
+ */
+export function shownValuesOf(type: ChartType, answer: QueryResult, config: WidgetConfig, orders: CategoryOrders | null): ShownValues {
+  const texts = (values: (string | null)[]) => values.filter((value): value is string => value !== null);
+  if (type === 'stat' || type === 'histogram' || type === 'map') {
+    return { groups: [], series: [] };
+  }
+  if (type === 'boxplot') {
+    return { groups: texts(arrange(answer.boxes ?? [], (box) => entryOf(box.group), orders?.groups ?? null).map((box) => box.group)), series: [] };
+  }
+  if (hasSeries(type) && isSeriesAnswer(answer)) {
+    const table = orderedSeriesTable(answer, type, config.layout ?? null, orders);
+    return { groups: texts(table.rows.map((row) => row.group)), series: texts(table.columns.map((column) => (column.kind === 'value' ? column.series : null))) };
+  }
+  if (type === 'pie') {
+    const ranked = [...answer.rows].filter((row) => row.value > 0).sort((a, b) => b.value - a.value);
+    return { groups: texts(arrange(ranked, (row) => entryOf(row.group), orders?.groups ?? null).map((row) => row.group)), series: [] };
+  }
+  return { groups: texts(pivot(answer.rows, '', type === 'line' ? 'natural' : 'listed', orders).groups), series: [] };
 }
 
 /**
@@ -308,10 +359,10 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
                       <app-stat-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" />
                     }
                     @case ('pie') {
-                      <app-pie-widget [rows]="result.rows" [domain]="result.domain" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [colors]="resolvedColors()" [asTable]="asTable()" />
+                      <app-pie-widget [rows]="result.rows" [domain]="result.domain" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [orders]="orders()" [colors]="resolvedColors()" [asTable]="asTable()" />
                     }
                     @case ('map') {
-                      <app-map-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [colors]="resolvedColors()" [tooltipTypes]="result.tooltipTypes" [asTable]="asTable()" (exportReadiness)="mapReadiness.set($event)" (basemapShown)="mapBasemap.set($event)" />
+                      <app-map-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [orders]="orders()" [colors]="resolvedColors()" [tooltipTypes]="result.tooltipTypes" [asTable]="asTable()" (exportReadiness)="mapReadiness.set($event)" (basemapShown)="mapBasemap.set($event)" />
                     }
                     @case ('bar') {
                       <ng-container *ngTemplateOutlet="axis" />
@@ -326,19 +377,19 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
                       <ng-container *ngTemplateOutlet="axis" />
                     }
                     @case ('heatmap') {
-                      <app-heatmap-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [colors]="resolvedColors()" [asTable]="asTable()" />
+                      <app-heatmap-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [orders]="orders()" [colors]="resolvedColors()" [asTable]="asTable()" />
                     }
                     @case ('pyramid') {
-                      <app-pyramid-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [colors]="resolvedColors()" [asTable]="asTable()" />
+                      <app-pyramid-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [orders]="orders()" [colors]="resolvedColors()" [asTable]="asTable()" />
                     }
                     @case ('likert') {
-                      <app-likert-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [asTable]="asTable()" />
+                      <app-likert-chart [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [orders]="orders()" [asTable]="asTable()" />
                     }
                     @case ('crosstab') {
-                      <app-crosstab-widget [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" chartType="crosstab" />
+                      <app-crosstab-widget [answer]="result" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [orders]="orders()" chartType="crosstab" />
                     }
                     @case ('boxplot') {
-                      <app-boxplot-chart [answer]="result" [config]="config()!" [label]="label()" [format]="boxFormatter()" [names]="names()" [percent]="isPercent()" [colors]="resolvedColors()" [asTable]="asTable()" />
+                      <app-boxplot-chart [answer]="result" [config]="config()!" [label]="label()" [format]="boxFormatter()" [names]="names()" [orders]="orders()" [percent]="isPercent()" [colors]="resolvedColors()" [asTable]="asTable()" />
                     }
                   }
                 </div>
@@ -365,7 +416,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
 
     <!-- A bar, column or line chart with a series is given the whole answer, which holds the series and the totals. -->
     <ng-template #axis>
-      <app-axis-chart [kind]="axisKind()!" [rows]="result()!.rows" [answer]="result()" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [colors]="resolvedColors()" [asTable]="asTable()" />
+      <app-axis-chart [kind]="axisKind()!" [rows]="result()!.rows" [answer]="result()" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [orders]="orders()" [colors]="resolvedColors()" [asTable]="asTable()" />
     </ng-template>
 
     <ng-template #notPublished>
@@ -416,6 +467,12 @@ export class WidgetView {
   readonly dashboardFilters = input<ActiveDashboardFilter[]>([]);
   /** True while the widget has rows it can show as a chart or as a table (never for a stat tile), so a host can offer the toggle. */
   readonly tableAvailable = output<boolean>();
+  /**
+   * The values the widget draws, in the order it draws them and in full text (add-declared-category-order, design D8): its groups and its
+   * series. The widget form seeds its order editors from them and lists apart the values an order holds that are not among them. Null
+   * while there is no answer to draw.
+   */
+  readonly valuesShown = output<ShownValues | null>();
   protected readonly state = signal<State>({ kind: 'idle' });
   private readonly drawable = computed(() => {
     const result = this.result();
@@ -453,6 +510,16 @@ export class WidgetView {
   protected readonly label = computed(() => this.indicator()?.label ?? this.config()?.indicator ?? '');
   /** The name shown for each column: the widget's own label, else the indicator's, else the column (design D6, D7). */
   protected readonly names = computed(() => columnLabels(this.indicator(), this.config()?.display));
+  /**
+   * What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D8): its own
+   * order, else its indicator's, and the indicator's hidden prefixes. Null when it declares nothing, and every chart then draws as it always did.
+   */
+  protected readonly orders = computed(() => ordersFor(this.chartType(), this.config(), this.indicator()?.columns));
+  private readonly drawn = computed<ShownValues | null>(() => {
+    const result = this.result();
+    const config = this.config();
+    return result && config && result.published && !result.missing.indicator && !result.missing.columns.length ? shownValuesOf(this.chartType(), result, config, this.orders()) : null;
+  });
   /**
    * The values are written with the indicator's format and the unit of the widget, which replaces the indicator's when it has one
    * (add-widget-context, design D4); a widget whose indicator the project no longer lists keeps its own unit too.
@@ -564,6 +631,7 @@ export class WidgetView {
       inject(DestroyRef).onDestroy(print.registerPending(() => this.state().kind === 'loading'));
     }
     effect(() => this.tableAvailable.emit(this.drawable()));
+    effect(() => this.valuesShown.emit(this.drawn()));
     toObservable(this.key)
       .pipe(
         distinctUntilChanged(),

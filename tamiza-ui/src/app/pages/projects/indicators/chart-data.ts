@@ -1,5 +1,6 @@
 import { DestroyRef, ElementRef, Signal, effect, inject, signal } from '@angular/core';
 import { QueryRow } from '../../../core/projects/indicators.service';
+import { CategoryOrders, arrange, entryOf, shown, shownValues } from './category-order';
 import { naturalCompare } from './chart-scales';
 import { DashboardPrint } from './dashboard-print';
 
@@ -13,13 +14,25 @@ export interface Pivot {
 /**
  * Rows to categories and values. Categories are the group values, in the order the rows list them or in natural order (2 before
  * 10); a missing group shows as `emptyLabel`. The server sends one row per group value.
+ *
+ * With `orders` (add-declared-category-order, design D4 and D5) the groups are then arranged in the order they declare, and the
+ * categories are written without their leading numbers when the column hides them; `groups` keep the full values either way. Without
+ * `orders` nothing else changes.
  */
-export function pivot(rows: readonly QueryRow[], emptyLabel: string, order: 'listed' | 'natural'): Pivot {
-  const listed = rows.map((row) => ({ category: row.group ?? emptyLabel, group: row.group, missing: row.group === null, value: row.value }));
+export function pivot(rows: readonly QueryRow[], emptyLabel: string, order: 'listed' | 'natural', orders: CategoryOrders | null = null): Pivot {
+  let listed = rows.map((row) => ({ category: row.group ?? emptyLabel, group: row.group, missing: row.group === null, value: row.value }));
   if (order === 'natural') {
     listed.sort((a, b) => (a.missing ? 1 : b.missing ? -1 : naturalCompare(a.category, b.category)));
   }
-  return { categories: listed.map((entry) => entry.category), values: listed.map((entry) => entry.value), groups: listed.map((entry) => entry.group) };
+  if (orders?.groups) {
+    listed = arrange(listed, (entry) => entryOf(entry.group), orders.groups);
+  }
+  const texts = orders?.hideGroupPrefixes ? shownValues(listed.map((entry) => entry.group), true) : null;
+  return {
+    categories: listed.map((entry) => (texts ? (shown(texts, entry.group) ?? emptyLabel) : entry.category)),
+    values: listed.map((entry) => entry.value),
+    groups: listed.map((entry) => entry.group),
+  };
 }
 
 export interface Bucket {

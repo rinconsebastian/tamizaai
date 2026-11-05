@@ -395,4 +395,59 @@ public sealed class McpScriptToolsTests(PostgresFixture postgres)
         Assert.Contains("list_scripts", script.Text());
         Assert.Equal("mcp.notFound", restore.Code());
     }
+
+    // The declared order of a column through MCP (mcp-server: Declared category order through MCP)
+
+    [Fact]
+    public async Task Order_through_save_script()
+    {
+        await using var h = await CreateAsync();
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "teatro_hoy", "categoria text, value numeric", "('1. Sí', 3), ('2. Tal vez', 2), ('4. No sabe', 1)");
+
+        using var saved = (await h.CallAsync("analyst", "save_script", Labelled(new
+        {
+            categoria = new { label = "Respuesta", order = new[] { "1. Sí", "2. Tal vez", "3. No" }, last = new[] { "4. No sabe" }, stripPrefix = true },
+        }))).Json();
+        using var script = (await h.CallAsync("analyst", "get_script", new { kind = "indicator", name = "teatro_hoy" })).Json();
+        using var listed = (await h.CallAsync("viewer", "list_indicators")).Json();
+        using var catalog = (await h.CallAsync("viewer", "get_indicator_columns", new { name = "teatro_hoy" })).Json();
+
+        void Check(JsonElement facts)
+        {
+            Assert.Equal("Respuesta", facts.GetProperty("label").GetString());
+            Assert.Equal(["1. Sí", "2. Tal vez", "3. No"], facts.GetProperty("order").EnumerateArray().Select(v => v.GetString()));
+            Assert.Equal(["4. No sabe"], facts.GetProperty("last").EnumerateArray().Select(v => v.GetString()));
+            Assert.True(facts.GetProperty("stripPrefix").GetBoolean());
+        }
+
+        Check(saved.RootElement.GetProperty("columns").GetProperty("categoria"));
+        Check(script.RootElement.GetProperty("columns").GetProperty("categoria"));
+        Check(Assert.Single(listed.RootElement.GetProperty("indicators").EnumerateArray()).GetProperty("columns").GetProperty("categoria"));
+        Check(catalog.RootElement.GetProperty("columns").EnumerateArray().Single(c => c.GetProperty("name").GetString() == "categoria"));
+        // A column with nothing declared carries no such members.
+        Assert.False(catalog.RootElement.GetProperty("columns").EnumerateArray().Single(c => c.GetProperty("name").GetString() == "value").TryGetProperty("order", out _));
+    }
+
+    [Fact]
+    public async Task A_save_through_mcp_that_breaks_a_rule_of_the_order_is_refused_and_makes_no_version()
+    {
+        await using var h = await CreateAsync();
+
+        var result = await h.CallAsync("analyst", "save_script", Labelled(new { categoria = new { order = new[] { "No sabe" }, last = new[] { "No sabe" } } }));
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("columns.categoria.last[0]", result.Text());
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
+
+    [Fact]
+    public async Task A_save_through_mcp_that_leaves_columns_out_keeps_the_order_of_the_current_version()
+    {
+        await using var h = await CreateAsync();
+        using var first = (await h.CallAsync("analyst", "save_script", Labelled(new { categoria = new { order = new[] { "Sí", "No" } } }))).Json();
+
+        using var second = (await h.CallAsync("analyst", "save_script", Labelled(null, baseVersion: 1, code: "# two\n" + Indicator))).Json();
+
+        Assert.Equal(["Sí", "No"], second.RootElement.GetProperty("columns").GetProperty("categoria").GetProperty("order").EnumerateArray().Select(v => v.GetString()));
+    }
 }

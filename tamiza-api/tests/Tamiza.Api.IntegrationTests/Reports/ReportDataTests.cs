@@ -901,4 +901,149 @@ public sealed class ReportDataTests(PostgresFixture postgres)
         Assert.All(widgets, w => Assert.Empty(w.ReferenceLines));
         Assert.Equal(WidgetOutcome.NotPublished, widgets[2].Outcome);
     }
+
+    // The declared category order in a scheduled email (add-declared-category-order, design D11)
+
+    private async Task<IndicatorsHarness> ConteoAsync(object? columns = null)
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("teatro_conteo", "comuna text, respuesta text, conteo numeric", """
+            ('COMUNA 1', '4. No sabe', 5), ('COMUNA 1', '2. Tal vez', 10), ('COMUNA 1', '1. Sí', 30), ('COMUNA 1', '3. No', 15),
+            ('COMUNA 2', '1. Sí', 20), ('COMUNA 2', '3. No', 25)
+            """, label: "Teatro conteo", format: "count", labels: columns);
+        return h;
+    }
+
+    private static object PercentBar(string seriesBy = "respuesta", string groupBy = "comuna") => Widget("2.8. Iría al teatro, por comuna", "bar", new
+    {
+        indicator = "teatro_conteo", measure = "conteo", groupBy, seriesBy, layout = "percent",
+    }, y: 0, w: 12, height: 4);
+
+    [Fact]
+    public async Task Answers_in_order_without_their_numbers()
+    {
+        await using var h = await ConteoAsync(new { respuesta = new { order = new[] { "1. Sí", "2. Tal vez", "3. No" }, last = new[] { "4. No sabe" }, stripPrefix = true } });
+        await h.AddWidgetAsync(PercentBar());
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal(["comuna", "Sí", "Tal vez", "No", "No sabe", "Total"], widget.Columns.Select(c => c.Header));
+        Assert.Equal(["COMUNA 1", "COMUNA 2"], Texts(widget, 0));
+        Assert.Equal("50%", widget.Rows[0][1].Text);
+    }
+
+    [Fact]
+    public async Task A_widget_that_declares_nothing_lists_its_series_as_before()
+    {
+        await using var h = await ConteoAsync(new { respuesta = new { label = "Respuesta" } });
+        await h.AddWidgetAsync(PercentBar());
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal(["comuna", "1. Sí", "2. Tal vez", "3. No", "4. No sabe", "Total"], widget.Columns.Select(c => c.Header));
+    }
+
+    [Fact]
+    public async Task Value_kept_last()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("teatro_hoy", "comuna text, value numeric", "('COMUNA 1', 5), ('Sin dato', 2), ('ZONA RURAL', 3), ('COMUNA 2', 7)", label: "Teatro hoy", format: "count",
+            labels: new { comuna = new { last = new[] { "Sin dato" } } });
+        await h.AddWidgetAsync(Widget("Por comuna", "column", new { indicator = "teatro_hoy", measure = "value", groupBy = "comuna" }, y: 0));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal("Sin dato", Texts(widget, 0).Last());
+        Assert.Equal(["COMUNA 1", "COMUNA 2", "ZONA RURAL", "Sin dato"], Texts(widget, 0));
+    }
+
+    [Fact]
+    public async Task Widgets_own_order()
+    {
+        await using var h = await HarnessAsync();
+        await h.AddWidgetAsync(Widget("Share", "pie", new
+        {
+            indicator = "households", measure = "value", groupBy = "municipality", display = new { order = new { group = new[] { "Pasto", "Cali" } } },
+        }, y: 0));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal(["Pasto", "Cali"], Texts(widget, 0).Take(2));
+        Assert.Equal("(none)", Texts(widget, 0).Last());
+        Assert.Equal(4, widget.Rows.Count);
+    }
+
+    [Fact]
+    public async Task A_widgets_own_order_replaces_the_indicators()
+    {
+        await using var h = await ConteoAsync(new { respuesta = new { order = new[] { "1. Sí", "2. Tal vez" }, stripPrefix = true } });
+        await h.AddWidgetAsync(Widget("Respuestas", "column", new
+        {
+            indicator = "teatro_conteo", measure = "conteo", groupBy = "comuna", seriesBy = "respuesta", layout = "stacked",
+            display = new { order = new { series = new[] { "4. No sabe", "3. No" } } },
+        }, y: 0, w: 12, height: 4));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal(["comuna", "No sabe", "No", "Sí", "Tal vez", "Total"], widget.Columns.Select(c => c.Header));
+    }
+
+    [Fact]
+    public async Task A_box_plot_ordered_by_median_keeps_a_value_kept_last_at_the_end()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync(
+            "household_size", "estrato text, value numeric", "('1', 9), ('1', 10), ('2', 4), ('2', 5), ('No sabe', 20), ('No sabe', 21), ('3', 1), ('3', 2)",
+            label: "Household size", format: "count", labels: new { estrato = new { last = new[] { "No sabe" } } });
+        await h.AddWidgetAsync(Widget("Size", "boxplot", new
+        {
+            indicator = "household_size", groupBy = "estrato", sort = new { by = "value", direction = "desc" },
+        }, y: 0));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal(["1", "2", "3", "No sabe"], Texts(widget, 0));
+    }
+
+    [Fact]
+    public async Task A_box_plot_in_a_declared_order_lists_its_boxes_so()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("tarifa", "vehiculo text, value numeric", "('Carro', 5), ('Carro', 6), ('Moto', 1), ('Moto', 2), ('Todos los vehículos', 3), ('Todos los vehículos', 4)",
+            label: "Tarifa", format: "count");
+        await h.AddWidgetAsync(Widget("Tarifa", "boxplot", new
+        {
+            indicator = "tarifa", groupBy = "vehiculo", display = new { order = new { group = new[] { "Todos los vehículos", "Carro", "Moto" } } },
+        }, y: 0));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal(["Todos los vehículos", "Carro", "Moto"], Texts(widget, 0));
+    }
+
+    [Fact]
+    public async Task The_groups_of_a_line_follow_the_declared_order_over_the_natural_one()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("demanda", "precio text, value numeric", "('$10.000', 30), ('$0', 40), ('$50.000', 5), ('$20.000', 20)", label: "Demanda", format: "count",
+            labels: new { precio = new { order = new[] { "$50.000", "$20.000", "$10.000", "$0" } } });
+        await h.AddWidgetAsync(Widget("Demanda", "line", new { indicator = "demanda", measure = "value", groupBy = "precio" }, y: 0));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal(["$50.000", "$20.000", "$10.000", "$0"], Texts(widget, 0));
+    }
+
+    [Fact]
+    public async Task A_dashboard_that_declares_nothing_builds_the_tables_it_always_built()
+    {
+        await using var h = await HarnessAsync();
+        await h.AddWidgetAsync(Widget("By round", "line", new { indicator = "households", measure = "value", groupBy = "round" }, y: 0));
+        await h.AddWidgetAsync(Widget("Share", "pie", new { indicator = "households", measure = "value", groupBy = "municipality" }, y: 2));
+
+        var model = await BuildAsync(h);
+
+        Assert.Equal(["1", "2", "10"], Texts(model.Widgets[0], 0));
+        Assert.Equal(4, model.Widgets[1].Rows.Count);
+    }
 }

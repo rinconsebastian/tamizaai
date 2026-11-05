@@ -9,6 +9,7 @@ import { bandScale, charWidth, linearScale, niceAxis, truncate } from './chart-s
 import { CrosstabWidget } from './crosstab-widget';
 import { ColumnNamer, ValueFormatter, named, plotted, rawNames } from './format';
 import { MarkPoint, markTooltips } from './mark-tooltips';
+import { CategoryOrders, groupTexts, seriesTexts, shown } from './category-order';
 import { LegendEntry, SeriesLegend, SeriesNotes, seriesName, seriesNoteTexts } from './series-legend';
 import { Hit, Label, Line, Rect } from './series-plot';
 import { SeriesTable, buildSeriesTable, orderedSeriesTable } from './series-table';
@@ -148,7 +149,7 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
     <ng-container *transloco="let t">
       <app-series-legend [entries]="legend()" />
       @if (asTable()) {
-        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" [names]="names()" chartType="pyramid" />
+        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [orders]="orders()" chartType="pyramid" />
       } @else {
         <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
           <svg
@@ -232,6 +233,8 @@ export class PyramidChart {
   readonly format = input.required<ValueFormatter>();
   /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
   readonly names = input<ColumnNamer>(rawNames);
+  /** What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D8). */
+  readonly orders = input<CategoryOrders | null>(null);
   readonly asTable = input(false);
   /** The colors of the widget, from the dashboard's palette and its colors kept by value. */
   readonly colors = input.required<ChartColors>();
@@ -243,7 +246,10 @@ export class PyramidChart {
   protected readonly what = computed(() => plotted(this.config(), this.label(), this.names()));
   /** The group column under its name shown. */
   protected readonly groupShown = computed(() => named(this.names(), this.config().groupBy));
-  protected readonly table = computed(() => orderedSeriesTable(this.answer(), 'pyramid', null));
+  protected readonly table = computed(() => orderedSeriesTable(this.answer(), 'pyramid', null, this.orders()));
+  /** The text each group and each side is shown with when its column hides numbered prefixes (design D5); the sides keep their places. */
+  private readonly groupText = computed(() => groupTexts(this.table(), this.orders()));
+  private readonly seriesText = computed(() => seriesTexts(this.table(), this.orders()));
   private readonly tr = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
 
   /**
@@ -262,7 +268,8 @@ export class PyramidChart {
   private readonly sideNames = computed<readonly [string, string]>(() => {
     const columns = this.table().columns;
     const [a, b] = this.sides();
-    return [columns[a] ? seriesName(columns[a], this.tr) : '', columns[b] ? seriesName(columns[b], this.tr) : ''];
+    const texts = this.seriesText();
+    return [columns[a] ? seriesName(columns[a], this.tr, texts) : '', columns[b] ? seriesName(columns[b], this.tr, texts) : ''];
   });
   /** Each side's color, by the value it shows (the sides are `forValues` of the series column in the order left, right). */
   private readonly sideColors = computed<readonly [string, string]>(() => {
@@ -283,7 +290,7 @@ export class PyramidChart {
       height: Math.max(120, this.size().height),
       names: this.sideNames(),
       colors: this.sideColors(),
-      groupLabel: (group) => group ?? this.tr('indicators.chart.noGroup'),
+      groupLabel: (group) => shown(this.groupText(), group) ?? this.tr('indicators.chart.noGroup'),
       value: this.format(),
     }),
   );
@@ -326,7 +333,7 @@ export class PyramidChart {
       right,
       groups: t(countKey('indicators.series.groupsCount', groups, this.transloco.getActiveLang()), { count: groups }),
       max: this.format()(best.value),
-      top: `${best.group}, ${best.side === 0 ? left : right}`,
+      top: `${shown(this.groupText(), best.group)}, ${best.side === 0 ? left : right}`,
     });
   }
 }

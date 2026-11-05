@@ -191,6 +191,7 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
                         class="mt-3 block"
                         [value]="shownMetadata()"
                         [columns]="columnNames()"
+                        [offered]="valuesOffered()"
                         [errors]="fieldErrors()"
                         (valueChange)="editMetadata($event)"
                       />
@@ -209,7 +210,16 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
                           <dd class="text-heading">
                             <ul>
                               @for (entry of shownColumns(); track entry.column) {
-                                <li class="break-words" data-testid="indicator-meta-column"><code>{{ entry.column }}</code>: {{ entry.label }}</li>
+                                <li class="break-words" data-testid="indicator-meta-column">
+                                  <code>{{ entry.column }}</code>{{ entry.label ? ': ' + entry.label : '' }}
+                                  @if (entry.order || entry.last || entry.strip) {
+                                    <span class="text-body" data-testid="indicator-meta-column-order">
+                                      @if (entry.order) { · {{ t('scripts.columns.order.summaryOrdered', { count: entry.order }) }} }
+                                      @if (entry.last) { · {{ t('scripts.columns.order.summaryLast', { count: entry.last }) }} }
+                                      @if (entry.strip) { · {{ t('scripts.columns.order.summaryStrip') }} }
+                                    </span>
+                                  }
+                                </li>
                               }
                             </ul>
                           </dd>
@@ -501,12 +511,32 @@ export class ProjectScripts {
    * published table. A column with a saved label that this list lacks follows them in the section itself.
    */
   protected readonly columnNames = computed(() => this.testedColumns() ?? this.publishedColumns());
-  /** The labelled columns of the version on view or of the indicator, as text for whoever cannot edit them. */
+  /**
+   * The columns of the version on view or of the indicator that say anything (a name, an order, values kept at the end or hidden
+   * prefixes), as text for whoever cannot edit them.
+   */
   protected readonly shownColumns = computed(() =>
     Object.entries(this.shownMetadata().columns)
-      .filter(([, draft]) => draft.label.trim())
-      .map(([column, draft]) => ({ column, label: draft.label.trim() })),
+      .filter(([, draft]) => draft.label.trim() || draft.order.length || draft.last.length || draft.stripPrefix)
+      .map(([column, draft]) => ({ column, label: draft.label.trim(), order: draft.order.length, last: draft.last.length, strip: draft.stripPrefix })),
   );
+  /**
+   * The values the latest test of the draft saw in each column of up to 50 values (the dashboard view of the test lists them), offered when
+   * an order is typed in the Column names section. Nothing before a test, or for a column with more values: any value can be typed.
+   */
+  protected readonly valuesOffered = computed<Record<string, readonly string[]>>(() => {
+    const test = this.latestTest();
+    const name = this.indicatorName();
+    if (!test || !name || test.kind !== 'indicator' || test.name !== name) {
+      return {};
+    }
+    const charts = [...test.steps].reverse().find((s) => s.step === 'indicator')?.dashboard?.charts ?? {};
+    return Object.fromEntries(
+      Object.entries(charts)
+        .filter(([, chart]) => chart.groups)
+        .map(([column, chart]) => [column, chart.groups!.map((entry) => entry.group).filter((group): group is string => group !== null)]),
+    );
+  });
 
   constructor() {
     this.assistant.connect({

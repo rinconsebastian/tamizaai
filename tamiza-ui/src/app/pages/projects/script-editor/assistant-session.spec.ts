@@ -56,7 +56,7 @@ describe('AssistantSession', () => {
   it('sends the details without the column names, which the assistant neither reads nor proposes', () => {
     session.setText('x');
 
-    const body = session.requestBody(frame({ details: { ...details, columns: { numerator: { label: 'Hogares' } } } }));
+    const body = session.requestBody(frame({ details: { ...details, columns: { numerator: { label: 'Hogares', order: [], last: [], stripPrefix: false } } } }));
 
     expect(body.details).toEqual({ label: 'Piped water', description: '', unit: 'households', format: 'percent' });
     expect(JSON.stringify(body)).not.toContain('Hogares');

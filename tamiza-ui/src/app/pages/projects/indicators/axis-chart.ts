@@ -2,6 +2,7 @@ import { LOCALE_ID, Component, ElementRef, computed, inject, input, viewChild } 
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { QueryResult, QueryRow, WidgetConfig, defaultBuckets } from '../../../core/projects/indicators.service';
 
+import { CategoryOrders, arrangeColumns, groupTexts, seriesTexts, shown } from './category-order';
 import { histogram, observeSize, pivot } from './chart-data';
 import { bandScale, charWidth, compactNumber, linePath, linearScale, niceAxis, stepPath, truncate, Point } from './chart-scales';
 import { Box, ReferenceMark, dashOf, dataLabelMargin, labelGap, minLabelBar, placeReferences, pointGap, referenceMargin, textWidth, boxOf } from './chart-annotations';
@@ -54,7 +55,7 @@ const noMarks: MarkGrid = [];
       }
       @if (asTable()) {
         @if (seriesTable()) {
-          <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()!" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [chartType]="kind()" />
+          <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()!" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [orders]="orders()" [chartType]="kind()" />
         } @else {
           <app-widget-table class="flex-1 overflow-auto" [model]="table(t)" />
         }
@@ -199,6 +200,8 @@ export class AxisChart {
   readonly format = input.required<ValueFormatter>();
   /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
   readonly names = input<ColumnNamer>(rawNames);
+  /** What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D8). */
+  readonly orders = input<CategoryOrders | null>(null);
   readonly asTable = input(false);
   /** The colors of the widget, from the dashboard's palette and the widget's own color. */
   readonly colors = input.required<ChartColors>();
@@ -210,8 +213,11 @@ export class AxisChart {
   /** The grid of a widget with a series (design D4), null for a chart without one and for a histogram. */
   protected readonly seriesTable = computed<SeriesTable | null>(() => {
     const kind = this.kind();
-    return kind !== 'histogram' && isSeriesAnswer(this.answer()) ? buildSeriesTable(this.answer()!, kind, this.config().layout) : null;
+    return kind !== 'histogram' && isSeriesAnswer(this.answer()) ? arrangeColumns(buildSeriesTable(this.answer()!, kind, this.config().layout), this.orders()) : null;
   });
+  /** The text each group and each series is shown with when its column hides numbered prefixes (design D5); null shows the value as it is. */
+  private readonly groupText = computed(() => (this.seriesTable() ? groupTexts(this.seriesTable()!, this.orders()) : null));
+  private readonly seriesText = computed(() => (this.seriesTable() ? seriesTexts(this.seriesTable()!, this.orders()) : null));
   /**
    * The series in their order with the names and colors the legend, the tooltips and the marks share. The color follows the series'
    * value (a color kept for it, else the next free color of the palette), and "Other" is the neutral.
@@ -226,7 +232,8 @@ export class AxisChart {
       this.config().seriesBy ?? '',
       table.columns.map((column) => ({ value: column.series, kind: column.kind })),
     );
-    return table.columns.map((column, i) => ({ name: seriesName(column, t), color: colors[i] }));
+    const texts = this.seriesText();
+    return table.columns.map((column, i) => ({ name: seriesName(column, t, texts), color: colors[i] }));
   });
   /**
    * The reference lines the chart draws, with the text each is written with (add-chart-annotations, design D3): `{label}: {value}`, the
@@ -273,7 +280,8 @@ export class AxisChart {
       height: Math.max(120, this.size().height),
       names: entries.map((entry) => entry.name),
       colors: entries.map((entry) => entry.color),
-      groupLabel: (group) => group ?? this.transloco.translate('indicators.chart.noGroup'),
+      groupLabel: (group) => shown(this.groupText(), group) ?? this.transloco.translate('indicators.chart.noGroup'),
+      orders: this.orders(),
       value: this.format(),
       share: (value) => share.format(value),
       what: plotted(this.config(), this.label(), this.names()),
@@ -313,7 +321,7 @@ export class AxisChart {
         };
         if (this.asTable()) {
           const table = series
-            ? crossTableModel(series, { type: this.kind(), config: this.config(), format: this.format(), locale: this.locale, t, names: this.names() })
+            ? crossTableModel(series, { type: this.kind(), config: this.config(), format: this.format(), locale: this.locale, t, names: this.names(), orders: this.orders() })
             : this.table(t);
           return { ...shared, notes: lines.map((mark) => mark.text), table };
         }
@@ -342,7 +350,7 @@ export class AxisChart {
       };
     }
     const empty = this.transloco.translate('indicators.chart.noGroup');
-    return { ranges: false, ...pivot(this.rows(), empty, kind === 'line' ? 'natural' : 'listed') };
+    return { ranges: false, ...pivot(this.rows(), empty, kind === 'line' ? 'natural' : 'listed', this.orders()) };
   });
 
   /** What the chart draws, one series or many: the plot of a widget with a series, else the plain layout, which has no hit areas. */
@@ -524,7 +532,7 @@ export class AxisChart {
       seriesCount: t(countKey('indicators.series.seriesCount', table.columns.length, lang), { count: table.columns.length }),
       min: format(Math.min(...cells.map((entry) => entry.cell))),
       max: format(Math.max(...cells.map((entry) => entry.cell))),
-      top: `${top.group ?? t('indicators.chart.noGroup')}, ${seriesName(top.column, t)}`,
+      top: `${shown(this.groupText(), top.group) ?? t('indicators.chart.noGroup')}, ${seriesName(top.column, t, this.seriesText())}`,
     });
   }
 

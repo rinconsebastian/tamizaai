@@ -911,6 +911,34 @@ public sealed class DashboardTests(PostgresFixture postgres)
         Assert.Equal(column.GetProperty("id").GetGuid(), (await h.GetWidgetsAsync())[0].GetProperty("id").GetGuid());
     }
 
+    // The own order of a widget's values duplicated (dashboard-indicators: Declared category order of a widget)
+
+    [Fact]
+    public async Task A_duplicate_holds_the_own_order_of_the_originals_widgets_as_it_is_stored()
+    {
+        await using var h = await PublishedAsync();
+        var column = await h.AddWidgetAsync(new
+        {
+            title = "By municipality", chartType = "column",
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { color = 3, order = new { group = new[] { "Palmira", "Cali" } } } },
+        });
+
+        var response = await DuplicateAsync(h, h.DashboardId, "Housing (copy)");
+        var copyId = (await ReadAsync(response)).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var copied = (await h.GetWidgetsAsync(copyId))[0].GetProperty("config").GetProperty("display");
+        Assert.Equal(3, copied.GetProperty("color").GetInt32());
+        Assert.Equal(["Palmira", "Cali"], IndicatorsHarness.Strings(copied.GetProperty("order").GetProperty("group")));
+        Assert.Equal(1L, await TestData.ScalarAsync<long>(h.Db,
+            """
+            SELECT count(*) FROM tamiza.dashboard_widgets AS c
+            JOIN tamiza.dashboard_widgets AS o ON o.id = @original AND o.config = c.config AND o.config -> 'display' -> 'order' -> 'group' ->> 0 = 'Palmira'
+            WHERE c.dashboard_id = @copy
+            """,
+            ("original", column.GetProperty("id").GetGuid()), ("copy", copyId)));
+    }
+
     // Column labels duplicated (custom-dashboards: Duplicating a dashboard)
 
     [Fact]

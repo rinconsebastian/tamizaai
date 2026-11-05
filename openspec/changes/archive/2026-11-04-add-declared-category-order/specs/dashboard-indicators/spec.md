@@ -132,7 +132,7 @@ The order of this requirement is a sort. A declared order of values (see "Declar
 - **THEN** the API responds 400 with an error on the widget's order of groups
 
 ### Requirement: Line chart
-A line chart SHALL plot the group values of its indicator in their natural order, or in a declared order when one applies (see "Declared category order applied"), against the measure or ratio. Without a series it SHALL draw one line; with a series it SHALL draw one line per series value (see "Series in a widget"), and a series that has no value for a group SHALL have a gap there instead of a point. Natural order compares runs of digits as numbers, so `2` comes before `10`, and puts a missing group value last. A line chart SHALL NOT have an order (see "Bar and column order").
+A line chart SHALL plot the group values of its indicator in their natural order, or in a declared order when one applies (see "Declared category order applied"), against the measure or ratio. Without a series it SHALL draw one line; with a series it SHALL draw one line per series value (see "Series in a widget"), and a series that has no value for a group SHALL have a gap there instead of a point. Natural order compares runs of digits as numbers, so `2` comes before `10`, and puts a missing group value last. A line chart SHALL NOT have an order (see "Bar and column order"). Its points SHALL be joined by straight segments, or by steps when the widget says so (see "Step lines").
 
 #### Scenario: Trend over a grouped column
 - **WHEN** a line chart is configured for the indicator `attendance` grouped by a `round` column with values `1`, `2` and `3`
@@ -145,6 +145,10 @@ A line chart SHALL plot the group values of its indicator in their natural order
 #### Scenario: Gap in a line
 - **WHEN** in that line chart `Buga` has no row for round `2`
 - **THEN** the `Buga` line has points at rounds `1` and `3` and no segment through round `2`
+
+#### Scenario: Straight segments by default
+- **WHEN** a member opens the line chart "2.10. Cuánto pagaría por una boleta", saved without a choice of segments
+- **THEN** its points are joined by straight segments, as before
 
 #### Scenario: Points in a declared order
 - **WHEN** the line chart "2.10. Cuánto pagaría por una boleta: curva de demanda" over `teatro_demanda`, grouped by `precio`, has its own order of groups `$50.000`, `$35.000`, `$20.000`, `$10.000`, `$0`

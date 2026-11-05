@@ -2,12 +2,13 @@ import { Component, inject, input } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { SeriesKind } from '../../../core/projects/indicators.service';
+import { shown } from './category-order';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
 /** How a series is named in a legend, a tooltip or a table: its value, or "(none)" and "Other" for the two kinds that have none. */
-export function seriesName(column: { series: string | null; kind: SeriesKind }, t: Translate): string {
-  return column.kind === 'value' ? (column.series ?? '') : t(column.kind === 'none' ? 'indicators.series.none' : 'indicators.series.other');
+export function seriesName(column: { series: string | null; kind: SeriesKind }, t: Translate, texts: ReadonlyMap<string, string> | null = null): string {
+  return column.kind === 'value' ? (shown(texts, column.series) ?? '') : t(column.kind === 'none' ? 'indicators.series.none' : 'indicators.series.other');
 }
 
 export interface LegendEntry {

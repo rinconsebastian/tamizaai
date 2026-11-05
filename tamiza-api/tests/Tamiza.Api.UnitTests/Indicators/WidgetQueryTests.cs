@@ -258,6 +258,24 @@ public sealed class WidgetQueryTests
         Assert.Null(query.Display);
     }
 
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void An_own_order_of_values_never_changes_a_query(string chartType)
+    {
+        var plain = Config();
+        var ordered = plain with
+        {
+            Display = new WidgetDisplay(Color: 2, Order: new WidgetCategoryOrder(["Piped", "Well"], ["Sí", "No", "No sabe"])),
+        };
+
+        var query = WidgetQuery.For(chartType, ordered);
+
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, plain), json), System.Text.Json.JsonSerializer.Serialize(query, json));
+        Assert.Null(query.Display);
+        Assert.DoesNotContain("order", System.Text.Json.JsonSerializer.Serialize(query, json));
+    }
+
     public static TheoryData<string> EveryKind() => new(ChartTypes.All);
 
     [Fact]

@@ -501,6 +501,28 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
         Assert.Contains("0.5", line.GetProperty("value").GetProperty("description").GetString());
     }
 
+    [Fact]
+    public async Task The_openapi_document_describes_the_own_order_of_a_widget_and_the_order_of_an_indicator_column()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        using var anonymous = h.Factory.CreateClient();
+
+        var document = await anonymous.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        Assert.True(schemas.GetProperty("WidgetDisplay").GetProperty("properties").TryGetProperty("order", out var order), "WidgetDisplay.order");
+        Assert.False(string.IsNullOrWhiteSpace(order.TryGetProperty("description", out var text) ? text.GetString() : order.GetRawText()));
+        var own = schemas.GetProperty("WidgetCategoryOrder").GetProperty("properties");
+        Assert.Equal(["group", "series"], own.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Contains("100", own.GetProperty("group").GetProperty("description").GetString());
+        Assert.Contains("100", own.GetProperty("series").GetProperty("description").GetString());
+        var column = schemas.GetProperty("IndicatorColumnMetadata").GetProperty("properties");
+        Assert.Equal(["label", "last", "order", "stripPrefix"], column.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Contains("100", column.GetProperty("order").GetProperty("description").GetString());
+        Assert.Contains("20", column.GetProperty("last").GetProperty("description").GetString());
+        Assert.Contains("true", column.GetProperty("stripPrefix").GetProperty("description").GetString());
+    }
+
     // Column labels of an indicator (design D4 of the indicator column metadata)
 
     [Fact]

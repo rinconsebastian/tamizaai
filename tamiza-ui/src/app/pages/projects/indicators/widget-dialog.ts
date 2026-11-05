@@ -68,7 +68,8 @@ import { describeFilter, normalizeFilter } from '../data-view';
 import { FilterValues, activeFilters } from './dashboard-filters';
 import { columnLabels, textsCrowd } from './format';
 import { defaultSize } from './grid-layout';
-import { WidgetView, offersDataLabels, queryFor, referenceKindsFor, savedConfig } from './widget-view';
+import { ValueOrderEditor } from './value-order-editor';
+import { ShownValues, WidgetView, offersDataLabels, queryFor, referenceKindsFor, savedConfig } from './widget-view';
 import { naturalCompare } from './chart-scales';
 import { colorsOf, defaultScale, paletteColor, rampGradient } from './chart-colors';
 
@@ -216,7 +217,9 @@ type Problems = Partial<
     | 'unit'
     | 'referenceLines'
     | 'interpolation'
-    | 'dataLabels',
+    | 'dataLabels'
+    | 'groupOrder'
+    | 'seriesOrder',
     string
   >
 >;
@@ -265,7 +268,7 @@ export class LineField {
 
 @Component({
   selector: 'app-widget-dialog',
-  imports: [TranslocoDirective, Alert, ApiLang, Button, Disclosure, FormField, Input, LineField, WidgetView],
+  imports: [TranslocoDirective, Alert, ApiLang, Button, Disclosure, FormField, Input, LineField, ValueOrderEditor, WidgetView],
   template: `
     <form
       class="flex h-dvh w-screen flex-col gap-4 overflow-y-auto bg-neutral-primary-soft p-4 md:h-auto md:max-h-[calc(100dvh-2rem)] md:w-[min(46rem,calc(100vw-2rem))] lg:w-[min(64rem,calc(100vw-2rem))] md:rounded-base md:border md:border-default md:p-6 md:shadow-sm"
@@ -953,6 +956,65 @@ export class LineField {
         </fieldset>
       }
 
+      @if (offersGroupOrder() || offersSeriesOrder()) {
+        <fieldset class="flex min-w-0 flex-col gap-4" data-testid="dialog-order">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.order.legend') }}</legend>
+          <p class="-mt-2 text-sm text-body">{{ t('indicators.dialog.order.help') }}</p>
+          @if (offersGroupOrder()) {
+            <div class="flex min-w-0 flex-col gap-2" data-testid="dialog-order-group">
+              <p class="text-sm font-medium text-heading">{{ t('indicators.dialog.order.group', { column: groupBy() }) }}</p>
+              @if (groupOrderSorted()) {
+                <p class="text-sm text-body" data-testid="order-sorted">{{ t(chartType() === 'boxplot' ? 'indicators.dialog.order.sortedBoxes' : 'indicators.dialog.order.sorted') }}</p>
+              } @else {
+                <div class="flex flex-wrap gap-x-6 gap-y-1">
+                  <label class="flex min-h-10 cursor-pointer items-center gap-2 text-sm text-heading">
+                    <input type="radio" name="widgetGroupOrder" class="size-4 shrink-0" [checked]="groupOrder() === null" (change)="chooseOrder('group', false)" data-testid="dialog-order-group-default" />
+                    {{ t('indicators.dialog.order.default.' + groupOrderDefault()) }}
+                  </label>
+                  <label class="flex min-h-10 cursor-pointer items-center gap-2 text-sm text-heading">
+                    <input type="radio" name="widgetGroupOrder" class="size-4 shrink-0" [checked]="groupOrder() !== null" (change)="chooseOrder('group', true)" data-testid="dialog-order-group-own" />
+                    {{ t('indicators.dialog.order.own') }}
+                  </label>
+                </div>
+                @if (groupOrder(); as values) {
+                  <app-value-order-editor [values]="values" [shown]="valuesNow()?.groups ?? null" [offered]="valuesNow()?.groups ?? []" (changed)="setOrder('group', $event)" testId="order-editor-group" />
+                }
+                @if (shown().groupOrder; as message) {
+                  <p class="text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
+                }
+                @if (groupOrder() !== null && chartType() === 'pie') {
+                  <p class="text-sm text-body" data-testid="order-colors">{{ t('indicators.dialog.order.colors') }}</p>
+                }
+              }
+            </div>
+          }
+          @if (offersSeriesOrder()) {
+            <div class="flex min-w-0 flex-col gap-2" data-testid="dialog-order-series">
+              <p class="text-sm font-medium text-heading">{{ t('indicators.dialog.order.series', { column: seriesBy() }) }}</p>
+              <div class="flex flex-wrap gap-x-6 gap-y-1">
+                <label class="flex min-h-10 cursor-pointer items-center gap-2 text-sm text-heading">
+                  <input type="radio" name="widgetSeriesOrder" class="size-4 shrink-0" [checked]="seriesOrder() === null" (change)="chooseOrder('series', false)" data-testid="dialog-order-series-default" />
+                  {{ t('indicators.dialog.order.default.' + seriesOrderDefault()) }}
+                </label>
+                <label class="flex min-h-10 cursor-pointer items-center gap-2 text-sm text-heading">
+                  <input type="radio" name="widgetSeriesOrder" class="size-4 shrink-0" [checked]="seriesOrder() !== null" (change)="chooseOrder('series', true)" data-testid="dialog-order-series-own" />
+                  {{ t('indicators.dialog.order.own') }}
+                </label>
+              </div>
+              @if (seriesOrder(); as values) {
+                <app-value-order-editor [values]="values" [shown]="valuesNow()?.series ?? null" [offered]="valuesNow()?.series ?? []" (changed)="setOrder('series', $event)" testId="order-editor-series" />
+              }
+              @if (shown().seriesOrder; as message) {
+                <p class="text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
+              }
+              @if (seriesOrder() !== null) {
+                <p class="text-sm text-body" data-testid="order-colors">{{ t('indicators.dialog.order.colors') }}</p>
+              }
+            </div>
+          }
+        </fieldset>
+      }
+
       <tmz-disclosure [heading]="t('indicators.dialog.filtersCount', { count: filters().length })" [open]="startsWithFilters" data-testid="dialog-filters">
         @if (catalog()?.published) {
           @if (filters().length) {
@@ -1030,6 +1092,7 @@ export class LineField {
               [dashboardFilters]="previewFilters()"
               [colors]="data.colors"
               [tileRows]="tileRows()"
+              (valuesShown)="valuesNow.set($event)"
             />
           </div>
         </div>
@@ -1200,6 +1263,15 @@ export class WidgetDialog {
   );
   protected readonly interpolation = signal<LineInterpolation | null>(this.start.display?.interpolation ?? null);
   protected readonly dataLabels = signal<boolean | null>(this.start.display?.dataLabels ?? null);
+  /**
+   * The widget's own order of its groups and of its series (add-declared-category-order, design D9), or null for the default: its
+   * indicator's order, else the chart's. Kept while the member changes the kind or the sort, as a color is: `savedConfig` keeps them only
+   * where the kind, the columns and the sort take them.
+   */
+  protected readonly groupOrder = signal<string[] | null>(this.start.display?.order?.group ? [...this.start.display.order.group] : null);
+  protected readonly seriesOrder = signal<string[] | null>(this.start.display?.order?.series ? [...this.start.display.order.series] : null);
+  /** The values the preview draws, in the order it draws them: what an own order is seeded from and what the editors offer. */
+  protected readonly valuesNow = signal<ShownValues | null>(null);
   /** What the server refused in each reference line, by its row. */
   protected readonly lineProblems = signal<Record<number, LineProblems>>({});
   protected readonly chosenInterpolation = computed<LineInterpolation>(() => this.interpolation() ?? 'linear');
@@ -1288,6 +1360,20 @@ export class WidgetDialog {
   /** Bar, column and line widgets may have a series column; heat map, pyramid, Likert and cross table widgets need one. */
   protected readonly offersSeries = computed(() => hasSeries(this.chartType()));
   protected readonly requiresSeries = computed(() => needsSeries(this.chartType()));
+  /** Every kind with groups takes an order of them, once there is a group column (a stat tile, a histogram and a map list none). */
+  protected readonly offersGroupOrder = computed(() => !['stat', 'histogram', 'map'].includes(this.chartType()) && !!this.groupBy());
+  /** A sort, or an order by median, decides the order of the groups: an own order of them is off. */
+  protected readonly groupOrderSorted = computed(() => {
+    const type = this.chartType();
+    return ((type === 'bar' || type === 'column') && this.sortKey() !== '') || (type === 'boxplot' && this.sortKey() === 'value');
+  });
+  /** A pyramid's sides and a Likert scale set the order of their series, and the other kinds have none. */
+  protected readonly offersSeriesOrder = computed(() => ['bar', 'column', 'line', 'heatmap', 'crosstab'].includes(this.chartType()) && !!this.seriesBy());
+  /** What the default order is called: the indicator's, when it declares one for the column, else the chart's own. */
+  protected readonly groupOrderDefault = computed(() => this.defaultOrderOf(this.groupBy()));
+  protected readonly seriesOrderDefault = computed(() => this.defaultOrderOf(this.seriesBy()));
+  /** Values with no color kept take the palette's colors in the order of the series, and of a pie's slices (design D10). */
+  protected readonly orderRecolors = computed(() => this.chartType() === 'pie' || this.offersSeriesOrder());
   /** The layout is the choice of a bar or column chart that has a series. */
   protected readonly offersLayout = computed(() => (this.chartType() === 'bar' || this.chartType() === 'column') && !!this.seriesBy());
   /** What the rules of the annotations read of the form: the series, the layout and whether it plots a ratio. */
@@ -1432,6 +1518,9 @@ export class WidgetDialog {
     const lines = this.draftLines();
     const interpolation = this.interpolation();
     const dataLabels = this.dataLabels();
+    const groups = this.groupOrder();
+    const series = this.seriesOrder();
+    const order = groups?.length || series?.length ? { ...(groups?.length ? { group: [...groups] } : {}), ...(series?.length ? { series: [...series] } : {}) } : null;
     return color === null &&
       ramp === null &&
       orientation === null &&
@@ -1443,7 +1532,8 @@ export class WidgetDialog {
       !description &&
       !lines.length &&
       interpolation === null &&
-      dataLabels === null
+      dataLabels === null &&
+      !order
       ? {}
       : {
           display: {
@@ -1459,6 +1549,7 @@ export class WidgetDialog {
             ...(lines.length ? { referenceLines: lines } : {}),
             ...(interpolation !== null ? { interpolation } : {}),
             ...(dataLabels !== null ? { dataLabels } : {}),
+            ...(order ? { order } : {}),
           },
         };
   }
@@ -1823,6 +1914,23 @@ export class WidgetDialog {
   protected setInterpolation(value: LineInterpolation): void {
     this.interpolation.set(value === 'linear' && this.start.display?.interpolation == null ? null : value);
     this.serverFieldErrors.update(({ interpolation: _interpolation, ...others }) => others);
+  }
+
+  private defaultOrderOf(column: string): 'indicator' | 'chart' {
+    const meta = column ? this.entry()?.columns?.[column] : undefined;
+    return meta?.order?.length ? 'indicator' : 'chart';
+  }
+
+  /** Chooses the default order again (null) or an order of the widget's own, which starts as the order the preview draws now. */
+  protected chooseOrder(place: 'group' | 'series', own: boolean): void {
+    const current = (place === 'group' ? this.valuesNow()?.groups : this.valuesNow()?.series) ?? [];
+    this.setOrder(place, own ? [...current] : null);
+  }
+
+  protected setOrder(place: 'group' | 'series', values: string[] | null): void {
+    this.edited = true;
+    (place === 'group' ? this.groupOrder : this.seriesOrder).set(values);
+    this.serverFieldErrors.update(({ groupOrder, seriesOrder, ...others }) => (place === 'group' ? { ...others, ...(seriesOrder ? { seriesOrder } : {}) } : { ...others, ...(groupOrder ? { groupOrder } : {}) }));
   }
 
   /** Data labels. Off is the default: unchecking on a widget saved without the setting leaves it without one. */
@@ -2385,6 +2493,8 @@ export class WidgetDialog {
     const name = path.toLowerCase();
     if (name === 'dashboardid') return 'dashboardId';
     // First, because the name of a column in the path can hold any of the words below.
+    if (name.includes('display.order.group')) return 'groupOrder';
+    if (name.includes('display.order.series')) return 'seriesOrder';
     if (name.includes('display.labels')) return 'labels';
     if (name.includes('display.referencelines')) return 'referenceLines';
     if (name.includes('display.interpolation')) return 'interpolation';

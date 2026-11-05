@@ -1,6 +1,7 @@
 import { LOCALE_ID, Component, ElementRef, computed, inject, input, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { QueryRow, QuerySeries, WidgetConfig } from '../../../core/projects/indicators.service';
+import { CategoryOrders, arrange, entryOf } from './category-order';
 import { ChartColors, SeriesKey } from './chart-colors';
 import { registerExportParts } from './export-parts';
 import { observeSize, pivot } from './chart-data';
@@ -26,6 +27,8 @@ interface Slice {
 /** What a slice stands for: a group value, the missing one (`none`), or the group values that did not get a color of their own (`other`). */
 interface Part {
   id: string;
+  /** The group value, null for the missing one: what a declared order is matched by. */
+  group: string | null;
   name: string;
   value: number;
 }
@@ -105,6 +108,8 @@ export class PieWidget {
   readonly format = input.required<ValueFormatter>();
   /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
   readonly names = input<ColumnNamer>(rawNames);
+  /** What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D8). */
+  readonly orders = input<CategoryOrders | null>(null);
   readonly asTable = input(false);
   /** The colors of the widget, from the dashboard's palette and its colors kept by value. */
   readonly colors = input.required<ChartColors>();
@@ -120,7 +125,7 @@ export class PieWidget {
   protected readonly groupShown = computed(() => named(this.names(), this.config().groupBy));
 
   private readonly all = computed(() => {
-    const data = pivot(this.rows(), this.transloco.translate('indicators.chart.noGroup'), 'listed');
+    const data = pivot(this.rows(), this.transloco.translate('indicators.chart.noGroup'), 'listed', this.orders());
     return data.categories.map((name, i) => ({ name, group: data.groups[i], value: data.values[i] }));
   });
 
@@ -131,16 +136,17 @@ export class PieWidget {
    * sends none, the filtered rows ranked by size with the smallest past the eighth color folded.
    */
   private readonly colorDomain = computed<readonly SeriesKey[]>(() => {
+    const declared = this.orders()?.groups ?? null;
     const given = this.domain();
     if (given?.length) {
-      return given.map(({ value, kind }) => ({ value, kind }));
+      return arrange(given.map(({ value, kind }): SeriesKey => ({ value, kind })), (key) => key, declared);
     }
     const ranked = this.all()
       .filter((entry) => entry.value > 0)
       .sort((a, b) => b.value - a.value);
     const folds = ranked.length > seriesCount;
     const kept = (folds ? ranked.slice(0, seriesCount - 1) : ranked).map((entry): SeriesKey => ({ value: entry.group, kind: entry.group === null ? 'none' : 'value' }));
-    return folds ? [...kept, otherKey] : kept;
+    return arrange(folds ? [...kept, otherKey] : kept, (key) => key, declared);
   });
 
   /**
@@ -153,13 +159,15 @@ export class PieWidget {
     let rest = 0;
     for (const entry of this.all().filter((entry) => entry.value > 0)) {
       if (inDomain.has(idOf(entry.group))) {
-        named.push({ id: idOf(entry.group), name: entry.name, value: entry.value });
+        named.push({ id: idOf(entry.group), group: entry.group, name: entry.name, value: entry.value });
       } else {
         rest += entry.value;
       }
     }
-    named.sort((a, b) => b.value - a.value);
-    return rest > 0 ? [...named, { id: 'other', name: this.transloco.translate('indicators.pie.other'), value: rest }] : named;
+    // Largest first, or in the order the widget declares for its groups (add-declared-category-order, design D4); "Other" is last either way.
+    const declared = this.orders()?.groups ?? null;
+    const drawn = declared ? arrange(named, (part) => entryOf(part.group), declared) : named.sort((a, b) => b.value - a.value);
+    return rest > 0 ? [...drawn, { id: 'other', group: null, name: this.transloco.translate('indicators.pie.other'), value: rest }] : drawn;
   });
 
   /**
@@ -282,12 +290,14 @@ export class PieWidget {
     if (!slices.length) {
       return t('indicators.chart.summaryEmpty', { what: this.what() });
     }
+    // The largest slice, whatever the order the slices are drawn in (a declared order is not ranked by size).
+    const largest = slices.reduce((top, slice) => (slice.value > top.value ? slice : top));
     return t(countKey('indicators.chart.summary.pie', slices.length, this.transloco.getActiveLang()), {
       what: this.what(),
       group: this.groupShown(),
       count: slices.length,
-      top: slices[0].name,
-      share: new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }).format(slices[0].share),
+      top: largest.name,
+      share: new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }).format(largest.share),
     });
   }
 

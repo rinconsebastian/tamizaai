@@ -245,6 +245,48 @@ describe('what a widget registers for an image', () => {
     });
   });
 
+  // The declared category order (add-declared-category-order, Image in the declared order): an image says what the screen says, in its order.
+  describe('the order of the values (add-declared-category-order, Image in the declared order)', () => {
+    const answers = seriesResult(
+      [cell('Cali', '1. Sí', 5), cell('Cali', '4. No sabe', 3), cell('Cali', '2. No', 2), cell('Pasto', '1. Sí', 4)],
+      ['1. Sí', '2. No', '4. No sabe'],
+    );
+    const declared = indicator('coverage', { columns: { water_source: { order: ['1. Sí', '2. No'], last: ['4. No sabe'], stripPrefix: true } } });
+
+    it('gives the legend of a column chart in the declared order, without the numbers', async () => {
+      const { parts } = await render('column', config({ seriesBy: 'water_source', layout: 'stacked' }), answers, false, [], declared);
+
+      expect(parts.legend).toMatchObject({ kind: 'entries', entries: [{ label: 'Sí' }, { label: 'No' }, { label: 'No sabe' }] });
+    });
+
+    it('gives the legend of a column chart in the order the series come in when nothing is declared', async () => {
+      const { parts } = await render('column', config({ seriesBy: 'water_source', layout: 'stacked' }), answers);
+
+      expect(parts.legend).toMatchObject({ kind: 'entries', entries: [{ label: '1. Sí' }, { label: '2. No' }, { label: '4. No sabe' }] });
+    });
+
+    it('gives the legend of a pie in the own order of the widget', async () => {
+      const own = config({ display: { order: { group: ['Pasto', 'Cali'] } } });
+
+      const { parts } = await render('pie', own, result([row('Cali', 75), row('Pasto', 25)]));
+
+      expect(parts.legend).toMatchObject({ kind: 'entries', entries: [{ label: 'Pasto' }, { label: 'Cali' }] });
+    });
+
+    it('gives the table of a chart shown as a table in the declared order, without the numbers', async () => {
+      const { parts } = await render('column', config({ seriesBy: 'water_source', layout: 'stacked' }), answers, true, [], declared);
+
+      expect((parts.table as { headers: string[] }).headers).toEqual(['municipality', 'Sí', 'No', 'No sabe', 'Total']);
+    });
+
+    it('draws a heat map with the arranged series', async () => {
+      const { parts, registration } = await render('heatmap', config({ seriesBy: 'water_source' }), answers, false, [], declared);
+
+      expect(parts.caption).toContain('Coverage');
+      expect(registration.plot()).not.toBeNull();
+    });
+  });
+
   describe('the names of the columns (add-indicator-column-metadata, Image caption)', () => {
     const ratio = { numerator: 'numerator', denominator: 'denominator' };
     const teatro = indicator('coverage', {

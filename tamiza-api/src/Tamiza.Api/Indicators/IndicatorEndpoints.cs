@@ -69,7 +69,14 @@ public static class IndicatorEndpoints
             var labels = await CurrentColumnsAsync(db, projectId, name, ct);
             return TypedResults.Ok(labels is null
                 ? columns
-                : columns with { Columns = columns.Columns.Select(c => c with { Label = labels.GetValueOrDefault(c.Name)?.Label ?? c.Label }).ToList() });
+                : columns with
+                {
+                    Columns = columns.Columns.Select(c =>
+                    {
+                        var facts = labels.GetValueOrDefault(c.Name);
+                        return c with { Label = facts?.Label ?? c.Label, Order = facts?.Order, Last = facts?.Last, StripPrefix = facts?.StripPrefix };
+                    }).ToList(),
+                });
         }
         catch (DataTimeoutException)
         {

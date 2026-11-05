@@ -737,4 +737,59 @@ public sealed class WidgetExportTests(PostgresFixture postgres)
         Assert.Equal(["Elemento", "Valor"], Rows(path, "Resumen")[0].Keys);
         Assert.Contains(Rows(path, "Resumen").Select(Values), r => r.SequenceEqual(["Filtros: Municipality", "Todos"]));
     }
+
+    // The declared category order in a widget workbook (add-declared-category-order, design D11)
+
+    private static object WithOrder(object order, string? seriesBy = "water_source", string? layout = null) => new
+    {
+        indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy, layout, display = new { order },
+    };
+
+    [Fact]
+    public async Task Workbook_in_the_widgets_order()
+    {
+        await using var h = await HarnessAsync();
+        var config = WithOrder(new { series = new[] { "Well", "Piped" }, group = new[] { "Palmira", "Cali" } });
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("Order", "column", config)));
+
+        var data = Rows(path, "Order");
+        Assert.Equal(["municipality", "Well (households)", "Piped (households)", "Total (households)"], data[0].Keys);
+        Assert.Equal(["Palmira", "Cali", "Buga"], data.Where(r => Values(r)[0] != "Total").Select(r => Values(r)[0]));
+    }
+
+    [Fact]
+    public async Task A_widget_that_declares_nothing_lists_its_series_as_before()
+    {
+        await using var h = await HarnessAsync();
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("Plain", "column", Configs["column"])));
+
+        Assert.Equal(["municipality", "Piped (households)", "Well (households)", "Total (households)"], Rows(path, "Plain")[0].Keys);
+    }
+
+    [Fact]
+    public async Task Workbook_of_a_version_follows_the_order_that_version_had()
+    {
+        await using var h = await HarnessAsync();
+        var widget = await h.AddWidgetAsync(new { title = "Gone", chartType = "column", config = WithOrder(new { group = new[] { "Palmira", "Buga", "Cali" } }, seriesBy: null) });
+        var version = await CurrentVersionAsync(h);
+        Assert.Equal(HttpStatusCode.NoContent, (await h.Analyst.DeleteAsync(h.WidgetUrl(widget.GetProperty("id").GetGuid()))).StatusCode);
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("Gone", "column", WithOrder(new { group = new[] { "Palmira", "Buga", "Cali" } }, seriesBy: null), version: version), h.Analyst));
+
+        Assert.Equal(["Palmira", "Buga", "Cali"], Rows(path, "Gone").Select(r => Values(r)[0]));
+    }
+
+    [Fact]
+    public async Task An_order_that_breaks_a_rule_is_refused_like_a_save_would_refuse_it_and_leaves_no_file()
+    {
+        await using var h = await HarnessAsync();
+        var config = WithOrder(new { group = new[] { "Cali", "Cali" } }, seriesBy: null);
+
+        var (response, json) = await PostAsync(h, Body("Order", "column", config));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["'Cali' is listed twice."], IndicatorsHarness.Errors(json, "config.display.order.group[1]"));
+    }
 }

@@ -500,4 +500,29 @@ public sealed class ReportHtmlTests
         // A block that fits shows six series columns, never the twenty-five.
         Assert.DoesNotContain(">S7</th>", html);
     }
+
+    // The declared category order (add-declared-category-order): the model arrives arranged, and the body and the text write it as it is.
+    private static ReportWidget Answers(int groups) =>
+        new(1, "2.8. Iría al teatro, por comuna", "bar", "Teatro conteo: conteo", WidgetOutcome.Shown,
+            [new ReportColumn("comuna"), .. new[] { "Sí", "Tal vez", "No", "No sabe" }.Select(h => new ReportColumn(h, "0.0%")), new ReportColumn("Total", "#,##0")],
+            Enumerable.Range(1, groups).Select(g => (IReadOnlyList<ReportCell>)
+                [new ReportCell($"COMUNA {g}", $"COMUNA {g}"), .. Enumerable.Range(1, 4).Select(i => new ReportCell(i / 10d, $"{i * 10}%")), new ReportCell(60d, "60")]).ToList(),
+            null, null, [], 4);
+
+    [Fact]
+    public void The_series_of_a_table_in_a_declared_order_are_written_in_that_order_with_ten_rows_in_the_body_and_the_text()
+    {
+        var model = Model([Answers(12)]);
+
+        var (html, shown) = ReportHtml.Write(model, true, Options);
+        var text = ReportPlainText.Write(model, true, shown, Options);
+
+        var headers = new[] { ">comuna</th>", ">Sí</th>", ">Tal vez</th>", ">No</th>", ">No sabe</th>", ">Total</th>" };
+        Assert.Equal(headers.OrderBy(h => html.IndexOf(h, StringComparison.Ordinal)), headers);
+        Assert.Contains("COMUNA 10<", html);
+        Assert.DoesNotContain("COMUNA 11<", html);
+        Assert.Contains("2 more rows", html);
+        Assert.Contains("comuna | Sí | Tal vez | No | No sabe | Total", text);
+        Assert.Contains("2 more rows", text);
+    }
 }

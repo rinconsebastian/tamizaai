@@ -9,6 +9,7 @@ import { charWidth, sequentialStep, sequentialSteps, truncate } from './chart-sc
 import { CrosstabWidget } from './crosstab-widget';
 import { ColumnNamer, ValueFormatter, captionShown, named, plotted, rawNames } from './format';
 import { MarkPoint, markTooltips } from './mark-tooltips';
+import { CategoryOrders, groupTexts, seriesTexts, shown } from './category-order';
 import { seriesName } from './series-legend';
 import { Hit, Label } from './series-plot';
 import { SeriesTable, buildSeriesTable, orderedSeriesTable } from './series-table';
@@ -145,7 +146,7 @@ let hatchIds = 0;
     <ng-container *transloco="let t">
       <p class="shrink-0 text-xs text-body" [class.sr-only]="!captionShown(config())" data-testid="chart-caption">{{ t('indicators.series.caption', { what: what(), group: groupShown(), series: seriesShown() }) }}</p>
       @if (asTable()) {
-        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" [names]="names()" chartType="heatmap" />
+        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [orders]="orders()" chartType="heatmap" />
       } @else {
         <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
           <svg
@@ -261,6 +262,8 @@ export class HeatmapChart {
   readonly format = input.required<ValueFormatter>();
   /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
   readonly names = input<ColumnNamer>(rawNames);
+  /** What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D8). */
+  readonly orders = input<CategoryOrders | null>(null);
   readonly asTable = input(false);
   /** The colors of the widget: its sequential scale, from the widget or from its dashboard's palette. */
   readonly colors = input.required<ChartColors>();
@@ -276,7 +279,10 @@ export class HeatmapChart {
   /** The group and series columns under their names shown (their colors stay keyed by the columns themselves). */
   protected readonly groupShown = computed(() => named(this.names(), this.config().groupBy));
   protected readonly seriesShown = computed(() => named(this.names(), this.config().seriesBy));
-  private readonly table = computed(() => orderedSeriesTable(this.answer(), 'heatmap', null));
+  private readonly table = computed(() => orderedSeriesTable(this.answer(), 'heatmap', null, this.orders()));
+  /** The text each group and each series is shown with when its column hides numbered prefixes (design D5). */
+  private readonly groupText = computed(() => groupTexts(this.table(), this.orders()));
+  private readonly seriesText = computed(() => seriesTexts(this.table(), this.orders()));
   protected readonly hasEmpty = computed(() => this.table().rows.some((row) => row.cells.some((cell) => cell === null)));
 
   private readonly tr = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
@@ -287,8 +293,8 @@ export class HeatmapChart {
       table,
       width: Math.max(160, this.size().width),
       height: Math.max(120, this.size().height),
-      groupLabel: (group) => group ?? this.tr('indicators.chart.noGroup'),
-      seriesLabel: (i) => seriesName(table.columns[i], this.tr),
+      groupLabel: (group) => shown(this.groupText(), group) ?? this.tr('indicators.chart.noGroup'),
+      seriesLabel: (i) => seriesName(table.columns[i], this.tr, this.seriesText()),
       short: (value) => this.format().tick(value),
     });
   });
@@ -302,8 +308,8 @@ export class HeatmapChart {
       const column = table.columns[cell.s];
       grid[cell.g][cell.s] = {
         content: {
-          heading: table.rows[cell.g].group ?? this.tr('indicators.chart.noGroup'),
-          lines: [{ label: seriesName(column, this.tr), value: cell.value === null ? this.tr('indicators.series.noValue') : this.format()(cell.value), align: 'end' }],
+          heading: shown(this.groupText(), table.rows[cell.g].group) ?? this.tr('indicators.chart.noGroup'),
+          lines: [{ label: seriesName(column, this.tr, this.seriesText()), value: cell.value === null ? this.tr('indicators.series.noValue') : this.format()(cell.value), align: 'end' }],
           footer: null,
         },
         x: cell.x + cell.width / 2,
@@ -371,7 +377,7 @@ export class HeatmapChart {
       seriesCount: t(countKey('indicators.series.seriesCount', table.columns.length, lang), { count: table.columns.length }),
       min: format(range.min),
       max: format(range.max),
-      top: `${top.group ?? t('indicators.chart.noGroup')}, ${seriesName(top.column, t)}`,
+      top: `${shown(this.groupText(), top.group) ?? t('indicators.chart.noGroup')}, ${seriesName(top.column, t, this.seriesText())}`,
     });
   }
 }

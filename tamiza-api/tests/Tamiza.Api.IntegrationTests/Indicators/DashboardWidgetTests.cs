@@ -1315,4 +1315,264 @@ public sealed class DashboardWidgetTests(PostgresFixture postgres)
         await transaction.CommitAsync();
         return await move;
     }
+
+    // The own order of a widget's values (dashboard-indicators: Declared category order of a widget)
+
+    private static object Ordered(string chartType, object? display, string? groupBy = "municipality", string? seriesBy = "water_source", object? sort = null, string title = "Ordered") => new
+    {
+        title,
+        chartType,
+        config = new { indicator = BySource, measure = "value", groupBy, seriesBy, sort, display },
+    };
+
+    private static readonly object ByValueDesc = new { by = "value", direction = "desc" };
+
+    [Fact]
+    public async Task A_widget_is_saved_with_its_own_order_of_groups_and_of_series_and_returns_it()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var created = await h.AddWidgetAsync(Ordered("column", new { order = new { group = new[] { "Palmira", "Cali" }, series = new[] { "Well", "Piped" } } }));
+
+        var order = created.GetProperty("config").GetProperty("display").GetProperty("order");
+        Assert.Equal(["Palmira", "Cali"], IndicatorsHarness.Strings(order.GetProperty("group")));
+        Assert.Equal(["Well", "Piped"], IndicatorsHarness.Strings(order.GetProperty("series")));
+        var read = (await h.GetWidgetsAsync(client: h.Viewer))[0];
+        Assert.Equal(order.GetRawText(), read.GetProperty("config").GetProperty("display").GetProperty("order").GetRawText());
+        Assert.Equal(
+            """{"order": {"group": ["Palmira", "Cali"], "series": ["Well", "Piped"]}}""",
+            await TestData.ScalarAsync<string>(h.Db, "SELECT config -> 'display' FROM tamiza.dashboard_widgets WHERE id = @id", ("id", created.GetProperty("id").GetGuid())));
+    }
+
+    [Fact]
+    public async Task A_widget_with_no_series_is_saved_with_an_order_of_groups_and_a_sorted_one_with_an_order_of_series()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var bar = await h.AddWidgetAsync(Ordered("bar", new { order = new { group = new[] { "Palmira" } } }, seriesBy: null, title: "Bar"));
+        var sorted = await h.AddWidgetAsync(Ordered("bar", new { order = new { series = new[] { "Well" } } }, sort: ByValueDesc, title: "Sorted"));
+
+        Assert.Equal(["Palmira"], IndicatorsHarness.Strings(bar.GetProperty("config").GetProperty("display").GetProperty("order").GetProperty("group")));
+        Assert.Equal(["Well"], IndicatorsHarness.Strings(sorted.GetProperty("config").GetProperty("display").GetProperty("order").GetProperty("series")));
+    }
+
+    [Fact]
+    public async Task An_empty_order_is_saved_as_none_and_the_widget_is_stored_without_a_display()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var created = await h.AddWidgetAsync(Ordered("column", new { order = new { group = Array.Empty<string>(), series = Array.Empty<string>() } }));
+
+        Assert.False(created.GetProperty("config").TryGetProperty("display", out _));
+        Assert.DoesNotContain("display", (await h.StoredWidgetsAsync()).Single());
+        Assert.DoesNotContain("order", (await h.StoredWidgetsAsync()).Single());
+    }
+
+    [Fact]
+    public async Task A_widget_updated_with_an_order_then_with_none_is_stored_each_time_as_sent()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var created = await h.AddWidgetAsync(Ordered("column", new { color = (int?)null, order = new { series = new[] { "Well", "Piped" } } }));
+        var id = created.GetProperty("id").GetGuid();
+
+        var cleared = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { config = new { indicator = BySource, measure = "value", groupBy = "municipality", seriesBy = "water_source" } });
+        var again = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { config = new { indicator = BySource, measure = "value", groupBy = "municipality", seriesBy = "water_source", display = new { order = new { group = new[] { "Palmira" } } } } });
+
+        Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
+        Assert.False((await ReadAsync(cleared)).GetProperty("config").TryGetProperty("display", out _));
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        Assert.Equal(["Palmira"], IndicatorsHarness.Strings((await ReadAsync(again)).GetProperty("config").GetProperty("display").GetProperty("order").GetProperty("group")));
+    }
+
+    public static TheoryData<string, string> RefusedOrders() => new()
+    {
+        { "stat", "A stat widget has no groups to order." },
+        { "histogram", "A histogram widget has no groups to order." },
+        { "map", "A map widget has no groups to order." },
+    };
+
+    [Theory]
+    [MemberData(nameof(RefusedOrders))]
+    public async Task An_order_of_groups_on_a_stat_tile_a_histogram_or_a_map_is_refused_and_nothing_is_saved(string chartType, string message)
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var response = await h.PostWidgetAsync(new
+        {
+            title = "Ordered",
+            chartType,
+            config = new { indicator = BySource, measure = "value", groupBy = "municipality", geometryColumn = chartType == "map" ? "municipality" : null, display = new { order = new { group = new[] { "Cali" } } } },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal([message], IndicatorsHarness.Errors(await ReadAsync(response), "config.display.order.group"));
+        Assert.Empty(await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task An_order_of_groups_without_a_group_column_is_refused()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var response = await h.PostWidgetAsync(Ordered("boxplot", new { order = new { group = new[] { "Cali" } } }, groupBy: null, seriesBy: null));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["Ordering groups needs a column to group by."], IndicatorsHarness.Errors(await ReadAsync(response), "config.display.order.group"));
+        Assert.Empty(await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task An_order_of_series_without_a_series_column_is_refused()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var response = await h.PostWidgetAsync(Ordered("column", new { order = new { series = new[] { "Well" } } }, seriesBy: null));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["Only a widget with a series has an order of series."], IndicatorsHarness.Errors(await ReadAsync(response), "config.display.order.series"));
+        Assert.Empty(await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task An_order_of_series_on_a_pyramid_or_a_Likert_widget_is_refused_saying_what_sets_that_order()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var display = new { order = new { series = new[] { "Well" } } };
+
+        var pyramid = await h.PostWidgetAsync(new
+        {
+            title = "Pyramid", chartType = "pyramid",
+            config = new { indicator = BySource, measure = "value", groupBy = "municipality", seriesBy = "water_source", pyramid = new { left = "Piped", right = "Well" }, display },
+        });
+        var likert = await h.PostWidgetAsync(new
+        {
+            title = "Likert", chartType = "likert",
+            config = new
+            {
+                indicator = BySource, measure = "value", groupBy = "municipality", seriesBy = "water_source", display,
+                scale = new object[] { new { value = "Piped", side = "negative" }, new { value = "Well", side = "positive" } },
+            },
+        });
+
+        Assert.Equal(["A population pyramid's sides are its left and right values."], IndicatorsHarness.Errors(await ReadAsync(pyramid), "config.display.order.series"));
+        Assert.Equal(["A Likert widget's answers follow its scale."], IndicatorsHarness.Errors(await ReadAsync(likert), "config.display.order.series"));
+        Assert.Empty(await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task An_order_of_101_values_and_a_value_listed_twice_are_refused_on_their_own_keys()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var response = await h.PostWidgetAsync(Ordered("column", new
+        {
+            order = new
+            {
+                group = Enumerable.Range(1, 101).Select(i => $"Value {i}").ToArray(),
+                series = new[] { "Well", "Piped", "Well" },
+            },
+        }));
+        var problem = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["An order lists at most 100 values."], IndicatorsHarness.Errors(problem, "config.display.order.group"));
+        Assert.Equal(["'Well' is listed twice."], IndicatorsHarness.Errors(problem, "config.display.order.series[2]"));
+        Assert.Empty(await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task A_sort_and_an_own_order_of_groups_are_refused_together_and_the_order_of_series_is_not()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var refused = await h.PostWidgetAsync(Ordered("column", new { order = new { group = new[] { "Cali" } } }, seriesBy: null, sort: ByValueDesc));
+        var accepted = await h.PostWidgetAsync(Ordered("column", new { order = new { series = new[] { "Well" } } }, sort: ByValueDesc));
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(
+            ["A sorted widget takes the order of its groups from its sort: remove the sort or this order."],
+            IndicatorsHarness.Errors(await ReadAsync(refused), "config.display.order.group"));
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+    }
+
+    [Fact]
+    public async Task An_order_by_median_and_an_own_order_of_boxes_are_refused_together()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var refused = await h.PostWidgetAsync(Ordered("boxplot", new { order = new { group = new[] { "Cali" } } }, seriesBy: null, sort: ByValueDesc));
+        var accepted = await h.PostWidgetAsync(Ordered("boxplot", new { order = new { group = new[] { "Cali" } } }, seriesBy: null, title: "Boxes"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(
+            ["A box plot ordered by median takes the order of its boxes from their medians: remove that order or this one."],
+            IndicatorsHarness.Errors(await ReadAsync(refused), "config.display.order.group"));
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_chart_type_change_that_keeps_an_order_of_series_the_new_kind_does_not_take_is_refused()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var created = await h.AddWidgetAsync(Ordered("column", new { order = new { series = new[] { "Well", "Piped" } } }));
+        var stored = await h.StoredWidgetsAsync();
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(created.GetProperty("id").GetGuid()), new { chartType = "pie" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("config.display.order.series", (await ReadAsync(response)).GetProperty("errors").EnumerateObject().Select(p => p.Name));
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task A_widget_with_an_order_sent_back_unchanged_writes_nothing_and_makes_no_version()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var created = await h.AddWidgetAsync(Ordered("column", new { order = new { group = new[] { "Palmira" }, series = new[] { "Well", "Piped" } } }));
+        var id = created.GetProperty("id").GetGuid();
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await VersionCountAsync(h);
+        var read = (await h.GetWidgetsAsync()).EnumerateArray().Single();
+
+        var form = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { title = "Ordered", chartType = "column", config = read.GetProperty("config") });
+
+        Assert.Equal(HttpStatusCode.OK, form.StatusCode);
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await VersionCountAsync(h));
+    }
+
+    [Fact]
+    public async Task A_change_of_the_order_makes_a_version_that_says_the_widget_changed()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var created = await h.AddWidgetAsync(Ordered("column", new { order = new { series = new[] { "Well", "Piped" } } }));
+        var versions = await VersionCountAsync(h);
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(created.GetProperty("id").GetGuid()), new
+        {
+            config = new { indicator = BySource, measure = "value", groupBy = "municipality", seriesBy = "water_source", display = new { order = new { series = new[] { "Piped", "Well" } } } },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(versions + 1, await VersionCountAsync(h));
+    }
+
+    [Fact]
+    public async Task A_widget_moved_to_another_dashboard_keeps_its_own_order_byte_for_byte()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var cruces = await h.InsertDashboardAsync("Cruces");
+        var created = await h.AddWidgetAsync(Ordered("column", new { order = new { group = new[] { "Palmira", "Cali" }, series = new[] { "Well", "Piped" } } }));
+        var id = created.GetProperty("id").GetGuid();
+        var before = await TestData.ScalarAsync<string>(h.Db, "SELECT config::text FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id));
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { dashboardId = cruces });
+        var moved = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(created.GetProperty("config").GetRawText(), moved.GetProperty("config").GetRawText());
+        Assert.Equal(before, await TestData.ScalarAsync<string>(h.Db, "SELECT config::text FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id)));
+        var onCruces = (await h.GetWidgetsAsync(cruces))[0];
+        Assert.Equal(["Well", "Piped"], IndicatorsHarness.Strings(onCruces.GetProperty("config").GetProperty("display").GetProperty("order").GetProperty("series")));
+    }
 }

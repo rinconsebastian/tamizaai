@@ -204,6 +204,29 @@ public sealed record WidgetReferenceLine(
      Description("The text written at the line, 1 to 40 characters with no line break; left out, the kind's default label (Mean, Median, Overall, Reference).")] string? Label = null);
 
 /// <summary>
+/// A widget's own order of values (design D1 and D7 of add-declared-category-order): the groups and the series it lists, as full text, in
+/// the order to draw them. Each member is left out of the JSON while it is not set. Values the list does not name follow in the chart's
+/// order; the lists are never checked against the table, since a script can change its values later. Null items are kept by
+/// <see cref="Normalize"/> so validation can name them, as tooltip items are, and a value is never trimmed: it is exact text.
+/// </summary>
+/// <param name="Group">Up to <see cref="CategoryOrder.MaxValues"/> group values; left out, the indicator's order of the group column, else the chart's.</param>
+/// <param name="Series">Up to <see cref="CategoryOrder.MaxValues"/> series values; left out, the indicator's order of the series column, else the chart's.</param>
+public sealed record WidgetCategoryOrder(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("Group values as full text, in the order to draw them (up to 100, none twice); the other groups follow in the chart's order. Not with a sort or, for a boxplot, an order by median.")] IReadOnlyList<string?>? Group = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("Series values as full text, in the order to draw them (up to 100, none twice); the other series follow in the chart's order. Needs seriesBy; not for a pyramid or a likert.")] IReadOnlyList<string?>? Series = null)
+{
+    /// <summary>The order as saved: an empty list is none, and an order that lists nothing is none (null).</summary>
+    public WidgetCategoryOrder? Normalize()
+    {
+        var group = Group is { Count: 0 } ? null : Group;
+        var series = Series is { Count: 0 } ? null : Series;
+        return group is null && series is null ? null : new WidgetCategoryOrder(group, series);
+    }
+}
+
+/// <summary>
 /// How a widget is drawn, apart from its query (design D3 of dashboard palettes): a change here never changes the rows. Each field is
 /// left out of the JSON while it is not set, so a config saved without it reads and writes exactly as before. The description and range on
 /// the fields are what the MCP tools' input schema shows of them; nothing is validated with them, since
@@ -227,6 +250,7 @@ public sealed record WidgetReferenceLine(
 /// <param name="ReferenceLines">Bar, column and line only: up to <see cref="WidgetDisplay.MaxReferenceLines"/> lines to compare the bars with, in the order given (design D1 of the chart annotations).</param>
 /// <param name="Interpolation">Line only: one of <see cref="LineInterpolations"/>; left out, linear. A saved <c>linear</c> is kept as it is, so a form saved unchanged stays unchanged.</param>
 /// <param name="DataLabels">Bar, column (no stacked or 100% layout), line and pie only: writes each value on its mark; left out, off. A saved <c>false</c> is kept as it is.</param>
+/// <param name="Order">The widget's own order of groups and of series (design D1 of add-declared-category-order); left out, the indicator's order, else the chart's.</param>
 public sealed record WidgetDisplay(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
      Description("A place in the dashboard's palette, 1 to 8, never a color code. For a bar, column or line chart with no seriesBy, for a histogram and for a boxplot; left out, color 1."),
@@ -252,7 +276,9 @@ public sealed record WidgetDisplay(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
      Description("How a line chart joins its points: linear (straight segments) or step (each value holds until the next point), matched exactly in lower case. For a line only; left out, linear.")] string? Interpolation = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("true writes each value on its bar, column, point or slice. For a bar or column with no seriesBy or a grouped layout, and for a line or pie; left out, no data labels.")] bool? DataLabels = null)
+     Description("true writes each value on its bar, column, point or slice. For a bar or column with no seriesBy or a grouped layout, and for a line or pie; left out, no data labels.")] bool? DataLabels = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("The order to draw the widget's values in: { group, series }, each a list of up to 100 values as full text; the others follow in the chart's order. Left out, the indicator's order of the column (save_script columns), else the chart's own.")] WidgetCategoryOrder? Order = null)
 {
     /// <summary>The longest subtitle, footnote and caption text, counted as a title is: UTF-16 units once trimmed (design D2 of the widget context).</summary>
     public const int MaxSubtitleLength = 200;
@@ -273,6 +299,7 @@ public sealed record WidgetDisplay(
     /// and a display that sets nothing is no display (null). The texts have no default value a form could store: their default is to be
     /// absent. A saved <c>linear</c> interpolation and <c>dataLabels: false</c> are kept as given, as a box plot's <c>vertical</c> is.
     /// A null line, and a line with no kind, are kept so validation can name them.
+    /// An order that lists nothing is none, so a display that holds only an empty order is no display.
     /// </summary>
     public WidgetDisplay? Normalize()
     {
@@ -286,14 +313,15 @@ public sealed record WidgetDisplay(
         var showDescription = ShowDescription is true ? true : (bool?)null;
         var referenceLines = NormalizeReferenceLines(ReferenceLines);
         var interpolation = string.IsNullOrEmpty(Interpolation) ? null : Interpolation;
+        var order = Order?.Normalize();
         return Color is null && ramp is null && orientation is null && labels is null
             && subtitle is null && footnote is null && caption is null && unit is null && showDescription is null
-            && referenceLines is null && interpolation is null && DataLabels is null
+            && referenceLines is null && interpolation is null && DataLabels is null && order is null
             ? null
             : this with
             {
                 Ramp = ramp, Orientation = orientation, Labels = labels, Subtitle = subtitle, Footnote = footnote, Caption = caption,
-                Unit = unit, ShowDescription = showDescription, ReferenceLines = referenceLines, Interpolation = interpolation,
+                Unit = unit, ShowDescription = showDescription, ReferenceLines = referenceLines, Interpolation = interpolation, Order = order,
             };
     }
 
@@ -391,7 +419,7 @@ public sealed record WidgetConfigInput(
     WidgetPyramid? Pyramid = null,
     IReadOnlyList<LikertStep>? Scale = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("How the widget is drawn and what it says: its color, its scale, its orientation, the names of its columns, its subtitle, footnote, caption, unit and description button, its reference lines, its steps or its data labels. It never changes the rows.")] WidgetDisplay? Display = null)
+     Description("How the widget is drawn and what it says: its color, its scale, its orientation, the names of its columns, its subtitle, footnote, caption, unit and description button, its reference lines, its steps, its data labels or the order of its values. It never changes the rows.")] WidgetDisplay? Display = null)
 {
     public WidgetConfig Normalize() => new(
         Indicator ?? "",

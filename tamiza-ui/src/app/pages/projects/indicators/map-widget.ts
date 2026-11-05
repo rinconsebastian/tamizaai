@@ -13,6 +13,7 @@ import { ColumnNamer, ValueFormatter, captionShown, named, ownCaption, plotted, 
 import { BasemapChoice, MapControls } from './map-controls';
 import { EngineView, MapEngine, MapEvents, MapPicture, MapPoint, ShapeInput, TileHooks } from './map-engine';
 import { kindOf } from './map-geometry';
+import { CategoryOrders, shown, shownValues } from './category-order';
 import { TooltipContext, tooltipContent, tooltipLabel, tooltipSpeech, tooltipValues } from './map-tooltip';
 import { countKey } from '../../../core/i18n/plural';
 import { Geometry, parseWkt, positionsOf } from './wkt';
@@ -177,6 +178,8 @@ export class MapWidget {
   readonly format = input.required<ValueFormatter>();
   /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
   readonly names = input<ColumnNamer>(rawNames);
+  /** What the widget declares for the text of its values (add-declared-category-order): a map shows its places without their numbers. */
+  readonly orders = input<CategoryOrders | null>(null);
   /** The type of each tooltip column, from the query's answer. */
   readonly tooltipTypes = input<readonly DataColumnType[] | undefined>(undefined);
   readonly asTable = input(false);
@@ -204,6 +207,8 @@ export class MapWidget {
   // --- The rows ---------------------------------------------------------------------------------------------------------
 
   private readonly parsed = computed(() => this.rows().map((row) => ({ row, geometry: parseWkt(row.geometry) })));
+  /** The text each place is shown with when its column hides numbered prefixes (design D5); null shows the value as it is. */
+  private readonly groupText = computed(() => (this.orders()?.hideGroupPrefixes ? shownValues(this.rows().map((row) => row.group), true) : null));
   protected readonly leftOut = computed(() => this.parsed().filter((entry) => entry.geometry === null).length);
 
   protected readonly range = computed(() => {
@@ -616,7 +621,7 @@ export class MapWidget {
       headers: [this.names()(this.config().groupBy ?? ''), this.what(), ...items.map((item) => tooltipLabel(item, this.names())), t('indicators.map.geometry')],
       align: ['start', 'end', ...items.map((_, i) => (types?.[i] === 'integer' || types?.[i] === 'decimal' ? ('end' as const) : ('start' as const))), 'start'],
       rows: this.parsed().map(({ row, geometry }) => [
-        row.group ?? t('indicators.chart.noGroup'),
+        shown(this.groupText(), row.group) ?? t('indicators.chart.noGroup'),
         this.format()(row.value),
         ...tooltipValues(row, context),
         geometry === null ? t('indicators.map.kind.none') : t(`indicators.map.kind.${geometry.type === 'point' ? 'point' : 'polygon'}`),
@@ -798,6 +803,7 @@ export class MapWidget {
       locale: this.locale,
       t: (key, params) => this.transloco.translate(key, params),
       names: this.names(),
+      groupText: this.groupText(),
     };
   }
 

@@ -211,6 +211,68 @@ public static class IndicatorValidation
         CheckLabels(display.Labels, prefix, errors);
         CheckContext(display, prefix, errors);
         CheckAnnotations(display, config, chartType, prefix, errors);
+        CheckOrder(display, config, chartType, prefix, errors);
+    }
+
+    /// <summary>
+    /// A widget's own order of values (design D6 of add-declared-category-order). The shape rules (the count, the text and the repeats of
+    /// each value) run on every request; the rules that depend on the chart type, the group column, the series column and the sort are
+    /// skipped when <paramref name="chartType"/> is null, as the other per-kind rules are. Values are not checked against the table: a
+    /// script can change them later.
+    /// </summary>
+    private static void CheckOrder(WidgetDisplay display, WidgetConfig config, string? chartType, string prefix, FieldErrors errors)
+    {
+        if (display.Order is not { } order)
+        {
+            return;
+        }
+
+        const string tooMany = "An order lists at most 100 values.";
+        if (order.Group is { } groups)
+        {
+            var key = prefix + "display.order.group";
+            CategoryOrder.CheckValues(groups, CategoryOrder.MaxValues, tooMany, key, errors);
+            if (chartType is not null && groups.Count > 0)
+            {
+                if (chartType is ChartTypes.Stat or ChartTypes.Histogram or ChartTypes.Map)
+                {
+                    errors.Add(key, $"A {chartType} widget has no groups to order.");
+                }
+                else if (config.GroupBy is null)
+                {
+                    errors.Add(key, "Ordering groups needs a column to group by.");
+                }
+                else if (chartType is ChartTypes.Bar or ChartTypes.Column && config.Sort is not null)
+                {
+                    errors.Add(key, "A sorted widget takes the order of its groups from its sort: remove the sort or this order.");
+                }
+                else if (chartType == ChartTypes.Boxplot && config.Sort is { By: SortValues.ByValue })
+                {
+                    errors.Add(key, "A box plot ordered by median takes the order of its boxes from their medians: remove that order or this one.");
+                }
+            }
+        }
+
+        if (order.Series is { } series)
+        {
+            var key = prefix + "display.order.series";
+            CategoryOrder.CheckValues(series, CategoryOrder.MaxValues, tooMany, key, errors);
+            if (chartType is not null && series.Count > 0)
+            {
+                if (chartType == ChartTypes.Pyramid)
+                {
+                    errors.Add(key, "A population pyramid's sides are its left and right values.");
+                }
+                else if (chartType == ChartTypes.Likert)
+                {
+                    errors.Add(key, "A Likert widget's answers follow its scale.");
+                }
+                else if (config.SeriesBy is null || !ChartTypes.HasSeries(chartType))
+                {
+                    errors.Add(key, "Only a widget with a series has an order of series.");
+                }
+            }
+        }
     }
 
     /// <summary>

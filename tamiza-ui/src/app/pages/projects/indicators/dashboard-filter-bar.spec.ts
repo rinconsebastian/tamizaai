@@ -191,6 +191,19 @@ describe('DashboardFilterBar', () => {
     expect(bar.host.changes).toEqual([{ column: 'municipality', value: { values: ['Palmira'] } }]);
   });
 
+  it('offers numbered values in full, whatever an indicator hides of them in its charts (add-declared-category-order, Filters offer the full values)', async () => {
+    const answer = { ...municipality, column: 'respuesta', label: 'Respuesta' };
+    const bar = await render([answer]);
+
+    bar.pill('respuesta').click();
+    await bar.settle();
+
+    bar.http.expectOne((r) => r.url === '/api/v1/projects/p1/dashboards/d1/values').flush({ values: [{ value: '1. Sí', count: 12 }, { value: '10 - 14', count: 3 }, { value: '2. No', count: 1 }] });
+    await bar.settle();
+    const options = Array.from(bar.dialog()!.querySelectorAll('[data-testid="filter-option"]'));
+    expect(options.map((o) => text(o.closest('label')))).toEqual(['1. Sí', '10 - 14', '2. No']);
+  });
+
   it('reads the values from the indicators it is given, which a version shown names (add-dashboard-versions, design D11)', async () => {
     const bar = await render([municipality]);
     bar.host.indicators.set(['coverage', 'piped_water_rate']);

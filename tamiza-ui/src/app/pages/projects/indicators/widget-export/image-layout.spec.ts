@@ -296,3 +296,25 @@ describe('composeImage', () => {
     });
   });
 });
+
+// The legend and the table of an image are drawn in the order the widget gives them, which is the order of the screen
+// (add-declared-category-order, Image in the declared order): the layout adds none of its own.
+describe('an image in a declared order', () => {
+  it('writes the legend entries in the order given, with their text as given', () => {
+    const entries = [{ label: 'Sí', color: 'var(--c1)' }, { label: 'No', color: 'var(--c2)' }, { label: 'No sabe', color: 'var(--c3)' }];
+
+    const { texts } = compose({ width: 600 }, { legend: { kind: 'entries', entries } });
+
+    const written = names(texts).filter((text) => ['Sí', 'No', 'No sabe'].includes(text));
+    expect(written).toEqual(['Sí', 'No', 'No sabe']);
+  });
+
+  it('writes the rows of a table in the order given', () => {
+    const rows = [['COMUNA 2', '5'], ['COMUNA 1', '7'], ['Sin dato', '1']];
+
+    const { texts } = compose({ width: 600 }, { table: { headers: ['Comuna', 'Hogares'], rows } });
+
+    const written = names(texts).filter((text) => text.startsWith('COMUNA') || text === 'Sin dato');
+    expect(written).toEqual(['COMUNA 2', 'COMUNA 1', 'Sin dato']);
+  });
+});

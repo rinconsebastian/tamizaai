@@ -3513,3 +3513,191 @@ describe('ProjectScripts column names (add-indicator-column-metadata, design D8)
     expect(byTestId(opened.root, 'unsaved')).toBeNull();
   });
 });
+
+describe('ProjectScripts order of the column values (add-declared-category-order, design D9)', () => {
+  const columnsUrl = (name: string) => `/api/v1/projects/${projectId}/indicators/${name}/columns`;
+  const publishedTable = (names: string[]) => ({ published: true, columns: names.map((name) => ({ name, type: 'text' })), numeric: [], defaults: { measure: null, groupBy: null } });
+  const labelled = (name: string, number: number, columns: ScriptVersionDetails['columns'] = null) => indicatorVersion(name, number, { columns });
+  const sectionOf = (root: ParentNode, column: string) => root.querySelector<HTMLElement>(`[data-testid="meta-column-order"][data-column="${column}"]`)!;
+  const listOf = (root: ParentNode, column: string, id: 'order-editor' | 'last-editor') =>
+    Array.from(sectionOf(root, column).querySelectorAll(`[data-testid="${id}-${column}"] [data-testid="order-value"]`)).map((value) => textOf(value));
+  const addValue = async (opened: Opened, column: string, id: 'order-editor' | 'last-editor', value: string) => {
+    const editor = sectionOf(opened.root, column).querySelector<HTMLElement>(`[data-testid="${id}-${column}"]`)!;
+    typeInto(editor.querySelector<HTMLInputElement>('[data-testid="order-new"]')!, value);
+    await settle(opened.harness);
+    editor.querySelector<HTMLButtonElement>('[data-testid="order-add"]')!.click();
+    await settle(opened.harness);
+  };
+  const saveBody = (opened: Opened, name = 'teatro_hoy') => {
+    byTestId<HTMLButtonElement>(opened.root, 'save')!.click();
+    return opened.http.expectOne((r) => r.url === `${scriptsUrl}/indicators/${name}` && r.method === 'PUT').request.body;
+  };
+
+  async function choose(opened: Opened, current: ScriptVersionDetails, table: string[] = ['variable', 'comuna', 'respuesta']) {
+    await pickIndicator(opened, current.name!);
+    opened.http.expectOne(`${scriptsUrl}/indicators/${current.name}/versions`).flush([summary(current)]);
+    opened.http.expectOne(columnsUrl(current.name!)).flush(publishedTable(table));
+    await settle(opened.harness);
+  }
+
+  it('sends the order, the values kept at the end and the prefix choice next to the names, and a column with only an order too (Order saved)', async () => {
+    const teatro = labelled('teatro_hoy', 4, { comuna: { label: 'Comuna' } });
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await editDetails(opened);
+
+    await addValue(opened, 'respuesta', 'order-editor', '1. Sí');
+    await addValue(opened, 'respuesta', 'order-editor', '2. No');
+    await addValue(opened, 'respuesta', 'last-editor', '4. No sabe');
+    const strip = sectionOf(opened.root, 'respuesta').querySelector<HTMLInputElement>('[data-testid="meta-column-strip"]')!;
+    strip.checked = true;
+    strip.dispatchEvent(new Event('change'));
+    await settle(opened.harness);
+
+    expect(saveBody(opened).columns).toEqual({
+      comuna: { label: 'Comuna' },
+      respuesta: { order: ['1. Sí', '2. No'], last: ['4. No sabe'], stripPrefix: true },
+    });
+  });
+
+  it('sends the prefix choice alone, with no order and no value kept at the end (Prefixes hidden without a test)', async () => {
+    const teatro = labelled('teatro_hoy', 4);
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await editDetails(opened);
+
+    const strip = sectionOf(opened.root, 'respuesta').querySelector<HTMLInputElement>('[data-testid="meta-column-strip"]')!;
+    strip.checked = true;
+    strip.dispatchEvent(new Event('change'));
+    await settle(opened.harness);
+
+    expect(saveBody(opened).columns).toEqual({ respuesta: { stripPrefix: true } });
+  });
+
+  it('marks the details unsaved when a value is moved, and saved again when it is moved back', async () => {
+    const teatro = labelled('teatro_hoy', 4, { respuesta: { order: ['1. Sí', '2. No'] } });
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await editDetails(opened);
+    expect(byTestId(opened.root, 'unsaved')).toBeNull();
+
+    sectionOf(opened.root, 'respuesta').querySelectorAll<HTMLButtonElement>('[data-testid="order-down"]')[0].click();
+    await settle(opened.harness);
+    expect(listOf(opened.root, 'respuesta', 'order-editor')).toEqual(['2. No', '1. Sí']);
+    expect(byTestId(opened.root, 'unsaved')).not.toBeNull();
+
+    sectionOf(opened.root, 'respuesta').querySelectorAll<HTMLButtonElement>('[data-testid="order-down"]')[0].click();
+    await settle(opened.harness);
+    expect(byTestId(opened.root, 'unsaved')).toBeNull();
+  });
+
+  it('shows what was saved when the details are opened again, and sends a column with only a name no order', async () => {
+    const teatro = labelled('teatro_hoy', 4, { comuna: { label: 'Comuna' }, respuesta: { order: ['1. Sí'], last: ['4. No sabe'], stripPrefix: true } });
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await editDetails(opened);
+
+    expect(listOf(opened.root, 'respuesta', 'order-editor')).toEqual(['1. Sí']);
+    expect(listOf(opened.root, 'respuesta', 'last-editor')).toEqual(['4. No sabe']);
+    expect(sectionOf(opened.root, 'respuesta').querySelector<HTMLInputElement>('[data-testid="meta-column-strip"]')!.checked).toBe(true);
+    expect(listOf(opened.root, 'comuna', 'order-editor')).toEqual([]);
+    await addValue(opened, 'respuesta', 'last-editor', 'Otro');
+    const columns = saveBody(opened).columns;
+    expect(columns['comuna']).toEqual({ label: 'Comuna' });
+    expect(columns['respuesta']).toEqual({ order: ['1. Sí'], last: ['4. No sabe', 'Otro'], stripPrefix: true });
+  });
+
+  it('offers the values the latest test saw for each column of up to 50 values (Values of the latest test)', async () => {
+    const teatro = labelled('teatro_hoy', 4);
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await startTest(opened);
+    const dashboard = {
+      measures: ['value'],
+      defaultMeasure: 'value',
+      ratio: false,
+      dimensions: ['comuna', 'respuesta'],
+      defaultDimension: 'comuna',
+      geometry: [],
+      rows: 6,
+      defaultMeasureNulls: 0,
+      defaultMeasureMax: 10,
+      totals: {},
+      duplicateRows: 0,
+      charts: {
+        respuesta: { values: 3, groups: [{ group: '1. Sí', value: 5, numerator: null, denominator: null }, { group: '2. No', value: 3, numerator: null, denominator: null }, { group: null, value: 1, numerator: null, denominator: null }] },
+        comuna: { values: 80, groups: null },
+      },
+    };
+    const table = {
+      name: 'teatro_hoy',
+      rows: 3,
+      columns: [
+        { name: 'comuna', type: 'text' as const },
+        { name: 'respuesta', type: 'text' as const },
+        { name: 'value', type: 'decimal' as const },
+      ],
+      previewRows: 0,
+      preview: null,
+      cutCells: null,
+    };
+    opened.http
+      .expectOne((r) => r.url === testsUrl && r.method === 'POST')
+      .flush(scriptTest({ kind: 'indicator', name: 'teatro_hoy', status: 'succeeded', steps: [flattenStep, { ...flattenStep, step: 'indicator', tables: [table], dashboard }] }));
+    await settle(opened.harness);
+    await editDetails(opened);
+
+    expect(Array.from(sectionOf(opened.root, 'respuesta').querySelectorAll('datalist option')).map((option) => (option as HTMLOptionElement).value)).toEqual(['1. Sí', '2. No', '1. Sí', '2. No']);
+    expect(sectionOf(opened.root, 'comuna').querySelectorAll('datalist option')).toHaveLength(0);
+  });
+
+  it('lists apart, as not in the table, a column whose order the latest table lacks, and keeps it unless it is removed (Order of a column the latest test lacks)', async () => {
+    const teatro = labelled('teatro_hoy', 4, { comuna: { last: ['Sin dato'] } });
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro, ['variable', 'respuesta']);
+    await editDetails(opened);
+
+    expect(listOf(opened.root, 'comuna', 'last-editor')).toEqual(['Sin dato']);
+    expect(textOf(sectionOf(opened.root, 'comuna').closest('div') ?? null)).toContain('Not in the table');
+    typeInto(opened.root.querySelector<HTMLInputElement>('[data-testid="meta-column-label"][data-column="respuesta"]')!, 'Respuesta');
+    await settle(opened.harness);
+    expect(saveBody(opened).columns).toEqual({ comuna: { last: ['Sin dato'] }, respuesta: { label: 'Respuesta' } });
+  });
+
+  it('shows a refused value on the row of its column (a refusal of the order)', async () => {
+    const teatro = labelled('teatro_hoy', 4, { respuesta: { order: ['1. Sí'] } });
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await editDetails(opened);
+    await addValue(opened, 'respuesta', 'last-editor', '1. Sí');
+
+    byTestId<HTMLButtonElement>(opened.root, 'save')!.click();
+    opened.http
+      .expectOne((r) => r.url === `${scriptsUrl}/indicators/teatro_hoy` && r.method === 'PUT')
+      .flush({ errors: { 'columns.respuesta.last[0]': ["'1. Sí' is already in the order."] } }, { status: 400, statusText: 'Bad Request' });
+    await settle(opened.harness);
+
+    expect(textOf(sectionOf(opened.root, 'respuesta').querySelector('[data-testid="last-error"]'))).toBe("'1. Sí' is already in the order.");
+    expect(sectionOf(opened.root, 'respuesta').querySelector('details')!.open).toBe(true);
+    expect(byTestId(opened.root, 'save-error')).toBeNull();
+  });
+
+  it('lists the order, the values kept at the end and the prefixes of an older version as text', async () => {
+    const current = labelled('teatro_hoy', 4);
+    const older = labelled('teatro_hoy', 2, { comuna: { label: 'Comuna' }, respuesta: { order: ['1. Sí', '2. No'], last: ['4. No sabe'], stripPrefix: true } });
+    const opened = await open('analyst', { scripts: withIndicators(current) });
+    await pickIndicator(opened, current.name!);
+    opened.http.expectOne(`${scriptsUrl}/indicators/teatro_hoy/versions`).flush([summary(current), summary(older)]);
+    opened.http.expectOne(columnsUrl('teatro_hoy')).flush(publishedTable(['comuna', 'respuesta']));
+    await settle(opened.harness);
+    await openVersions(opened);
+    byTestId<HTMLButtonElement>(opened.root, 'version-2')!.click();
+    await settle(opened.harness);
+    opened.http.expectOne(`${scriptsUrl}/indicators/teatro_hoy/versions/2`).flush(older);
+    await settle(opened.harness);
+
+    const entries = Array.from(opened.root.querySelectorAll('[data-testid="indicator-meta-column"]')).map(textOf);
+    expect(entries).toEqual(['comuna: Comuna', 'respuesta · Ordered: 2 · At the end: 1 · Numbers hidden']);
+    expect(byTestId(opened.root, 'meta-column-order')).toBeNull();
+  });
+});

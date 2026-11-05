@@ -3,6 +3,7 @@ import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { BoxOrientation, QueryBox, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartTooltip, ChartTooltipContent, ChartTooltips } from '../../../shared/ui';
+import { CategoryOrders, arrange, entryOf, shown, shownValues } from './category-order';
 import { ChartColors } from './chart-colors';
 import { registerExportParts } from './export-parts';
 import { observeSize } from './chart-data';
@@ -465,6 +466,8 @@ export class BoxplotChart {
   readonly format = input.required<ValueFormatter>();
   /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
   readonly names = input<ColumnNamer>(rawNames);
+  /** What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D8). */
+  readonly orders = input<CategoryOrders | null>(null);
   readonly asTable = input(false);
   /** Whether the indicator is a percent: it decides how far a flat scale is padded at 0. */
   readonly percent = input(false);
@@ -484,10 +487,12 @@ export class BoxplotChart {
   protected readonly what = computed(() => plotted(this.config(), this.label(), this.names()));
   /** The group column under its name shown; the colors kept by value stay keyed by the column itself. */
   protected readonly groupShown = computed(() => named(this.names(), this.config().groupBy));
-  protected readonly boxes = computed(() => this.answer().boxes ?? []);
+  /** The boxes in the order the widget declares for its groups (design D4); as the server sends them, without a declaration. */
+  protected readonly boxes = computed(() => arrange(this.answer().boxes ?? [], (box) => entryOf(box.group), this.orders()?.groups ?? null));
+  private readonly groupText = computed(() => (this.orders()?.hideGroupPrefixes ? shownValues(this.boxes().map((box) => box.group), true) : null));
   protected readonly orientation = computed<BoxOrientation>(() => (this.config().display?.orientation === 'horizontal' ? 'horizontal' : 'vertical'));
   private readonly groupLabel = (group: string | null): string =>
-    group ?? this.tr(this.config().groupBy ? 'indicators.chart.noGroup' : 'indicators.boxplot.allRows');
+    shown(this.groupText(), group) ?? this.tr(this.config().groupBy ? 'indicators.chart.noGroup' : 'indicators.boxplot.allRows');
   protected notDrawnText = (count: number): string => this.tr(countKey('indicators.boxplot.notDrawn', count, this.transloco.getActiveLang()), { count });
 
   private words(): BoxplotWords {

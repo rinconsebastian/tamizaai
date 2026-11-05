@@ -2285,4 +2285,171 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         Assert.NotNull(result.Code());
         Assert.Null(await TestData.ScalarAsync<string>(h.Db, "SELECT source FROM tamiza.dashboards WHERE id = @d", ("d", teatro)));
     }
+
+    // The declared category order in the results of the tools (add-declared-category-order, design D12)
+
+    /// <summary>The indicator <c>teatro_conteo</c>, published and saved as a script whose version says what it declares for its columns.</summary>
+    private static async Task SeedAnswersAsync(McpProjectHarness h, string? columns)
+    {
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "teatro_conteo", "comuna text, respuesta text, conteo numeric", """
+            ('COMUNA 1', '4. No sabe', 5), ('COMUNA 1', '2. Tal vez', 10), ('COMUNA 1', '1. Sí', 30), ('COMUNA 2', '1. Sí', 20), ('COMUNA 2', '3. No', 25), ('Sin dato', '1. Sí', 3)
+            """);
+        await TestData.ExecuteAsync(h.Db,
+            "INSERT INTO tamiza.script_versions (id, project_id, kind, name, number, code, label, format, columns, author_id, created_at) VALUES (gen_random_uuid(), @p, 'indicator', 'teatro_conteo', 1, 'x', 'Teatro conteo', 'count', @c::jsonb, @a, now())",
+            ("p", h.ProjectId), ("c", (object?)columns ?? DBNull.Value), ("a", h.Users["analyst"]));
+    }
+
+    private const string DeclaredAnswers = """{"respuesta": {"order": ["1. Sí", "2. Tal vez", "3. No"], "last": ["4. No sabe"], "stripPrefix": true}, "comuna": {"last": ["Sin dato"]}}""";
+
+    private static object AnswersConfig(object? display = null) => new
+    {
+        indicator = "teatro_conteo", measure = "conteo", groupBy = "comuna", seriesBy = "respuesta", layout = "percent", display,
+    };
+
+    [Fact]
+    public async Task Full_values_in_results()
+    {
+        await using var h = await CreateAsync();
+        await SeedAnswersAsync(h, DeclaredAnswers);
+        var dashboard = await AddDashboardAsync(h, "Teatro");
+        var widget = await AddWidgetAsync(h, dashboard, "2.8. Iría al teatro, por comuna", "bar", AnswersConfig());
+
+        using var body = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard, widgetId = widget })).Json();
+
+        var root = body.RootElement.GetProperty("widgets")[0];
+        Assert.Equal(["1. Sí", "2. Tal vez", "3. No", "4. No sabe"], root.GetProperty("series").EnumerateArray().Select(s => s.GetProperty("value").GetString()));
+        Assert.Equal(["COMUNA 1", "COMUNA 2", "Sin dato"], root.GetProperty("totals").GetProperty("groups").EnumerateArray().Select(g => g.GetProperty("group").GetString()));
+        Assert.Contains(root.GetProperty("cells").EnumerateArray(), c => c.GetProperty("series").GetString() == "1. Sí" && c.GetProperty("group").GetString() == "COMUNA 1");
+    }
+
+    [Fact]
+    public async Task A_preview_with_a_widgets_own_order_lists_its_series_in_it()
+    {
+        await using var h = await CreateAsync();
+        await SeedAnswersAsync(h, DeclaredAnswers);
+
+        using var body = (await h.CallAsync("viewer", "query_indicator", new
+        {
+            chartType = "column",
+            config = AnswersConfig(new { order = new { series = new[] { "4. No sabe", "3. No" } } }),
+        })).Json();
+
+        Assert.Equal(["4. No sabe", "3. No", "1. Sí", "2. Tal vez"], body.RootElement.GetProperty("series").EnumerateArray().Select(s => s.GetProperty("value").GetString()));
+    }
+
+    [Fact]
+    public async Task A_group_kept_last_comes_last_in_the_plain_rows()
+    {
+        await using var h = await CreateAsync();
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "teatro_hoy", "comuna text, value numeric", "('COMUNA 1', 5), ('Sin dato', 2), ('ZONA RURAL', 3)");
+        await TestData.ExecuteAsync(h.Db,
+            "INSERT INTO tamiza.script_versions (id, project_id, kind, name, number, code, label, format, columns, author_id, created_at) VALUES (gen_random_uuid(), @p, 'indicator', 'teatro_hoy', 1, 'x', 'Teatro hoy', 'count', @c::jsonb, @a, now())",
+            ("p", h.ProjectId), ("c", """{"comuna": {"last": ["Sin dato"]}}"""), ("a", h.Users["analyst"]));
+
+        using var body = (await h.CallAsync("viewer", "query_indicator", new
+        {
+            chartType = "column", config = new { indicator = "teatro_hoy", measure = "value", groupBy = "comuna" },
+        })).Json();
+
+        Assert.Equal(["COMUNA 1", "ZONA RURAL", "Sin dato"], body.RootElement.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("group").GetString()));
+    }
+
+    [Fact]
+    public async Task Results_of_a_widget_that_declares_nothing()
+    {
+        await using var h = await CreateAsync();
+        await SeedAnswersAsync(h, """{"respuesta": {"label": "Respuesta"}}""");
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "demanda", "precio text, value numeric", "('$10.000', 30), ('$0', 40), ('$50.000', 5), ('$20.000', 20)");
+
+        using var series = (await h.CallAsync("viewer", "query_indicator", new { chartType = "bar", config = AnswersConfig() })).Json();
+        using var line = (await h.CallAsync("viewer", "query_indicator", new { chartType = "line", config = new { indicator = "demanda", measure = "value", groupBy = "precio" } })).Json();
+
+        Assert.Equal(["1. Sí", "2. Tal vez", "3. No", "4. No sabe"], series.RootElement.GetProperty("series").EnumerateArray().Select(s => s.GetProperty("value").GetString()).Order(StringComparer.Ordinal));
+        // The rows of a line keep the order of the response: the tool takes no step when nothing is declared.
+        var rows = line.RootElement.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("group").GetString()).ToArray();
+        using var again = (await h.CallAsync("viewer", "query_indicator", new { chartType = "line", config = new { indicator = "demanda", measure = "value", groupBy = "precio" } })).Json();
+        Assert.Equal(rows, again.RootElement.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("group").GetString()));
+    }
+
+    [Fact]
+    public async Task The_boxes_follow_the_order_the_widget_declares()
+    {
+        await using var h = await CreateAsync();
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "tarifa", "vehiculo text, value numeric",
+            "('Carro', 5), ('Carro', 6), ('Moto', 1), ('Moto', 2), ('Todos', 3), ('Todos', 4)");
+
+        using var body = (await h.CallAsync("viewer", "query_indicator", new
+        {
+            chartType = "boxplot",
+            config = new { indicator = "tarifa", measure = "value", groupBy = "vehiculo", display = new { order = new { group = new[] { "Todos", "Carro", "Moto" } } } },
+        })).Json();
+
+        Assert.Equal(["Todos", "Carro", "Moto"], body.RootElement.GetProperty("boxes").EnumerateArray().Select(b => b.GetProperty("group").GetString()));
+    }
+
+    // Writing the own order of a widget through MCP (mcp-server: Declared category order through MCP)
+
+    [Fact]
+    public async Task Widget_order_through_MCP()
+    {
+        await using var h = await CreateAsync();
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "barreras", "tipo text, razon text, value numeric", "('A', 'Acceso', 3), ('A', 'Interés', 2), ('A', 'Otra', 1), ('B', 'Acceso', 4)");
+        var dashboard = await AddDashboardAsync(h, "Barreras");
+
+        var widget = await AddWidgetAsync(h, dashboard, "Barreras por tipo", "column", new
+        {
+            indicator = "barreras", measure = "value", groupBy = "tipo", seriesBy = "razon", layout = "stacked",
+            display = new { order = new { series = new[] { "Acceso", "Interés", "Otra" } } },
+        });
+
+        using var read = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = dashboard })).Json();
+        var widgets = read.RootElement.GetProperty("widgets").EnumerateArray().ToList();
+        var order = Assert.Single(widgets).GetProperty("config").GetProperty("display").GetProperty("order");
+        Assert.Equal(["Acceso", "Interés", "Otra"], order.GetProperty("series").EnumerateArray().Select(v => v.GetString()));
+        Assert.Equal(widget.ToString(), widgets[0].GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public async Task Order_of_groups_with_a_sort_refused()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+
+        var result = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = dashboard, title = "Ordenado", chartType = "bar", change = Request,
+            config = new
+            {
+                indicator = "piped_water_rate", ratio = new { numerator = "numerator", denominator = "denominator" }, groupBy = "municipality",
+                sort = new { by = "value", direction = "desc" }, display = new { order = new { group = new[] { "San Luis" } } },
+            },
+        });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("config.display.order.group", result.Text());
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+    }
+
+    [Fact]
+    public async Task An_order_of_series_on_a_pyramid_is_refused_through_MCP_saying_what_sets_it()
+    {
+        await using var h = await CreateAsync();
+        await SeedSourcesAsync(h);
+        var dashboard = await AddDashboardAsync(h, "Fuentes");
+
+        var result = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = dashboard, title = "Pirámide", chartType = "pyramid", change = Request,
+            config = new
+            {
+                indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source",
+                pyramid = new { left = "Piped", right = "Well" }, display = new { order = new { series = new[] { "Well" } } },
+            },
+        });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("config.display.order.series", result.Text());
+        Assert.Contains("A population pyramid's sides are its left and right values.", result.Text());
+    }
 }

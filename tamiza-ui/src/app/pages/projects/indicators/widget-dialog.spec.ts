@@ -4093,3 +4093,159 @@ describe('the widget dialog and the chart annotations (add-chart-annotations, de
     });
   });
 });
+
+describe('the widget dialog and the order of values (add-declared-category-order, design D9)', () => {
+  afterEach(clearOverlay);
+
+  const twoDimensions = catalog({ columns: [...catalog().columns, { name: 'water_source', type: 'text', label: null }] });
+  const queries = (context: Context) => context.http.match(isQuery).filter((r) => !r.cancelled);
+  const saved = async (context: Context) => {
+    await click(context, field('dialog-save'));
+    return context.http.expectOne((r) => isCreate(r) || isPatch(r)).request.body as { title: string; chartType: ChartType; config: WidgetConfig };
+  };
+  const edit = (display: NonNullable<WidgetConfig['display']> | undefined, overrides: Partial<WidgetConfig> = {}, widgetOverrides: Partial<Widget> = {}) =>
+    widget('w1', { config: config({ seriesBy: 'water_source', ...(display ? { display } : {}), ...overrides }), ...widgetOverrides });
+  const answer = () => seriesResult([cell('Cali', 'Piped', 5), cell('Cali', 'Well', 3), cell('Cali', 'River', 1), cell('Pasto', 'Piped', 2)], ['Piped', 'River', 'Well']);
+  const seriesValues = () => Array.from(dialog().querySelectorAll('[data-testid="dialog-order-series"] [data-testid="order-value"]')).map(text);
+  const downButtons = () => dialog().querySelectorAll<HTMLButtonElement>('[data-testid="dialog-order-series"] [data-testid="order-down"]');
+
+  it('offers the default order and an own order of the groups and of the series of a widget with a series', async () => {
+    await openDialog({ existing: edit(undefined), columns: twoDimensions });
+
+    expect(fields('dialog-order')).toHaveLength(1);
+    expect(field<HTMLInputElement>('dialog-order-group-default').checked).toBe(true);
+    expect(field<HTMLInputElement>('dialog-order-series-default').checked).toBe(true);
+    expect(text(dialog().querySelector('[data-testid="dialog-order-series"] label'))).toBe('Default order (the chart’s order)');
+  });
+
+  it('words the default as the order of the indicator when the indicator declares one for the column', async () => {
+    const declared = indicator('coverage', { columns: { water_source: { order: ['Well', 'Piped'] } } });
+
+    await openDialog({ existing: edit(undefined), columns: twoDimensions, indicators: [declared] });
+
+    expect(text(dialog().querySelector('[data-testid="dialog-order-series"] label'))).toBe('Default order (the indicator’s order)');
+    expect(text(dialog().querySelector('[data-testid="dialog-order-group"] label'))).toBe('Default order (the chart’s order)');
+  });
+
+  it('lists the values the preview shows, in its current order, with a button to move each (Own order from the preview)', async () => {
+    const context = await openDialog({ existing: edit(undefined), columns: twoDimensions });
+    await previewAnswer(context, answer());
+
+    await click(context, field('dialog-order-series-own'));
+
+    expect(seriesValues()).toEqual(['Piped', 'River', 'Well']);
+    expect(dialog().querySelectorAll('[data-testid="dialog-order-series"] [data-testid="order-up"]')).toHaveLength(3);
+    expect(downButtons()).toHaveLength(3);
+  });
+
+  it('redraws the preview in the new order without asking the indicator again (No new query)', async () => {
+    const context = await openDialog({ existing: edit(undefined), columns: twoDimensions });
+    await previewAnswer(context, answer());
+    await click(context, field('dialog-order-series-own'));
+
+    await click(context, downButtons()[0]);
+    await wait(previewDelayMs + 100);
+    await settle(context.harness);
+
+    expect(queries(context)).toHaveLength(0);
+    expect(seriesValues()).toEqual(['River', 'Piped', 'Well']);
+    expect(Array.from(dialog().querySelectorAll('[data-testid="dialog-preview"] [data-testid="legend-name"]')).map(text)).toEqual(['River', 'Piped', 'Well']);
+  });
+
+  it('saves nothing of the order once the default is chosen again (Back to the default)', async () => {
+    const context = await openDialog({ existing: edit(undefined), columns: twoDimensions });
+    await previewAnswer(context, answer());
+    await click(context, field('dialog-order-series-own'));
+    await click(context, downButtons()[0]);
+    await click(context, field('dialog-order-series-default'));
+
+    const body = await saved(context);
+
+    expect(body.config.display).toBeUndefined();
+  });
+
+  it('saves the order moved to, as the last member of the display', async () => {
+    const context = await openDialog({ existing: edit({ labels: { value: 'Hogares' } }), columns: twoDimensions });
+    await previewAnswer(context, answer());
+    await click(context, field('dialog-order-series-own'));
+    await click(context, downButtons()[0]);
+
+    const body = await saved(context);
+
+    expect(body.config.display).toEqual({ labels: { value: 'Hogares' }, order: { series: ['River', 'Piped', 'Well'] } });
+    expect(Object.keys(body.config.display!)).toEqual(['labels', 'order']);
+  });
+
+  it('lists apart, as not shown, a value the order holds that the preview does not, with a button to remove it (Listed value no longer shown)', async () => {
+    const context = await openDialog({ existing: edit({ order: { series: ['No sabe', 'Well', 'Piped'] } }), columns: twoDimensions });
+    await previewAnswer(context, answer());
+
+    expect(seriesValues()).toEqual(['Well', 'Piped']);
+    const apart = dialog().querySelectorAll('[data-testid="dialog-order-series"] [data-testid="order-apart-item"]');
+    expect(Array.from(apart).map((item) => text(item.querySelector('[data-testid="order-apart-value"]')))).toEqual(['No sabe']);
+    await click(context, apart[0].querySelector<HTMLButtonElement>('[data-testid="order-apart-remove"]')!);
+    expect((await saved(context)).config.display).toEqual({ order: { series: ['Well', 'Piped'] } });
+  });
+
+  it('says that values with no color kept take the colors of the palette in this order (Colors follow the order)', async () => {
+    const context = await openDialog({ existing: edit(undefined), columns: twoDimensions });
+    await previewAnswer(context, answer());
+    expect(fields('order-colors')).toHaveLength(0);
+
+    await click(context, field('dialog-order-series-own'));
+
+    expect(text(field('order-colors'))).toContain('in this order');
+  });
+
+  it('sends the saved settings back unchanged for a widget with no order (Saved unchanged)', async () => {
+    const context = await openDialog({ existing: edit({ labels: { value: 'Hogares' } }), columns: twoDimensions });
+
+    const body = await saved(context);
+
+    expect(body.config.display).toEqual({ labels: { value: 'Hogares' } });
+  });
+
+  it('shows a refusal of the order of groups on its field', async () => {
+    const context = await openDialog({ existing: edit({ order: { group: ['Cali'] } }, { seriesBy: null }), columns: twoDimensions });
+    await click(context, field('dialog-save'));
+
+    context.http
+      .expectOne((r) => isCreate(r) || isPatch(r))
+      .flush({ title: 'x', errors: { 'config.display.order.group[0]': ['It is listed twice.'] } }, { status: 400, statusText: 'Bad Request' });
+    await settle(context.harness);
+
+    expect(text(dialog().querySelector('[data-testid="dialog-order-group"] [data-testid="field-error"]'))).toBe('It is listed twice.');
+  });
+
+  it('turns the order of groups off with its reason while the widget has a sort, and still offers the order of series (Order of groups off while sorted)', async () => {
+    const context = await openDialog({ existing: edit(undefined), columns: twoDimensions });
+    await previewAnswer(context, answer());
+
+    await change(context, field('dialog-sort-by'), 'value');
+
+    expect(fields('dialog-order-group-own')).toHaveLength(0);
+    expect(text(field('order-sorted'))).toBe('The sort decides the order of the bars.');
+    expect(fields('dialog-order-series-own')).toHaveLength(1);
+  });
+
+  it('drops the order of series when the widget becomes a pie (Order dropped by a kind change)', async () => {
+    const context = await openDialog({ existing: edit({ order: { series: ['Well', 'Piped'] } }), columns: twoDimensions });
+    await change(context, field('dialog-chart-type'), 'pie');
+
+    const body = await saved(context);
+
+    expect(body.chartType).toBe('pie');
+    expect(body.config.display?.order).toBeUndefined();
+  });
+
+  it('offers no order of groups to a stat tile, a histogram and a map, and no order of series to a pyramid', async () => {
+    const context = await openDialog({ existing: edit(undefined), columns: twoDimensions });
+
+    for (const type of ['stat', 'histogram', 'map']) {
+      await change(context, field('dialog-chart-type'), type);
+      expect(fields('dialog-order-group'), type).toHaveLength(0);
+    }
+    await change(context, field('dialog-chart-type'), 'pyramid');
+    expect(fields('dialog-order-series')).toHaveLength(0);
+  });
+});

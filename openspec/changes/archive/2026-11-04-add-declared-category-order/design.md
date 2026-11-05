@@ -266,7 +266,7 @@ The production facts of the Duitama project (a read-only survey of 2026-11-03), 
 - **Box plots colored by `vehiculo`** (Centro a137, parqueadero 8492) keep their kept colors and natural order.
 - **Likert scales** (6) keep the order of their scale; a series order is refused on them.
 - **`in` filters on group and series columns, `ignoredDashboardFilters`, stacked and percent layouts over counts, heat maps with ramps, the map**: untouched, since no query changes.
-- **Stored JSON and versions.** No config is rewritten; a widget without `display.order` serializes as before, and its first save after the deploy makes no version. The production-shapes fixture of `add-indicator-column-metadata` (20 shapes today) is extended and run (task 1.1).
+- **Stored JSON and versions.** No config is rewritten; a widget without `display.order` serializes as before, and its first save after the deploy makes no version. The production-shapes fixture of `add-indicator-column-metadata` is extended and run (task 1.1): it held 25 shapes when this change started and holds 28 now, the three new ones last, with `indicatorColumns` on those and on six existing shapes (the line over text prices, the box plot, both Likert widgets, the cross table and the pie).
 - **Scheduled emails and workbooks** of the 9 dashboards: `CategoryOrder.For` finds nothing declared, so every table is built by today's code.
 - **MCP clients** get byte-identical results for widgets that declare nothing.
 
@@ -296,3 +296,12 @@ The production facts of the Duitama project (a read-only survey of 2026-11-03), 
 
 - Whether a later change should offer dashboard filter values in a column's declared order, with prefixes hidden. Filters keep full values and their own order here, so the specs do not depend on it.
 - Whether the script editor's test chart should follow the order being edited in the details form before it is saved. It only previews the table and does not change what is saved.
+
+## Results of the checks (apply, 2026-11-04)
+
+- **Build (task 9.1).** `ng build` succeeds. The initial total is 674.96 kB raw (158.49 kB transferred) against the 675 kB warning: `main` 304.28 kB and `styles` 78.22 kB, which grew by about 0.1 kB for the utility classes of the value editor (`min-h-10`, `max-h-72`, `border-dashed`); the new code sits in the lazy dashboard and scripts chunks. The margin under the warning is 0.04 kB, so the next change that adds a utility to an initial chunk has to trim one. No component style grew (the 4 kB budget), and `scripts/check-ui-safety.sh` is clean.
+- **OpenSpec (task 9.5).** `openspec validate add-declared-category-order --strict` passes.
+- **Suites (task 9.2).**
+  - API: 2,622 unit tests pass. Of 2,186 integration tests, 2,184 pass and 2 fail: `IndicatorSeriesQueryTests.A_ratio_total_is_the_ratio_of_the_sums_and_not_a_sum_or_a_mean_of_the_cells` and `…A_ratio_cell_whose_denominator_sums_to_zero_has_no_value_and_its_total_has_none`. They compare "0.5" with the machine's Spanish formatting "0,5"; this change does not touch them, and both pass with `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1`. The run took 38 minutes.
+  - UI: 3,621 of 3,622 pass; the one failure is `project-scripts.spec.ts` "polls while a run is active and stops when the page is destroyed", which the project's notes record as failing on unchanged code (not re-run on the base commit here).
+

@@ -3,7 +3,9 @@ import { settle } from '../../../../testing/project-harness';
 import { BasemapList } from '../../../core/basemaps.service';
 import { ChartType, IndicatorColumns, WidgetConfig } from '../../../core/projects/indicators.service';
 import { DataColumnType } from '../../../core/projects/data.service';
+import { ColumnMetadataMap } from '../../../core/projects/pipeline.service';
 import { chooseInWidgetMenu, clearOverlay, indicator, isColumns, isPatch, open, overlay, widget } from './indicators-testing';
+import { ordersFor } from './category-order';
 import { loadLeaflet } from './map-engine';
 import fixture from './testing/production-shapes.json';
 import { overallFor, queryFor, savedConfig } from './widget-view';
@@ -21,6 +23,7 @@ interface Shape {
   saved?: unknown;
   uiQuery?: unknown;
   formSaved?: unknown;
+  indicatorColumns?: ColumnMetadataMap;
 }
 
 const shapes = fixture.shapes as unknown as Shape[];
@@ -49,6 +52,31 @@ const annotationShapes = [
   'line by a price column with steps',
   '100% bar chart of a count with a value line of 0.5',
   'grouped column chart with an overall line',
+];
+
+/**
+ * The shapes the declared category order adds (add-declared-category-order, task 1.1) to the fixture, after the others: a column chart
+ * sorted by `orden` over a numbered question column, a 100% bar over a numbered series column and a heat map of two numbered columns. The
+ * API's ProductionShapesTests pins their stored text, query and plan; each has its `saved`, `uiQuery` and `formSaved` goldens.
+ */
+const orderShapes = [
+  'column chart sorted by orden as text over a numbered question column',
+  '100% bar over counts with a numbered series column',
+  'heat map of two numbered columns',
+];
+
+/**
+ * The shapes whose indicator publishes its group and series columns with only a label (`indicatorColumns`), so that no order applies to
+ * them: the three above and the line over text prices, the box plot with kept colors, both Likert widgets, the cross table and the pie.
+ */
+const labelledShapes = [
+  'line over text prices with a series and no sort',
+  'box plot grouped by a column with kept colors',
+  'Likert widget with its scale',
+  'Likert widget with a subtitle',
+  'cross table',
+  'pie',
+  ...orderShapes,
 ];
 
 const hasQueryGoldens = (shape: Shape): boolean => !!shape.uiQuery && !!shape.saved;
@@ -111,8 +139,8 @@ describe('the production shapes', () => {
   afterEach(clearOverlay);
 
   it('lists the shapes the design names, once each', () => {
-    expect(shapes).toHaveLength(25);
-    expect(new Set(shapes.map((s) => s.name)).size).toBe(25);
+    expect(shapes).toHaveLength(28);
+    expect(new Set(shapes.map((s) => s.name)).size).toBe(28);
     expect(shapes.every(hasQueryGoldens)).toBe(true);
   });
 
@@ -128,6 +156,20 @@ describe('the production shapes', () => {
     const annotationKeys = ['referenceLines', 'interpolation', 'dataLabels'];
     const holding = shapes.filter((s) => annotationKeys.some((key) => key in (JSON.parse(s.stored).display ?? {})));
     expect(holding.map((s) => s.name)).toEqual(annotationShapes);
+  });
+
+  it('has the shapes of the declared category order, last, and the columns of the indicators that label their columns only', () => {
+    expect(shapes.slice(25).map((s) => s.name)).toEqual(orderShapes);
+    const labelled = shapes.filter((s) => s.indicatorColumns);
+    expect(labelled.map((s) => s.name).sort()).toEqual([...labelledShapes].sort());
+    for (const shape of labelled) {
+      // The indicator only labels its group and series columns, so no order or hidden prefix applies (add-declared-category-order, task 3.4).
+      expect(ordersFor(shape.chartType, configOf(shape), shape.indicatorColumns), shape.name).toBeNull();
+      const config = configOf(shape);
+      for (const column of [config.groupBy, config.seriesBy].filter((c): c is string => !!c)) {
+        expect(Object.keys(shape.indicatorColumns![column] ?? {}), `${shape.name}: ${column}`).toEqual(['label']);
+      }
+    }
   });
 
   describe.each(shapes.filter(withTexts).map((s) => [s.name, s] as const))('%s (widget context)', (_name, shape) => {

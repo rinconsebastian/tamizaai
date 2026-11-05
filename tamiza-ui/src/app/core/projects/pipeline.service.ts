@@ -42,19 +42,31 @@ export interface ScriptVersionSummary {
 }
 
 /**
- * The facts an indicator keeps about one column of its table (`IndicatorColumnMetadata` in tamiza-api). Today only the name shown for
- * the column; later changes add their own optional properties. A property that is not set is left out.
+ * The facts an indicator keeps about one column of its table (`IndicatorColumnMetadata` in tamiza-api): the name shown for the column
+ * and, for a column that widgets group or split by (add-declared-category-order, design D1), the order of its values (up to
+ * `maxOrderValues`), the values kept at the end whatever the order or the sort (up to `maxKeptLast`) and whether a leading number such as
+ * "1. " is hidden. A property that is not set is left out; an empty list and `false` are never saved.
  */
 export interface ColumnMetadata {
   label?: string;
+  order?: string[];
+  last?: string[];
+  /** Only `true` is stored: an unticked box is left out. */
+  stripPrefix?: boolean;
 }
 
 /** The column facts of an indicator version, keyed by the column's name as its table publishes it. The keys' order means nothing. */
 export type ColumnMetadataMap = Record<string, ColumnMetadata>;
 
-/** The row of the details form for one column, as it is typed (design D8); later properties add their fields here. */
+/**
+ * The row of the details form for one column, as it is typed (design D8): the label, and for a column that widgets group or split by the
+ * order of its values, the values kept at the end and whether numbered prefixes are hidden (add-declared-category-order, design D9).
+ */
 export interface ColumnDraft {
   label: string;
+  order: string[];
+  last: string[];
+  stripPrefix: boolean;
 }
 
 /** An indicator's metadata, saved with each version of its script. */
