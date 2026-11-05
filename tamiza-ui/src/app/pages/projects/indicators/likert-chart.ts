@@ -1,7 +1,8 @@
-import { Component, ElementRef, LOCALE_ID, computed, inject, input, viewChild } from '@angular/core';
+import { Component, ElementRef, LOCALE_ID, computed, effect, inject, input, output, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { LikertSide, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
+import { ChartBases, SeriesFigures, isSmallBase, noChartBases, seriesFigures, smallBaseDash, smallBaseOpacity, smallBaseStroke, summaryWithSmall } from './base-figures';
 import { observeSize } from './chart-data';
 import { bandScale, charWidth, linearScale, niceAxis, truncate } from './chart-scales';
 import { CrosstabWidget } from './crosstab-widget';
@@ -52,6 +53,8 @@ export interface LikertPlot {
   ends: Label[];
   hits: Hit[];
   marks: (MarkPoint | null)[][];
+  /** How many segments have a small base: a segment has the n of its group (add-small-sample-warnings, design D2, D10). */
+  small: number;
 }
 
 export interface LikertPlotInput {
@@ -67,6 +70,8 @@ export interface LikertPlotInput {
   share: (share: number) => string;
   what: string;
   sideName: (side: LikertSide) => string;
+  /** The base figures of the tooltips and the threshold that dims small bases; a chart given none draws what it always did. */
+  figures?: SeriesFigures;
 }
 
 const top = 8;
@@ -120,6 +125,7 @@ export function likertPlot(input: LikertPlotInput): LikertPlot {
   const ends: Label[] = [];
   const hits: Hit[] = [];
   const marks: (MarkPoint | null)[][] = rows.map((row) => row.cells.map(() => null));
+  let small = 0;
 
   for (const tick of axis.ticks) {
     grid.push({ x1: x(tick), y1: top, x2: x(tick), y2: h - bottomRoom, zero: tick === 0 });
@@ -148,17 +154,22 @@ export function likertPlot(input: LikertPlotInput): LikertPlot {
       const x0 = x(from) + (first ? 0 : 1);
       const x1 = x(at) - (last ? 0 : 1);
       const width = Math.max(1, x1 - x0);
-      rects.push({ x: x0, y, width, height: thickness, color: input.colors[s], title: '', at: { g, s } });
+      const dim = isSmallBase(row.figures?.[s]?.n, input.figures?.minN);
+      small += dim ? 1 : 0;
+      rects.push({ x: x0, y, width, height: thickness, color: input.colors[s], title: '', at: { g, s }, ...(dim ? { dim } : {}) });
       const length = width >= minHit ? { x: x0 - (first ? 0 : 1), width: width + (first ? 0 : 1) + (last ? 0 : 1) } : { x: x0 + (width - minHit) / 2, width: minHit };
       hits.push({ x: length.x, y: bands.start(g) - (bands.step - bands.bandwidth) / 2, width: length.width, height: bands.step, at: { g, s } });
+      // A segment is a share of its group, so its n is its group's. After the value: the figures, and the note of a small base (design D9).
+      const tip = input.figures?.tip(row.figures?.[s]) ?? { lines: [], footer: null };
       marks[g][s] = {
         content: {
           heading: input.groupLabel(row.group),
           lines: [
             { label: input.names[s], value: input.share(share), align: 'end', color: input.colors[s] },
             { label: input.what, value: input.value(row.cells[s]!), align: 'end' },
+            ...tip.lines,
           ],
-          footer: input.sideName(input.sides[s]),
+          footer: tip.footer ? `${input.sideName(input.sides[s])} · ${tip.footer}` : input.sideName(input.sides[s]),
         },
         x: x0 + width / 2,
         y: y + thickness / 2,
@@ -172,7 +183,7 @@ export function likertPlot(input: LikertPlotInput): LikertPlot {
       if (toRight > 0) ends.push({ x: x(extents[g].end) + 4, y: y + thickness / 2 + 4, text: input.share(toRight), anchor: 'start' });
     }
   });
-  return { width: w, height: h, grid, ticks, labels, rects, ends, hits, marks };
+  return { width: w, height: h, grid, ticks, labels, rects, ends, hits, marks, small };
 }
 
 /**
@@ -188,7 +199,7 @@ export function likertPlot(input: LikertPlotInput): LikertPlot {
     <ng-container *transloco="let t">
       <app-series-legend [entries]="legend()" />
       @if (asTable()) {
-        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [orders]="orders()" chartType="likert" />
+        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [orders]="orders()" [bases]="bases()" chartType="likert" />
       } @else {
         <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
           <svg
@@ -225,7 +236,10 @@ export function likertPlot(input: LikertPlotInput): LikertPlot {
               <rect
                 rx="2"
                 [class.stroke-default-strong]="sides()[rect.at!.s] === 'neutral'"
-                [attr.stroke-width]="sides()[rect.at!.s] === 'neutral' ? 1 : null"
+                [attr.stroke-width]="rect.dim ? smallStroke : sides()[rect.at!.s] === 'neutral' ? 1 : null"
+                [attr.fill-opacity]="rect.dim ? smallOpacity : null"
+                [style.stroke]="rect.dim && sides()[rect.at!.s] !== 'neutral' ? rect.color : null"
+                [attr.stroke-dasharray]="rect.dim ? smallDash : null"
                 [attr.x]="rect.x"
                 [attr.y]="rect.y"
                 [attr.width]="rect.width"
@@ -281,6 +295,13 @@ export class LikertChart {
   /** What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D8). */
   readonly orders = input<CategoryOrders | null>(null);
   readonly asTable = input(false);
+  /** The threshold in force and the indicator's base column, for the figures and the small bases of the segments (add-small-sample-warnings). */
+  readonly bases = input<ChartBases>(noChartBases);
+  /** How many segments the chart draws dimmed for a small base, so the widget can explain the dimming under it (design D10, D11). */
+  readonly dimmed = output<number>();
+  protected readonly smallStroke = smallBaseStroke;
+  protected readonly smallDash = smallBaseDash;
+  protected readonly smallOpacity = smallBaseOpacity;
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private readonly svg = viewChild<ElementRef<SVGElement>>('chartSvg');
@@ -318,6 +339,7 @@ export class LikertChart {
       share: (share) => this.percent().format(share),
       what: this.what(),
       sideName: (side) => this.tr(`indicators.likert.sides.${side}`),
+      figures: seriesFigures(this.config(), this.names(), this.bases(), this.locale, this.tr),
     }),
   );
 
@@ -325,6 +347,7 @@ export class LikertChart {
 
   // What an image of the Likert bars says around them (add-widget-export): the scale's legend, neutral outlined, and the rows left out.
   constructor() {
+    effect(() => this.dimmed.emit(this.plot().small));
     registerExportParts({
       plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
       settle: () => this.marks.reset(),
@@ -354,7 +377,7 @@ export class LikertChart {
     const positive = (row: (typeof rows)[number]) => row.shares!.reduce<number>((sum, share, i) => sum + (sides[i] === 'positive' ? (share ?? 0) : 0), 0);
     const best = rows.reduce((top, row) => (positive(row) > positive(top) ? row : top));
     const lang = this.transloco.getActiveLang();
-    return t('indicators.likert.summary', {
+    const words = t('indicators.likert.summary', {
       what: this.what(),
       group: this.groupShown(),
       groups: t(countKey('indicators.series.groupsCount', table.rows.length, lang), { count: table.rows.length }),
@@ -362,5 +385,6 @@ export class LikertChart {
       top: shown(this.groupText(), best.group) ?? t('indicators.chart.noGroup'),
       share: this.percent().format(positive(best)),
     });
+    return summaryWithSmall(words, this.plot().small, t);
   }
 }

@@ -430,6 +430,61 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
         Assert.Equal(["value", "none", "other"], [Tamiza.Api.Indicators.SeriesKinds.Value, Tamiza.Api.Indicators.SeriesKinds.None, Tamiza.Api.Indicators.SeriesKinds.Other]);
     }
 
+    /// <summary>
+    /// The base figures of add-small-sample-warnings (design D5): <c>numerator</c>, <c>denominator</c> and <c>n</c> on rows and on every
+    /// kind of total, and the widget's <c>n</c> on the response. Later tasks of that change add the settings it describes to this test.
+    /// </summary>
+    [Fact]
+    public async Task The_openapi_document_describes_the_base_figures_of_rows_totals_and_the_response()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        using var anonymous = h.Factory.CreateClient();
+
+        var document = await anonymous.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        foreach (var schema in new[] { "IndicatorRow", "GroupTotal", "SeriesTotal", "GrandTotal" })
+        {
+            var properties = schemas.GetProperty(schema).GetProperty("properties");
+            foreach (var name in new[] { "numerator", "denominator", "n" })
+            {
+                Assert.True(properties.TryGetProperty(name, out _), $"{schema}.{name}");
+            }
+        }
+
+        var response = schemas.GetProperty("IndicatorQueryResponse").GetProperty("properties");
+        Assert.True(response.TryGetProperty("n", out var n));
+        Assert.Contains("base n", n.GetProperty("description").GetString());
+        // The figures are left out of an answer that has none, so they are never required.
+        Assert.DoesNotContain(
+            schemas.GetProperty("IndicatorRow").TryGetProperty("required", out var required)
+                ? required.EnumerateArray().Select(r => r.GetString()).ToArray()
+                : Array.Empty<string?>(),
+            name => name is "numerator" or "denominator" or "n");
+        Assert.True(schemas.GetProperty("SeriesTotals").GetProperty("properties").TryGetProperty("all", out _));
+
+        // The settings of design D6 and D7: leaving out the no-data values, and the widget's threshold and n line.
+        Assert.True(schemas.GetProperty("WidgetConfig").GetProperty("properties").TryGetProperty("missingFooter", out _), "WidgetConfig.missingFooter");
+        Assert.True(schemas.GetProperty("WidgetConfigInput").GetProperty("properties").TryGetProperty("missingFooter", out var footer), "WidgetConfigInput.missingFooter");
+        Assert.Contains("no data", footer.GetProperty("description").GetString());
+        Assert.True(response.TryGetProperty("noData", out _), "IndicatorQueryResponse.noData");
+        Assert.Equal(
+            ["denominator", "n", "numerator", "share", "value", "values"],
+            schemas.GetProperty("IndicatorNoData").GetProperty("properties").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        var display = schemas.GetProperty("WidgetDisplay").GetProperty("properties");
+        Assert.True(display.TryGetProperty("minN", out var minN), "WidgetDisplay.minN");
+        Assert.Contains("threshold", minN.GetProperty("description").GetString());
+        Assert.True(display.TryGetProperty("showN", out var showN), "WidgetDisplay.showN");
+        Assert.Contains("base n line", showN.GetProperty("description").GetString());
+
+        // The two settings a widget's workbook request carries (design D13): the threshold and the n line the page applies to the widget.
+        var request = schemas.GetProperty("WidgetExportRequest").GetProperty("properties");
+        Assert.True(request.TryGetProperty("minN", out var requestMinN), "WidgetExportRequest.minN");
+        Assert.Contains("threshold", requestMinN.GetProperty("description").GetString());
+        Assert.True(request.TryGetProperty("showN", out var requestShowN), "WidgetExportRequest.showN");
+        Assert.Contains("base n line", requestShowN.GetProperty("description").GetString());
+    }
+
     [Fact]
     public async Task The_openapi_document_describes_the_boxes_of_a_box_plot_and_its_orientation()
     {
@@ -517,7 +572,12 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
         Assert.Contains("100", own.GetProperty("group").GetProperty("description").GetString());
         Assert.Contains("100", own.GetProperty("series").GetProperty("description").GetString());
         var column = schemas.GetProperty("IndicatorColumnMetadata").GetProperty("properties");
-        Assert.Equal(["label", "last", "order", "stripPrefix"], column.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        // And the facts add-small-sample-warnings adds: a base, the values that mean no data and the kind of answers.
+        Assert.Equal(
+            ["base", "categories", "label", "last", "missing", "order", "stripPrefix"], column.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Contains("base", column.GetProperty("base").GetProperty("description").GetString());
+        Assert.Contains("20", column.GetProperty("missing").GetProperty("description").GetString());
+        Assert.Contains("multiple", column.GetProperty("categories").GetProperty("description").GetString());
         Assert.Contains("100", column.GetProperty("order").GetProperty("description").GetString());
         Assert.Contains("20", column.GetProperty("last").GetProperty("description").GetString());
         Assert.Contains("true", column.GetProperty("stripPrefix").GetProperty("description").GetString());

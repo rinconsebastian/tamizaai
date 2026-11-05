@@ -1,7 +1,7 @@
 import { MapStub, stubMap } from '../../../../testing/leaflet';
 import { details, projectId, settle, typeInto } from '../../../../testing/project-harness';
 import { BasemapList } from '../../../core/basemaps.service';
-import { ChartType, DashboardColors, DashboardFilter, IndicatorColumns, IndicatorEntry, Widget, WidgetConfig, chartTypes } from '../../../core/projects/indicators.service';
+import { ChartType, DashboardBases, DashboardColors, DashboardFilter, IndicatorColumns, IndicatorEntry, Widget, WidgetConfig, chartTypes } from '../../../core/projects/indicators.service';
 import { DashboardEntry } from '../../../core/projects/projects.service';
 import { valueSearchDelayMs } from '../data-filter-dialog';
 import { encodeFilters } from '../data-view';
@@ -54,16 +54,19 @@ interface Setup {
   colors?: DashboardColors;
   /** The interface language; English unless said. */
   lang?: OpenAt['lang'];
+  /** The dashboard's base settings (add-small-sample-warnings, design D8), when it has any. */
+  bases?: Partial<DashboardBases>;
 }
 
 /** Opens the dialog to add a widget, or to edit `existing`, and answers the request for the columns of the indicator it starts on. */
-async function openDialog({ existing = null, columns = catalog(), indicators, dashboards, filters, query, colors, lang }: Setup = {}) {
+async function openDialog({ existing = null, columns = catalog(), indicators, dashboards, filters, query, colors, lang, bases }: Setup = {}) {
   const context = await open('analyst', existing ? [existing] : [], existing ? result([row('Cali', 75)]) : null, indicators ? { indicators } : {}, {
     ...(dashboards ? { dashboards } : {}),
     ...(filters ? { filters } : {}),
     ...(query ? { query } : {}),
     ...(colors ? { colors } : {}),
     ...(lang ? { lang } : {}),
+    ...(bases ? { bases } : {}),
   });
   if (existing) {
     // Edit is an item of the widget's menu.
@@ -4247,5 +4250,453 @@ describe('the widget dialog and the order of values (add-declared-category-order
     }
     await change(context, field('dialog-chart-type'), 'pyramid');
     expect(fields('dialog-order-series')).toHaveLength(0);
+  });
+});
+
+describe('the widget dialog and the base settings (add-small-sample-warnings, design D12)', () => {
+  afterEach(clearOverlay);
+
+  const ratio = { ratio: { numerator: 'numerator', denominator: 'denominator' } };
+  const declared = (columns: NonNullable<IndicatorEntry['columns']>) => [indicator('coverage', { columns })];
+  const edit = (display: NonNullable<WidgetConfig['display']> | undefined, overrides: Partial<WidgetConfig> = {}, type: ChartType = 'column') =>
+    widget('w1', { chartType: type, config: config({ ...(display ? { display } : {}), ...overrides }) });
+  const saved = async (context: Context) => {
+    await click(context, field('dialog-save'));
+    return context.http.expectOne((r) => isCreate(r) || isPatch(r)).request.body as { title: string; chartType: ChartType; config: WidgetConfig };
+  };
+  const refuse = async (context: Context, errors: Record<string, string[]>) => {
+    await click(context, field('dialog-save'));
+    context.http.expectOne(isPatch).flush({ title: 'x', errors }, { status: 400, statusText: 'Bad Request' });
+    await settle(context.harness);
+  };
+  const hint = () => dialog().querySelector('[data-testid="dialog-n-hint"]');
+  const fieldIn = (id: string) => field(id).closest('tmz-form-field')!;
+  const small = () => dialog().querySelector('[data-testid="dialog-preview"] [data-testid="widget-small-note"]');
+  const comunas = () => result([row('COMUNA 7', 0.5, null, { numerator: 8, denominator: 16, n: 16 }), row('COMUNA 1', 56 / 121, null, { numerator: 56, denominator: 121, n: 121 })], { n: 137 });
+
+  describe('the group', () => {
+    it('offers the n line, the threshold and the no-data values as a group of its own, after the texts of the widget (Base settings in the widget form)', async () => {
+      await openDialog({ existing: edit(undefined) });
+
+      const ids = ['dialog-footnote', 'dialog-show-n', 'dialog-min-n-choice', 'dialog-missing-footer'];
+      const present = ids.map((id) => field(id));
+      for (let i = 1; i < present.length; i++) {
+        expect(present[i - 1].compareDocumentPosition(present[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      }
+      expect(text(field('dialog-bases').querySelector('legend'))).toBe('Base');
+      expect(text(fieldIn('dialog-show-n').querySelector('label'))).toBe('Base n under the widget');
+      expect(text(fieldIn('dialog-min-n-choice').querySelector('label'))).toBe('Small bases');
+      // The threshold's own field only exists once the widget has a threshold of its own.
+      expect(fields('dialog-min-n')).toHaveLength(0);
+      for (const control of present) {
+        expect((control as HTMLInputElement).disabled).toBe(false);
+        expect(control.tabIndex).toBe(0);
+      }
+    });
+
+    it('says what "as the dashboard says" means: the n line shown or hidden, and the threshold or none', async () => {
+      await openDialog({ existing: edit(undefined), bases: { minN: 30, showN: true } });
+
+      expect(optionTexts('dialog-show-n')).toEqual(['As the dashboard says (shown)', 'Show', 'Hide']);
+      expect(optionTexts('dialog-min-n-choice')).toEqual(['As the dashboard says (below 30)', 'Off', 'Below']);
+    });
+
+    it('says it in Spanish for a dashboard that has none', async () => {
+      await openDialog({ existing: edit(undefined), lang: 'es' });
+
+      expect(optionTexts('dialog-show-n')).toEqual(['Como indique el tablero (se oculta)', 'Mostrar', 'Ocultar']);
+      expect(optionTexts('dialog-min-n-choice')).toEqual(['Como indique el tablero (desactivado)', 'Desactivado', 'Menos de']);
+      expect(text(field('dialog-bases').querySelector('legend'))).toBe('Base');
+    });
+
+    it('says the dashboard has none when it has none, and no threshold either', async () => {
+      await openDialog({ existing: edit(undefined) });
+
+      expect(optionTexts('dialog-show-n')[0]).toBe('As the dashboard says (hidden)');
+      expect(optionTexts('dialog-min-n-choice')[0]).toBe('As the dashboard says (off)');
+    });
+
+    it('offers no group for a histogram, which has no n and takes no no-data values', async () => {
+      await openDialog({ existing: edit(undefined, { groupBy: null }, 'histogram') });
+
+      expect(fields('dialog-bases')).toHaveLength(0);
+    });
+
+    it('offers the n line and the threshold on a stat tile, but not the no-data values', async () => {
+      await openDialog({ existing: edit(undefined, { groupBy: null }, 'stat') });
+
+      expect(fields('dialog-show-n')).toHaveLength(1);
+      expect(fields('dialog-min-n-choice')).toHaveLength(1);
+      expect(fields('dialog-missing-group')).toHaveLength(0);
+    });
+
+    it.each<ChartType>(['bar', 'column', 'line', 'pie'])('offers the no-data values on a %s chart', async (type) => {
+      await openDialog({ existing: edit(undefined, {}, type) });
+
+      expect(fields('dialog-missing-group')).toHaveLength(1);
+    });
+
+    it('gives the threshold its own field, with a number to start from, once Below is chosen', async () => {
+      const context = await openDialog({ existing: edit(undefined), bases: { minN: 50, showN: false } });
+
+      await change(context, field('dialog-min-n-choice'), 'own');
+
+      expect(field<HTMLInputElement>('dialog-min-n').value).toBe('50');
+      expect(field('dialog-min-n').getAttribute('inputmode')).toBe('numeric');
+      expect(text(fieldIn('dialog-min-n').querySelector('label'))).toBe('Base below');
+    });
+  });
+
+  describe('the preview', () => {
+    it('dims the small bases without asking for the rows again when the threshold is set (Threshold previewed)', async () => {
+      const context = await openDialog({ existing: edit(undefined, ratio) });
+      await previewAnswer(context, comunas());
+      expect(small()).toBeNull();
+
+      await change(context, field('dialog-min-n-choice'), 'own');
+      await wait(previewDelayMs + 100);
+      await settle(context.harness);
+
+      expect(context.http.match(isQuery).filter((r) => !r.cancelled)).toHaveLength(0);
+      expect(text(small())).toBe('Marks with a base below 30 are dimmed.');
+
+      await change(context, field('dialog-min-n'), '16');
+      await wait(previewDelayMs + 100);
+      expect(context.http.match(isQuery).filter((r) => !r.cancelled)).toHaveLength(0);
+      expect(small()).toBeNull();
+    });
+
+    it('shows the n line without a new query when the widget shows it', async () => {
+      const context = await openDialog({ existing: edit(undefined, ratio) });
+      await previewAnswer(context, comunas());
+
+      await change(context, field('dialog-show-n'), 'show');
+      await wait(previewDelayMs + 100);
+      await settle(context.harness);
+
+      expect(context.http.match(isQuery).filter((r) => !r.cancelled)).toHaveLength(0);
+      expect(text(dialog().querySelector('[data-testid="dialog-preview"] [data-testid="widget-n-line"]'))).toContain('n = 137');
+    });
+
+    it('applies the dashboard\'s threshold to the widget until it sets its own', async () => {
+      const context = await openDialog({ existing: edit(undefined, ratio), bases: { minN: 30, showN: false } });
+      await previewAnswer(context, comunas());
+      expect(text(small())).toBe('Marks with a base below 30 are dimmed.');
+
+      await change(context, field('dialog-min-n-choice'), 'off');
+      expect(small()).toBeNull();
+    });
+
+    it('asks for the rows again when leaving out the no-data values changes them, and sends the option (No-data values named)', async () => {
+      const context = await openDialog({ existing: edit(undefined, ratio), indicators: declared({ municipality: { missing: ['Sin dato'] } }) });
+      await previewAnswer(context, comunas());
+
+      await click(context, field('dialog-missing-footer'));
+      const body = await previewAnswer(context, comunas());
+
+      expect(body.config.missingFooter).toBe(true);
+    });
+  });
+
+  describe('the no-data values', () => {
+    it('names the values the indicator declares for the group column (No-data values named)', async () => {
+      await openDialog({ existing: edit(undefined), indicators: declared({ municipality: { label: 'Comuna', missing: ['Sin dato', 'No sabe'] }, round: { missing: ['x'] } }) });
+
+      expect(text(field('dialog-missing-help'))).toBe('Left out: municipality: Sin dato, No sabe.');
+      expect(text(field('dialog-missing-footer').closest('label'))).toBe('Leave out values that mean no data, and say what they held under the chart');
+    });
+
+    it('names the values of the series column too', async () => {
+      await openDialog({
+        existing: edit(undefined, { seriesBy: 'water_source' }),
+        columns: catalog({ columns: [...catalog().columns, { name: 'water_source', type: 'text', label: null }] }),
+        indicators: declared({ municipality: { missing: ['Sin dato'] }, water_source: { missing: ['4. No sabe'] } }),
+      });
+
+      expect(text(field('dialog-missing-help'))).toBe('Left out: municipality: Sin dato; water_source: 4. No sabe.');
+    });
+
+    it('says that the indicator declares none for the group and series columns (Nothing declared for the columns)', async () => {
+      await openDialog({ existing: edit(undefined), indicators: declared({ round: { missing: ['x'] } }) });
+
+      expect(text(field('dialog-missing-help'))).toBe('The indicator declares no values that mean no data for the group and series columns. Declare them in its details.');
+    });
+
+    it('says it too for an indicator that declares nothing at all', async () => {
+      await openDialog({ existing: edit(undefined) });
+
+      expect(text(field('dialog-missing-help'))).toContain('declares no values that mean no data');
+    });
+
+    it('sends nothing for a widget that never set it', async () => {
+      const context = await openDialog({ existing: edit(undefined), indicators: declared({ municipality: { missing: ['Sin dato'] } }) });
+      expect((await saved(context)).config).not.toHaveProperty('missingFooter');
+    });
+
+    it('saves true when it is ticked', async () => {
+      const context = await openDialog({ existing: edit(undefined), indicators: declared({ municipality: { missing: ['Sin dato'] } }) });
+      await click(context, field('dialog-missing-footer'));
+
+      expect((await saved(context)).config.missingFooter).toBe(true);
+    });
+
+    it('keeps a saved false as false, and a ticked box unticked on a widget that never had it as nothing', async () => {
+      const kept = await openDialog({ existing: edit(undefined, { missingFooter: true }) });
+      expect(field<HTMLInputElement>('dialog-missing-footer').checked).toBe(true);
+      await click(kept, field('dialog-missing-footer'));
+      expect((await saved(kept)).config.missingFooter).toBe(false);
+    });
+
+    it('sends no option for a widget that ticks it and unticks it again', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      await click(context, field('dialog-missing-footer'));
+      await click(context, field('dialog-missing-footer'));
+
+      expect((await saved(context)).config).not.toHaveProperty('missingFooter');
+    });
+  });
+
+  describe('why a widget has no n (the hints of design D4)', () => {
+    it('says that the indicator must declare its base column or its answer columns when it declares neither', async () => {
+      await openDialog({ existing: edit({ showN: true }, ratio) });
+
+      expect(text(hint())).toBe('This widget has no base n to show: its indicator must declare its base column or its answer columns.');
+    });
+
+    it('says it for a widget the dashboard shows the n line of, and is silent while no line is asked for', async () => {
+      const context = await openDialog({ existing: edit(undefined, ratio), bases: { minN: null, showN: true } });
+      expect(hint()).not.toBeNull();
+
+      await change(context, field('dialog-show-n'), 'hide');
+      expect(hint()).toBeNull();
+    });
+
+    it('is silent for a dashboard and a widget that ask for no line', async () => {
+      await openDialog({ existing: edit(undefined, ratio) });
+
+      expect(hint()).toBeNull();
+    });
+
+    it('says that a measure has an n only with a base column, when answers are declared but no base', async () => {
+      await openDialog({ existing: edit({ showN: true }), indicators: declared({ municipality: { categories: 'single' } }) });
+
+      expect(text(hint())).toBe('This widget has no base n: a measure has one only when its indicator declares a base column.');
+    });
+
+    it('has none to say for a measure over a declared base column', async () => {
+      await openDialog({ existing: edit({ showN: true }), indicators: declared({ round: { base: true } }) });
+
+      expect(hint()).toBeNull();
+    });
+
+    it('has none to say for a ratio whose indicator declares its answer columns', async () => {
+      await openDialog({ existing: edit({ showN: true }, ratio), indicators: declared({ municipality: { categories: 'single' } }) });
+
+      expect(hint()).toBeNull();
+    });
+
+    it('says that a box plot has no n of its own, whatever the indicator declares', async () => {
+      await openDialog({ existing: edit({ showN: true }, ratio, 'boxplot'), indicators: declared({ round: { base: true } }) });
+
+      expect(text(hint())).toBe('A box plot has no base n: each box gives the number of values it holds.');
+    });
+
+    it('follows the plot the form holds: a ratio takes the measure\'s hint away, and the other way round', async () => {
+      const context = await openDialog({ existing: edit({ showN: true }), indicators: declared({ municipality: { categories: 'single' } }) });
+      expect(hint()).not.toBeNull();
+
+      await change(context, field('dialog-mode'), 'ratio');
+
+      expect(hint()).toBeNull();
+    });
+  });
+
+  describe('what it saves', () => {
+    it('saves the n line and the threshold in the display, a 0 and a false as chosen', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      await change(context, field('dialog-show-n'), 'hide');
+      await change(context, field('dialog-min-n-choice'), 'off');
+
+      expect((await saved(context)).config.display).toEqual({ minN: 0, showN: false });
+    });
+
+    it('saves its own threshold as a number', async () => {
+      const context = await openDialog({ existing: edit(undefined) });
+      await change(context, field('dialog-min-n-choice'), 'own');
+      await change(context, field('dialog-min-n'), ' 25 ');
+      await change(context, field('dialog-show-n'), 'show');
+
+      expect((await saved(context)).config.display).toEqual({ minN: 25, showN: true });
+    });
+
+    it('saves no display for a widget that follows the dashboard on both settings', async () => {
+      const context = await openDialog({ existing: edit({ minN: 30, showN: true }) });
+      await change(context, field('dialog-show-n'), 'dashboard');
+      await change(context, field('dialog-min-n-choice'), 'dashboard');
+
+      expect((await saved(context)).config).not.toHaveProperty('display');
+    });
+
+    it.each(['0', '-3', '10001', '2.5', 'abc', ''])('refuses the own threshold %j before anything is sent', async (typed) => {
+      const context = await openDialog({ existing: edit(undefined) });
+      await change(context, field('dialog-min-n-choice'), 'own');
+      await change(context, field('dialog-min-n'), typed);
+
+      await click(context, field('dialog-save'));
+
+      expect(text(fieldIn('dialog-min-n').querySelector('[data-testid="field-error"]'))).toBe('The small-base threshold must be a whole number from 1 to 10,000.');
+      context.http.expectNone(isPatch);
+    });
+
+    it('keeps the threshold and drops the no-data option when the chart type changes to a stat tile', async () => {
+      const context = await openDialog({ existing: edit({ minN: 30, showN: true }, { ...ratio, missingFooter: true }) });
+
+      await change(context, field('dialog-chart-type'), 'stat');
+      const body = await saved(context);
+
+      expect(body.chartType).toBe('stat');
+      expect(body.config).not.toHaveProperty('missingFooter');
+      expect(body.config.display).toEqual({ minN: 30, showN: true });
+      expect(fields('dialog-missing-group')).toHaveLength(0);
+    });
+
+    it('brings the no-data option back when the chart type is changed back', async () => {
+      const context = await openDialog({ existing: edit(undefined, { ...ratio, missingFooter: true }) });
+
+      await change(context, field('dialog-chart-type'), 'stat');
+      await change(context, field('dialog-chart-type'), 'column');
+
+      expect(field<HTMLInputElement>('dialog-missing-footer').checked).toBe(true);
+      expect((await saved(context)).config.missingFooter).toBe(true);
+    });
+  });
+
+  describe('a widget saved unchanged (Form saved unchanged)', () => {
+    it('sends the config of a widget saved before base settings as it was, with no new key', async () => {
+      const original = edit({ color: 2 }, ratio);
+      const context = await openDialog({ existing: original });
+
+      const body = await saved(context);
+
+      expect(body.config).toEqual(original.config);
+      expect(Object.keys(body.config.display!)).toEqual(['color']);
+      expect(body.config).not.toHaveProperty('missingFooter');
+    });
+
+    it('sends a widget that sets every base setting back as it was saved, the zero and the false included', async () => {
+      const original = edit({ minN: 0, showN: false }, { ...ratio, missingFooter: false });
+      const context = await openDialog({ existing: original, bases: { minN: 30, showN: true } });
+      expect(field<HTMLSelectElement>('dialog-min-n-choice').value).toBe('off');
+      expect(field<HTMLSelectElement>('dialog-show-n').value).toBe('hide');
+
+      const body = await saved(context);
+
+      expect(body.config).toEqual(original.config);
+      expect(JSON.stringify(body.config.display)).toBe(JSON.stringify({ minN: 0, showN: false }));
+    });
+
+    it('sends a widget with its own threshold and a shown n line back as it was saved', async () => {
+      const original = edit({ color: 3, minN: 10, showN: true }, { ...ratio, missingFooter: true });
+      const context = await openDialog({ existing: original });
+      expect(field<HTMLInputElement>('dialog-min-n').value).toBe('10');
+
+      const body = await saved(context);
+
+      expect(body.config).toEqual(original.config);
+    });
+
+    it('sends a moved widget\'s display along with it untouched', async () => {
+      const original = edit({ minN: 10, showN: false });
+      const context = await openDialog({ existing: original, dashboards: [{ id: 'd1', name: 'Indicators' }, { id: 'd2', name: 'Field' }] });
+      await change(context, field('dialog-dashboard'), 'd2');
+
+      await click(context, field('dialog-save'));
+
+      expect(context.http.expectOne(isPatch).request.body).toEqual({ dashboardId: 'd2' });
+    });
+  });
+
+  describe('a refusal', () => {
+    it('shows a refused threshold on the threshold\'s field, and lets it go once the field is changed (Threshold out of range, widget part)', async () => {
+      const context = await openDialog({ existing: edit({ minN: 10 }) });
+
+      await refuse(context, { 'config.display.minN': ['The small-base threshold must be a whole number from 0 (off) to 10,000.'] });
+
+      expect(text(fieldIn('dialog-min-n'))).toContain('The small-base threshold must be a whole number from 0 (off) to 10,000.');
+      expect(field('dialog-min-n').getAttribute('aria-invalid')).toBe('true');
+      expect(fields('dialog-error')).toHaveLength(0);
+
+      await change(context, field('dialog-min-n'), '12');
+      expect(text(fieldIn('dialog-min-n'))).not.toContain('must be a whole number');
+    });
+
+    it('shows a refused n line choice on its select', async () => {
+      const context = await openDialog({ existing: edit({ showN: true }) });
+
+      await refuse(context, { 'config.display.showN': ['Not accepted.'] });
+
+      expect(text(fieldIn('dialog-show-n'))).toContain('Not accepted.');
+      expect(fields('dialog-error')).toHaveLength(0);
+    });
+
+    it('shows a refused no-data option under its box', async () => {
+      const context = await openDialog({ existing: edit(undefined, { missingFooter: true }) });
+
+      await refuse(context, { 'config.missingFooter': ['Only bar, column, line, pie, heat map, population pyramid, Likert and cross table widgets can leave out values that mean no data.'] });
+
+      expect(text(field('dialog-missing-group').querySelector('[data-testid="field-error"]'))).toContain('Only bar, column, line');
+      expect(fields('dialog-error')).toHaveLength(0);
+    });
+  });
+});
+
+describe('the widget dialog and the answer columns of its indicator (add-small-sample-warnings, design D16)', () => {
+  afterEach(clearOverlay);
+
+  const ratio = { ratio: { numerator: 'numerator', denominator: 'denominator' } };
+  const twoDimensions = catalog({ columns: [...catalog().columns, { name: 'water_source', type: 'text', label: null }] });
+  const declared = (columns: NonNullable<IndicatorEntry['columns']>) => [indicator('coverage', { columns })];
+  const lineRows = () => fields('reference-line');
+  const kindSelect = (index: number) => lineRows()[index].querySelector<HTMLSelectElement>('[data-testid="reference-kind"]')!;
+  const kindsOf = (index: number) => Array.from(kindSelect(index).options).map((o) => o.value);
+  const edit = (display: NonNullable<WidgetConfig['display']> | undefined, overrides: Partial<WidgetConfig> = {}) =>
+    widget('w1', { config: config({ ...(display ? { display } : {}), ...overrides }) });
+
+  it('does not offer an overall line for a chart grouped by a column the indicator declares as answers (Overall line over places)', async () => {
+    const context = await openDialog({ existing: edit(undefined, ratio), indicators: declared({ municipality: { categories: 'single' } }) });
+    await click(context, field('reference-add'));
+
+    expect(kindsOf(0)).toEqual(['mean', 'median', 'value']);
+  });
+
+  it('does not offer it for a chart split by an answer column either', async () => {
+    const context = await openDialog({
+      existing: edit(undefined, { ...ratio, seriesBy: 'water_source' }),
+      columns: twoDimensions,
+      indicators: declared({ water_source: { categories: 'multiple' } }),
+    });
+    await click(context, field('reference-add'));
+
+    expect(kindsOf(0)).toEqual(['value']);
+  });
+
+  it('offers it for a chart grouped by a column that is not an answer column (Overall line over comunas)', async () => {
+    const context = await openDialog({ existing: edit(undefined, ratio), indicators: declared({ water_source: { categories: 'single' }, municipality: { label: 'Municipio' } }) });
+    await click(context, field('reference-add'));
+
+    expect(kindsOf(0)).toEqual(['mean', 'median', 'overall', 'value']);
+  });
+
+  it('keeps a saved overall line, shows its kind, and sends it back when the form is saved unchanged', async () => {
+    const display = { referenceLines: [{ kind: 'overall' as const }, { kind: 'mean' as const }] };
+    const context = await openDialog({ existing: edit(display, ratio), indicators: declared({ municipality: { categories: 'single' } }) });
+
+    expect(kindSelect(0).value).toBe('overall');
+    expect(kindsOf(0)).toEqual(['overall', 'median', 'value']);
+    expect(kindsOf(1)).toEqual(['mean', 'median', 'value']);
+    await click(context, field('dialog-save'));
+    const body = context.http.expectOne(isPatch).request.body as { config: WidgetConfig };
+
+    expect(body.config.display).toEqual(display);
   });
 });

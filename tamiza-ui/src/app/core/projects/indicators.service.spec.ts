@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { DashboardColors, IndicatorsService, WidgetConfig, chartTypes, dashboardChangeKinds, emptyConfig, hasSeries, needsGroup, needsSeries, paletteIds, scaleIds, takesSeries } from './indicators.service';
+import { DashboardBases, DashboardColors, IndicatorsService, WidgetConfig, chartTypes, dashboardChangeKinds, basesOf, emptyConfig, hasSeries, needsGroup, needsSeries, paletteIds, scaleIds, takesSeries } from './indicators.service';
 
 const base = '/api/v1/projects/p1/indicators';
 const dashboards = '/api/v1/projects/p1/dashboards';
@@ -137,6 +137,30 @@ describe('IndicatorsService', () => {
     expect(request.request.body).toEqual({ source: '  Encuesta de hogares, ronda 2  ' });
     request.flush({ source: 'Encuesta de hogares, ronda 2' });
     expect(saved).toEqual({ source: 'Encuesta de hogares, ronda 2' });
+  });
+
+  it('sets the base settings of a dashboard with a put to its bases, and answers them as saved', () => {
+    const bases: DashboardBases = { minN: 30, showN: true };
+    let saved: unknown;
+    service.saveBases('p1', 'd2', bases).subscribe((answer) => (saved = answer));
+
+    const request = http.expectOne(`${dashboards}/d2/bases`);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.body).toEqual({ minN: 30, showN: true });
+    request.flush(bases);
+    expect(saved).toEqual(bases);
+  });
+
+  it('turns the threshold off by sending null, and sends nothing else the object it was given holds', () => {
+    service.saveBases('p1', 'd2', { minN: null, showN: false, name: 'Teatro' } as DashboardBases).subscribe();
+
+    expect(http.expectOne(`${dashboards}/d2/bases`).request.body).toEqual({ minN: null, showN: false });
+  });
+
+  it('reads the base settings of a dashboard or a version that has none as off', () => {
+    expect(basesOf({})).toEqual({ minN: null, showN: false });
+    expect(basesOf(null)).toEqual({ minN: null, showN: false });
+    expect(basesOf({ minN: 30, showN: true })).toEqual({ minN: 30, showN: true });
   });
 
   it('removes the source of a dashboard by sending null', () => {
@@ -420,5 +444,9 @@ describe('IndicatorsService', () => {
     expect(dashboardChangeKinds).toContain('sourceChanged');
     expect(dashboardChangeKinds.indexOf('sourceChanged')).toBe(dashboardChangeKinds.indexOf('colorsChanged') + 1);
     expect(new Set(dashboardChangeKinds).size).toBe(dashboardChangeKinds.length);
+  });
+
+  it('names the change that saves the base settings of a dashboard among the kinds of change a version records', () => {
+    expect(dashboardChangeKinds).toContain('basesChanged');
   });
 });

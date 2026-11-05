@@ -1,5 +1,6 @@
-import { Component, computed, input } from '@angular/core';
+import { Component, computed, effect, input, output } from '@angular/core';
 import { QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
+import { ChartBases, isSmallBase, noChartBases, smallBaseOpacity } from './base-figures';
 import { registerExportParts } from './export-parts';
 import { ColumnNamer, ValueFormatter, captionShown, plotted, rawNames } from './format';
 
@@ -11,7 +12,7 @@ import { ColumnNamer, ValueFormatter, captionShown, plotted, rawNames } from './
   selector: 'app-stat-widget',
   template: `
     <div class="flex h-full min-h-0 flex-col gap-1" [class.justify-center]="!hasTexts()" [class.justify-center-safe]="hasTexts()" data-testid="stat">
-      <p class="break-all text-4xl font-semibold text-heading" data-testid="stat-value">{{ value() }}</p>
+      <p class="break-all text-4xl font-semibold text-heading" [style.opacity]="small() ? smallOpacity : null" [attr.data-small]="small() ? 'true' : null" data-testid="stat-value">{{ value() }}</p>
       <p class="break-words text-sm text-body" [class.sr-only]="!captionShown(config())" data-testid="stat-label">{{ description() }}</p>
     </div>
   `,
@@ -26,6 +27,11 @@ export class StatWidget {
   readonly format = input.required<ValueFormatter>();
   /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
   readonly names = input<ColumnNamer>(rawNames);
+  /** The threshold in force: a figure whose n is below it is drawn at reduced opacity (add-small-sample-warnings, design D10). */
+  readonly bases = input<ChartBases>(noChartBases);
+  /** 1 while the figure is dimmed for a small base, so the widget can explain the dimming under the tile (design D11). */
+  readonly dimmed = output<number>();
+  protected readonly smallOpacity = smallBaseOpacity;
 
   /**
    * The tile has a subtitle or a footnote, which take room from it: its column is then centered while it fits and starts at the top when
@@ -38,13 +44,16 @@ export class StatWidget {
     return row ? this.format()(row.value) : '—';
   });
   protected readonly description = computed(() => plotted(this.config(), this.label(), this.names()));
+  /** The row of a tile is one mark: its n is the sum of the denominator or of the base column over its rows (design D2). */
+  protected readonly small = computed(() => isSmallBase(this.rows()[0]?.n, this.bases().minN));
 
   // What an image of the tile says (add-widget-export): the figure and what it measures.
   constructor() {
+    effect(() => this.dimmed.emit(this.small() ? 1 : 0));
     registerExportParts({
       plot: () => null,
       settle: () => undefined,
-      parts: () => ({ caption: null, legend: null, notes: [], stat: { value: this.value(), description: this.description() }, table: null }),
+      parts: () => ({ caption: null, legend: null, notes: [], stat: { value: this.value(), description: this.description(), ...(this.small() ? { dimmed: true } : {}) }, table: null }),
     });
   }
 }

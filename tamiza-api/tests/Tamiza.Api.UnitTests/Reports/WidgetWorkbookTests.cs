@@ -319,4 +319,29 @@ public sealed class WidgetWorkbookTests : IDisposable
 
         Assert.Equal(hostile, Rows(MiniExcel.GetSheetNames(_path)[0])[0].Values.First());
     }
+
+    [Fact]
+    public void The_data_sheet_has_the_n_column_in_whole_numbers_and_the_summary_says_how_many_values_have_a_small_base()
+    {
+        Write(Model(SmallBases(1, "2.1. Asistió, por comuna")));
+
+        // The data sheet is first: the group, the rate, and the n column; the marked cell holds the number alone.
+        var rows = Rows("2.1. Asistió, por comuna");
+        Assert.Equal(["Comuna", "Teatro hoy: numerator / denominator", "n"], rows[0].Keys);
+        Assert.Equal(0.5, Convert.ToDouble(rows[1]["Teatro hoy: numerator / denominator"]));
+        Assert.Equal(16d, Convert.ToDouble(rows[1]["n"]));
+        Assert.Equal("#,##0", CellFormat("C3"));
+
+        var notes = Assert.Single(Rows("Summary"), r => Pair(r)[0] == "Notes");
+        Assert.Equal("2 values have a base below 30, marked *. n = 157 Hogares que asistieron Sin dato: 50%", Pair(notes)[1]);
+    }
+
+    [Fact]
+    public void A_widget_without_base_notes_has_the_summary_it_had()
+    {
+        Write(Model(Bars(1, "2.1", 2)));
+
+        Assert.DoesNotContain(Rows("Summary"), r => Pair(r)[0] == "Notes");
+        Assert.Equal(["municipality", "Households visited: value"], Rows("2.1")[0].Keys);
+    }
 }

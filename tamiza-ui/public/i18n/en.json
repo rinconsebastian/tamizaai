@@ -631,6 +631,33 @@
         "summaryLast": "At the end: {{ count }}",
         "summaryStrip": "Numbers hidden",
         "summaryNone": "Not set"
+      },
+      "base": {
+        "legend": "Base column",
+        "help": "The numeric column that counts the people each row stands for, such as households. A widget's n is the sum of this column over its rows. Choose at most one; leave None for a table whose rows are not counts, or when the n is the denominator of a rate.",
+        "none": "None"
+      },
+      "facts": {
+        "title": "Base and answers",
+        "missing": "Values that mean no data",
+        "missingHelp": "Up to {{ max }} values, such as “Sin dato” or “No sabe”, written exactly as the data has them. A widget can leave them out and say what they held.",
+        "answers": "Answers of one question",
+        "answersNone": "No",
+        "answersSingle": "Yes, single choice",
+        "answersMultiple": "Yes, multiple choice",
+        "answersHelp": "Choose it for the columns of a long table that name a question and its answers, such as variable, orden and categoria, where every household is counted under every answer. Never for a column that splits the households, such as comuna or estrato, and not for a table with a base of its own for each answer. Choose multiple choice when any question of the column allows several answers.",
+        "summaryBase": "Base column",
+        "summaryMissing": "No data: {{ count }}",
+        "summarySingle": "Answers: single choice",
+        "summaryMultiple": "Answers: multiple choice",
+        "textMissing": "No data: {{ values }}"
+      },
+      "chips": {
+        "addLabel": "Add a value",
+        "addPlaceholder": "Another value",
+        "add": "Add",
+        "remove": "Remove {{ value }}",
+        "full": "At most {{ count }} values."
       }
     },
     "nameErrors": {
@@ -1599,7 +1626,8 @@
         "overall": "Overall",
         "value": "Reference"
       },
-      "summary": "Reference lines: {{ lines }}."
+      "summary": "Reference lines: {{ lines }}.",
+      "noOverall": "No overall line: the bars are the answers of one question."
     },
     "chart": {
       "noGroup": "(none)",
@@ -1747,7 +1775,8 @@
         "scaleNeutral": "A scale has at most one neutral value.",
         "scaleSide": "A scale has at most {{ max }} values on one side.",
         "likertRatio": "A Likert widget shows shares of a measure, not a ratio.",
-        "seriesSame": "Choose a series column other than the group column."
+        "seriesSame": "Choose a series column other than the group column.",
+        "minN": "The small-base threshold must be a whole number from 1 to {{ max }}."
       },
       "filtersCount": "Filters ({{ count }})",
       "tooltip": {
@@ -1923,6 +1952,36 @@
           "indicator": "Default order (the indicator’s order)",
           "chart": "Default order (the chart’s order)"
         }
+      },
+      "bases": {
+        "legend": "Base",
+        "help": "How many people each value rests on, and what to do about the small ones.",
+        "showN": {
+          "label": "Base n under the widget",
+          "dashboardShown": "As the dashboard says (shown)",
+          "dashboardHidden": "As the dashboard says (hidden)",
+          "show": "Show",
+          "hide": "Hide"
+        },
+        "minN": {
+          "label": "Small bases",
+          "dashboardBelow": "As the dashboard says (below {{ min }})",
+          "dashboardOff": "As the dashboard says (off)",
+          "off": "Off",
+          "own": "Below",
+          "valueLabel": "Base below",
+          "hint": "Values whose base n is lower are drawn dimmed. A whole number from 1 to {{ max }}."
+        },
+        "missing": {
+          "label": "Leave out values that mean no data, and say what they held under the chart",
+          "named": "Left out: {{ values }}.",
+          "none": "The indicator declares no values that mean no data for the group and series columns. Declare them in its details."
+        },
+        "noN": {
+          "kind": "A box plot has no base n: each box gives the number of values it holds.",
+          "undeclared": "This widget has no base n to show: its indicator must declare its base column or its answer columns.",
+          "measure": "This widget has no base n: a measure has one only when its indicator declares a base column."
+        }
       }
     },
     "series": {
@@ -2042,6 +2101,19 @@
       "addPlaceholder": "Another value",
       "add": "Add",
       "full": "An order lists at most {{ count }} values."
+    },
+    "bases": {
+      "numerator": "Numerator",
+      "denominator": "Denominator",
+      "nName": "n ({{ name }})",
+      "rows": "Rows",
+      "smallTooltip": "Small base: n = {{ n }} (below {{ min }})",
+      "smallSome": "Small base in some series (below {{ min }})",
+      "smallNote": "Marks with a base below {{ min }} are dimmed.",
+      "summaryCount": ", {{ count }} with a small base",
+      "tableNote": "* Base below {{ min }}.",
+      "tableMark": "small base",
+      "nColumn": "n"
     }
   },
   "dashboards": {
@@ -2060,7 +2132,8 @@
       "colors": "Colors",
       "source": "Source",
       "report": "Scheduled email…",
-      "versions": "Version history"
+      "versions": "Version history",
+      "bases": "Base sizes"
     },
     "unavailable": {
       "limit": "A project can have at most {{ max }} dashboards.",
@@ -2191,7 +2264,8 @@
         "widgetMovedIn": "Widget “{{ widget }}” moved here from “{{ dashboard }}”",
         "layoutChanged": "Widgets moved or resized",
         "restored": "Version {{ number }} restored",
-        "unrecorded": "Changes kept before a restore"
+        "unrecorded": "Changes kept before a restore",
+        "basesChanged": "Base sizes changed"
       },
       "viewing": "Viewing version {{ number }}, saved by {{ author }} on {{ time }}. It is read-only.",
       "backToCurrent": "Back to the current version",
@@ -2370,6 +2444,20 @@
         "7": "crimson",
         "8": "orange"
       }
+    }
+  },
+  "dashboardBases": {
+    "title": "Base sizes of {{ name }}",
+    "intro": "How the widgets of this dashboard show their base n. Each widget can follow these settings or set its own.",
+    "where": "The n of a value is the sum of its indicator's base column over its rows or, for a rate, the sum of its denominator. A widget shows an n line only when its indicator declares a base column or its answer columns.",
+    "showN": "Show each widget's base n under it",
+    "minN": "Dim marks with a base below",
+    "minHint": "Leave it empty to turn dimming off. Common choices are 30 or 50.",
+    "save": "Save base sizes",
+    "saving": "Saving…",
+    "saved": "Base sizes saved.",
+    "errors": {
+      "range": "The small-base threshold must be a whole number from 1 to {{ max }}; leave it empty to turn it off."
     }
   }
 }

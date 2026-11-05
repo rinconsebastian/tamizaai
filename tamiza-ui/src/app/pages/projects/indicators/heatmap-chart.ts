@@ -1,7 +1,8 @@
-import { Component, ElementRef, computed, inject, input, viewChild } from '@angular/core';
+import { Component, ElementRef, LOCALE_ID, computed, effect, inject, input, output, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
+import { ChartBases, isSmallBase, noChartBases, seriesFigures, smallBaseDash, smallBaseStroke, summaryWithSmall } from './base-figures';
 import { observeSize } from './chart-data';
 import { ChartColors } from './chart-colors';
 import { registerExportParts } from './export-parts';
@@ -27,6 +28,8 @@ export interface HeatCell {
   value: number | null;
   step: number;
   label: string | null;
+  /** A cell with a small base keeps its shade and is hatched with a dashed outline (add-small-sample-warnings, design D10). */
+  small: boolean;
 }
 
 export interface HeatmapPlot {
@@ -48,6 +51,8 @@ export interface HeatmapPlotInput {
   seriesLabel: (index: number) => string;
   /** A short value for inside a cell. */
   short: (value: number) => string;
+  /** The threshold in force: a cell whose n is below it is a small base. Null or left out for none. */
+  minN?: number | null;
 }
 
 const gap = 2;
@@ -122,6 +127,7 @@ export function heatmapPlot(input: HeatmapPlotInput): HeatmapPlot {
         value,
         step: value === null || !range ? 0 : sequentialStep(value, range.min, range.max),
         label: labelled ? text : null,
+        small: value !== null && isSmallBase(row.figures?.[s]?.n, input.minN),
       });
       hits.push({ x: x - gap / 2, y: y - gap / 2, width: w + gap, height: h + gap, at: { g, s } });
     });
@@ -146,7 +152,7 @@ let hatchIds = 0;
     <ng-container *transloco="let t">
       <p class="shrink-0 text-xs text-body" [class.sr-only]="!captionShown(config())" data-testid="chart-caption">{{ t('indicators.series.caption', { what: what(), group: groupShown(), series: seriesShown() }) }}</p>
       @if (asTable()) {
-        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [orders]="orders()" chartType="heatmap" />
+        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [orders]="orders()" [bases]="bases()" chartType="heatmap" />
       } @else {
         <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
           <svg
@@ -169,6 +175,10 @@ let hatchIds = 0;
               <pattern [attr.id]="hatchId" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                 <rect width="6" height="6" class="fill-neutral-primary-soft" />
                 <line x1="0" y1="0" x2="0" y2="6" class="stroke-default-strong" stroke-width="1" />
+              </pattern>
+              <!-- A small base: one diagonal from the top left corner of a 6 px tile to its bottom right one, in the heading ink, over the cell's own shade. The empty cell's runs the other way. -->
+              <pattern [attr.id]="smallHatchId" width="6" height="6" patternUnits="userSpaceOnUse">
+                <path d="M0 0 L6 6" class="stroke-heading" stroke-width="1" fill="none" />
               </pattern>
             </defs>
             @for (label of plot().columnLabels; track $index) {
@@ -202,6 +212,9 @@ let hatchIds = 0;
                   [attr.opacity]="marks.isLifted(cell.g, cell.s) ? 0.8 : null"
                   data-testid="chart-mark"
                 />
+                @if (cell.small) {
+                  <rect class="stroke-heading" rx="2" [attr.stroke-width]="smallStroke" [attr.stroke-dasharray]="smallDash" [attr.x]="cell.x" [attr.y]="cell.y" [attr.width]="cell.width" [attr.height]="cell.height" [attr.fill]="'url(#' + smallHatchId + ')'" pointer-events="none" data-testid="heat-small" />
+                }
                 @if (cell.label) {
                   <text font-size="11" text-anchor="middle" [attr.x]="cell.x + cell.width / 2" [attr.y]="cell.y + cell.height / 2 + 4" [style.fill]="ink(cell.step)" data-testid="heat-value">{{ cell.label }}</text>
                 }
@@ -253,6 +266,7 @@ let hatchIds = 0;
 })
 export class HeatmapChart {
   private readonly transloco = inject(TranslocoService);
+  private readonly locale = inject(LOCALE_ID);
   readonly answer = input.required<QueryResult>();
   readonly config = input.required<WidgetConfig>();
   /** Whether the line that names what the widget plots is seen: a hidden one stays for screen readers (add-widget-context, design D3). */
@@ -267,6 +281,12 @@ export class HeatmapChart {
   readonly asTable = input(false);
   /** The colors of the widget: its sequential scale, from the widget or from its dashboard's palette. */
   readonly colors = input.required<ChartColors>();
+  /** The threshold in force and the indicator's base column, for the figures and the small bases of the cells (add-small-sample-warnings). */
+  readonly bases = input<ChartBases>(noChartBases);
+  /** How many cells the chart hatches for a small base, so the widget can explain the hatching under it (design D10, D11). */
+  readonly dimmed = output<number>();
+  protected readonly smallStroke = smallBaseStroke;
+  protected readonly smallDash = smallBaseDash;
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private readonly svg = viewChild<ElementRef<SVGElement>>('chartSvg');
@@ -274,6 +294,8 @@ export class HeatmapChart {
 
   protected readonly steps = Array.from({ length: sequentialSteps }, (_, i) => i + 1);
   protected readonly hatchId = `heat-hatch-${++hatchIds}`;
+  /** The pattern of a small base, with an id of its own in this chart, so an image of two charts on one page never mixes them up. */
+  protected readonly smallHatchId = `${this.hatchId}-small`;
   protected readonly hatchSwatch = 'repeating-linear-gradient(45deg, transparent 0 3px, var(--color-default-strong) 3px 4px)';
   protected readonly what = computed(() => plotted(this.config(), this.label(), this.names()));
   /** The group and series columns under their names shown (their colors stay keyed by the columns themselves). */
@@ -296,21 +318,26 @@ export class HeatmapChart {
       groupLabel: (group) => shown(this.groupText(), group) ?? this.tr('indicators.chart.noGroup'),
       seriesLabel: (i) => seriesName(table.columns[i], this.tr, this.seriesText()),
       short: (value) => this.format().tick(value),
+      minN: this.bases().minN,
     });
   });
+  private readonly smallCount = computed(() => this.plot().cells.filter((cell) => cell.small).length);
 
   /** A cell's tooltip: its group, its series and its value, or that it has no value. */
   private readonly marksGrid = computed<(MarkPoint | null)[][]>(() => {
     const table = this.table();
     const plot = this.plot();
     const grid: (MarkPoint | null)[][] = table.rows.map((row) => row.cells.map(() => null));
+    const figures = seriesFigures(this.config(), this.names(), this.bases(), this.locale, this.tr);
     for (const cell of plot.cells) {
       const column = table.columns[cell.s];
+      // After the value: the numerator, the denominator and the n under their names, and the note of a small base (design D9).
+      const tip = cell.value === null ? { lines: [], footer: null } : figures.tip(table.rows[cell.g].figures?.[cell.s]);
       grid[cell.g][cell.s] = {
         content: {
           heading: shown(this.groupText(), table.rows[cell.g].group) ?? this.tr('indicators.chart.noGroup'),
-          lines: [{ label: seriesName(column, this.tr, this.seriesText()), value: cell.value === null ? this.tr('indicators.series.noValue') : this.format()(cell.value), align: 'end' }],
-          footer: null,
+          lines: [{ label: seriesName(column, this.tr, this.seriesText()), value: cell.value === null ? this.tr('indicators.series.noValue') : this.format()(cell.value), align: 'end' }, ...tip.lines],
+          footer: tip.footer,
         },
         x: cell.x + cell.width / 2,
         y: cell.y + cell.height / 2,
@@ -323,6 +350,7 @@ export class HeatmapChart {
 
   // What an image of the heat map says around its grid (add-widget-export): its caption and its scale, from the smallest value to the largest.
   constructor() {
+    effect(() => this.dimmed.emit(this.smallCount()));
     registerExportParts({
       plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
       settle: () => this.marks.reset(),
@@ -369,7 +397,7 @@ export class HeatmapChart {
     const format = this.format();
     const lang = this.transloco.getActiveLang();
     const top = table.rows.flatMap((row) => row.cells.flatMap((cell, i) => (cell === null ? [] : [{ cell, group: row.group, column: table.columns[i] }]))).reduce((best, entry) => (entry.cell > best.cell ? entry : best));
-    return t('indicators.heatmap.summary', {
+    const words = t('indicators.heatmap.summary', {
       what: this.what(),
       group: this.groupShown(),
       series: this.seriesShown(),
@@ -379,5 +407,6 @@ export class HeatmapChart {
       max: format(range.max),
       top: `${shown(this.groupText(), top.group) ?? t('indicators.chart.noGroup')}, ${seriesName(top.column, t, this.seriesText())}`,
     });
+    return summaryWithSmall(words, this.smallCount(), t);
   }
 }

@@ -10,6 +10,7 @@ import { ApiErrors } from '../../core/api-error';
 import { Downloader } from '../../core/download.service';
 import { ExportFormat } from '../../core/projects/data.service';
 import {
+  DashboardBases,
   DashboardColors,
   DashboardFilter,
   DashboardRestore,
@@ -19,12 +20,15 @@ import {
   IndicatorsService,
   Layout,
   Widget,
+  basesOf,
   maxDashboards,
 } from '../../core/projects/indicators.service';
 import { DashboardEntry } from '../../core/projects/projects.service';
 import { SystemConfigService } from '../../core/system-config';
 import { Alert, ApiLang, Badge, Button, Card, ChartTooltips, ConfirmDialog, Disclosure, DropdownMenu, MenuItem, Skeleton, ToastService, DateTimePipe, NumberPipe, dateText, numberText } from '../../shared/ui';
+import { settingsInForce } from './indicators/base-figures';
 import { colorsOf, defaultColors } from './indicators/chart-colors';
+import { DashboardBasesData, DashboardBasesDialog, DashboardBasesResult } from './indicators/dashboard-bases-dialog';
 import { DashboardColorsData, DashboardColorsDialog, DashboardColorsResult } from './indicators/dashboard-colors-dialog';
 import { DashboardFilterBar, FilterChange } from './indicators/dashboard-filter-bar';
 import { FilterValues, activeFilters, defaultsOf, describeValue, readAddress, writeAddress } from './indicators/dashboard-filters';
@@ -343,6 +347,7 @@ export const layoutSaveDelayMs = 400;
             [allTables]="allTables()"
             [dashboardFilters]="active()"
             [colors]="colors()"
+            [bases]="bases()"
             [exporting]="exportingWidgets()"
             (layoutsChange)="layoutsChanged($event)"
             (edit)="editWidget($event)"
@@ -450,6 +455,7 @@ export class ProjectIndicators {
       { id: 'filters', label: t('dashboards.menu.filters'), testId: 'dashboard-filters' },
       { id: 'colors', label: t('dashboards.menu.colors'), testId: 'dashboard-colors' },
       { id: 'source', label: t('dashboards.menu.source'), testId: 'dashboard-source' },
+      { id: 'bases', label: t('dashboards.menu.bases'), testId: 'dashboard-bases' },
       ...(this.emailEnabled() ? [{ id: 'report', label: t('dashboards.menu.report'), testId: 'dashboard-report' }] : []),
       { id: 'versions', label: t('dashboards.menu.versions'), testId: 'dashboard-versions' },
       {
@@ -526,6 +532,13 @@ export class ProjectIndicators {
   protected readonly source = computed<string | null>(() => {
     const version = this.viewing();
     return (version ? version.source : this.dashboardSource()) || null;
+  });
+  /** The open dashboard's base settings as they are: no threshold and no n line until it is read (add-small-sample-warnings, design D8). */
+  protected readonly dashboardBases = signal<DashboardBases>(basesOf(null));
+  /** What the widgets apply: the settings of the version shown while one is, so it looks as it did; the dashboard's otherwise. */
+  protected readonly bases = computed<DashboardBases>(() => {
+    const version = this.viewing();
+    return version ? basesOf(version) : this.dashboardBases();
   });
   /** The filters of an address that no longer apply, named, until the member changes a value or another dashboard opens. */
   protected readonly dropped = signal<string[]>([]);
@@ -651,6 +664,7 @@ export class ProjectIndicators {
         this.filtersRead.set(true);
         this.dashboardColors.set(colorsOf(dashboard));
         this.dashboardSource.set(dashboard.source || null);
+        this.dashboardBases.set(basesOf(dashboard));
         this.widgets.set(dashboard.widgets);
         this.error.set(null);
         this.loading.set(false);
@@ -700,6 +714,7 @@ export class ProjectIndicators {
     this.filtersRead.set(false);
     this.dashboardColors.set(defaultColors);
     this.dashboardSource.set(null);
+    this.dashboardBases.set(basesOf(null));
     this.dropped.set([]);
     this.allTables.set(false);
     this.exporting.set(null);
@@ -805,6 +820,7 @@ export class ProjectIndicators {
         bodyWidth: view.bodyWidth(),
         registration,
         notesAbove: view.exportNotesAbove(),
+        notesBelow: view.exportNotesBelow(),
         mapPicture: view.chartType() === 'map' && asChart ? view.mapPicture() : null,
         basemapNote: view.chartType() === 'map' && asChart && view.mapBasemap() ? t('indicators.widgetExport.basemapLeftOut') : null,
         facts: {
@@ -848,6 +864,7 @@ export class ProjectIndicators {
           ignored: ignored.includes(filter.column),
         })),
         locale: this.locale,
+        ...this.basesOfRequest(widget),
         ...(this.viewing() ? { version: this.viewing()!.number } : {}),
       }),
     );
@@ -1047,6 +1064,7 @@ export class ProjectIndicators {
         filters: this.filters(),
         values: this.filterValues(),
         colors: this.colors(),
+        bases: this.bases(),
       },
       ariaLabelledBy: 'widget-dialog-title',
       autoFocus: 'first-tabbable',
@@ -1128,6 +1146,9 @@ export class ProjectIndicators {
         break;
       case 'source':
         this.editSource();
+        break;
+      case 'bases':
+        this.editBases();
         break;
       case 'report':
         this.editReport();
@@ -1302,6 +1323,56 @@ export class ProjectIndicators {
         this.dashboardSource.set(saved.source);
         this.toasts.success(this.transloco.translate(saved.source ? 'dashboardSource.saved' : 'dashboardSource.removed'));
       });
+  }
+
+  /**
+   * Sets whether the widgets show their base n and the small-base threshold (add-small-sample-warnings, design D8). Once saved, the widgets
+   * follow at once and nothing is queried again. Saving what the dashboard already has closes the form and changes nothing. Focus returns
+   * to the actions button.
+   */
+  private editBases(): void {
+    const dashboard = this.current();
+    if (!dashboard) {
+      return;
+    }
+    this.dialog
+      .open<DashboardBasesResult, DashboardBasesData>(DashboardBasesDialog, {
+        data: { projectId: this.projectId, dashboardId: dashboard.id, name: dashboard.name, bases: this.dashboardBases() },
+        ariaLabelledBy: 'dashboard-bases-dialog-title',
+        autoFocus: 'first-tabbable',
+        restoreFocus: true,
+        backdropClass: ['cdk-overlay-dark-backdrop'],
+        maxWidth: '100vw',
+        maxHeight: '100dvh',
+      })
+      .closed.subscribe((saved) => {
+        if (!saved) {
+          return;
+        }
+        if ('gone' in saved) {
+          this.gone(dashboard);
+          return;
+        }
+        if (!this.showing(dashboard.id)) {
+          return; // another dashboard opened meanwhile: it reads its own settings
+        }
+        this.dashboardBases.set(saved);
+        this.toasts.success(this.transloco.translate('dashboardBases.saved'));
+      });
+  }
+
+  /**
+   * The base settings a widget's workbook is built with (design D13): the widget's own over the dashboard's, or the shown version's, as
+   * the screen applies them. Left out while neither the dashboard nor the widget says anything, so the request is what it was.
+   */
+  private basesOfRequest(widget: Widget): { minN?: number; showN?: boolean } {
+    const own = widget.config.display;
+    const shown = this.bases();
+    const inForce = settingsInForce(own, shown);
+    return {
+      ...(shown.minN !== null || typeof own?.minN === 'number' ? { minN: inForce.minN ?? 0 } : {}),
+      ...(shown.showN || typeof own?.showN === 'boolean' ? { showN: inForce.showN } : {}),
+    };
   }
 
   /**
@@ -1487,6 +1558,7 @@ export class ProjectIndicators {
       // drawn in the colors the restore replaced, or in the version's, which are no longer shown.
       this.dashboardColors.set(colorsOf(restore.dashboard));
       this.dashboardSource.set(restore.dashboard.source || null);
+      this.dashboardBases.set(basesOf(restore.dashboard));
       this.loads.next(dashboard.id);
       this.focusHeading();
     }

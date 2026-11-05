@@ -19,6 +19,7 @@ function compose(overrides: Partial<ImageInput> = {}, parts: Partial<ExportParts
     subtitle: null,
     footnote: null,
     notesAbove: [],
+    notesBelow: [],
     parts: { ...empty, ...parts },
     plot: null,
     notesExtra: [],
@@ -316,5 +317,69 @@ describe('an image in a declared order', () => {
 
     const written = names(texts).filter((text) => text.startsWith('COMUNA') || text === 'Sin dato');
     expect(written).toEqual(['COMUNA 2', 'COMUNA 1', 'Sin dato']);
+  });
+});
+
+describe('an image with small bases (add-small-sample-warnings, design D10, D11)', () => {
+  it('draws the lines of the bases after the chart\'s own notes and before the footnote, which stays last (Lines in an image)', () => {
+    const { texts } = compose(
+      {
+        footnote: 'No suman 100 %: respuesta múltiple.',
+        notesAbove: ['Not filtered by: Round'],
+        notesBelow: ['Marks with a base below 30 are dimmed.', 'n = 223 Hogares que asistieron', 'No sabe: 2.24%'],
+        notesExtra: ['The basemap is not included in the image.'],
+        footer: ['Census 2026 · Housing'],
+      },
+      { caption: 'Coverage: value', notes: ['2 rows were left out.'] },
+    );
+
+    expect(names(texts)).toEqual([
+      'Coverage by municipality',
+      'Not filtered by: Round',
+      'Coverage: value',
+      '2 rows were left out.',
+      'The basemap is not included in the image.',
+      'Marks with a base below 30 are dimmed.',
+      'n = 223 Hogares que asistieron',
+      'No sabe: 2.24%',
+      'No suman 100 %: respuesta múltiple.',
+      'Census 2026 · Housing',
+    ]);
+    const ys = texts.map((t) => t.y);
+    expect(ys).toEqual([...ys].sort((a, b) => a - b));
+  });
+
+  it('draws the lines at 12 px, whole, in the body color', () => {
+    const long = 'n = 223 ' + 'Hogares que asistieron '.repeat(6).trim();
+    const { texts, markup } = compose({ notesBelow: [long] });
+
+    const lines = texts.filter((t) => t.size === 12);
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.map((t) => t.text).join(' ')).toBe(long);
+    expect(markup).toContain('fill="#444"');
+  });
+
+  it('adds nothing when the widget has no line', () => {
+    const plain = compose({}, { caption: 'Coverage: value' });
+    const none = compose({ notesBelow: [] }, { caption: 'Coverage: value' });
+
+    expect(names(none.texts)).toEqual(names(plain.texts));
+    expect(none.height).toBe(plain.height);
+  });
+
+  it('writes the figure of a stat tile with a small base at the reduced opacity of the page, and a whole one as it was (Dimmed stat figure)', () => {
+    const dimmed = compose({}, { stat: { value: '40%', description: 'Teatro hoy', dimmed: true } });
+    const whole = compose({}, { stat: { value: '40%', description: 'Teatro hoy' } });
+
+    const figure = (svg: SVGSVGElement) => Array.from(svg.querySelectorAll('text')).find((node) => node.textContent === '40%')!;
+    expect(figure(dimmed.svg).getAttribute('fill-opacity')).toBe('0.35');
+    expect(figure(whole.svg).hasAttribute('fill-opacity')).toBe(false);
+    expect(figure(whole.svg).getAttribute('font-size')).toBe('36');
+  });
+
+  it('keeps the note of a table with small bases among the notes below it', () => {
+    const { texts } = compose({}, { table: { headers: ['Comuna', 'Teatro hoy', 'n'], rows: [['COMUNA 7', '50% *', '16']] }, notes: ['* Base below 30.'] });
+
+    expect(names(texts)).toEqual(expect.arrayContaining(['50% *', '* Base below 30.']));
   });
 });

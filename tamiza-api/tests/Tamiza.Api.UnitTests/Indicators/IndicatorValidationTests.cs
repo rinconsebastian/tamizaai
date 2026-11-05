@@ -1916,4 +1916,75 @@ public sealed class IndicatorValidationTests
 
         Assert.Equal(["config.display.color"], errors.Keys);
     }
+
+    // The base settings and leaving out no-data values (design D6 and D7 of add-small-sample-warnings)
+
+    private static WidgetConfig WithBase(WidgetDisplay? display = null, bool? missingFooter = null, string? groupBy = "municipality", string? seriesBy = null) =>
+        new WidgetConfigInput("households_by_source", GroupBy: groupBy, SeriesBy: seriesBy, Display: display, MissingFooter: missingFooter).Normalize();
+
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void The_base_settings_are_accepted_on_every_kind_of_widget(string chartType)
+    {
+        var errors = Check(WithBase(new WidgetDisplay(MinN: 30, ShowN: false), seriesBy: ChartTypes.HasSeries(chartType) ? "water_source" : null), chartType);
+
+        Assert.DoesNotContain(errors.Keys, key => key.StartsWith("config.display", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_chart_type_change_of_a_widget_with_both_base_settings_is_accepted()
+    {
+        var config = WithBase(new WidgetDisplay(MinN: 0, ShowN: true));
+
+        Assert.Empty(Check(config, ChartTypes.Bar));
+        Assert.Empty(Check(config, ChartTypes.Histogram));
+        Assert.Empty(Check(config, ChartTypes.Stat));
+        Assert.Equal(new WidgetDisplay(MinN: 0, ShowN: true), config.Display);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(10000)]
+    public void A_threshold_from_0_to_10000_is_accepted(int minN) => Assert.Empty(Check(WithBase(new WidgetDisplay(MinN: minN)), ChartTypes.Column));
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(10001)]
+    public void A_threshold_out_of_range_is_refused_on_the_threshold(int minN)
+    {
+        var error = Assert.Single(Check(WithBase(new WidgetDisplay(MinN: minN)), ChartTypes.Column));
+
+        Assert.Equal("config.display.minN", error.Key);
+        Assert.Equal(["The small-base threshold must be a whole number from 0 (off) to 10,000."], error.Value);
+        Assert.Single(Check(WithBase(new WidgetDisplay(MinN: minN)), null));
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void Missing_footer_is_accepted_on_the_kinds_that_take_it_and_refused_on_the_others(string chartType)
+    {
+        var errors = Check(WithBase(missingFooter: true, seriesBy: ChartTypes.HasSeries(chartType) ? "water_source" : null), chartType);
+
+        if (ChartTypes.TakesMissingFooter(chartType))
+        {
+            Assert.DoesNotContain("config.missingFooter", errors.Keys);
+        }
+        else
+        {
+            Assert.Equal(
+                ["Only bar, column, line, pie, heat map, population pyramid, Likert and cross table widgets can leave out values that mean no data."],
+                errors["config.missingFooter"]);
+        }
+    }
+
+    [Fact]
+    public void A_stat_tile_that_leaves_out_no_data_values_is_refused_on_that_option_and_no_chart_type_checks_nothing()
+    {
+        var error = Assert.Single(Check(WithBase(missingFooter: true, groupBy: null), ChartTypes.Stat));
+
+        Assert.Equal("config.missingFooter", error.Key);
+        Assert.Empty(Check(WithBase(missingFooter: true), null));
+        Assert.Empty(Check(WithBase(), ChartTypes.Stat));
+    }
 }

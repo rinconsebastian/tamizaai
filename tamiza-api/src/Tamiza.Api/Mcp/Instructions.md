@@ -53,6 +53,16 @@ A widget's title is one short line. Put the rest in its `display`, in the widget
 - Set the dashboard's `source`, where its data comes from, once, with `update_dashboard`; an empty text removes it.
 - `update_widget` replaces the whole `config`, so send the `display` again, texts included, when you change the query.
 
+## Bases
+
+A survey estimate rests on the people behind it, so `query_indicator` and `get_widget_data` give the base n of what they return: a rate's `n` is its `denominator` unless its indicator declares a base column, and its rows carry `numerator`, `denominator` and `n`.
+
+- In `save_script`'s `columns`, declare `base: true` on the column that counts the units each row stands for (such as `hogares`), `categories` (`single` or `multiple`) on the columns of a long table that name the question and its answers (`variable`, `orden`, `categoria`), and `missing` on the values that mean no data (such as `Sin dato` or `No sabe`). Never declare `categories` on a household dimension such as `comuna` or `estrato`, which splits the households, and use `multiple` when any question of the column is multiple-choice.
+- A widget's own `n` needs one of those declarations: a base column or answer columns. Without them each value keeps its own `n`, and the widget has none.
+- Set a dashboard's `minN` (the small-base threshold, 0 turns it off) and `showN` with `update_dashboard` only when the person asks, or their study's specification does. A widget can follow it or set its own in `display.minN` and `display.showN`. `get_widget_data` marks a row, cell or box under the threshold `smallBase`.
+- `missingFooter` in a widget's `config` replaces hand-written `in` lists that only drop `Sin dato`: it leaves out the values the indicator declares as `missing` and says what they held in `noData`.
+- `save_script`'s `columns` replaces the whole map when given, so read it with `get_script` and send back the properties it holds (`base`, `missing`, `categories`, `order`, `last`, `stripPrefix`) together with the labels. A widget grouped or split by a declared answer column draws no `overall` line, and its `notes` say so.
+
 ## Rules
 
 - Answers to select questions are choice LABELS in the data, never codes. Select-multiple answers are labels joined by "; ".

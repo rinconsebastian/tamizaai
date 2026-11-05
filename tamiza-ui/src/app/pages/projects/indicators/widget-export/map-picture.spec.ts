@@ -39,6 +39,30 @@ describe('mapPictureToSvg', () => {
     expect(circle.getAttribute('fill')).toBe('rgb(2, 0, 0)');
   });
 
+  it('draws a shape with a small base with the dashed outline the screen gives it, and the others with none', () => {
+    const small = mapPictureToSvg(
+      {
+        width: 600,
+        height: 400,
+        shapes: [
+          { step: 3, point: null, polygons: [[[{ x: 10, y: 10 }, { x: 110, y: 10 }, { x: 110, y: 90 }]]], small: true },
+          { step: 4, point: { x: 300, y: 200 }, polygons: [], small: true },
+          { step: 5, point: null, polygons: [[[{ x: 200, y: 10 }, { x: 300, y: 10 }, { x: 300, y: 90 }]]] },
+        ],
+      },
+      resolve,
+      'wx-small',
+    );
+    const [region, plain] = Array.from(small.querySelectorAll('path'));
+    const circle = small.querySelector('circle')!;
+
+    expect([region.getAttribute('stroke-dasharray'), region.getAttribute('stroke-width')]).toEqual(['4 3', '2']);
+    expect([circle.getAttribute('stroke-dasharray'), circle.getAttribute('stroke-width')]).toEqual(['4 3', '2']);
+    expect(plain.hasAttribute('stroke-dasharray')).toBe(false);
+    expect(plain.getAttribute('stroke-width')).toBe('1');
+    expect(svg.querySelector('path')!.hasAttribute('stroke-dasharray')).toBe(false);
+  });
+
   it('holds no image, tile, link or credit', () => {
     const markup = new XMLSerializer().serializeToString(svg);
 

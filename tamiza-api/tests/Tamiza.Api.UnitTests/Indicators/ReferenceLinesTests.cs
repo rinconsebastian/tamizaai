@@ -59,7 +59,8 @@ public sealed class ReferenceLinesTests
                  {
                      "Four bars", "Three bars", "One value", "Missing group value counted", "Overall unlike the mean", "Overall from the grand total of a widget with a series",
                      "Overall that the engine could not give", "Answers of one question", "Value lines keep their number and their label", "The lines come in the order the widget lists them",
-                     "Sums that depend on the order of addition",
+                     "Sums that depend on the order of addition", "Overall line over declared answers", "Overall line over a column that is not an answer",
+                     "Overall line of a widget with a series split by a declared answer",
                  })
         {
             Assert.Contains(named, names);
@@ -74,7 +75,10 @@ public sealed class ReferenceLinesTests
         var tolerance = Fixture()!["tolerance"]!.GetValue<double>();
         var config = ProductionShapesTests.Read(testCase["config"]!.ToJsonString());
 
-        var lines = ReferenceLines.Of(testCase["chartType"]!.GetValue<string>(), config, ResponseOf(testCase["answer"]!));
+        // The columns the case's indicator declares as answers (design D16 of add-small-sample-warnings); none when the case gives none.
+        string[] answerColumns = [.. testCase["answerColumns"]?.AsArray().Select(column => column!.GetValue<string>()) ?? []];
+
+        var lines = ReferenceLines.Of(testCase["chartType"]!.GetValue<string>(), config, ResponseOf(testCase["answer"]!), answerColumns);
 
         var expected = testCase["expected"]!.AsArray();
         var message = Name(testCase);
@@ -120,5 +124,39 @@ public sealed class ReferenceLinesTests
         var config = ProductionShapesTests.Read("""{"indicator":"encuesta_hoy","groupBy":"zona"}""");
 
         Assert.Empty(ReferenceLines.Of(ChartTypes.Column, config, new IndicatorQueryResponse(true, [new("a", 0.5, null)], false, MissingReferences.None)));
+    }
+
+    [Fact]
+    public void An_overall_line_is_left_out_over_the_answers_of_one_question_and_the_widget_says_so()
+    {
+        var config = ProductionShapesTests.Read(
+            """{"indicator":"teatro_hoy","ratio":{"numerator":"numerator","denominator":"denominator"},"groupBy":"categoria","display":{"referenceLines":[{"kind":"mean"},{"kind":"overall"}]}}""");
+        var response = new IndicatorQueryResponse(true, [new("Teatro", 0.3, null), new("Cine", 0.7, null)], false, MissingReferences.None, Overall: 0.5);
+
+        Assert.True(ReferenceLines.OverallLeftOut(ChartTypes.Bar, config, ["categoria"]));
+        Assert.Equal([ReferenceLineKinds.Mean], ReferenceLines.Of(ChartTypes.Bar, config, response, ["variable", "categoria"]).Select(line => line.Kind));
+
+        // Nothing declared, or another column declared: the overall line is drawn as it always was, and nothing is said.
+        Assert.False(ReferenceLines.OverallLeftOut(ChartTypes.Bar, config, []));
+        Assert.False(ReferenceLines.OverallLeftOut(ChartTypes.Bar, config, null));
+        Assert.False(ReferenceLines.OverallLeftOut(ChartTypes.Bar, config, ["variable"]));
+        Assert.Equal([ReferenceLineKinds.Mean, ReferenceLineKinds.Overall], ReferenceLines.Of(ChartTypes.Bar, config, response, ["variable"]).Select(line => line.Kind));
+        Assert.Equal([ReferenceLineKinds.Mean, ReferenceLineKinds.Overall], ReferenceLines.Of(ChartTypes.Bar, config, response).Select(line => line.Kind));
+    }
+
+    [Fact]
+    public void The_note_is_not_said_for_a_line_the_widget_could_not_have_or_for_a_chart_without_an_overall_line()
+    {
+        var stacked = ProductionShapesTests.Read(
+            """{"indicator":"teatro_hoy","measure":"value","groupBy":"comuna","seriesBy":"categoria","layout":"stacked","display":{"referenceLines":[{"kind":"overall"}]}}""");
+        var withoutOverall = ProductionShapesTests.Read(
+            """{"indicator":"teatro_hoy","ratio":{"numerator":"numerator","denominator":"denominator"},"groupBy":"categoria","display":{"referenceLines":[{"kind":"mean"}]}}""");
+        var ratio = ProductionShapesTests.Read(
+            """{"indicator":"teatro_hoy","ratio":{"numerator":"numerator","denominator":"denominator"},"groupBy":"categoria","display":{"referenceLines":[{"kind":"overall"}]}}""");
+
+        Assert.False(ReferenceLines.OverallLeftOut(ChartTypes.Column, stacked, ["categoria"]));
+        Assert.False(ReferenceLines.OverallLeftOut(ChartTypes.Bar, withoutOverall, ["categoria"]));
+        Assert.False(ReferenceLines.OverallLeftOut(ChartTypes.Pie, ratio, ["categoria"]));
+        Assert.True(ReferenceLines.OverallLeftOut(ChartTypes.Line, ratio, ["categoria"]));
     }
 }

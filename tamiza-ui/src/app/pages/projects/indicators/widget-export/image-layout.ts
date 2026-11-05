@@ -1,3 +1,4 @@
+import { smallBaseOpacity } from '../small-base-style';
 import { dashOf } from '../chart-annotations';
 import { ExportKeyGlyph, ExportLegend, ExportLegendEntry, ExportParts } from '../export-parts';
 import { TableLabels, TableTheme, drawTable, fitText } from './svg-table';
@@ -35,6 +36,11 @@ export interface ImageInput {
   footnote: string | null;
   /** The tile's notes above the chart ("Not filtered by …", the row limit). */
   notesAbove: string[];
+  /**
+   * What the tile says under its chart (add-small-sample-warnings, design D11): the small-base note, the base n line and the no-data line.
+   * They follow the chart's own notes and come before the footnote.
+   */
+  notesBelow: string[];
   parts: ExportParts;
   /** The sanitized chart (or the map's picture) as a nested `<svg>` with its own size, or null. */
   plot: SVGSVGElement | null;
@@ -152,7 +158,8 @@ export function composeImage(input: ImageInput): ImageLayout {
     y += table.height + gap;
   } else if (input.parts.stat) {
     const value = input.parts.stat.value;
-    add(body, 'text', { x: margin, y: y + 36, 'font-size': 36, 'font-weight': 600, fill: theme.heading }, value);
+    // A figure with a small base is drawn at the reduced opacity the page gives it (design D10); its size is `improve-stat-cards`'.
+    add(body, 'text', { x: margin, y: y + 36, 'font-size': 36, 'font-weight': 600, fill: theme.heading, ...(input.parts.stat.dimmed ? { 'fill-opacity': smallBaseOpacity } : {}) }, value);
     y += 36 + gap + 4;
     if (input.parts.stat.description) {
       paragraph(input.parts.stat.description, 14, 400, theme.body);
@@ -170,7 +177,7 @@ export function composeImage(input: ImageInput): ImageLayout {
   if (input.parts.legend) {
     y = drawLegend(input.parts.legend, body, y);
   }
-  for (const note of [...(table?.notes ?? []), ...input.parts.notes, ...input.notesExtra]) {
+  for (const note of [...(table?.notes ?? []), ...input.parts.notes, ...input.notesExtra, ...input.notesBelow]) {
     paragraph(note, noteSize, 400, theme.body);
   }
   if (input.footnote) {

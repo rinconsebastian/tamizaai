@@ -53,8 +53,10 @@ public sealed class WidgetExportTests(PostgresFixture postgres)
         },
     };
 
-    private static object Body(string title, string chartType, object config, object? filters = null, string locale = "en-US", int? version = null, string format = "xlsx") =>
-        new { format, title, chartType, config, filters = filters ?? Array.Empty<object>(), locale, version };
+    private static object Body(
+        string title, string chartType, object config, object? filters = null, string locale = "en-US", int? version = null, string format = "xlsx",
+        int? minN = null, bool? showN = null) =>
+        new { format, title, chartType, config, filters = filters ?? Array.Empty<object>(), locale, version, minN, showN };
 
     private static string UrlOf(IndicatorsHarness h, Guid? dashboardId = null) => h.DashboardUrl(dashboardId) + "/widget-exports";
 
@@ -791,5 +793,134 @@ public sealed class WidgetExportTests(PostgresFixture postgres)
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(["'Cali' is listed twice."], IndicatorsHarness.Errors(json, "config.display.order.group[1]"));
+    }
+
+    // Base settings (widget-export "Base n and small bases in a widget workbook"; add-small-sample-warnings, design D13). A long table shaped
+    // like teatro_hoy with invented values: COMUNA 7 rests on 16 households and SIN NOMBRE on 20.
+
+    private async Task<IndicatorsHarness> BaseTeatroAsync(bool sinDato = false)
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        (string Comuna, int Households)[] comunas = [("COMUNA 1", 120), ("COMUNA 7", 16), ("SIN NOMBRE", 20), .. sinDato ? new[] { ("Sin dato", 4) } : []];
+        var rows = string.Join(", ", comunas.SelectMany(c => new[]
+        {
+            $"('Asistio (E1)', '1', 'Si', '{c.Comuna}', 0, {c.Households / 2}, {c.Households})",
+            $"('Asistio (E1)', '2', 'No', '{c.Comuna}', 0, {c.Households / 2}, {c.Households})",
+        }));
+        await h.PublishAsync(
+            "teatro_hoy", "variable text, orden text, categoria text, comuna text, value numeric, numerator numeric, denominator numeric", rows,
+            label: "Teatro hoy", format: "percent",
+            labels: new
+            {
+                variable = new { categories = "multiple" }, orden = new { categories = "multiple" }, categoria = new { categories = "multiple" },
+                comuna = new { missing = new[] { "Sin dato" } }, denominator = new { label = "Hogares" },
+            });
+        return h;
+    }
+
+    private static object BaseConfig(object? display = null, bool? missingFooter = null) => new
+    {
+        indicator = "teatro_hoy", ratio = new { numerator = "numerator", denominator = "denominator" }, groupBy = "comuna", display, missingFooter,
+        filters = new object[] { new { column = "variable", op = "equals", value = "Asistio (E1)" }, new { column = "categoria", op = "equals", value = "Si" } },
+    };
+
+    private static string? NotesOf(string path) => Rows(path, "Summary").Select(Values).SingleOrDefault(r => r[0] == "Notes")?[1];
+
+    [Fact]
+    public async Task Threshold_in_force_on_screen()
+    {
+        await using var h = await BaseTeatroAsync();
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("2.1", "column", BaseConfig(), minN: 30)));
+
+        // The data sheet has an n column after the value, in whole numbers, and the cell of a small base holds the number alone.
+        var sheet = Rows(path, "2.1");
+        Assert.Equal(["comuna", "Teatro hoy: numerator / Hogares", "n"], sheet[0].Keys.Select(key => key.Split(" (")[0]));
+        var comuna7 = sheet.Single(r => Values(r)[0] == "COMUNA 7");
+        Assert.Equal(0.5, Convert.ToDouble(comuna7["Teatro hoy: numerator / Hogares"]));
+        Assert.Equal(16d, Convert.ToDouble(comuna7["n"]));
+        Assert.Equal("2 values have a base below 30, marked *.", NotesOf(path));
+    }
+
+    [Fact]
+    public async Task The_n_line_the_page_shows_is_among_the_notes_of_the_summary()
+    {
+        await using var h = await BaseTeatroAsync();
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("2.1", "column", BaseConfig(), showN: true)));
+
+        Assert.Equal(["comuna", "Teatro hoy: numerator / Hogares", "n"], Rows(path, "2.1")[0].Keys.Select(key => key.Split(" (")[0]));
+        Assert.Equal("n = 156 Hogares", NotesOf(path));
+    }
+
+    [Fact]
+    public async Task Request_without_base_settings()
+    {
+        await using var h = await BaseTeatroAsync();
+        // A dashboard with a threshold now, and a request that carries none: a page from before base settings, or a version that had none.
+        await h.SaveBasesAsync(30, true);
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("2.1", "column", BaseConfig())));
+
+        Assert.Equal(["comuna", "Teatro hoy: numerator / Hogares"], Rows(path, "2.1")[0].Keys.Select(key => key.Split(" (")[0]));
+        Assert.Null(NotesOf(path));
+        Assert.DoesNotContain(Rows(path, "2.1"), r => Values(r).Any(v => v.EndsWith(" *", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task A_version_without_a_threshold_gives_a_workbook_without_marks_while_the_dashboard_has_one()
+    {
+        await using var h = await BaseTeatroAsync();
+        await h.AddWidgetAsync(new { title = "2.1", chartType = "column", config = BaseConfig() });
+        var version = await CurrentVersionAsync(h);
+        await h.SaveBasesAsync(30, true);
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("2.1", "column", BaseConfig(), version: version), h.Analyst));
+
+        Assert.Equal(2, Rows(path, "2.1")[0].Count);
+        Assert.Null(NotesOf(path));
+    }
+
+    [Fact]
+    public async Task A_config_that_carries_its_own_settings_gives_way_to_the_ones_of_the_request()
+    {
+        await using var h = await BaseTeatroAsync();
+        var display = new { minN = 10 };
+
+        // The widget's own 10 is below every n; the request, which resolved it over the dashboard's, says 30.
+        var thirty = await DownloadAsync(h, await ExportAsync(h, Body("2.1", "column", BaseConfig(display), minN: 30)));
+        Assert.Equal("2 values have a base below 30, marked *.", NotesOf(thirty));
+
+        // A request that turns it off (0) leaves the config's own threshold aside: it is the page's, not the config's, that decides.
+        var off = await DownloadAsync(h, await ExportAsync(h, Body("2.1", "column", BaseConfig(new { minN = 30 }), minN: 0)));
+        Assert.Equal(2, Rows(off, "2.1")[0].Count);
+        Assert.Null(NotesOf(off));
+    }
+
+    [Fact]
+    public async Task missingFooter_in_the_sent_config_leaves_the_rows_out_and_the_summary_says_what_they_held()
+    {
+        await using var h = await BaseTeatroAsync(sinDato: true);
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("2.1", "column", BaseConfig(missingFooter: true))));
+
+        Assert.DoesNotContain(Rows(path, "2.1"), r => Values(r)[0] == "Sin dato");
+        Assert.Equal(3, Rows(path, "2.1").Count);
+        Assert.Equal("Sin dato: 50%", NotesOf(path));
+    }
+
+    [Fact]
+    public async Task A_threshold_of_10001_is_refused_with_its_key_and_leaves_no_file()
+    {
+        await using var h = await BaseTeatroAsync();
+
+        var (response, problem) = await PostAsync(h, Body("2.1", "column", BaseConfig(), minN: 10001));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["The small-base threshold must be a whole number from 0 (off) to 10,000."], IndicatorsHarness.Errors(problem, "minN"));
+        Assert.Empty(h.ExportFiles);
+        var (negative, _) = await PostAsync(h, Body("2.1", "column", BaseConfig(), minN: -1));
+        Assert.Equal(HttpStatusCode.BadRequest, negative.StatusCode);
+        Assert.Empty(h.ExportFiles);
     }
 }

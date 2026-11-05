@@ -36,6 +36,12 @@ public static class ChartTypes
 
     /// <summary>The charts whose query has a series column when it names one.</summary>
     public static bool HasSeries(string chartType) => TakesSeries(chartType) || NeedsSeries(chartType);
+
+    /// <summary>
+    /// The charts that may leave out the values their indicator declares as meaning no data (<see cref="WidgetConfig.MissingFooter"/>,
+    /// design D6 of add-small-sample-warnings): those with a group column that a mark stands for. Twin of <c>takesMissingFooter</c>.
+    /// </summary>
+    public static bool TakesMissingFooter(string chartType) => chartType is Bar or Column or Line or Pie or Heatmap or Pyramid or Likert or Crosstab;
 }
 
 /// <summary>A widget's size and position on the 12-column grid, in grid units.</summary>
@@ -251,6 +257,8 @@ public sealed record WidgetCategoryOrder(
 /// <param name="Interpolation">Line only: one of <see cref="LineInterpolations"/>; left out, linear. A saved <c>linear</c> is kept as it is, so a form saved unchanged stays unchanged.</param>
 /// <param name="DataLabels">Bar, column (no stacked or 100% layout), line and pie only: writes each value on its mark; left out, off. A saved <c>false</c> is kept as it is.</param>
 /// <param name="Order">The widget's own order of groups and of series (design D1 of add-declared-category-order); left out, the indicator's order, else the chart's.</param>
+/// <param name="MinN">Every kind (design D7 of add-small-sample-warnings): the widget's own small-base threshold, 0 (off for this widget) or 1 to <see cref="WidgetDisplay.MaxMinN"/>; left out, the dashboard's. A saved <c>0</c> is kept as it is.</param>
+/// <param name="ShowN">Every kind: shows (<c>true</c>) or hides (<c>false</c>) the widget's base n line whatever the dashboard says; left out, the dashboard's. A saved <c>false</c> is kept as it is.</param>
 public sealed record WidgetDisplay(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
      Description("A place in the dashboard's palette, 1 to 8, never a color code. For a bar, column or line chart with no seriesBy, for a histogram and for a boxplot; left out, color 1."),
@@ -278,8 +286,15 @@ public sealed record WidgetDisplay(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
      Description("true writes each value on its bar, column, point or slice. For a bar or column with no seriesBy or a grouped layout, and for a line or pie; left out, no data labels.")] bool? DataLabels = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("The order to draw the widget's values in: { group, series }, each a list of up to 100 values as full text; the others follow in the chart's order. Left out, the indicator's order of the column (save_script columns), else the chart's own.")] WidgetCategoryOrder? Order = null)
+     Description("The order to draw the widget's values in: { group, series }, each a list of up to 100 values as full text; the others follow in the chart's order. Left out, the indicator's order of the column (save_script columns), else the chart's own.")] WidgetCategoryOrder? Order = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("The small-base threshold of this widget: 0 turns it off, 1 to 10000 dims the marks whose base n is below it. For every kind; left out, the dashboard's threshold.")] int? MinN = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("true shows the widget's base n line under it and false hides it, whatever the dashboard says. For every kind; left out, the dashboard's setting.")] bool? ShowN = null)
 {
+    /// <summary>The greatest small-base threshold of a widget or a dashboard (design D7 of add-small-sample-warnings).</summary>
+    public const int MaxMinN = 10000;
+
     /// <summary>The longest subtitle, footnote and caption text, counted as a title is: UTF-16 units once trimmed (design D2 of the widget context).</summary>
     public const int MaxSubtitleLength = 200;
 
@@ -300,6 +315,7 @@ public sealed record WidgetDisplay(
     /// absent. A saved <c>linear</c> interpolation and <c>dataLabels: false</c> are kept as given, as a box plot's <c>vertical</c> is.
     /// A null line, and a line with no kind, are kept so validation can name them.
     /// An order that lists nothing is none, so a display that holds only an empty order is no display.
+    /// A saved <c>minN</c> of 0 and <c>showN: false</c> are kept as given, so a form saved unchanged stays unchanged (design D7 of add-small-sample-warnings).
     /// </summary>
     public WidgetDisplay? Normalize()
     {
@@ -316,7 +332,7 @@ public sealed record WidgetDisplay(
         var order = Order?.Normalize();
         return Color is null && ramp is null && orientation is null && labels is null
             && subtitle is null && footnote is null && caption is null && unit is null && showDescription is null
-            && referenceLines is null && interpolation is null && DataLabels is null && order is null
+            && referenceLines is null && interpolation is null && DataLabels is null && order is null && MinN is null && ShowN is null
             ? null
             : this with
             {
@@ -402,6 +418,11 @@ public sealed record WidgetDisplay(
 /// widget is moved or copied to, and for a filter removed and defined again. Not a query setting: a query ignores it.
 /// </param>
 /// <param name="Display">How the widget is drawn (<see cref="WidgetDisplay"/>). Not a query setting: a query ignores it.</param>
+/// <param name="MissingFooter">
+/// Bar, column, line, pie, heat map, population pyramid, Likert and cross table only (<see cref="ChartTypes.TakesMissingFooter"/>, design D6 of
+/// add-small-sample-warnings): leaves out the rows whose group or series value the indicator declares as meaning no data. A query setting,
+/// since it changes the rows. Kept as given, a saved <c>false</c> too; left out of the JSON while it is not set.
+/// </param>
 public sealed record WidgetConfigInput(
     string? Indicator = null,
     string? Measure = null,
@@ -419,7 +440,9 @@ public sealed record WidgetConfigInput(
     WidgetPyramid? Pyramid = null,
     IReadOnlyList<LikertStep>? Scale = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("How the widget is drawn and what it says: its color, its scale, its orientation, the names of its columns, its subtitle, footnote, caption, unit and description button, its reference lines, its steps, its data labels or the order of its values. It never changes the rows.")] WidgetDisplay? Display = null)
+     Description("How the widget is drawn and what it says: its color, its scale, its orientation, the names of its columns, its subtitle, footnote, caption, unit and description button, its reference lines, its steps, its data labels, the order of its values, its small-base threshold or its base n line. It never changes the rows.")] WidgetDisplay? Display = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("true leaves out of the widget the rows whose group or series value the indicator declares as meaning no data (save_script columns, missing), and says under the chart what they held. For a bar, column, line, pie, heatmap, pyramid, likert or crosstab; it changes the rows. Left out, nothing is left out.")] bool? MissingFooter = null)
 {
     public WidgetConfig Normalize() => new(
         Indicator ?? "",
@@ -439,7 +462,8 @@ public sealed record WidgetConfigInput(
         Pyramid,
         // A null step is kept so validation can name it.
         Scale ?? [],
-        Display?.Normalize());
+        Display?.Normalize(),
+        MissingFooter);
 }
 
 /// <summary>A widget's query with its defaults applied. With no <see cref="Measure"/> and no <see cref="Ratio"/>, the table's default measure is plotted.</summary>
@@ -459,7 +483,8 @@ public sealed record WidgetConfig(
     string? Layout = null,
     WidgetPyramid? Pyramid = null,
     IReadOnlyList<LikertStep>? Scale = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WidgetDisplay? Display = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WidgetDisplay? Display = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? MissingFooter = null)
 {
     public const int DefaultBuckets = 10;
 
@@ -537,10 +562,20 @@ public sealed record IndicatorOverview(IReadOnlyList<IndicatorEntry> Indicators,
 /// Where the dashboard's data comes from, 1 to <see cref="DashboardValidation.MaxSourceLength"/> characters (design D7 of the widget
 /// context). Left out of the JSON while the dashboard has none, so a dashboard without one returns what it returned before sources.
 /// </param>
+/// <param name="MinN">
+/// The dashboard's small-base threshold, 1 to <see cref="WidgetDisplay.MaxMinN"/> (design D8 of add-small-sample-warnings). Left out of the
+/// JSON while it is off.
+/// </param>
+/// <param name="ShowN">
+/// Whether each widget's base n shows under it. Written only when true, so a dashboard without base settings returns what it returned before
+/// them; a reader takes a missing <c>showN</c> as false.
+/// </param>
 public sealed record DashboardView(
     Guid Id, string Name, IReadOnlyList<DashboardFilter> Filters, string Palette, IReadOnlyList<ValueColor> ValueColors,
     IReadOnlyList<Widget> Widgets, int? Version,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Source = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Source = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MinN = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool ShowN = false);
 
 /// <summary>One of the project's own dashboards, without its widgets.</summary>
 public sealed record DashboardEntry(Guid Id, string Name);
@@ -557,6 +592,16 @@ public sealed record DashboardSourceRequest(
 /// <summary>A dashboard's source as saved, and the answer to saving it; null when the dashboard has none.</summary>
 public sealed record DashboardSource(string? Source);
 
+/// <summary>The body that replaces a dashboard's base settings (design D8 of add-small-sample-warnings): both are saved whole.</summary>
+/// <param name="MinN">The small-base threshold, a whole number from 1 to 10,000; null turns it off.</param>
+/// <param name="ShowN">Whether each widget shows its base n under it; left out, false.</param>
+public sealed record DashboardBasesRequest(
+    [property: Description("The small-base threshold: a whole number from 1 to 10,000; marks whose base n is below it are drawn dimmed. Null turns it off.")] int? MinN,
+    [property: Description("true shows each widget's base n line under it; left out or false, the widgets that do not choose for themselves hide it.")] bool? ShowN);
+
+/// <summary>A dashboard's base settings as saved, and the answer to saving them (design D8 of add-small-sample-warnings).</summary>
+public sealed record DashboardBases(int? MinN, bool ShowN);
+
 /// <summary>A new order of the project's dashboards. The API knows nothing of left and right: the page sends the whole list.</summary>
 /// <param name="ExpectedIds">The order the member's page shows. When it is not the project's current order, nothing changes.</param>
 /// <param name="DashboardIds">The order asked for: the same dashboards, once each.</param>
@@ -567,7 +612,15 @@ public sealed record ColumnDefaults(string? Measure, string? GroupBy);
 
 /// <param name="Columns">Every column of the published table, in table order.</param>
 /// <param name="Numeric">The columns a widget can plot as a measure or a ratio.</param>
-public sealed record IndicatorColumns(bool Published, IReadOnlyList<TableColumn> Columns, IReadOnlyList<string> Numeric, ColumnDefaults Defaults);
+/// <param name="Declared">
+/// What the indicator's current version declares for its columns about bases (design D1 of add-small-sample-warnings): the base column,
+/// the values that mean no data and the answer columns, by column name, each entry holding only those properties. Left out while it
+/// declares none, so the columns of an indicator without declarations are what they were.
+/// </param>
+public sealed record IndicatorColumns(
+    bool Published, IReadOnlyList<TableColumn> Columns, IReadOnlyList<string> Numeric, ColumnDefaults Defaults,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("What the indicator declares for its columns about bases, by column name: base (the column that counts the units each row stands for), missing (values that mean no data) and categories (single or multiple, the columns that name a question and its answers). Left out when it declares none.")] IReadOnlyDictionary<string, IndicatorColumnMetadata>? Declared = null);
 
 /// <summary>One plotted point: <see cref="Value"/> is the measure summed, or the ratio of sums, over the rows that share the group.</summary>
 /// <param name="Group">The group column's value as text; null for rows with no value in it and when the query has no group.</param>
@@ -576,6 +629,9 @@ public sealed record IndicatorColumns(bool Published, IReadOnlyList<TableColumn>
 /// <param name="Tooltip">Map only: one value per tooltip column, in order, as <see cref="IndicatorQueryResponse.TooltipTypes"/> types them: a number, text, true/false, or null for no value.</param>
 /// <param name="Series">A widget with a series only: the series value of the cell (<see cref="Rows"/> then counts the table rows it sums). Left out for the rows with no series value and for the folded series.</param>
 /// <param name="SeriesKind">A widget with a series only: <see cref="SeriesKinds.Value"/>, <see cref="SeriesKinds.None"/> or <see cref="SeriesKinds.Other"/>.</param>
+/// <param name="Numerator">A ratio only (design D5 of add-small-sample-warnings): the sum of its numerator over the rows of the value. A measure has none, and nor does a box plot or a histogram.</param>
+/// <param name="Denominator">A ratio only: the sum of its denominator over the rows of the value.</param>
+/// <param name="N">The value's base n (design D2): the sum of the indicator's base column over its rows, else a ratio's <paramref name="Denominator"/>; none for a measure without a base column, for a histogram's bar and for a box.</param>
 public sealed record IndicatorRow(
     string? Group,
     double Value,
@@ -583,7 +639,10 @@ public sealed record IndicatorRow(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Rows = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<object?>? Tooltip = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Series = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SeriesKind = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SeriesKind = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), Description("A ratio only: the sum of its numerator over the rows of the value.")] double? Numerator = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), Description("A ratio only: the sum of its denominator over the rows of the value.")] double? Denominator = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), Description("The value's base n: the sum of the indicator's base column over its rows, else a ratio's denominator. Left out for a measure without a base column, a histogram's bar and a box.")] double? N = null);
 
 /// <summary>
 /// One box of a box plot (design D4 of add-boxplot-widget), computed over every value of the group that the query matches.
@@ -629,6 +688,15 @@ public sealed record MissingReferences(bool Indicator, IReadOnlyList<string> Col
 /// matches, with the widget's and the dashboard's filters, whatever groups are returned: the figure a stat tile with the same indicator,
 /// ratio and filters shows. Left out when none was asked for, and when there is no row to give it (the denominators sum to zero).
 /// </param>
+/// <param name="N">
+/// The widget's base n (design D4 of add-small-sample-warnings), counted over every row it plots, once across answers when the indicator
+/// declares answer columns. Left out unless its marks have an n and the indicator declares a base column or an answer column.
+/// </param>
+/// <param name="NoData">
+/// A widget that leaves out the values that mean no data, whose indicator declares some for its group or series column (design D6 of
+/// add-small-sample-warnings): what it left out. Left out of the JSON when the widget does not ask, when nothing is declared, and when no
+/// row was left out.
+/// </param>
 public sealed record IndicatorQueryResponse(
     bool Published,
     IReadOnlyList<IndicatorRow> Rows,
@@ -642,7 +710,30 @@ public sealed record IndicatorQueryResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<SeriesInfo>? Domain = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<IndicatorBox>? Boxes = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("Only on a query that asked for it with the request's overall flag: the value over all the rows the query matches, as a stat tile with the same indicator and filters shows it.")] double? Overall = null);
+     Description("Only on a query that asked for it with the request's overall flag: the value over all the rows the query matches, as a stat tile with the same indicator and filters shows it.")] double? Overall = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("The widget's base n (design D4 of add-small-sample-warnings): the n over every row it plots, each unit counted once across the answers of one question. Only when its marks have an n and its indicator declares a base column or answer columns; left out for a histogram and a box plot.")] double? N = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("What a widget that leaves out the values that mean no data (config.missingFooter) left out, combined as one value. Left out when the widget does not ask for it or no row was left out.")] IndicatorNoData? NoData = null);
+
+/// <summary>
+/// What a widget left out as no data (design D6 of add-small-sample-warnings): the rows whose group or series value its indicator
+/// declares as meaning no data, combined as one value over the widget's own filters and the dashboard's. Each figure is left out of the
+/// JSON when it does not exist: a ratio has a numerator, a denominator and no share, a measure has a share and no numerator or denominator.
+/// </summary>
+/// <param name="Values">The left-out values that had rows, in natural order.</param>
+/// <param name="Value">A ratio's left-out numerator over its left-out denominator; a measure's left-out sum. Left out when the denominators sum to zero.</param>
+/// <param name="Numerator">A ratio only: the sum of the numerator over the left-out rows.</param>
+/// <param name="Denominator">A ratio only: the sum of the denominator over the left-out rows.</param>
+/// <param name="N">The base n of the left-out rows (the largest per-answer sum when the indicator declares answer columns); none for a measure without a base column.</param>
+/// <param name="Share">A measure only: the left-out sum over the sum of every row the query matches, left out rows included.</param>
+public sealed record IndicatorNoData(
+    IReadOnlyList<string> Values,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? Value = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? Numerator = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? Denominator = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? N = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? Share = null);
 
 /// <summary>The outcome of a query: the response, or the validation errors of the request.</summary>
 public sealed record IndicatorQueryOutcome(IndicatorQueryResponse? Response, IDictionary<string, string[]>? Errors);

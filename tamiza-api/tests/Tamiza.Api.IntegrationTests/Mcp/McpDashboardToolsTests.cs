@@ -1677,7 +1677,7 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         var result = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = water, change = ColorsRequest });
 
         Assert.Equal("mcp.validation", result.Code());
-        Assert.Contains("Give a name, a position, filters, a palette, colors kept by value or a source to change.", result.Text());
+        Assert.Contains("Give a name, a position, filters, a palette, colors kept by value, a source, a small-base threshold or a base n line to change.", result.Text());
         Assert.Equal(Enumerable.Range(1, 1), await NumbersAsync(h, water));
     }
 
@@ -2451,5 +2451,393 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         Assert.Equal("mcp.validation", result.Code());
         Assert.Contains("config.display.order.series", result.Text());
         Assert.Contains("A population pyramid's sides are its left and right values.", result.Text());
+    }
+
+    // Base figures through MCP (add-small-sample-warnings, design D14)
+
+    private const string TeatroColumns = "variable text, orden text, categoria text, comuna text, value numeric, numerator numeric, denominator numeric";
+
+    /// <summary>Every comuna with its households: 476 in all, 16 of them in COMUNA 7.</summary>
+    private static readonly (string Name, int Households)[] Comunas = [("COMUNA 1", 300), ("COMUNA 2", 140), ("COMUNA 7", 16), ("SIN NOMBRE", 20)];
+
+    private const string DeclaredAnswersAndNoData =
+        """{"variable": {"categories": "multiple"}, "orden": {"categories": "multiple"}, "categoria": {"categories": "multiple"}, "comuna": {"missing": ["Sin dato"]}}""";
+
+    /// <summary>
+    /// The indicator <c>teatro_hoy</c>, a long % table with a row per comuna and answer of one question, every household of a comuna in the
+    /// denominator of both answers, saved as a script whose version declares <paramref name="declared"/>. Names and values are invented.
+    /// </summary>
+    private static async Task SeedTeatroAsync(McpProjectHarness h, string? declared, bool sinDato = false)
+    {
+        var rows = new List<string>();
+        foreach (var (name, households) in Comunas)
+        {
+            rows.Add($"('Asistio', '1', 'Si', '{name}', 0, {households / 2}, {households})");
+            rows.Add($"('Asistio', '2', 'No', '{name}', 0, {households / 2}, {households})");
+        }
+
+        if (sinDato)
+        {
+            // Four households with no block, all of whom attended.
+            rows.Add("('Asistio', '1', 'Si', 'Sin dato', 0, 4, 4)");
+        }
+
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "teatro_hoy", TeatroColumns, string.Join(", ", rows));
+        await TestData.ExecuteAsync(h.Db,
+            "INSERT INTO tamiza.script_versions (id, project_id, kind, name, number, code, label, format, columns, author_id, created_at) VALUES (gen_random_uuid(), @p, 'indicator', 'teatro_hoy', 1, 'x', 'Teatro hoy', 'percent', @c::jsonb, @a, now())",
+            ("p", h.ProjectId), ("c", (object?)declared ?? DBNull.Value), ("a", h.Users["analyst"]));
+    }
+
+    private static object Attended(string groupBy = "comuna", object? display = null, bool? missingFooter = null, bool filterAnswer = true) => new
+    {
+        indicator = "teatro_hoy",
+        ratio = new { numerator = "numerator", denominator = "denominator" },
+        groupBy,
+        filters = filterAnswer
+            ? new object[] { new { column = "variable", op = "equals", value = "Asistio" }, new { column = "categoria", op = "equals", value = "Si" } }
+            : new object[] { new { column = "variable", op = "equals", value = "Asistio" } },
+        display,
+        missingFooter,
+    };
+
+    private static JsonElement WidgetOf(JsonDocument body) => body.RootElement.GetProperty("widgets")[0];
+
+    private static string[] Notes(JsonElement widget) =>
+        widget.TryGetProperty("notes", out var notes) ? notes.EnumerateArray().Select(n => n.GetString()!).ToArray() : [];
+
+    [Fact]
+    public async Task Base_figures_of_a_widget()
+    {
+        await using var h = await CreateAsync();
+        await SeedTeatroAsync(h, DeclaredAnswersAndNoData);
+        var dashboard = await AddDashboardAsync(h, "Teatro");
+        Assert.Null((await h.CallAsync("analyst", "update_dashboard", new { dashboardId = dashboard, minN = 30, change = Request })).Code());
+        var widget = await AddWidgetAsync(h, dashboard, "2.1. Asistió, por comuna", "column", Attended());
+
+        using var body = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard, widgetId = widget })).Json();
+
+        var shown = WidgetOf(body);
+        Assert.Equal("shown", shown.GetProperty("status").GetString());
+        string Figures(JsonElement row) =>
+            $"{row.GetProperty("group").GetString()}|{row.GetProperty("numerator").GetDouble()}|{row.GetProperty("denominator").GetDouble()}|{row.GetProperty("n").GetDouble()}"
+            + (row.TryGetProperty("smallBase", out var small) && small.GetBoolean() ? "|small" : "");
+        var rows = shown.GetProperty("rows").EnumerateArray().Select(Figures).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(["COMUNA 1|150|300|300", "COMUNA 2|70|140|140", "COMUNA 7|8|16|16|small", "SIN NOMBRE|10|20|20|small"], rows);
+        // The indicator declares its answers, so the widget has an n, counted once across them: 476 households, not 952.
+        Assert.Equal(476, shown.GetProperty("n").GetDouble());
+        Assert.Equal(30, shown.GetProperty("minN").GetInt32());
+        Assert.False(shown.TryGetProperty("showN", out _));
+        Assert.Equal(["2 values have a base below 30, marked smallBase."], Notes(shown));
+        // The value is as it was.
+        Assert.Equal(0.5, shown.GetProperty("rows")[0].GetProperty("value").GetDouble(), 6);
+    }
+
+    [Fact]
+    public async Task A_widget_own_threshold_and_a_cell_of_a_series_widget_carry_their_small_base()
+    {
+        await using var h = await CreateAsync();
+        await SeedTeatroAsync(h, DeclaredAnswersAndNoData);
+        var dashboard = await AddDashboardAsync(h, "Teatro");
+        // The dashboard sets none: the widget's own display.minN applies, and display.showN true is a setting in force.
+        var widget = await AddWidgetAsync(h, dashboard, "Por comuna y respuesta", "heatmap", new
+        {
+            indicator = "teatro_hoy", ratio = new { numerator = "numerator", denominator = "denominator" }, groupBy = "comuna", seriesBy = "categoria",
+            filters = new object[] { new { column = "variable", op = "equals", value = "Asistio" } },
+            display = new { minN = 25, showN = true },
+        });
+
+        using var body = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard, widgetId = widget })).Json();
+
+        var shown = WidgetOf(body);
+        var cells = shown.GetProperty("cells").EnumerateArray().Where(c => c.GetProperty("series").GetString() == "Si").ToDictionary(c => c.GetProperty("group").GetString()!);
+        Assert.Equal(16, cells["COMUNA 7"].GetProperty("n").GetDouble());
+        Assert.True(cells["COMUNA 7"].GetProperty("smallBase").GetBoolean());
+        Assert.True(cells["SIN NOMBRE"].GetProperty("smallBase").GetBoolean());
+        Assert.False(cells["COMUNA 2"].TryGetProperty("smallBase", out _));
+        // Each total has its three figures: COMUNA 7 holds both answers, each over the same 16 households.
+        var group = shown.GetProperty("totals").GetProperty("groups").EnumerateArray().Single(g => g.GetProperty("group").GetString() == "COMUNA 7");
+        Assert.Equal((32d, 16d), (group.GetProperty("denominator").GetDouble(), group.GetProperty("n").GetDouble()));
+        Assert.Equal(476, shown.GetProperty("totals").GetProperty("all").GetProperty("n").GetDouble());
+        Assert.Equal(25, shown.GetProperty("minN").GetInt32());
+        Assert.True(shown.GetProperty("showN").GetBoolean());
+        Assert.Contains("4 values have a base below 25, marked smallBase.", Notes(shown));
+    }
+
+    [Fact]
+    public async Task Measure_without_a_base_through_MCP()
+    {
+        await using var h = await CreateAsync();
+        await SeedAnswersAsync(h, null);
+
+        using var body = (await h.CallAsync("viewer", "query_indicator", new
+        {
+            chartType = "column", config = new { indicator = "teatro_conteo", measure = "conteo", groupBy = "comuna" },
+        })).Json();
+
+        Assert.NotEmpty(body.RootElement.GetProperty("rows").EnumerateArray());
+        foreach (var row in body.RootElement.GetProperty("rows").EnumerateArray())
+        {
+            Assert.Equal(["group", "value", "formatted"], row.EnumerateObject().Select(p => p.Name).ToArray());
+            Assert.False(row.TryGetProperty("numerator", out _));
+            Assert.False(row.TryGetProperty("denominator", out _));
+            Assert.False(row.TryGetProperty("n", out _));
+        }
+
+        Assert.False(body.RootElement.TryGetProperty("n", out _));
+        Assert.False(body.RootElement.TryGetProperty("noData", out _));
+    }
+
+    [Fact]
+    public async Task The_widget_n_only_under_the_rule_of_the_design()
+    {
+        await using var h = await CreateAsync();
+        // Only no-data values declared: no base column and no answer column, so the marks keep their n and the widget has none.
+        await SeedTeatroAsync(h, """{"comuna": {"missing": ["Sin dato"]}}""");
+        var dashboard = await AddDashboardAsync(h, "Teatro");
+        var widget = await AddWidgetAsync(h, dashboard, "2.1. Asistió, por comuna", "column", Attended());
+
+        using var undeclared = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard, widgetId = widget })).Json();
+        using var preview = (await h.CallAsync("viewer", "query_indicator", new { chartType = "column", config = Attended() })).Json();
+
+        Assert.False(WidgetOf(undeclared).TryGetProperty("n", out _));
+        Assert.False(preview.RootElement.TryGetProperty("n", out _));
+        Assert.Equal([16d, 20d, 140d, 300d], WidgetOf(undeclared).GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("n").GetDouble()).Order().ToArray());
+
+        // Declaring the answers gives the widget its n, in a preview too.
+        await TestData.ExecuteAsync(h.Db, "UPDATE tamiza.script_versions SET columns = @c::jsonb WHERE name = 'teatro_hoy'", ("c", DeclaredAnswersAndNoData));
+        using var declared = (await h.CallAsync("viewer", "query_indicator", new { chartType = "column", config = Attended() })).Json();
+        Assert.Equal(476, declared.RootElement.GetProperty("n").GetDouble());
+    }
+
+    [Fact]
+    public async Task noData_for_a_widget_with_the_option()
+    {
+        await using var h = await CreateAsync();
+        await SeedTeatroAsync(h, DeclaredAnswersAndNoData, sinDato: true);
+        var dashboard = await AddDashboardAsync(h, "Teatro");
+        var widget = await AddWidgetAsync(h, dashboard, "2.1. Asistió, por comuna", "column", Attended(missingFooter: true));
+        var plain = await AddWidgetAsync(h, dashboard, "2.1b. Asistió, por comuna", "column", Attended());
+
+        using var body = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard })).Json();
+        using var preview = (await h.CallAsync("viewer", "query_indicator", new { chartType = "column", config = Attended(missingFooter: true) })).Json();
+
+        var widgets = body.RootElement.GetProperty("widgets").EnumerateArray().ToDictionary(w => w.GetProperty("widgetId").GetGuid());
+        void Check(JsonElement result)
+        {
+            Assert.DoesNotContain("Sin dato", result.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("group").GetString()));
+            var noData = result.GetProperty("noData");
+            Assert.Equal(["Sin dato"], noData.GetProperty("values").EnumerateArray().Select(v => v.GetString()));
+            Assert.Equal(1, noData.GetProperty("value").GetDouble());
+            Assert.Contains("100", noData.GetProperty("formatted").GetString());
+            Assert.Equal(4, noData.GetProperty("n").GetDouble());
+            Assert.False(noData.TryGetProperty("share", out _));
+        }
+
+        Check(widgets[widget]);
+        Check(preview.RootElement);
+        // Without the option the value keeps its column and nothing is reported.
+        Assert.Contains("Sin dato", widgets[plain].GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("group").GetString()));
+        Assert.False(widgets[plain].TryGetProperty("noData", out _));
+    }
+
+    [Fact]
+    public async Task No_data_option_on_a_stat_tile_through_MCP()
+    {
+        await using var h = await CreateAsync();
+        await SeedTeatroAsync(h, DeclaredAnswersAndNoData);
+        var dashboard = await AddDashboardAsync(h, "Teatro");
+
+        var result = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = dashboard, title = "Asistió", chartType = "stat", change = Request,
+            config = new { indicator = "teatro_hoy", ratio = new { numerator = "numerator", denominator = "denominator" }, missingFooter = true },
+        });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("missingFooter", result.Text());
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+    }
+
+    [Fact]
+    public async Task A_chart_type_change_alone_is_refused_on_missingFooter()
+    {
+        await using var h = await CreateAsync();
+        await SeedTeatroAsync(h, DeclaredAnswersAndNoData);
+        var dashboard = await AddDashboardAsync(h, "Teatro");
+        var widget = await AddWidgetAsync(h, dashboard, "Asistió", "column", Attended(missingFooter: true));
+
+        var result = await h.CallAsync("analyst", "update_widget", new { dashboardId = dashboard, widgetId = widget, chartType = "stat", change = Request });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("missingFooter", result.Text());
+    }
+
+    [Fact]
+    public async Task No_overall_line_and_its_note_over_a_declared_answer_column()
+    {
+        await using var h = await CreateAsync();
+        await SeedTeatroAsync(h, DeclaredAnswersAndNoData);
+        var dashboard = await AddDashboardAsync(h, "Teatro");
+        var lines = new { referenceLines = new[] { new { kind = "overall" } } };
+        var answers = await AddWidgetAsync(h, dashboard, "Por respuesta", "bar", Attended("categoria", lines, filterAnswer: false));
+        var comunas = await AddWidgetAsync(h, dashboard, "Por comuna", "bar", Attended("comuna", lines));
+
+        using var body = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard })).Json();
+        using var preview = (await h.CallAsync("viewer", "query_indicator", new { chartType = "bar", config = Attended("categoria", lines, filterAnswer: false) })).Json();
+
+        const string note = "No overall line: the bars are the answers of one question.";
+        var widgets = body.RootElement.GetProperty("widgets").EnumerateArray().ToDictionary(w => w.GetProperty("widgetId").GetGuid());
+        // Over the answers of one question the line is only the mean of the bars: not drawn, and the note says why.
+        Assert.False(widgets[answers].TryGetProperty("referenceLines", out _));
+        Assert.Contains(note, Notes(widgets[answers]));
+        Assert.False(preview.RootElement.TryGetProperty("referenceLines", out _));
+        Assert.Contains(note, preview.RootElement.GetProperty("notes").EnumerateArray().Select(n => n.GetString()));
+        // Over comunas it is drawn as before, with no note.
+        Assert.Equal("overall", widgets[comunas].GetProperty("referenceLines")[0].GetProperty("kind").GetString());
+        Assert.DoesNotContain(note, Notes(widgets[comunas]));
+    }
+
+    [Fact]
+    public async Task A_long_result_is_cut_in_its_rows_with_the_existing_hint()
+    {
+        await using var h = await CreateAsync(new Dictionary<string, string?> { ["Mcp:MaxResultCharacters"] = "10000" });
+        var rows = string.Join(", ", Enumerable.Range(1, 400).Select(i => $"('Municipality number {i:000}', {i}, {i}, 1000)"));
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "piped_water_rate", Columns, rows);
+
+        var result = await h.CallAsync("viewer", "query_indicator", new { chartType = "column", config = BarConfig() });
+
+        Assert.True(result.Text().Length <= 10_000, $"{result.Text().Length} characters");
+        using var body = result.Json();
+        var note = body.RootElement.GetProperty("truncated");
+        Assert.True(note.GetProperty("omitted").GetInt32() > 0);
+        Assert.Contains("filter", note.GetProperty("hint").GetString());
+        Assert.True(body.RootElement.GetProperty("rows").GetArrayLength() < 400);
+    }
+
+    // The base settings of a dashboard through MCP (mcp-server: Base settings through MCP)
+
+    [Fact]
+    public async Task Threshold_through_MCP()
+    {
+        await using var h = await CreateAsync();
+        var teatro = await AddDashboardInTamizaAsync(h, "Teatro");
+        // A dashboard without base settings answers with the seven members it always had.
+        using var before = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = teatro })).Json();
+        Assert.Equal(["id", "name", "filters", "palette", "valueColors", "widgets", "version"], before.RootElement.EnumerateObject().Select(p => p.Name).ToArray());
+
+        var result = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = teatro, minN = 30, change = "Dim the small bases" });
+
+        Assert.Null(result.Code());
+        Assert.Equal([(teatro, 2)], DashboardVersionsOf(result));
+        using var body = result.Json();
+        Assert.Equal(30, body.RootElement.GetProperty("minN").GetInt32());
+        Assert.False(body.RootElement.TryGetProperty("showN", out _));
+        using var viewed = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = teatro })).Json();
+        Assert.Equal(30, viewed.RootElement.GetProperty("minN").GetInt32());
+        Assert.False(viewed.RootElement.TryGetProperty("showN", out _));
+        Assert.Equal(["1 | analyst | app | - | [{\"kind\": \"created\"}]", "2 | analyst | mcp | Dim the small bases | [{\"kind\": \"basesChanged\"}]"], await VersionsAsync(h, teatro));
+        Assert.Equal(30, await TestData.ScalarAsync<int>(h.Db, "SELECT min_n FROM tamiza.dashboards WHERE id = @d", ("d", teatro)));
+        Assert.Equal(30, await TestData.ScalarAsync<int>(h.Db, "SELECT (content->>'minN')::int FROM tamiza.dashboard_versions WHERE dashboard_id = @d AND number = 2", ("d", teatro)));
+        var page = await Rest(h, "viewer").GetFromJsonAsync<JsonElement>($"/api/v1/projects/{h.ProjectId}/dashboards/{teatro}");
+        Assert.Equal(30, page.GetProperty("minN").GetInt32());
+    }
+
+    [Fact]
+    public async Task The_line_and_the_threshold_are_kept_apart_turned_off_and_one_version_of_a_request()
+    {
+        await using var h = await CreateAsync();
+        var teatro = await AddDashboardInTamizaAsync(h, "Teatro");
+
+        // A rename with both settings is one version holding all three changes.
+        var first = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = teatro, name = "Teatro 2", minN = 30, showN = true, change = "Set the bases" });
+        Assert.Equal([(teatro, 2)], DashboardVersionsOf(first));
+        Assert.Equal(
+            """2 | analyst | mcp | Set the bases | [{"kind": "renamed", "dashboard": "Teatro 2"}, {"kind": "basesChanged"}]""",
+            (await VersionsAsync(h, teatro))[1]);
+        using var viewed = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = teatro })).Json();
+        Assert.Equal((30, true), (viewed.RootElement.GetProperty("minN").GetInt32(), viewed.RootElement.GetProperty("showN").GetBoolean()));
+
+        // The same settings make no version, and a call that names one keeps the other.
+        Assert.Null((await h.CallAsync("analyst", "update_dashboard", new { dashboardId = teatro, minN = 30, showN = true, change = "Again" })).Code());
+        Assert.Equal(new[] { 1, 2 }, await NumbersAsync(h, teatro));
+        Assert.Null((await h.CallAsync("analyst", "update_dashboard", new { dashboardId = teatro, showN = false, change = "Hide the line" })).Code());
+        Assert.Equal((30, false), (await TestData.ScalarAsync<int>(h.Db, "SELECT min_n FROM tamiza.dashboards WHERE id = @d", ("d", teatro)), await TestData.ScalarAsync<bool>(h.Db, "SELECT show_n FROM tamiza.dashboards WHERE id = @d", ("d", teatro))));
+
+        // 0 turns the threshold off.
+        var off = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = teatro, minN = 0, change = "Dim nothing" });
+        Assert.Null(off.Code());
+        using var body = off.Json();
+        Assert.False(body.RootElement.TryGetProperty("minN", out _));
+        Assert.Null(await TestData.ScalarAsync<int?>(h.Db, "SELECT min_n FROM tamiza.dashboards WHERE id = @d", ("d", teatro)));
+        Assert.Equal(new[] { 1, 2, 3, 4 }, await NumbersAsync(h, teatro));
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(10001)]
+    public async Task A_threshold_out_of_range_through_MCP_is_refused_on_minN_and_nothing_is_saved(int minN)
+    {
+        await using var h = await CreateAsync();
+        var teatro = await AddDashboardInTamizaAsync(h, "Teatro");
+
+        var result = await h.CallAsync("analyst", "update_dashboard", new { dashboardId = teatro, minN, change = Request });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("minN", result.Text());
+        Assert.Null(await TestData.ScalarAsync<int?>(h.Db, "SELECT min_n FROM tamiza.dashboards WHERE id = @d", ("d", teatro)));
+        Assert.Equal(new[] { 1 }, await NumbersAsync(h, teatro));
+    }
+
+    [Fact]
+    public async Task A_viewer_cannot_set_the_base_sizes()
+    {
+        await using var h = await CreateAsync();
+        var teatro = await AddDashboardInTamizaAsync(h, "Teatro");
+
+        var result = await h.CallAsync("viewer", "update_dashboard", new { dashboardId = teatro, minN = 30, showN = true, change = Request });
+
+        Assert.NotNull(result.Code());
+        Assert.Null(await TestData.ScalarAsync<int?>(h.Db, "SELECT min_n FROM tamiza.dashboards WHERE id = @d", ("d", teatro)));
+    }
+
+    [Fact]
+    public async Task A_widget_without_a_threshold_follows_the_dashboards_and_the_line_shows_when_it_is_on()
+    {
+        await using var h = await CreateAsync();
+        await SeedTeatroAsync(h, DeclaredAnswersAndNoData);
+        var dashboard = await AddDashboardAsync(h, "Teatro");
+        await AddWidgetAsync(h, dashboard, "Sigue", "column", Attended());
+        await AddWidgetAsync(h, dashboard, "Propio", "column", Attended(display: new { minN = 0, showN = false }));
+        Assert.Null((await h.CallAsync("analyst", "update_dashboard", new { dashboardId = dashboard, minN = 30, showN = true, change = Request })).Code());
+
+        using var body = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard })).Json();
+
+        var widgets = body.RootElement.GetProperty("widgets").EnumerateArray().ToDictionary(w => w.GetProperty("title").GetString()!);
+        Assert.Equal((30, true), (widgets["Sigue"].GetProperty("minN").GetInt32(), widgets["Sigue"].GetProperty("showN").GetBoolean()));
+        Assert.Contains(widgets["Sigue"].GetProperty("rows").EnumerateArray(), r => r.TryGetProperty("smallBase", out _));
+        // The widget's own threshold of 0 and hidden line win over the dashboard's.
+        Assert.False(widgets["Propio"].TryGetProperty("minN", out _));
+        Assert.False(widgets["Propio"].GetProperty("showN").GetBoolean());
+        Assert.DoesNotContain(widgets["Propio"].GetProperty("rows").EnumerateArray(), r => r.TryGetProperty("smallBase", out _));
+    }
+
+    [Fact]
+    public async Task Widget_base_settings_are_saved_and_read_back_by_get_dashboard()
+    {
+        await using var h = await CreateAsync();
+        await SeedTeatroAsync(h, DeclaredAnswersAndNoData);
+        var dashboard = await AddDashboardAsync(h, "Teatro");
+
+        await AddWidgetAsync(h, dashboard, "Asistió", "column", Attended(display: new { minN = 50, showN = true }, missingFooter: true));
+
+        using var read = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = dashboard })).Json();
+        var config = read.RootElement.GetProperty("widgets")[0].GetProperty("config");
+        Assert.Equal((50, true, true), (config.GetProperty("display").GetProperty("minN").GetInt32(), config.GetProperty("display").GetProperty("showN").GetBoolean(), config.GetProperty("missingFooter").GetBoolean()));
+        var refused = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = dashboard, title = "Mal", chartType = "column", change = Request, config = Attended(display: new { minN = 10001 }),
+        });
+        Assert.Equal("mcp.validation", refused.Code());
+        Assert.Contains("config.display.minN", refused.Text());
     }
 }

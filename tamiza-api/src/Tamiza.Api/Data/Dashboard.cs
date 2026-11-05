@@ -31,6 +31,12 @@ public sealed class Dashboard
     /// <summary>Where the dashboard's data comes from, 1 to 300 characters as the <c>ck_dashboards_source</c> check allows, or null for none; the indicators module validates and reads it.</summary>
     public string? Source { get; set; }
 
+    /// <summary>The small-base threshold, 1 to 10,000 as the <c>ck_dashboards_min_n</c> check allows, or null for off; the indicators module validates and reads it.</summary>
+    public int? MinN { get; set; }
+
+    /// <summary>Whether each widget's base n shows under it.</summary>
+    public bool ShowN { get; set; }
+
     public Guid CreatedBy { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }

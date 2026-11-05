@@ -564,4 +564,62 @@ public sealed class WidgetDisplayTests
         Assert.Null(query.Display);
         Assert.DoesNotContain("order", JsonSerializer.Serialize(query, Json));
     }
+
+    // The base settings (design D7 of add-small-sample-warnings)
+
+    [Fact]
+    public void A_display_without_the_base_settings_serializes_as_it_did_before()
+    {
+        const string stored = """{"color":3,"labels":{"value":"Hogares"},"subtitle":"Pregunta","order":{"group":["Zona 2"]}}""";
+
+        var json = JsonSerializer.Serialize(Read("""{"indicator":"encuesta_hoy","display":""" + stored + "}"), Json);
+
+        Assert.Contains(",\"display\":" + stored + ",", json);
+        Assert.DoesNotContain("minN", json);
+        Assert.DoesNotContain("showN", json);
+    }
+
+    [Fact]
+    public void A_threshold_of_zero_and_a_hidden_n_line_are_kept_as_given_and_round_trip()
+    {
+        foreach (var (stored, expected) in new[]
+        {
+            ("""{"minN":0}""", new WidgetDisplay(MinN: 0)),
+            ("""{"showN":false}""", new WidgetDisplay(ShowN: false)),
+            ("""{"minN":30,"showN":true}""", new WidgetDisplay(MinN: 30, ShowN: true)),
+        })
+        {
+            var config = Read("""{"indicator":"encuesta_hoy","display":""" + stored + "}");
+            var json = JsonSerializer.Serialize(config, Json);
+
+            Assert.Equal(expected, config.Display);
+            Assert.Contains(",\"display\":" + stored + ",", json);
+            Assert.Equal(json, JsonSerializer.Serialize(Read(json), Json));
+        }
+    }
+
+    [Fact]
+    public void The_base_settings_follow_the_order_in_the_stored_text_and_a_display_that_holds_only_them_is_a_display()
+    {
+        var config = new WidgetConfigInput(
+            "encuesta_hoy", GroupBy: "zona", Display: new WidgetDisplay(Order: new WidgetCategoryOrder(["Zona 2"]), MinN: 10, ShowN: true)).Normalize();
+
+        Assert.Contains(",\"display\":{\"order\":{\"group\":[\"Zona 2\"]},\"minN\":10,\"showN\":true}", JsonSerializer.Serialize(config, Json));
+        Assert.NotNull(new WidgetDisplay(MinN: 0).Normalize());
+        Assert.NotNull(new WidgetDisplay(ShowN: false).Normalize());
+        Assert.Null(new WidgetDisplay().Normalize());
+    }
+
+    [Fact]
+    public void Missing_footer_is_kept_as_given_and_left_out_while_it_is_not_set()
+    {
+        var plain = JsonSerializer.Serialize(Read("""{"indicator":"encuesta_hoy","groupBy":"zona"}"""), Json);
+        var on = JsonSerializer.Serialize(Read("""{"indicator":"encuesta_hoy","groupBy":"zona","missingFooter":true}"""), Json);
+        var off = Read("""{"indicator":"encuesta_hoy","groupBy":"zona","missingFooter":false}""");
+
+        Assert.DoesNotContain("missingFooter", plain);
+        Assert.Contains(",\"missingFooter\":true,", on);
+        Assert.False(off.MissingFooter);
+        Assert.Contains(",\"missingFooter\":false,", JsonSerializer.Serialize(off, Json));
+    }
 }

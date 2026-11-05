@@ -106,6 +106,16 @@ export function valueFormatter(indicator: IndicatorUnit, locale: string): ValueF
   return Object.assign((value: number) => withUnit(value), { plain, tick });
 }
 
+/**
+ * The formatter of the base figures (add-small-sample-warnings, design D9): a numerator, a denominator or an n, as a whole number with
+ * thousands separators and up to two decimals when it is not whole (a decimal numerator, such as 0.5), never in the indicator's format or
+ * with its unit. Twin of `ReportFormat.Figure` in tamiza-api.
+ */
+export function figureFormatter(locale: string): (value: number) => string {
+  const figure = new Intl.NumberFormat(locale, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return (value) => figure.format(value);
+}
+
 /** The name shown for a column of a table. */
 export type ColumnNamer = (column: string) => string;
 

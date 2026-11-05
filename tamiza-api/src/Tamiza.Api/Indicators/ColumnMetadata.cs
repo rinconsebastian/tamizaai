@@ -25,6 +25,18 @@ namespace Tamiza.Api.Indicators;
 /// Hides a leading number ("1. ", "2) ", "3 - ") in the text widgets show for the column's values; filters and colors kept by value still
 /// use the full value. Only <c>true</c> is stored.
 /// </param>
+/// <param name="Base">
+/// Declares the column as the indicator's base (design D1 of add-small-sample-warnings): the numeric column that counts the units, such
+/// as households, each row stands for. At most one column; only <c>true</c> is stored.
+/// </param>
+/// <param name="Missing">
+/// Values of a text or true/false column that mean no data, such as "Sin dato" or "No sabe", up to
+/// <see cref="ColumnMetadata.MaxMissingValues"/> texts of 1 to <see cref="ColumnMetadata.MaxMissingLength"/> characters, none twice, matched as exact text.
+/// </param>
+/// <param name="Categories">
+/// Declares the column as holding the answers of one question, one of <see cref="AnswerKinds.All"/>: the question, code and answer
+/// columns of a long table, where every unit of the base is counted under every answer.
+/// </param>
 public sealed record IndicatorColumnMetadata(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
      Description("The name people read for the column in captions, tables, emails and workbooks, 1 to 80 characters with no line break; left out, the column's own name.")] string? Label = null,
@@ -33,11 +45,28 @@ public sealed record IndicatorColumnMetadata(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
      Description("Values, as full text, that widgets keep at the end whatever the order or the sort, such as 'Otro', 'No sabe' or 'Sin dato' (up to 20, none twice, none also in order).")] IReadOnlyList<string?>? Last = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("true hides a leading number such as '1. ', '2) ' or '3 - ' in the text widgets show for the column's values; filters and colors kept by value still use the full value. Only true is stored.")] bool? StripPrefix = null)
+     Description("true hides a leading number such as '1. ', '2) ' or '3 - ' in the text widgets show for the column's values; filters and colors kept by value still use the full value. Only true is stored.")] bool? StripPrefix = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("true makes this numeric column the indicator's base: the count of units, such as households, that each row stands for (at most one column; never also missing or categories). Only true is stored.")] bool? Base = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("Values of a text column, as exact text, that mean no data, such as 'Sin dato' or 'No sabe' (up to 20, none twice, each 1 to 500 characters). A widget can leave them out and say what they held.")] IReadOnlyList<string?>? Missing = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("'single' or 'multiple': the column names a question or its answers in a long table with a row per answer (variable, orden, categoria), where every household of the base is counted under every answer. 'multiple' when any question of the column is multiple-choice. Never a column that splits the households (comuna, estrato, sexo).")] string? Categories = null)
 {
-    /// <summary>Whether the entry says anything: a label, an order, values kept last or hidden prefixes.</summary>
+    /// <summary>Whether the entry says anything: a label, an order, values kept last, hidden prefixes, a base, no-data values or a kind of answers.</summary>
     internal bool HasAny =>
-        (Label is { } label && !string.IsNullOrWhiteSpace(label)) || Order is { Count: > 0 } || Last is { Count: > 0 } || StripPrefix is true;
+        (Label is { } label && !string.IsNullOrWhiteSpace(label)) || Order is { Count: > 0 } || Last is { Count: > 0 } || StripPrefix is true
+        || Base is true || Missing is { Count: > 0 } || !string.IsNullOrWhiteSpace(Categories);
+}
+
+/// <summary>The kinds of answers a column can hold (<see cref="IndicatorColumnMetadata.Categories"/>).</summary>
+public static class AnswerKinds
+{
+    public const string Single = "single";
+
+    public const string Multiple = "multiple";
+
+    public static readonly IReadOnlyList<string> All = [Single, Multiple];
 }
 
 /// <summary>
@@ -49,6 +78,12 @@ public static class ColumnMetadata
 {
     /// <summary>The most columns of an indicator that can carry a property.</summary>
     public const int MaxColumns = 100;
+
+    /// <summary>The most values a column lists as meaning no data.</summary>
+    public const int MaxMissingValues = 20;
+
+    /// <summary>The longest value a column lists as meaning no data.</summary>
+    public const int MaxMissingLength = 500;
 
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 
@@ -78,6 +113,9 @@ public static class ColumnMetadata
                 Order = entry.Order is { Count: > 0 } ? entry.Order : null,
                 Last = entry.Last is { Count: > 0 } ? entry.Last : null,
                 StripPrefix = entry.StripPrefix is true ? true : null,
+                Base = entry.Base is true ? true : null,
+                Missing = entry.Missing is { Count: > 0 } ? entry.Missing : null,
+                Categories = string.IsNullOrWhiteSpace(entry.Categories) ? null : entry.Categories,
             };
         }
 
@@ -105,6 +143,7 @@ public static class ColumnMetadata
             errors.Add("columns", $"An indicator labels at most {MaxColumns} columns.");
         }
 
+        string? firstBase = null;
         foreach (var (column, entry) in kept)
         {
             if (!ColumnLabels.CheckKey(column, "columns", errors))
@@ -118,6 +157,57 @@ public static class ColumnMetadata
             }
 
             CheckValues(column, entry, errors);
+            CheckBase(column, entry, ref firstBase, errors);
+        }
+    }
+
+    /// <summary>
+    /// The rules of the facts about a column's base, its values that mean no data and its kind of answers (design D1 of
+    /// add-small-sample-warnings). Shape only: the table may not be published yet, and the engine ignores a fact that does not fit the
+    /// published column. <paramref name="firstBase"/> is the first column sent as the base, which a second one is refused against.
+    /// </summary>
+    private static void CheckBase(string column, IndicatorColumnMetadata entry, ref string? firstBase, FieldErrors errors)
+    {
+        if (entry.Base is true)
+        {
+            if (firstBase is null)
+            {
+                firstBase = column;
+            }
+            else
+            {
+                errors.Add($"columns.{column}.base", $"Only one column can be the base: {firstBase} already is.");
+            }
+
+            if (entry.Missing is { Count: > 0 } || !string.IsNullOrWhiteSpace(entry.Categories))
+            {
+                errors.Add($"columns.{column}", "A base column counts units: it holds no answers and no values that mean no data.");
+            }
+        }
+
+        var missing = entry.Missing ?? [];
+        if (missing.Count > MaxMissingValues)
+        {
+            errors.Add($"columns.{column}.missing", $"A column lists at most {MaxMissingValues} values that mean no data.");
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < missing.Count; i++)
+        {
+            var value = missing[i];
+            if (value is null || value.Length is 0 or > MaxMissingLength || value.Contains('\0'))
+            {
+                errors.Add($"columns.{column}.missing[{i}]", $"A value that means no data has 1 to {MaxMissingLength} characters and no NUL character.");
+            }
+            else if (!seen.Add(value))
+            {
+                errors.Add($"columns.{column}.missing[{i}]", $"{value} is listed twice.");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(entry.Categories) && !AnswerKinds.All.Contains(entry.Categories, StringComparer.Ordinal))
+        {
+            errors.Add($"columns.{column}.categories", "Answers are 'single' or 'multiple'.");
         }
     }
 

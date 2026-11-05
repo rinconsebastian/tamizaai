@@ -1,6 +1,7 @@
 import { ChartType, QueryRow, SeriesLayout } from '../../../core/projects/indicators.service';
 import cases from './testing/series-tables.json';
-import { SeriesAnswer, buildSeriesTable, chartOrder, hasShares, isSeriesAnswer } from './series-table';
+import { arrangeColumns, CategoryOrders } from './category-order';
+import { SeriesAnswer, buildSeriesTable, chartOrder, figuresOf, hasShares, isSeriesAnswer } from './series-table';
 
 // The same cases the API's SeriesTable tests read (design D12): the grid is derived from an answer, a chart type and a layout, and
 // both sides must give the same rows, totals, shares and notes.
@@ -129,5 +130,80 @@ describe('chartOrder', () => {
     for (const type of ['bar', 'column'] as const) {
       expect(chartOrder(table, type).map((row) => row.group)).toEqual(['10', null, '2', '1']);
     }
+  });
+});
+
+describe('the figures of each cell (add-small-sample-warnings, design D2)', () => {
+  const answer = (withFigures: boolean, withGroupN: boolean): SeriesAnswer => ({
+    series: [
+      { value: 'Sí', kind: 'value' },
+      { value: 'No', kind: 'value' },
+    ],
+    rows: [
+      { group: 'COMUNA 7', series: 'Sí', seriesKind: 'value', value: 8, geometry: null, ...(withFigures ? { numerator: 8, denominator: 16, n: 16 } : {}) },
+      { group: 'COMUNA 7', series: 'No', seriesKind: 'value', value: 2, geometry: null, ...(withFigures ? { numerator: 2, denominator: 16, n: 16 } : {}) },
+      { group: 'COMUNA 1', series: 'Sí', seriesKind: 'value', value: 56, geometry: null, ...(withFigures ? { numerator: 56, denominator: 121, n: 121 } : {}) },
+    ],
+    totals: {
+      groups: [
+        { group: 'COMUNA 7', value: 10, rows: 2, ...(withGroupN ? { n: 16 } : {}) },
+        { group: 'COMUNA 1', value: 56, rows: 1, ...(withGroupN ? { n: 121 } : {}) },
+      ],
+      series: [
+        { series: 'Sí', kind: 'value', value: 64, rows: 2 },
+        { series: 'No', kind: 'value', value: 2, rows: 1 },
+      ],
+      all: { value: 66, rows: 3 },
+    },
+  });
+
+  it('keeps the numerator, the denominator and the n of each cell next to the cell, null where the pair has no value', () => {
+    const table = buildSeriesTable(answer(true, false), 'column', 'grouped');
+
+    expect(table.rows[0].figures).toEqual([
+      { numerator: 8, denominator: 16, n: 16 },
+      { numerator: 2, denominator: 16, n: 16 },
+    ]);
+    expect(table.rows[1].figures).toEqual([{ numerator: 56, denominator: 121, n: 121 }, null]);
+  });
+
+  it('leaves figures out of a grid whose cells have none, as the grid of a measure with no base column', () => {
+    const table = buildSeriesTable(answer(false, false), 'column', 'stacked');
+
+    expect(table.rows.every((row) => !('figures' in row))).toBe(true);
+  });
+
+  it('gives each cell of a table of shares the n of its group, and no numerator or denominator', () => {
+    for (const [type, layout] of [['column', 'percent'], ['likert', null]] as const) {
+      const table = buildSeriesTable(answer(false, true), type, layout);
+
+      expect(table.rows[0].figures, type).toEqual([
+        { numerator: null, denominator: null, n: 16 },
+        { numerator: null, denominator: null, n: 16 },
+      ]);
+      expect(table.rows[1].figures, type).toEqual([{ numerator: null, denominator: null, n: 121 }, null]);
+    }
+  });
+
+  it('gives a share cell no figures when its group has no n', () => {
+    expect(buildSeriesTable(answer(false, false), 'column', 'percent').rows.every((row) => !('figures' in row))).toBe(true);
+  });
+
+  it('keeps the figures of each cell with its cell when the declared order moves the columns', () => {
+    const table = buildSeriesTable(answer(true, false), 'column', 'grouped');
+    const arranged = arrangeColumns(table, { groups: null, series: { order: ['No', 'Sí'], last: [], sorted: false }, hideGroupPrefixes: false, hideSeriesPrefixes: false } as CategoryOrders);
+
+    expect(arranged.columns.map((column) => column.series)).toEqual(['No', 'Sí']);
+    expect(arranged.rows[0].figures).toEqual([
+      { numerator: 2, denominator: 16, n: 16 },
+      { numerator: 8, denominator: 16, n: 16 },
+    ]);
+  });
+
+  it('reads the figures of a total, or none', () => {
+    expect(figuresOf({ numerator: 8, denominator: 16, n: 16 })).toEqual({ numerator: 8, denominator: 16, n: 16 });
+    expect(figuresOf({ n: 4 })).toEqual({ numerator: null, denominator: null, n: 4 });
+    expect(figuresOf({})).toBeNull();
+    expect(figuresOf(null)).toBeNull();
   });
 });

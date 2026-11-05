@@ -1,4 +1,5 @@
 import { ChartType, QueryResult, ReferenceLineKind, WidgetConfig } from '../../../core/projects/indicators.service';
+import { overOnAnswers } from './base-figures';
 
 /** A reference line a chart can draw (add-chart-annotations, design D3): its kind, the widget's own label (null for the kind's default) and its value. */
 export interface ReferenceLineValue {
@@ -35,18 +36,21 @@ function median(values: readonly number[]): number {
  * `mean` is the mean of the values the chart draws (the answer's rows, in its order), `median` their median, `overall` the answer's
  * `overall` or, with a series, its grand total, and `value` its own number. A line with no value (no bars, an overall of no rows) is
  * left out, and so is a mean or a median of a widget with a series, which the API refuses. A null line or a line of an unknown kind is
- * left out too. Twin of `ReferenceLines.Of` in tamiza-api (the case file `testing/reference-lines.json` is shared); change both together.
+ * left out too. Over a group or series column the indicator declares as answers (`answerColumns`, add-small-sample-warnings design D16) the
+ * `overall` line is left out as well: its bars are the answers of one question, so it would only be their mean. Twin of `ReferenceLines.Of`
+ * in tamiza-api (the case file `testing/reference-lines.json` is shared); change both together.
  */
-export function referenceLineValues(type: ChartType, config: WidgetConfig, answer: ReferenceAnswer): ReferenceLineValue[] {
+export function referenceLineValues(type: ChartType, config: WidgetConfig, answer: ReferenceAnswer, answerColumns: readonly string[] = []): ReferenceLineValue[] {
   const lines = config.display?.referenceLines;
   if ((type !== 'bar' && type !== 'column' && type !== 'line') || !lines?.length) {
     return [];
   }
   const withSeries = !!config.seriesBy;
+  const overAnswers = overOnAnswers(config, answerColumns);
   const values = withSeries ? [] : answer.rows.map((row) => row.value);
   const kept: ReferenceLineValue[] = [];
   lines.forEach((line, place) => {
-    const value = valueOf(line?.kind, line?.value, withSeries, values, answer);
+    const value = overAnswers && line?.kind === 'overall' ? null : valueOf(line?.kind, line?.value, withSeries, values, answer);
     if (line && value !== null) {
       kept.push({ kind: line.kind, label: line.label?.trim() || null, value, place });
     }

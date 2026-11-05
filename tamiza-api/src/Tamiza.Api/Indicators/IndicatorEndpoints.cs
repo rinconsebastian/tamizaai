@@ -71,6 +71,7 @@ public static class IndicatorEndpoints
                 ? columns
                 : columns with
                 {
+                    Declared = DeclaredOf(labels),
                     Columns = columns.Columns.Select(c =>
                     {
                         var facts = labels.GetValueOrDefault(c.Name);
@@ -82,6 +83,21 @@ public static class IndicatorEndpoints
         {
             return DataEndpoints.Timeout();
         }
+    }
+
+    /// <summary>
+    /// The base, no-data and answer declarations of a column map, by column name, each entry holding only those three properties; null when
+    /// the map declares none (design D1 of add-small-sample-warnings).
+    /// </summary>
+    internal static Dictionary<string, IndicatorColumnMetadata>? DeclaredOf(IReadOnlyDictionary<string, IndicatorColumnMetadata> columns)
+    {
+        var declared = columns
+            .Where(entry => entry.Value.Base is true || entry.Value.Missing is { Count: > 0 } || !string.IsNullOrEmpty(entry.Value.Categories))
+            .ToDictionary(
+                entry => entry.Key,
+                entry => new IndicatorColumnMetadata(Base: entry.Value.Base, Missing: entry.Value.Missing, Categories: entry.Value.Categories),
+                StringComparer.Ordinal);
+        return declared.Count == 0 ? null : declared;
     }
 
     /// <summary>What the current version of an indicator's script says about its columns; null when it says nothing or the indicator is removed.</summary>

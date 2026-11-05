@@ -450,4 +450,92 @@ public sealed class McpScriptToolsTests(PostgresFixture postgres)
 
         Assert.Equal(["Sí", "No"], second.RootElement.GetProperty("columns").GetProperty("categoria").GetProperty("order").EnumerateArray().Select(v => v.GetString()));
     }
+    // Base metadata through MCP (mcp-server: Base metadata through MCP)
+
+    private const string LongColumns = "variable text, orden text, categoria text, comuna text, hogares numeric, value numeric";
+
+    [Fact]
+    public async Task Answers_declared_by_Claude()
+    {
+        await using var h = await CreateAsync();
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "teatro_hoy", LongColumns, "('E1', '1', 'Sí', 'COMUNA 1', 5, 3), ('E1', '2', 'No', 'Sin dato', 1, 1)");
+
+        using var saved = (await h.CallAsync("analyst", "save_script", Labelled(new
+        {
+            variable = new { categories = "single" },
+            orden = new { categories = "single" },
+            categoria = new { categories = "single" },
+            comuna = new { label = "Comuna", missing = new[] { "Sin dato" } },
+            hogares = new { @base = true },
+        }))).Json();
+        using var script = (await h.CallAsync("analyst", "get_script", new { kind = "indicator", name = "teatro_hoy" })).Json();
+        using var listed = (await h.CallAsync("viewer", "list_indicators")).Json();
+        using var catalog = (await h.CallAsync("viewer", "get_indicator_columns", new { name = "teatro_hoy" })).Json();
+
+        void Check(JsonElement columns)
+        {
+            Assert.Equal("single", columns.GetProperty("categoria").GetProperty("categories").GetString());
+            Assert.Equal(["Sin dato"], columns.GetProperty("comuna").GetProperty("missing").EnumerateArray().Select(v => v.GetString()));
+            Assert.Equal("Comuna", columns.GetProperty("comuna").GetProperty("label").GetString());
+            Assert.True(columns.GetProperty("hogares").GetProperty("base").GetBoolean());
+        }
+
+        Check(saved.RootElement.GetProperty("columns"));
+        Check(script.RootElement.GetProperty("columns"));
+        Check(Assert.Single(listed.RootElement.GetProperty("indicators").EnumerateArray()).GetProperty("columns"));
+        // The columns of the table say what the indicator declares, apart from the labels they carry already.
+        var declared = catalog.RootElement.GetProperty("declared");
+        Assert.Equal(["categoria", "comuna", "hogares", "orden", "variable"], declared.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal("single", declared.GetProperty("variable").GetProperty("categories").GetString());
+        Assert.Equal(["Sin dato"], declared.GetProperty("comuna").GetProperty("missing").EnumerateArray().Select(v => v.GetString()));
+        Assert.False(declared.GetProperty("comuna").TryGetProperty("label", out _));
+        Assert.True(declared.GetProperty("hogares").GetProperty("base").GetBoolean());
+        Assert.Equal("Comuna", catalog.RootElement.GetProperty("columns").EnumerateArray().Single(c => c.GetProperty("name").GetString() == "comuna").GetProperty("label").GetString());
+    }
+
+    [Fact]
+    public async Task An_indicator_that_declares_nothing_has_no_declared_member_and_labels_alone_replace_the_declarations()
+    {
+        await using var h = await CreateAsync();
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "teatro_hoy", LongColumns, "('E1', '1', 'Sí', 'COMUNA 1', 5, 3)");
+        await h.CallAsync("analyst", "save_script", Labelled(new { numerator = new { label = "Hogares que asistieron" } }));
+        using var labelled = (await h.CallAsync("viewer", "get_indicator_columns", new { name = "teatro_hoy" })).Json();
+        Assert.False(labelled.RootElement.TryGetProperty("declared", out _));
+
+        await h.CallAsync("analyst", "save_script", Labelled(new { categoria = new { categories = "multiple" } }, baseVersion: 1));
+        using var declared = (await h.CallAsync("viewer", "get_indicator_columns", new { name = "teatro_hoy" })).Json();
+        Assert.Equal("multiple", declared.RootElement.GetProperty("declared").GetProperty("categoria").GetProperty("categories").GetString());
+
+        // Declarations replaced by labels alone: a given columns replaces the whole map.
+        using var replaced = (await h.CallAsync("analyst", "save_script", Labelled(new { numerator = new { label = "Hogares que asistieron" } }, baseVersion: 2))).Json();
+
+        Assert.False(replaced.RootElement.GetProperty("columns").TryGetProperty("categoria", out _));
+        using var after = (await h.CallAsync("viewer", "get_indicator_columns", new { name = "teatro_hoy" })).Json();
+        Assert.False(after.RootElement.TryGetProperty("declared", out _));
+    }
+
+    [Fact]
+    public async Task Two_base_columns_through_MCP()
+    {
+        await using var h = await CreateAsync();
+
+        var result = await h.CallAsync("analyst", "save_script", Labelled(new { hogares = new { @base = true }, personas = new { @base = true } }));
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("columns.personas.base", result.Text());
+        Assert.Contains("Only one column can be the base: hogares already is.", result.Text());
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
+
+    [Fact]
+    public async Task An_answer_kind_that_is_not_one_is_refused_with_its_key_through_MCP()
+    {
+        await using var h = await CreateAsync();
+
+        var result = await h.CallAsync("analyst", "save_script", Labelled(new { categoria = new { categories = "many" } }));
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("columns.categoria.categories", result.Text());
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
 }

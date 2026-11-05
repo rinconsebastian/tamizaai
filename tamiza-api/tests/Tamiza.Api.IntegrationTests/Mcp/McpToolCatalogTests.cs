@@ -82,10 +82,10 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         await using var h = await McpProjectHarness.CreateAsync(postgres);
         var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
 
-        const string warning = "To change the chart type of a widget that has a color, a scale, an orientation, reference lines, steps, data labels or an order, also send a config without the display fields the new type does not take: a new chartType alone keeps the old config";
+        const string warning = "To change the chart type of a widget that has a color, a scale, an orientation, reference lines, steps, data labels, an order or no-data values left out, also send a config without the display fields the new type does not take: a new chartType alone keeps the old config";
         var update = tools["update_widget"].Description;
         Assert.Contains(warning, update);
-        Assert.Contains("config.display.color, config.display.ramp, config.display.orientation, config.display.referenceLines, config.display.interpolation, config.display.dataLabels or config.display.order", update);
+        Assert.Contains("config.display.color, config.display.ramp, config.display.orientation, config.display.referenceLines, config.display.interpolation, config.display.dataLabels, config.display.order or config.missingFooter", update);
         // update_widget says what a new config replaces, which is why the chart type alone is not enough.
         Assert.Contains("What you leave out keeps its value; a new config replaces the old one whole", update);
 
@@ -226,7 +226,7 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         }
 
         // The template of create_widget lists the widget's texts after the labels (add-widget-context), and the chart annotations after them (add-chart-annotations).
-        Assert.Contains("display: { color, ramp, orientation, labels, subtitle, footnote, caption, unit, showDescription, referenceLines, interpolation, dataLabels, order } }", tools["create_widget"].Description);
+        Assert.Contains("missingFooter, display: { color, ramp, orientation, labels, subtitle, footnote, caption, unit, showDescription, referenceLines, interpolation, dataLabels, order, minN, showN } }", tools["create_widget"].Description);
         Assert.Contains("display: { labels, referenceLines, order } }", tools["query_indicator"].Description);
         Assert.Contains("labels", tools["query_indicator"].Description);
         Assert.Contains("labels gives the name shown for each column it names", tools["get_widget_data"].Description);
@@ -458,5 +458,71 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         {
             Assert.Contains(property, column);
         }
+    }
+    [Fact]
+    public async Task The_tools_name_the_base_settings_the_base_fields_of_their_results_and_the_base_metadata_of_a_column()
+    {
+        await using var h = await McpProjectHarness.CreateAsync(postgres);
+        var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
+
+        // The widget tools say what minN, showN and missingFooter are, after the order and before the chart type sentence.
+        foreach (var name in new[] { "create_widget", "update_widget" })
+        {
+            var description = tools[name].Description;
+            Assert.Contains("config.display also takes minN and showN, on every chart type", description);
+            Assert.Contains("minN is the widget's own small-base threshold, 0 (off for this widget) or 1 to 10000", description);
+            Assert.Contains("config.missingFooter true leaves out of a bar, column, line, pie, heatmap, pyramid, likert or crosstab the rows whose group or series value its indicator declares as meaning no data", description);
+            Assert.True(description.IndexOf("config.display.order =", StringComparison.Ordinal) < description.IndexOf("config.display also takes minN and showN", StringComparison.Ordinal));
+            // The sentence about the display that earlier changes pin stays as it is.
+            Assert.Contains("config.display = { color, ramp, orientation, labels } sets how the widget is drawn", description);
+            var display = tools[name].JsonSchema.GetProperty("properties").GetProperty("config").GetProperty("properties").GetProperty("display").GetProperty("properties");
+            Assert.Contains("0 turns it off", display.GetProperty("minN").GetProperty("description").GetString());
+            Assert.Contains("base n line", display.GetProperty("showN").GetProperty("description").GetString());
+            var missing = tools[name].JsonSchema.GetProperty("properties").GetProperty("config").GetProperty("properties").GetProperty("missingFooter").GetProperty("description").GetString();
+            Assert.Contains("no data", missing);
+            Assert.False(tools[name].JsonSchema.GetProperty("properties").GetProperty("config").GetProperty("properties").GetProperty("missingFooter").TryGetProperty("enum", out _));
+        }
+
+        var update = tools["update_dashboard"];
+        Assert.Contains("minN, 0 turns it off", update.Description);
+        Assert.Contains("showN", update.Description);
+        Assert.Contains("minN and showN; what you leave out keeps its value", update.Description);
+        var properties = update.JsonSchema.GetProperty("properties");
+        Assert.Contains("0 turns it off", properties.GetProperty("minN").GetProperty("description").GetString());
+        Assert.Contains("base n line", properties.GetProperty("showN").GetProperty("description").GetString());
+        Assert.DoesNotContain("minN", update.JsonSchema.GetProperty("required").EnumerateArray().Select(r => r.GetString()));
+        Assert.DoesNotContain("showN", update.JsonSchema.GetProperty("required").EnumerateArray().Select(r => r.GetString()));
+        Assert.Contains("minN, showN", tools["get_dashboard"].Description);
+
+        // The results: n, numerator, denominator, smallBase and noData.
+        foreach (var name in new[] { "query_indicator", "get_widget_data" })
+        {
+            var description = tools[name].Description;
+            Assert.Contains("numerator, denominator and n", description);
+            Assert.Contains("noData: { values, value, formatted, share, n }", description);
+            Assert.Contains("only when its indicator declares a base column or answer columns", description);
+        }
+
+        Assert.Contains("smallBase: true", tools["get_widget_data"].Description);
+        Assert.Contains("the minN and showN in force", tools["get_widget_data"].Description);
+        Assert.Contains("missingFooter, sort:", tools["query_indicator"].Description);
+
+        // save_script: the three properties, with when to declare each, and that the map is replaced whole.
+        var columns = tools["save_script"].JsonSchema.GetProperty("properties").GetProperty("columns").GetProperty("description").GetString()!;
+        Assert.Contains("base: true (a numeric column that counts the units each row stands for", columns);
+        Assert.Contains("missing (up to 20 values, as exact text, that mean no data", columns);
+        Assert.Contains("categories, single or multiple", columns);
+        Assert.Contains("never a column that splits the households, such as comuna or estrato", columns);
+        Assert.Contains("and its base, missing and categories too", columns);
+        var entry = tools["save_script"].JsonSchema.GetProperty("properties").GetProperty("columns").GetProperty("additionalProperties").ToString();
+        foreach (var property in new[] { "base", "missing", "categories" })
+        {
+            Assert.Contains(property, entry);
+        }
+
+        Assert.Contains("(base)", tools["save_script"].Description);
+        Assert.Contains("declared: base, missing and categories", tools["get_indicator_columns"].Description);
+        Assert.Contains("base, no-data and answer columns", tools["get_script"].Description);
+        Assert.Contains("base, no-data and answer columns", tools["list_indicators"].Description);
     }
 }

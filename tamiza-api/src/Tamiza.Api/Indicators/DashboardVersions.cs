@@ -34,6 +34,9 @@ public static class DashboardChangeKinds
     /// <summary>The dashboard's source was given, changed or removed (design D7 of the widget context).</summary>
     public const string SourceChanged = "sourceChanged";
 
+    /// <summary>The dashboard's small-base threshold or its base n line switch changed (design D8 of add-small-sample-warnings).</summary>
+    public const string BasesChanged = "basesChanged";
+
     public const string WidgetAdded = "widgetAdded";
 
     /// <summary>A widget's title, chart type, query or display (color or scale) changed, with or without its layout.</summary>
@@ -57,7 +60,7 @@ public static class DashboardChangeKinds
     public const string Unrecorded = "unrecorded";
 
     public static readonly IReadOnlyList<string> All =
-        [Initial, Created, Duplicated, Renamed, FiltersChanged, ColorsChanged, SourceChanged, WidgetAdded, WidgetChanged, WidgetRemoved,
+        [Initial, Created, Duplicated, Renamed, FiltersChanged, ColorsChanged, SourceChanged, BasesChanged, WidgetAdded, WidgetChanged, WidgetRemoved,
          WidgetMovedOut, WidgetMovedIn, LayoutChanged, Restored, Unrecorded];
 
     /// <summary>The kinds of a version that stays as it was recorded: no later write joins it (design D4).</summary>
@@ -306,14 +309,14 @@ public sealed class DashboardVersions(
 
     /// <summary>
     /// The dashboard as a version holds it (design D2): its name, its filters, its palette and colors kept by value when they are not
-    /// the defaults, its source when it has one, and its widgets in reading order, each with its id, title, chart type, config and
+    /// the defaults, its source when it has one, its base settings when it has any, and its widgets in reading order, each with its id, title, chart type, config and
     /// layout. Null when the project has no such dashboard.
     /// </summary>
     public static async Task<string?> ContentAsync(TamizaDbContext db, Guid projectId, Guid dashboardId, CancellationToken ct)
     {
         var dashboard = await db.Dashboards.AsNoTracking()
             .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
-            .Select(d => new { d.Name, d.Filters, d.Palette, d.ValueColors, d.Source })
+            .Select(d => new { d.Name, d.Filters, d.Palette, d.ValueColors, d.Source, d.MinN, d.ShowN })
             .SingleOrDefaultAsync(ct);
         if (dashboard is null)
         {
@@ -323,11 +326,12 @@ public sealed class DashboardVersions(
         var widgets = await db.DashboardWidgets.AsNoTracking()
             .Where(w => w.ProjectId == projectId && w.DashboardId == dashboardId)
             .ToListAsync(ct);
-        return Content(dashboard.Name, dashboard.Filters, dashboard.Palette, dashboard.ValueColors, dashboard.Source, widgets);
+        return Content(dashboard.Name, dashboard.Filters, dashboard.Palette, dashboard.ValueColors, dashboard.Source, dashboard.MinN, dashboard.ShowN, widgets);
     }
 
     /// <summary>
-    /// The content of a dashboard with this name, these filters, this palette, these colors kept by value, this source and these widgets (design D2).
+    /// The content of a dashboard with this name, these filters, this palette, these colors kept by value, this source, these base settings and
+    /// these widgets (design D2).
     /// The widgets are in reading order, top to bottom, then left to right, then the older first, then by id, so the same dashboard
     /// always gives the same list. The filters, the colors kept by value, each config and each layout are embedded as stored, never read
     /// and written again through <see cref="WidgetConfig"/>: a version is exactly what was saved, a restore writes back the same JSON,
@@ -339,9 +343,12 @@ public sealed class DashboardVersions(
     /// palettes existed, byte for byte, which the newest version of every dashboard migrated from script 0018 holds: the flush and a
     /// restore, which compare contents, find them equal and record no version for the new shape alone. <c>source</c> follows the colors and
     /// is written only when the dashboard has one (design D7 of the widget context), so a dashboard that never had a source keeps its
-    /// content byte for byte in the same way.
+    /// content byte for byte in the same way. <c>minN</c> and <c>showN</c> follow the source: <c>minN</c> is written only when the dashboard
+    /// has a threshold and <c>showN</c> only when it is true (design D8 of add-small-sample-warnings), so a dashboard with no base settings
+    /// keeps its content byte for byte too.
     /// </remarks>
-    public static string Content(string name, string filters, string palette, string valueColors, string? source, IEnumerable<DashboardWidget> widgets)
+    public static string Content(
+        string name, string filters, string palette, string valueColors, string? source, int? minN, bool showN, IEnumerable<DashboardWidget> widgets)
     {
         var ordered = widgets
             .Select(widget => (Widget: widget, Layout: DashboardEndpoints.ReadLayout(widget.Layout)))
@@ -373,6 +380,16 @@ public sealed class DashboardVersions(
         if (source is not null)
         {
             content["source"] = source;
+        }
+
+        if (minN is { } threshold)
+        {
+            content["minN"] = threshold;
+        }
+
+        if (showN)
+        {
+            content["showN"] = true;
         }
 
         content["widgets"] = new JsonArray(ordered);
@@ -446,7 +463,9 @@ public sealed class DashboardVersions(
             row.Author,
             version.CreatedAt,
             version.SavedAt,
-            content.Source);
+            content.Source,
+            content.MinN,
+            content.ShowN);
     }
 
     private static DashboardVersionSummary Summary(DashboardVersion version, Person author, bool current)
@@ -461,7 +480,7 @@ public sealed class DashboardVersions(
     /// <summary>
     /// A version's content as <see cref="Content"/> built it (design D2), with the filters, the colors kept by value and each widget's
     /// config and layout as the JSON text stored, so a restore writes them back as they were saved. What a content lacks reads as empty,
-    /// a missing or non-text source as none, and a missing palette as <see cref="Palettes.Tamiza"/>: a version recorded before palettes existed has neither key (design D6 of
+    /// a missing or non-text source as none, a missing or out-of-range threshold and a missing <c>showN</c> as off, and a missing palette as <see cref="Palettes.Tamiza"/>: a version recorded before palettes existed has neither key (design D6 of
     /// dashboard palettes). A palette the catalog no longer has reads as <see cref="Palettes.Tamiza"/> too, since the dashboard's
     /// <c>ck_dashboards_palette</c> check would refuse it on a restore.
     /// </summary>
@@ -475,6 +494,10 @@ public sealed class DashboardVersions(
             && Palettes.IsKnown(painted.GetString()) ? painted.GetString()! : Palettes.Tamiza;
         var colors = root.TryGetProperty("valueColors", out var kept) && kept.ValueKind == JsonValueKind.Array ? kept.GetRawText() : "[]";
         var source = root.TryGetProperty("source", out var sourced) && sourced.ValueKind == JsonValueKind.String ? sourced.GetString() : null;
+        // A missing key reads as off, and so does a threshold out of range, which the dashboard's check would refuse on a restore.
+        var minN = root.TryGetProperty("minN", out var threshold) && threshold.ValueKind == JsonValueKind.Number && threshold.TryGetInt32(out var number)
+            && number is >= 1 and <= WidgetDisplay.MaxMinN ? number : (int?)null;
+        var showN = root.TryGetProperty("showN", out var shown) && shown.ValueKind == JsonValueKind.True;
         var widgets = root.TryGetProperty("widgets", out var held) && held.ValueKind == JsonValueKind.Array
             ? held.EnumerateArray()
                 .Select(w => new VersionContentWidget(
@@ -485,7 +508,7 @@ public sealed class DashboardVersions(
                     w.GetProperty("layout").GetRawText()))
                 .ToList()
             : [];
-        return new VersionContent(name, filters, palette, colors, source, widgets);
+        return new VersionContent(name, filters, palette, colors, source, minN, showN, widgets);
     }
 
     /// <summary>
@@ -498,7 +521,7 @@ public sealed class DashboardVersions(
         ProjectId = dashboard.ProjectId,
         DashboardId = dashboard.Id,
         Number = 1,
-        Content = Content(dashboard.Name, dashboard.Filters, dashboard.Palette, dashboard.ValueColors, dashboard.Source, []),
+        Content = Content(dashboard.Name, dashboard.Filters, dashboard.Palette, dashboard.ValueColors, dashboard.Source, dashboard.MinN, dashboard.ShowN, []),
         Changes = JsonSerializer.Serialize(new[] { new DashboardChange(DashboardChangeKinds.Created) }, Json),
         Origin = DashboardVersionOrigin.App,
         AuthorId = dashboard.CreatedBy,
@@ -586,7 +609,7 @@ public sealed class DashboardVersions(
         // 2. A state no version holds: a change that committed without the lock just before, its flush still to come, or one whose flush
         // failed. That writer's flush would find the restored content and record nothing, so it is recorded here first.
         var widgets = await db.DashboardWidgets.Where(w => w.ProjectId == projectId && w.DashboardId == dashboardId).ToListAsync(ct);
-        var current = Content(dashboard.Name, dashboard.Filters, dashboard.Palette, dashboard.ValueColors, dashboard.Source, widgets);
+        var current = Content(dashboard.Name, dashboard.Filters, dashboard.Palette, dashboard.ValueColors, dashboard.Source, dashboard.MinN, dashboard.ShowN, widgets);
         var newest = await Of(db, projectId, dashboardId).AsNoTracking()
             .OrderByDescending(v => v.Number)
             .Select(v => new { v.Number, Same = v.Content == current })
@@ -635,7 +658,8 @@ public sealed class DashboardVersions(
 
         // 5. Name, kept when another dashboard of the project now has the version's, ignoring case. 6. Filters, palette, colors kept by
         // value and source: a version recorded before palettes existed reads as the palette tamiza with none kept (design D6 of dashboard
-        // palettes), and one recorded before sources existed, as having none (design D7 of the widget context).
+        // palettes), and one recorded before sources existed, as having none (design D7 of the widget context). The base settings
+        // come back too, and a version recorded before them restores them off (design D8 of add-small-sample-warnings).
         if (name != dashboard.Name)
         {
             dashboard.Name = name;
@@ -646,6 +670,8 @@ public sealed class DashboardVersions(
         dashboard.Palette = version.Palette;
         dashboard.ValueColors = version.ValueColors;
         dashboard.Source = version.Source;
+        dashboard.MinN = version.MinN;
+        dashboard.ShowN = version.ShowN;
 
         // 7. Widgets, with the JSON the version holds. The published tables are not checked: the config was valid when saved, and a
         // widget whose indicator or columns are gone shows its message, as after a move.
@@ -855,7 +881,8 @@ public sealed class DashboardVersions(
 /// A version's content as <see cref="DashboardVersions.ReadContent"/> reads it: the filters and the colors kept by value as their JSON
 /// text, the palette, which is <see cref="Palettes.Tamiza"/> when the content has none, and the source, which is null when it has none.
 /// </summary>
-public sealed record VersionContent(string Name, string Filters, string Palette, string ValueColors, string? Source, IReadOnlyList<VersionContentWidget> Widgets);
+public sealed record VersionContent(
+    string Name, string Filters, string Palette, string ValueColors, string? Source, int? MinN, bool ShowN, IReadOnlyList<VersionContentWidget> Widgets);
 
 /// <summary>A widget of a version's content, its config and layout as their JSON text.</summary>
 public sealed record VersionContentWidget(Guid Id, string Title, string ChartType, string Config, string Layout);

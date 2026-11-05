@@ -419,6 +419,7 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
                 table.HasCheckConstraint("ck_dashboards_position", "position >= 0");
                 table.HasCheckConstraint("ck_dashboards_palette", "palette IN ('tamiza', 'institutional', 'earth', 'vivid')");
                 table.HasCheckConstraint("ck_dashboards_source", "source IS NULL OR char_length(source) BETWEEN 1 AND 300");
+                table.HasCheckConstraint("ck_dashboards_min_n", "min_n IS NULL OR min_n BETWEEN 1 AND 10000");
             });
             dashboard.HasKey(d => d.Id);
             dashboard.Property(d => d.Id).HasDefaultValueSql("gen_random_uuid()");
@@ -428,6 +429,8 @@ public sealed class TamizaDbContext(DbContextOptions<TamizaDbContext> options) :
             dashboard.Property(d => d.Palette).HasColumnType("text").HasDefaultValue("tamiza");
             dashboard.Property(d => d.ValueColors).HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb");
             dashboard.Property(d => d.Source).HasColumnType("text");
+            dashboard.Property(d => d.MinN).HasColumnType("integer");
+            dashboard.Property(d => d.ShowN).HasDefaultValue(false);
             dashboard.Property(d => d.CreatedAt).HasDefaultValueSql("now()");
             dashboard.Property(d => d.UpdatedAt).HasDefaultValueSql("now()");
             // One name per project whatever its case; also serves the lookups by project, so the project has no index of its own.

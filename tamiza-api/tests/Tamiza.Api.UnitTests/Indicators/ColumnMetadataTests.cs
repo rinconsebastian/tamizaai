@@ -492,4 +492,226 @@ public sealed class ColumnMetadataTests
         Assert.Equal(100, CategoryOrder.MaxValues);
         Assert.Equal(20, CategoryOrder.MaxLast);
     }
+
+    // The base, the values that mean no data and the answer columns of a column (design D1 of add-small-sample-warnings)
+
+    [Fact]
+    public void An_entry_with_only_a_label_keeps_the_json_the_column_names_change_pins()
+    {
+        var map = ColumnMetadata.Normalize(One("numerator", new IndicatorColumnMetadata("Hogares")))!;
+
+        Assert.Equal("""{"numerator":{"label":"Hogares"}}""", ColumnMetadata.Write(map));
+    }
+
+    [Fact]
+    public void A_base_no_data_values_and_a_kind_of_answers_round_trip_unchanged_and_come_after_the_other_properties()
+    {
+        var map = ColumnMetadata.Normalize(new Dictionary<string, IndicatorColumnMetadata?>
+        {
+            ["hogares"] = new("Hogares", Base: true),
+            ["comuna"] = new("Comuna", ["COMUNA 1"], ["Sin dato"], true, Missing: ["Sin dato", "No sabe"]),
+            ["categoria"] = new(Categories: AnswerKinds.Multiple),
+        })!;
+
+        var stored = ColumnMetadata.Write(map)!;
+
+        Assert.Equal(
+            """{"hogares":{"label":"Hogares","base":true},"comuna":{"label":"Comuna","order":["COMUNA 1"],"last":["Sin dato"],"stripPrefix":true,"missing":["Sin dato","No sabe"]},"categoria":{"categories":"multiple"}}""",
+            stored);
+        Assert.Equal(stored, ColumnMetadata.Write(ColumnMetadata.Read(stored)));
+        Assert.True(ColumnMetadata.Read(stored)!["hogares"].Base);
+        Assert.Equal(["Sin dato", "No sabe"], ColumnMetadata.Read(stored)!["comuna"].Missing);
+        Assert.Empty(Errors(map.ToDictionary(p => p.Key, p => (IndicatorColumnMetadata?)p.Value)));
+    }
+
+    [Fact]
+    public void An_unticked_base_an_empty_list_and_an_empty_kind_are_none_and_an_entry_with_nothing_else_is_dropped()
+    {
+        var empty = new IndicatorColumnMetadata(Base: false, Missing: [], Categories: "  ");
+
+        Assert.Null(ColumnMetadata.Normalize(One("hogares", empty)));
+        Assert.Null(ColumnMetadata.Normalize(One("hogares", new IndicatorColumnMetadata(Base: false))));
+        Assert.Empty(Errors(One("hogares", empty)));
+
+        var withLabel = ColumnMetadata.Normalize(One("hogares", empty with { Label = "Hogares" }))!;
+        Assert.Equal("""{"hogares":{"label":"Hogares"}}""", ColumnMetadata.Write(withLabel));
+    }
+
+    [Fact]
+    public void An_entry_with_a_base_and_no_label_is_kept_and_counted_against_the_limit_of_100_columns()
+    {
+        var map = ColumnMetadata.Normalize(One("hogares", new IndicatorColumnMetadata(Base: true)))!;
+        Assert.Equal("""{"hogares":{"base":true}}""", ColumnMetadata.Write(map));
+
+        var columns = Labels(Enumerable.Range(1, 100).Select(i => ($"columna_{i}", (string?)$"Columna {i}")).ToArray());
+        columns["hogares"] = new IndicatorColumnMetadata(Base: true);
+
+        var error = Assert.Single(Errors(columns));
+        Assert.Equal("columns", error.Key);
+        Assert.Equal(["An indicator labels at most 100 columns."], error.Value);
+    }
+
+    [Fact]
+    public void Labels_and_facts_count_together_toward_the_limit()
+    {
+        IDictionary<string, string[]> Over(int labels, int facts)
+        {
+            var columns = Labels(Enumerable.Range(1, labels).Select(i => ($"columna_{i}", (string?)$"Columna {i}")).ToArray());
+            foreach (var i in Enumerable.Range(1, facts))
+            {
+                columns[$"dato_{i}"] = new IndicatorColumnMetadata(Missing: ["Sin dato"]);
+            }
+
+            return Errors(columns);
+        }
+
+        var refused = Assert.Single(Over(60, 41));
+        Assert.Equal("columns", refused.Key);
+        Assert.Equal(["An indicator labels at most 100 columns."], refused.Value);
+        Assert.Empty(Over(60, 40));
+    }
+
+    [Fact]
+    public void Two_base_columns_are_refused_on_the_second_one_sent()
+    {
+        var columns = new Dictionary<string, IndicatorColumnMetadata?>
+        {
+            ["hogares"] = new(Base: true),
+            ["comuna"] = new("Comuna"),
+            ["personas"] = new(Base: true),
+            ["viviendas"] = new(Base: true),
+        };
+
+        var errors = Errors(columns);
+
+        Assert.Equal(["columns.personas.base", "columns.viviendas.base"], errors.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(["Only one column can be the base: hogares already is."], errors["columns.personas.base"]);
+        Assert.Equal(["Only one column can be the base: hogares already is."], errors["columns.viviendas.base"]);
+    }
+
+    [Theory]
+    [InlineData(20, true)]
+    [InlineData(21, false)]
+    public void A_column_lists_at_most_20_values_that_mean_no_data(int count, bool accepted)
+    {
+        var errors = Errors(One("comuna", new IndicatorColumnMetadata(Missing: Values(count))));
+
+        if (accepted)
+        {
+            Assert.Empty(errors);
+            return;
+        }
+
+        var error = Assert.Single(errors);
+        Assert.Equal("columns.comuna.missing", error.Key);
+        Assert.Equal(["A column lists at most 20 values that mean no data."], error.Value);
+    }
+
+    [Theory]
+    [InlineData("single", true)]
+    [InlineData("multiple", true)]
+    [InlineData("ranking", false)]
+    [InlineData("Single", false)]
+    public void Answers_are_single_or_multiple(string kind, bool accepted)
+    {
+        var errors = Errors(One("categoria", new IndicatorColumnMetadata(Categories: kind)));
+
+        if (accepted)
+        {
+            Assert.Empty(errors);
+            return;
+        }
+
+        var error = Assert.Single(errors);
+        Assert.Equal("columns.categoria.categories", error.Key);
+        Assert.Equal(["Answers are 'single' or 'multiple'."], error.Value);
+    }
+
+    [Fact]
+    public void A_no_data_value_listed_twice_is_refused_on_the_second_one()
+    {
+        var error = Assert.Single(Errors(One("comuna", new IndicatorColumnMetadata(Missing: ["Sin dato", "No sabe", "Sin dato"]))));
+
+        Assert.Equal("columns.comuna.missing[2]", error.Key);
+        Assert.Equal(["Sin dato is listed twice."], error.Value);
+    }
+
+    [Fact]
+    public void A_no_data_value_is_exact_text_so_values_that_differ_by_case_or_spaces_are_not_twice()
+    {
+        Assert.Empty(Errors(One("comuna", new IndicatorColumnMetadata(Missing: ["Sin dato", "sin dato", " Sin dato", "SIN NOMBRE"]))));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Sin\0dato")]
+    public void An_empty_no_data_value_and_one_with_a_NUL_character_are_refused(string value)
+    {
+        var error = Assert.Single(Errors(One("comuna", new IndicatorColumnMetadata(Missing: ["Sin dato", value]))));
+
+        Assert.Equal("columns.comuna.missing[1]", error.Key);
+        Assert.Equal(["A value that means no data has 1 to 500 characters and no NUL character."], error.Value);
+    }
+
+    [Theory]
+    [InlineData(500, true)]
+    [InlineData(501, false)]
+    public void A_no_data_value_has_at_most_500_characters(int length, bool accepted)
+    {
+        var errors = Errors(One("comuna", new IndicatorColumnMetadata(Missing: [new string('x', length)])));
+
+        if (accepted)
+        {
+            Assert.Empty(errors);
+            return;
+        }
+
+        var error = Assert.Single(errors);
+        Assert.Equal("columns.comuna.missing[0]", error.Key);
+        Assert.Equal(["A value that means no data has 1 to 500 characters and no NUL character."], error.Value);
+    }
+
+    [Fact]
+    public void A_null_no_data_value_is_refused_as_an_empty_one_is()
+    {
+        var error = Assert.Single(Errors(One("comuna", new IndicatorColumnMetadata(Missing: [null]))));
+
+        Assert.Equal("columns.comuna.missing[0]", error.Key);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void A_base_column_holds_no_answers_and_no_values_that_mean_no_data(bool withMissing, bool withCategories)
+    {
+        var entry = new IndicatorColumnMetadata(Base: true, Missing: withMissing ? ["Sin dato"] : null, Categories: withCategories ? "single" : null);
+
+        var error = Assert.Single(Errors(One("hogares", entry)));
+
+        Assert.Equal("columns.hogares", error.Key);
+        Assert.Equal(["A base column counts units: it holds no answers and no values that mean no data."], error.Value);
+    }
+
+    [Fact]
+    public void Every_problem_of_the_base_facts_is_reported_at_once()
+    {
+        var errors = Errors(new Dictionary<string, IndicatorColumnMetadata?>
+        {
+            ["hogares"] = new(Base: true),
+            ["personas"] = new(Base: true, Categories: "ranking"),
+            ["comuna"] = new(Missing: [..Values(20), "Valor 1", ""]),
+        });
+
+        Assert.Equal(
+            ["columns.comuna.missing", "columns.comuna.missing[20]", "columns.comuna.missing[21]", "columns.personas", "columns.personas.base", "columns.personas.categories"],
+            errors.Keys.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void The_base_limits_are_the_documented_ones()
+    {
+        Assert.Equal(20, ColumnMetadata.MaxMissingValues);
+        Assert.Equal(500, ColumnMetadata.MaxMissingLength);
+        Assert.Equal(["single", "multiple"], AnswerKinds.All);
+    }
 }

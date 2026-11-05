@@ -423,4 +423,92 @@ public sealed class IndicatorSeriesQueryTests(PostgresFixture postgres)
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("seriesBy", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors").EnumerateObject().Select(p => p.Name));
     }
+
+    // The figures of each cell and total (design D5 of add-small-sample-warnings)
+
+    private static readonly object RateOf = new { numerator = "numerator", denominator = "denominator" };
+
+    private static string Figures(JsonElement element) =>
+        string.Join("/", new[] { "numerator", "denominator", "n" }.Select(name =>
+            element.TryGetProperty(name, out var value) ? value.GetDouble().ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) : "-"));
+
+    [Fact]
+    public async Task A_ratios_cells_and_totals_carry_their_numerator_denominator_and_n()
+    {
+        await using var h = await WithSourcesAsync();
+
+        var result = await h.QueryAsync(
+            new { indicator = "households_by_source", groupBy = "municipality", seriesBy = "water_source", ratio = RateOf }, "crosstab");
+        var totals = result.GetProperty("totals");
+
+        // A cell's n is the sum of its denominator: Cali's three Piped rows are 15 of 30 households.
+        var cells = result.GetProperty("rows").EnumerateArray()
+            .ToDictionary(r => $"{r.GetProperty("group").GetString()}|{r.GetProperty("seriesKind").GetString()}:{(r.TryGetProperty("series", out var s) ? s.GetString() : "-")}", Figures);
+        Assert.Equal("15/30/30", cells["Cali|value:Piped"]);
+        Assert.Equal("10/20/20", cells["Cali|value:Well"]);
+        Assert.Equal("6/10/10", cells["Palmira|value:Piped"]);
+        Assert.Equal("1/10/10", cells["Buga|none:-"]);
+        // The group totals, the series totals and the grand total add the figures over their own rows.
+        Assert.Equal(["Buga|2/20/20", "Cali|25/50/50", "Palmira|6/10/10"],
+            totals.GetProperty("groups").EnumerateArray().Select(g => $"{g.GetProperty("group").GetString()}|{Figures(g)}"));
+        Assert.Equal(["21/40/40", "11/30/30", "1/10/10"], totals.GetProperty("series").EnumerateArray().Select(Figures));
+        Assert.Equal("33/80/80", Figures(totals.GetProperty("all")));
+        // The indicator declares nothing, so the widget has no n.
+        Assert.False(result.TryGetProperty("n", out _));
+    }
+
+    [Fact]
+    public async Task A_measure_without_a_base_column_has_no_figures_in_its_cells_or_totals()
+    {
+        await using var h = await WithSourcesAsync();
+
+        var result = await h.QueryAsync(Config(), "column");
+
+        Assert.DoesNotContain("numerator", result.GetRawText());
+        Assert.DoesNotContain("\"n\":", result.GetRawText());
+    }
+
+    [Fact]
+    public async Task A_declared_base_column_is_the_n_of_every_cell_and_total_and_of_the_widget()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync(
+            "households_by_source", Columns + ", hogares bigint",
+            """
+            ('Cali', 'Piped', 10, 5, 10, '1', 30), ('Cali', 'Piped', 20, 5, 10, '2', 20), ('Cali', 'Well', 15, 5, 10, '1', 40),
+            ('Palmira', 'Piped', 20, 6, 10, '1', 12)
+            """, labels: new { hogares = new { @base = true } });
+
+        var result = await h.QueryAsync(
+            new { indicator = "households_by_source", groupBy = "municipality", seriesBy = "water_source", ratio = RateOf }, "column");
+        var totals = result.GetProperty("totals");
+
+        // A ratio keeps its own sums, and its n is the base column's.
+        var cells = result.GetProperty("rows").EnumerateArray().ToDictionary(r => $"{r.GetProperty("group").GetString()}|{r.GetProperty("series").GetString()}", Figures);
+        Assert.Equal("10/20/50", cells["Cali|Piped"]);
+        Assert.Equal("5/10/40", cells["Cali|Well"]);
+        Assert.Equal(["Cali|15/30/90", "Palmira|6/10/12"], totals.GetProperty("groups").EnumerateArray().Select(g => $"{g.GetProperty("group").GetString()}|{Figures(g)}"));
+        Assert.Equal("21/40/102", Figures(totals.GetProperty("all")));
+        // Without answer columns the widget's n is the base over every row it plots.
+        Assert.Equal(102, result.GetProperty("n").GetDouble());
+
+        var measure = await h.QueryAsync(Config(), "column");
+        Assert.Equal("-/-/102", Figures(measure.GetProperty("totals").GetProperty("all")));
+        Assert.Equal(102, measure.GetProperty("n").GetDouble());
+    }
+
+    [Fact]
+    public async Task The_left_out_branch_of_a_pyramid_or_a_likert_widget_carries_no_figures_and_its_count_is_unchanged()
+    {
+        await using var h = await WithSourcesAsync();
+
+        var result = await h.QueryAsync(
+            new { indicator = "households_by_source", groupBy = "municipality", seriesBy = "water_source", ratio = RateOf, pyramid = new { left = "Piped", right = "Well" } },
+            "pyramid");
+
+        // Buga's rows (Well and none) have a group but one is not a side: the "none" row is left out and counted.
+        Assert.Equal(1, result.GetProperty("leftOut").GetInt64());
+        // The grand total covers the rows the widget draws, not the one it left out: 32 of 70, with n 70.
+        Assert.Equal("32/70/70", Figures(result.GetProperty("totals").GetProperty("all")));
+    }
 }

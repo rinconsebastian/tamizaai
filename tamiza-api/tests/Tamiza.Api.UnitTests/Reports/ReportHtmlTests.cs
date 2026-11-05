@@ -525,4 +525,43 @@ public sealed class ReportHtmlTests
         Assert.Contains("comuna | Sí | Tal vez | No | No sabe | Total", text);
         Assert.Contains("2 more rows", text);
     }
+
+    [Fact]
+    public void The_mark_and_the_notes_of_small_bases_are_in_the_body_and_the_text_above_the_table_with_the_footnote_last()
+    {
+        const string footnote = "No suman 100 %: respuesta múltiple.";
+        var widget = SmallBases(1, "2.1. Asistió, por comuna") with { Footnote = footnote };
+        var model = Model([widget]);
+
+        var (html, shown) = ReportHtml.Write(model, true, Options);
+        var text = ReportPlainText.Write(model, true, shown, Options);
+
+        foreach (var body in new[] { html, text })
+        {
+            Assert.Contains("50% *", body);
+            Assert.Contains("45% *", body);
+            Assert.DoesNotContain("COMUNA 1 *", body);
+            // The notes come above the table and the footnote after it.
+            var table = body.IndexOf("COMUNA 1", StringComparison.Ordinal);
+            Assert.True(body.IndexOf("2 values have a base below 30, marked *.", StringComparison.Ordinal) is var small && small >= 0 && small < table);
+            Assert.True(body.IndexOf("n = 157 Hogares que asistieron", StringComparison.Ordinal) is var n && n > small && n < table);
+            Assert.True(body.IndexOf("Sin dato: 50%", StringComparison.Ordinal) is var noData && noData > n && noData < table);
+            Assert.True(body.IndexOf(footnote, StringComparison.Ordinal) > body.LastIndexOf("SIN NOMBRE", StringComparison.Ordinal));
+        }
+
+        Assert.Contains(">n</th>", html);
+        Assert.Contains($"Comuna | Teatro hoy: numerator / denominator | n{Environment.NewLine}COMUNA 1 | 50% | 121", text);
+    }
+
+    [Fact]
+    public void Dashboards_of_widgets_with_small_bases_still_fit_the_budget_of_the_body()
+    {
+        var widgets = Enumerable.Range(1, 50).Select(i => SmallBases(i, $"Widget {i}") with { Footnote = "Respuesta múltiple." }).ToList();
+
+        var (html, shown) = ReportHtml.Write(Model(widgets), true, Options);
+
+        Assert.True(Encoding.UTF8.GetByteCount(html) <= Options.MaxBodyKb * 1024);
+        Assert.InRange(shown.Count, 1, 50);
+        Assert.Contains("50% *", html);
+    }
 }

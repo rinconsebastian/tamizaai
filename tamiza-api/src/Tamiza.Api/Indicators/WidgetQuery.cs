@@ -9,7 +9,8 @@ public static class WidgetQuery
     /// <summary>
     /// The query a chart type actually uses, as <c>queryFor</c> builds it: settings that belong to another chart type are not sent,
     /// and a stat tile never groups. The API accepts a <c>groupBy</c> on a stat tile and a geometry column on any widget, and both
-    /// change the rows, so a saved config is never sent as it is.
+    /// change the rows, so a saved config is never sent as it is. <c>missingFooter</c> is sent only when it is set and the kind takes it
+    /// (design D6 of add-small-sample-warnings), so the query of every widget without it is the one it was.
     /// </summary>
     public static WidgetConfigInput For(string chartType, WidgetConfig config) => new(
         config.Indicator,
@@ -27,7 +28,8 @@ public static class WidgetQuery
         ChartTypes.HasSeries(chartType) ? config.SeriesBy : null,
         chartType is ChartTypes.Bar or ChartTypes.Column ? config.Layout : null,
         chartType == ChartTypes.Pyramid ? config.Pyramid : null,
-        chartType == ChartTypes.Likert ? config.Scale : []);
+        chartType == ChartTypes.Likert ? config.Scale : [],
+        MissingFooter: ChartTypes.TakesMissingFooter(chartType) ? config.MissingFooter : null);
 
     /// <summary>
     /// Whether a saved widget asks its query for the overall value too (design D4 of add-chart-annotations): a bar, column or line with

@@ -1,13 +1,24 @@
+using System.Text.Json.Serialization;
+
 namespace Tamiza.Api.Indicators;
 
 /// <summary>One column of a <see cref="SeriesTable"/>: a series and its total.</summary>
 public sealed record SeriesTableColumn(string? Series, string Kind, double? Total, long Rows);
 
 /// <summary>
-/// One row of a <see cref="SeriesTable"/>: a group, its total, and one cell per column (null where the pair has no value). <paramref name="Shares"/>
-/// is null unless the chart shows shares.
+/// The base figures of one cell (design D2 of add-small-sample-warnings): a ratio's numerator and denominator sums and the cell's n, each
+/// null when the cell has none. A cell of a table of shares has only the n of its group.
 /// </summary>
-public sealed record SeriesTableRow(string? Group, double? Total, long Rows, IReadOnlyList<double?> Cells, IReadOnlyList<double?>? Shares);
+public sealed record CellFigures(double? Numerator, double? Denominator, double? N);
+
+/// <summary>
+/// One row of a <see cref="SeriesTable"/>: a group, its total, and one cell per column (null where the pair has no value). <paramref name="Shares"/>
+/// is null unless the chart shows shares. <paramref name="Figures"/> holds the figures of each cell, null for a cell that has none, and is left
+/// out while no cell of the table has any (a measure with no base column), so the grid of an answer without figures is what it was.
+/// </summary>
+public sealed record SeriesTableRow(
+    string? Group, double? Total, long Rows, IReadOnlyList<double?> Cells, IReadOnlyList<double?>? Shares,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<CellFigures?>? Figures = null);
 
 /// <summary>
 /// The grid every consumer of a widget with a series reads (design D4, D12): the chart's tooltips, "Show as table", the emails and the MCP
@@ -48,6 +59,7 @@ public sealed record SeriesTable(
 
         // A group is a text or a missing value: the flag keeps a group named like the placeholder apart from a missing one.
         var cells = new Dictionary<(bool Missing, string Group), double?[]>();
+        var cellFigures = new Dictionary<(bool Missing, string Group), CellFigures?[]>();
         foreach (var cell in response.Rows.Where(r => r.SeriesKind is not null))
         {
             if (!index.TryGetValue((cell.SeriesKind!, cell.SeriesKind == SeriesKinds.Value ? cell.Series : null), out var at))
@@ -59,9 +71,11 @@ public sealed record SeriesTable(
             if (!cells.TryGetValue(key, out var row))
             {
                 cells[key] = row = new double?[series.Count];
+                cellFigures[key] = new CellFigures?[series.Count];
             }
 
             row[at] = cell.Value;
+            cellFigures[key][at] = FiguresOf(cell.Numerator, cell.Denominator, cell.N);
         }
 
         var shares = ShowsShares(chartType, layout);
@@ -69,13 +83,27 @@ public sealed record SeriesTable(
         var rows = new List<SeriesTableRow>();
         foreach (var group in totals?.Groups ?? [])
         {
-            var values = cells.GetValueOrDefault((group.Group is null, group.Group ?? "")) ?? new double?[series.Count];
-            rows.Add(new SeriesTableRow(group.Group, group.Value, group.Rows, values, shares ? SharesOf(values, ref negative) : null));
+            var key = (group.Group is null, group.Group ?? "");
+            var values = cells.GetValueOrDefault(key) ?? new double?[series.Count];
+            // A share is over its row, so its base is the row's: every cell of a table of shares takes the n of its group (design D2).
+            var figures = shares
+                ? values.Select(value => value is not null && group.N is { } groupN ? new CellFigures(null, null, groupN) : null).ToArray()
+                : cellFigures.GetValueOrDefault(key) ?? new CellFigures?[series.Count];
+            rows.Add(new SeriesTableRow(group.Group, group.Value, group.Rows, values, shares ? SharesOf(values, ref negative) : null, figures));
+        }
+
+        if (!rows.Any(row => row.Figures!.Any(cell => cell is not null)))
+        {
+            rows = rows.Select(row => row with { Figures = null }).ToList();
         }
 
         return new SeriesTable(
             columns, rows, totals?.All.Value, totals?.All.Rows ?? 0, negative, response.LeftOut ?? 0, response.RowLimitReached);
     }
+
+    /// <summary>The figures a response row or total carries, or null when it has none of the three.</summary>
+    private static CellFigures? FiguresOf(double? numerator, double? denominator, double? n) =>
+        numerator is null && denominator is null && n is null ? null : new CellFigures(numerator, denominator, n);
 
     /// <summary>
     /// Each cell over the sum of the row's cells that are not below zero. A cell with no value, or below zero, has no share (each of the

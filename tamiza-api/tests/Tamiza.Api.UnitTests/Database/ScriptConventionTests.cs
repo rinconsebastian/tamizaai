@@ -342,6 +342,26 @@ public sealed class ScriptConventionTests
     }
 
     [Fact]
+    public void The_small_sample_warnings_script_adds_two_columns_and_one_named_check()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0023_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0023_add_small_sample_warnings.sql", resource);
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(sql, @"\bADD COLUMN\b").Count);
+        Assert.Contains("ADD COLUMN min_n integer,", sql);
+        Assert.Contains("ADD COLUMN show_n boolean NOT NULL DEFAULT false,", sql);
+        Assert.Contains("ADD CONSTRAINT ck_dashboards_min_n CHECK (min_n IS NULL OR min_n BETWEEN 1 AND 10000)", sql);
+
+        // The one check is introduced by a CONSTRAINT name, so nothing can be left unnamed; no key, foreign key, index or table is added and
+        // no row is rewritten.
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"\bCHECK\b"));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"ADD CONSTRAINT (?:pk|fk|ck)_\w+ CHECK\b"));
+        Assert.Empty(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|INDEX|CREATE TABLE|UPDATE)\b"));
+    }
+
+    [Fact]
     public void The_widget_context_script_adds_one_optional_column_and_one_named_check()
     {
         var resource = Resources.Single(name => name.StartsWith("0022_", StringComparison.Ordinal));

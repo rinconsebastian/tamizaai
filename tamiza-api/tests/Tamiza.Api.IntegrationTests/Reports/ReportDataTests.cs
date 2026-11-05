@@ -1046,4 +1046,250 @@ public sealed class ReportDataTests(PostgresFixture postgres)
         Assert.Equal(["1", "2", "10"], Texts(model.Widgets[0], 0));
         Assert.Equal(4, model.Widgets[1].Rows.Count);
     }
+
+    // Base n lines, small bases and no-data lines (add-small-sample-warnings, design D13). A long table shaped like teatro_hoy with invented
+    // values: every household of a comuna is in the denominator of every answer, and half of them gave the first answer of E1.
+
+    private const string LongColumns = "variable text, orden text, categoria text, comuna text, value numeric, numerator numeric, denominator numeric";
+
+    private static string LongRows(bool sinDato)
+    {
+        (string Comuna, int Households)[] comunas = [("COMUNA 1", 120), ("COMUNA 7", 16), ("SIN NOMBRE", 20), .. sinDato ? new[] { ("Sin dato", 4) } : []];
+        (string Variable, (string Answer, int Quarters)[] Answers)[] questions =
+            [("Asistio (E1)", [("Si", 2), ("No", 2)]), ("Frecuencia (E2)", [("Poco", 1), ("Mucho", 3)])];
+        var rows = new List<string>();
+        foreach (var (variable, answers) in questions)
+        {
+            for (var i = 0; i < answers.Length; i++)
+            {
+                foreach (var (comuna, households) in comunas)
+                {
+                    rows.Add($"('{variable}', '{i + 1}', '{answers[i].Answer}', '{comuna}', 0, {households * answers[i].Quarters / 4}, {households})");
+                }
+            }
+        }
+
+        return string.Join(",\n", rows);
+    }
+
+    /// <summary>The indicator declares its question, code and answer columns as answers, "Sin dato" as no data for its comunas, and names its denominator.</summary>
+    private static readonly object LongDeclared = new
+    {
+        variable = new { categories = "multiple" },
+        orden = new { categories = "multiple" },
+        categoria = new { categories = "multiple" },
+        comuna = new { missing = new[] { "Sin dato" } },
+        denominator = new { label = "Hogares" },
+    };
+
+    private async Task<IndicatorsHarness> LongTeatroAsync(bool sinDato = false, bool declared = true)
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("teatro_hoy", LongColumns, LongRows(sinDato), label: "Teatro hoy", format: "percent", labels: declared ? LongDeclared : null);
+        return h;
+    }
+
+    private static object EqualsFilter(string column, string value) => new { column, op = "equals", value };
+
+    private static readonly object[] Attended = [EqualsFilter("variable", "Asistio (E1)"), EqualsFilter("categoria", "Si")];
+
+    private static readonly object TeatroRatio = new { numerator = "numerator", denominator = "denominator" };
+
+    private static object ByComuna(object? display = null, bool? missingFooter = null) => new
+    {
+        indicator = "teatro_hoy", ratio = TeatroRatio, groupBy = "comuna", filters = Attended, display, missingFooter,
+    };
+
+    [Fact]
+    public async Task Base_n_line_in_the_email()
+    {
+        await using var h = await LongTeatroAsync();
+        await h.AddWidgetAsync(Widget("2.1. Asistio, por comuna", "column", ByComuna(), y: 0));
+        await h.SaveBasesAsync(null, true);
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        // The n of the widget (156 households) under the name of its denominator, and no mark: no threshold is in force.
+        Assert.Equal(["n = 156 Hogares"], widget.Notes);
+        Assert.DoesNotContain(widget.Rows, row => row.Any(cell => cell.Text.EndsWith(" *", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task Lines_before_the_footnote()
+    {
+        await using var h = await LongTeatroAsync();
+        const string footnote = "No suman 100 %: respuesta multiple.";
+        await h.AddWidgetAsync(Widget("2.4. En que lugares", "column", ByComuna(new { footnote }), y: 0));
+        await h.SaveBasesAsync(30, true);
+        var model = await BuildAsync(h);
+
+        var widget = model.Widgets.Single();
+        var (html, shown) = ReportHtml.Write(model, true, new ReportOptions());
+        var text = ReportPlainText.Write(model, true, shown, new ReportOptions());
+
+        // The lines are among the notes and the footnote is the widget's own, so it is not among them.
+        Assert.Equal(footnote, widget.Footnote);
+        Assert.Equal(["2 values have a base below 30, marked *.", "n = 156 Hogares"], widget.Notes);
+        foreach (var body in new[] { html, text })
+        {
+            var n = body.IndexOf("n = 156 Hogares", StringComparison.Ordinal);
+            Assert.True(n > 0 && n < body.IndexOf("COMUNA 1", StringComparison.Ordinal));
+            Assert.True(body.IndexOf(footnote, StringComparison.Ordinal) > body.LastIndexOf("SIN NOMBRE", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task n_column_in_the_email()
+    {
+        await using var h = await LongTeatroAsync();
+        await h.AddWidgetAsync(Widget("2.1. Asistio, por comuna", "column", ByComuna(), y: 0));
+        await h.SaveBasesAsync(30, false);
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal(["comuna", "Teatro hoy: numerator / Hogares", "n"], widget.Columns.Select(c => c.Header));
+        Assert.Equal("#,##0", widget.Columns[2].ExcelFormat);
+        var comuna7 = widget.Rows.Single(r => r[0].Text == "COMUNA 7");
+        Assert.Equal("16", comuna7[2].Text);
+        Assert.Equal(16d, comuna7[2].Value);
+        Assert.Equal("120", widget.Rows.Single(r => r[0].Text == "COMUNA 1")[2].Text);
+    }
+
+    [Fact]
+    public async Task Marked_value()
+    {
+        await using var h = await LongTeatroAsync();
+        await h.AddWidgetAsync(Widget("2.1. Asistio, por comuna", "column", ByComuna(), y: 0));
+        await h.SaveBasesAsync(30, false);
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        // COMUNA 7 (n 16) and SIN NOMBRE (n 20) carry the mark in their text, and their cells keep the number.
+        var texts = widget.Rows.ToDictionary(r => r[0].Text, r => r[1].Text);
+        Assert.Equal("50% *", texts["COMUNA 7"]);
+        Assert.Equal("50% *", texts["SIN NOMBRE"]);
+        Assert.Equal("50%", texts["COMUNA 1"]);
+        Assert.Equal(0.5, widget.Rows.Single(r => r[0].Text == "COMUNA 7")[1].Value);
+        Assert.Equal(["2 values have a base below 30, marked *."], widget.Notes);
+    }
+
+    [Fact]
+    public async Task No_data_line_in_the_email()
+    {
+        await using var h = await LongTeatroAsync(sinDato: true);
+        await h.AddWidgetAsync(Widget("2.1. Asistio, por comuna", "column", ByComuna(missingFooter: true), y: 0));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        // "Sin dato" is left out of the table, and the line says what it held: half of its 4 households.
+        Assert.DoesNotContain("Sin dato", Texts(widget, 0));
+        Assert.Equal(["Sin dato: 50%"], widget.Notes);
+
+        // The n of what was left out follows while the n lines show.
+        await h.SaveBasesAsync(null, true);
+        var withN = (await BuildAsync(h)).Widgets.Single();
+        Assert.Equal(["n = 156 Hogares", "Sin dato: 50% \u00b7 n = 4"], withN.Notes);
+    }
+
+    [Fact]
+    public async Task Email_of_a_dashboard_without_base_settings()
+    {
+        await using var h = await LongTeatroAsync(sinDato: true);
+        await h.AddWidgetAsync(Widget("2.1. Asistio, por comuna", "column", ByComuna(), y: 0));
+        await h.AddWidgetAsync(Widget("Asistieron", "stat", new { indicator = "teatro_hoy", ratio = TeatroRatio, filters = Attended }, y: 2, w: 3));
+        await h.AddWidgetAsync(Widget("Por respuesta", "column", new { indicator = "teatro_hoy", ratio = TeatroRatio, groupBy = "comuna", seriesBy = "categoria", filters = new[] { EqualsFilter("variable", "Asistio (E1)") } }, y: 4));
+        await h.AddWidgetAsync(Widget("Pastel", "pie", ByComuna(), y: 6));
+
+        var model = await BuildAsync(h);
+
+        // Declared metadata and no setting on: the tables and notes are the ones there were before base settings existed.
+        var column = model.Widgets[0];
+        Assert.Equal(["comuna", "Teatro hoy: numerator / Hogares"], column.Columns.Select(c => c.Header));
+        Assert.Equal(["COMUNA 1", "COMUNA 7", "SIN NOMBRE", "Sin dato"], Texts(column, 0).Order(StringComparer.Ordinal));
+        Assert.All(model.Widgets, widget => Assert.Empty(widget.Notes));
+        Assert.All(model.Widgets, widget => Assert.DoesNotContain(widget.Rows, row => row.Any(cell => cell.Text.EndsWith(" *", StringComparison.Ordinal))));
+        var series = model.Widgets[2].Columns.Select(c => c.Header).ToList();
+        Assert.Equal(["comuna", "No", "Si", "Total"], [series[0], .. series[1..^1].Order(StringComparer.Ordinal), series[^1]]);
+        Assert.Equal(3, model.Widgets[3].Columns.Count);
+        Assert.Equal("Share", model.Widgets[3].Columns[2].Header);
+    }
+
+    [Fact]
+    public async Task A_measure_widget_with_no_base_column_and_a_threshold_in_force_keeps_its_columns()
+    {
+        await using var h = await HarnessAsync();
+        await h.AddWidgetAsync(Widget("By municipality", "column", new { indicator = "households", measure = "value", groupBy = "municipality" }, y: 0));
+        await h.SaveBasesAsync(30, true);
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        // Its values have no n: no n column, no small base, no n line.
+        Assert.Equal(["municipality", "Households visited: value"], widget.Columns.Select(c => c.Header));
+        Assert.Empty(widget.Notes);
+    }
+
+    [Fact]
+    public async Task A_stat_tiles_n_line()
+    {
+        await using var h = await LongTeatroAsync();
+        await h.AddWidgetAsync(Widget("Asistieron", "stat", new { indicator = "teatro_hoy", ratio = TeatroRatio, filters = Attended }, y: 0, w: 3));
+        await h.SaveBasesAsync(null, true);
+
+        var model = await BuildAsync(h);
+
+        var stat = Assert.Single(model.Stats);
+        Assert.Equal("50%", stat.StatValue);
+        Assert.Equal(["n = 156 Hogares"], stat.Notes);
+        var (html, shown) = ReportHtml.Write(model, true, new ReportOptions());
+        Assert.Contains("n = 156 Hogares", html);
+        Assert.Contains("  n = 156 Hogares", ReportPlainText.Write(model, true, shown, new ReportOptions()));
+    }
+
+    private const string NoOverall = "No overall line: the bars are the answers of one question.";
+
+    private static object OverPlaces(string groupBy) => new
+    {
+        indicator = "teatro_hoy", ratio = TeatroRatio, groupBy, filters = new[] { EqualsFilter("variable", "Asistio (E1)") },
+        display = new { referenceLines = new object[] { new { kind = "mean" }, new { kind = "overall" } } },
+    };
+
+    [Fact]
+    public async Task Overall_line_over_places()
+    {
+        await using var h = await LongTeatroAsync();
+        await h.AddWidgetAsync(Widget("2.4. En que lugares", "bar", OverPlaces("categoria"), y: 0));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        // The bars are the answers of one question: the mean line is drawn, the overall line is not, and the note says why.
+        Assert.Equal(["mean"], widget.ReferenceLines.Select(l => l.Kind));
+        Assert.Equal([NoOverall], widget.Notes);
+
+        var spanish = (await BuildAsync(h, "es-CO")).Widgets.Single();
+        Assert.Equal(["Sin l\u00ednea de valor general: las barras son las respuestas de una pregunta."], spanish.Notes);
+    }
+
+    [Fact]
+    public async Task Overall_line_over_comunas()
+    {
+        await using var h = await LongTeatroAsync();
+        await h.AddWidgetAsync(Widget("2.1. Asistio, por comuna", "bar", OverPlaces("comuna"), y: 0));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal(["mean", "overall"], widget.ReferenceLines.Select(l => l.Kind));
+        Assert.Empty(widget.Notes);
+    }
+
+    [Fact]
+    public async Task An_indicator_that_declares_no_answer_keeps_its_overall_line_over_any_column()
+    {
+        await using var h = await LongTeatroAsync(declared: false);
+        await h.AddWidgetAsync(Widget("2.4. En que lugares", "bar", OverPlaces("categoria"), y: 0));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.Equal(["mean", "overall"], widget.ReferenceLines.Select(l => l.Kind));
+        Assert.Empty(widget.Notes);
+    }
 }

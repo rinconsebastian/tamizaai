@@ -110,9 +110,9 @@ public sealed class IndicatorDocsTests
 
         var text = File.ReadAllText(mcp);
 
-        Assert.Contains("Changing the `chartType` of a widget that has a color, a scale, an orientation, reference lines, steps, data labels or an order also needs a `config` without the `display` fields the new type does not take", text, StringComparison.Ordinal);
+        Assert.Contains("Changing the `chartType` of a widget that has a color, a scale, an orientation, reference lines, steps, data labels, an order or no-data values left out also needs a `config` without the `display` fields the new type does not take", text, StringComparison.Ordinal);
         Assert.Contains("a new `chartType` alone keeps the old `config`", text, StringComparison.Ordinal);
-        Assert.Contains("`config.display.color`, `config.display.ramp`, `config.display.orientation`, `config.display.referenceLines`, `config.display.interpolation`, `config.display.dataLabels` or `config.display.order`", text, StringComparison.Ordinal);
+        Assert.Contains("`config.display.color`, `config.display.ramp`, `config.display.orientation`, `config.display.referenceLines`, `config.display.interpolation`, `config.display.dataLabels`, `config.display.order` or `config.missingFooter`", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -351,7 +351,7 @@ public sealed class IndicatorDocsTests
 
         // A widget that is created has no earlier config to keep, so only the change of one carries the sentence.
         Assert.DoesNotContain("To change the chart type", Description("create_widget"), StringComparison.Ordinal);
-        Assert.Contains("To change the chart type of a widget that has a color, a scale, an orientation, reference lines, steps, data labels or an order", Description("update_widget"), StringComparison.Ordinal);
+        Assert.Contains("To change the chart type of a widget that has a color, a scale, an orientation, reference lines, steps, data labels, an order or no-data values left out", Description("update_widget"), StringComparison.Ordinal);
         Assert.Contains("Only `update_widget` changes the `chartType` of a widget.", text, StringComparison.Ordinal);
         Assert.DoesNotContain("`create_widget` changes the `chartType`", text, StringComparison.Ordinal);
     }

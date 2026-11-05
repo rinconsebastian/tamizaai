@@ -7,7 +7,13 @@ namespace Tamiza.Api.Indicators;
 /// <summary>A widget query as SQL: identifiers from the catalog (quoted), every value a parameter.</summary>
 /// <param name="Sql">Selects <c>group, value, geometry</c> in that order; a map query goes on with <c>count(*)</c> and one output per tooltip column.</param>
 /// <param name="TooltipTypes">Set for a map query: the type of each tooltip output, from the fifth column of <paramref name="Sql"/> on; null for every other query.</param>
-public sealed record IndicatorSql(string Sql, IReadOnlyList<SqlParam> Parameters, IReadOnlyList<DataColumnType>? TooltipTypes = null)
+/// <param name="Figures">
+/// The ordinals of the outputs appended after every other output of the select list (design D5 of add-small-sample-warnings): a ratio's
+/// two sums, the base column's sum and the widget's n. Null when the statement has none, as every statement of a measure with no base
+/// column, a histogram and a box plot.
+/// </param>
+public sealed record IndicatorSql(
+    string Sql, IReadOnlyList<SqlParam> Parameters, IReadOnlyList<DataColumnType>? TooltipTypes = null, SqlFigures? Figures = null)
 {
     public const string LimitParameter = "limit";
 }
@@ -27,9 +33,20 @@ public sealed record IndicatorSql(string Sql, IReadOnlyList<SqlParam> Parameters
 /// A plain grouped query that was asked for it only (design D4 of add-chart-annotations): next to <paramref name="Sql"/>, the statement a
 /// stat tile over the same config and filters runs, so the widget's overall value is the tile's figure. Null for every other query.
 /// </param>
+/// <param name="Counted">
+/// A plain grouped query or a stat tile whose indicator declares answer columns, over marks that have an n (design D5 of
+/// add-small-sample-warnings): next to <paramref name="Sql"/>, the statement that counts the n of each group and of the widget once
+/// across the answers (<see cref="BaseQueryBuilder.Counted"/>). Null for every other query.
+/// </param>
+/// <param name="NoData">
+/// A widget that leaves out the values that mean no data, whose indicator declares some for its group or series column (design D6 of
+/// add-small-sample-warnings): the statement that reports what it left out. Null for every other query, so a widget without the option
+/// runs no statement for it.
+/// </param>
 public sealed record IndicatorQueryPlan(
     IndicatorSql? Sql, IReadOnlyList<string> MissingColumns, IDictionary<string, string[]>? Errors, IReadOnlyList<string>? NotFiltered = null,
-    SeriesQueryPlan? Series = null, IndicatorSql? Domain = null, IndicatorSql? Boxes = null, IndicatorSql? Overall = null);
+    SeriesQueryPlan? Series = null, IndicatorSql? Domain = null, IndicatorSql? Boxes = null, IndicatorSql? Overall = null, IndicatorSql? Counted = null,
+    NoDataSql? NoData = null);
 
 /// <summary>Validates a widget query against the indicator table's columns and turns it into SQL.</summary>
 public static class IndicatorQueryBuilder
@@ -88,9 +105,10 @@ public static class IndicatorQueryBuilder
     /// <param name="rowFilter">The condition that keeps the rows that have something to plot.</param>
     /// <param name="own">The widget's own filters.</param>
     /// <param name="cap">How many groups to read; one more than the pie has colors for tells the caller that some will be folded.</param>
-    public static IndicatorSql PieDomain(string group, string from, string aggregate, string rowFilter, DataQuery own, int cap)
+    /// <param name="exclusion">The rows the widget leaves out as no data (design D6 of add-small-sample-warnings), so a left-out group takes no slot and no color; null for a widget that leaves none out.</param>
+    public static IndicatorSql PieDomain(string group, string from, string aggregate, string rowFilter, DataQuery own, int cap, NoDataExclusion? exclusion = null)
     {
-        var ownWhere = own.Where.Length > 0 ? " AND " + own.Where : "";
+        var ownWhere = (own.Where.Length > 0 ? " AND " + own.Where : "") + exclusion?.Condition;
         // A total of NaN or infinity is not a number to draw, and NaN sorts above every number: both are left out here, so the cap counts groups with a share.
         var sql =
             $"""
@@ -101,7 +119,9 @@ public static class IndicatorQueryBuilder
             ORDER BY 2 DESC, {GroupOrder(from, group)}
             LIMIT @{SeriesQueryBuilder.CapParameter}
             """;
-        var parameters = new List<SqlParam>(own.Parameters) { new(SeriesQueryBuilder.CapParameter, NpgsqlDbType.Integer, cap) };
+        var parameters = new List<SqlParam>(own.Parameters);
+        parameters.AddRange(exclusion?.Parameters ?? []);
+        parameters.Add(new(SeriesQueryBuilder.CapParameter, NpgsqlDbType.Integer, cap));
         return new IndicatorSql(sql, parameters);
     }
 
@@ -158,9 +178,20 @@ public static class IndicatorQueryBuilder
     /// Also plan the overall value (<see cref="IndicatorQueryPlan.Overall"/>) of a plain grouped bar, column or line query (so none with no
     /// chart type): not of a pie, a map, a box plot, a series, a histogram or a stat tile. The request flag of design D4 of add-chart-annotations; no widget stores it.
     /// </param>
+    /// <param name="bases">
+    /// What the indicator declares for its columns, resolved against the table (design D5 of add-small-sample-warnings); null for an
+    /// indicator that declares nothing that applies, which plans as it always did. A ratio and a base column add outputs after every
+    /// output of the plain and the series statements (<see cref="IndicatorSql.Figures"/>); a histogram and a box plot add none. Its values
+    /// that mean no data are what a widget with <see cref="WidgetConfig.MissingFooter"/> leaves out.
+    /// </param>
+    /// <param name="exclusion">
+    /// Only the overall statement's own planning sets it (design D6): the rows the plotted widget leaves out, which a stat tile that has no
+    /// group or series column cannot derive from its config. Every other caller leaves it null and the plan derives it from the config.
+    /// </param>
     public static IndicatorQueryPlan Plan(
         WidgetConfig config, IReadOnlyList<TableColumn> columns, string timeZone, string from, int maxRows, bool perRow = false,
-        IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null, string? chartType = null, bool overall = false)
+        IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null, string? chartType = null, bool overall = false,
+        IndicatorBases? bases = null, NoDataExclusion? exclusion = null)
     {
         var byName = columns.ToDictionary(c => c.Name, StringComparer.Ordinal);
 
@@ -234,6 +265,13 @@ public static class IndicatorQueryBuilder
         string Q(string name) => DataSources.Quote(byName[name].Name);
         var ratio = config.Ratio;
         var filters = string.Concat(new[] { query.Where, dashboard.Where }.Where(w => w.Length > 0).Select(w => " AND " + w));
+
+        // The rows the widget leaves out as no data (design D6 of add-small-sample-warnings) are out of every plotted statement and every
+        // count; the statement that reports them reads the rows without the exclusion.
+        var leaving = exclusion is null ? NoDataExclusion.For(config, chartType, bases, Q) : null;
+        var unfiltered = filters;
+        exclusion ??= leaving;
+        filters += exclusion?.Condition;
         var grouped = config.GroupBy is not null;
         var rows = perRow && !grouped;
 
@@ -267,8 +305,8 @@ public static class IndicatorQueryBuilder
 
         if (config.SeriesBy is not null && grouped)
         {
-            var series = SeriesQueryBuilder.Build(config, chartType, byName, from, aggregate, rowFilter, query, dashboard, maxRows);
-            return new IndicatorQueryPlan(null, missing, null, notFiltered, series);
+            var series = SeriesQueryBuilder.Build(config, chartType, byName, from, aggregate, rowFilter, query, dashboard, maxRows, bases, exclusion);
+            return new IndicatorQueryPlan(null, missing, null, notFiltered, series, NoData: NoDataOf(leaving, config, measure, bases, Q, from, rowFilter, unfiltered, query, dashboard));
         }
 
         var group = grouped ? $"{Q(config.GroupBy!)}::text" : "NULL::text";
@@ -287,6 +325,17 @@ public static class IndicatorQueryBuilder
         var isMap = grouped && config.GeometryColumn is not null;
         var tooltip = isMap ? config.Tooltip.Where(item => item is not null).ToList() : [];
         var extra = isMap ? ", count(*)" + string.Concat(tooltip.Select(item => ", " + TooltipOutput(byName[item.Column]))) : "";
+
+        // The figures (design D5 of add-small-sample-warnings) come after every output the statement has today, so today's select list is a
+        // prefix of this one. A measure with no base column adds none, and a histogram and a box plot (planned above) take none.
+        SqlFigures? figures = null;
+        var sums = chartType == ChartTypes.Histogram || rows ? null : BaseQueryBuilder.Sums(config, bases, Q);
+        if (sums is not null && sums.Any)
+        {
+            var window = BaseQueryBuilder.WidgetWindow(bases);
+            extra += string.Concat(sums.Outputs.Select(output => ", " + output)) + (window ? ", " + BaseQueryBuilder.WidgetWindow(sums.NColumn!) : "");
+            figures = sums.Ordinals(3 + (isMap ? 1 + tooltip.Count : 0), window);
+        }
 
         string sql;
         if (rows)
@@ -318,28 +367,59 @@ public static class IndicatorQueryBuilder
         // Both sets bind the project's zone as tz when they have a timestamp range: it is bound once.
         var parameters = new List<SqlParam>(query.Parameters);
         parameters.AddRange(dashboard.Parameters.Where(p => !parameters.Any(q => q.Name == p.Name)));
+        var noData = NoDataOf(leaving, config, measure, bases, Q, from, rowFilter, unfiltered, query, dashboard);
+        parameters.AddRange(exclusion?.Parameters ?? []);
+
+        // With answer columns declared, a second statement counts the n of each group and of the widget once across the answers, over the
+        // same rows and with the same filter parameters (design D3, D5).
+        var counted = sums is not null && bases is not null && BaseQueryBuilder.CountsAnswers(bases, sums)
+            ? BaseQueryBuilder.Counted(grouped ? Q(config.GroupBy!) : null, bases.Answers.Select(Q).ToList(), sums.NColumn!, from, rowFilter, filters, parameters)
+            : null;
         parameters.Add(new(IndicatorSql.LimitParameter, NpgsqlDbType.Integer, maxRows + 1));
 
         // A pie colors its slices by the groups of its own rows, as a series is colored (design D8 of dashboard palettes): the domain is
         // read through the widget's own filters only, one group past what the pie has colors for, so a fold can be told.
         var domain = chartType == ChartTypes.Pie && grouped
-            ? PieDomain(Q(config.GroupBy!), from, aggregate, rowFilter, query, WidgetConfig.MaxSlices + 1)
+            ? PieDomain(Q(config.GroupBy!), from, aggregate, rowFilter, query, WidgetConfig.MaxSlices + 1, exclusion)
             : null;
-        var overallSql = overall && grouped && chartType is (ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line) ? PlanOverall(config, columns, timeZone, from, maxRows, dashboardFilters) : null;
+        var overallSql = overall && grouped && chartType is (ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line)
+            ? PlanOverall(config, columns, timeZone, from, maxRows, dashboardFilters, exclusion)
+            : null;
         return new IndicatorQueryPlan(
-            new IndicatorSql(sql, parameters, isMap ? tooltip.Select(item => byName[item.Column].Type).ToList() : null), missing, null, notFiltered,
-            Domain: domain, Overall: overallSql);
+            new IndicatorSql(sql, parameters, isMap ? tooltip.Select(item => byName[item.Column].Type).ToList() : null, figures), missing, null, notFiltered,
+            Domain: domain, Overall: overallSql, Counted: counted, NoData: noData);
+    }
+
+    /// <summary>
+    /// The statement that reports what the widget left out as no data (design D6 of add-small-sample-warnings), over the rows of its
+    /// plotted statement without the exclusion; null for a widget that leaves nothing out.
+    /// </summary>
+    private static NoDataSql? NoDataOf(
+        NoDataExclusion? leaving, WidgetConfig config, string? measure, IndicatorBases? bases, Func<string, string> quote, string from, string rowFilter,
+        string filters, DataQuery own, DataQuery dashboard)
+    {
+        if (leaving is null)
+        {
+            return null;
+        }
+
+        var parameters = new List<SqlParam>(own.Parameters);
+        parameters.AddRange(dashboard.Parameters.Where(p => !parameters.Any(q => q.Name == p.Name)));
+        return BaseQueryBuilder.NoData(config, measure, bases, leaving, quote, from, rowFilter, filters, parameters);
     }
 
     /// <summary>
     /// The overall value of a plain grouped query (design D4 of add-chart-annotations): the statement of the stat tile that the same config
     /// would be, planned by the same code and given the same dashboard filters, so a line at the overall value and a tile with the same
-    /// indicator and filters show one figure. Its row limit parameter is bound as the main statement's is.
+    /// indicator and filters show one figure. Its row limit parameter is bound as the main statement's is. It carries the widget's
+    /// <paramref name="exclusion"/> of no-data rows (design D6 of add-small-sample-warnings), so the line never counts what the bars leave out.
     /// </summary>
     private static IndicatorSql? PlanOverall(
         WidgetConfig config, IReadOnlyList<TableColumn> columns, string timeZone, string from, int maxRows,
-        IReadOnlyList<AppliedDashboardFilter>? dashboardFilters) =>
-        Plan(WidgetQuery.For(ChartTypes.Stat, config).Normalize(), columns, timeZone, from, maxRows, dashboardFilters: dashboardFilters, chartType: ChartTypes.Stat).Sql;
+        IReadOnlyList<AppliedDashboardFilter>? dashboardFilters, NoDataExclusion? exclusion) =>
+        Plan(
+            WidgetQuery.For(ChartTypes.Stat, config).Normalize(), columns, timeZone, from, maxRows, dashboardFilters: dashboardFilters,
+            chartType: ChartTypes.Stat, exclusion: exclusion).Sql;
 
     /// <summary>
     /// The dashboard filters the table can take, as a second set of filters with parameters <c>d0</c>, <c>d1min</c>…, and the columns of

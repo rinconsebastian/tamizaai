@@ -49,9 +49,50 @@ public sealed class SeriesTableTests
             return;
         }
 
-        Assert.Equal(9, cases.Count);
+        Assert.Equal(12, cases.Count);
         Assert.Contains(cases, c => c!["name"]!.GetValue<string>().Contains("Likert"));
         Assert.Contains(cases, c => c!["name"]!.GetValue<string>().Contains("pyramid"));
+        // The cases of the figures of each cell (design D2 of add-small-sample-warnings).
+        Assert.Contains(cases, c => c!["name"]!.GetValue<string>() == "ratio grid keeps the figures of each cell");
+        Assert.Contains(cases, c => c!["name"]!.GetValue<string>() == "100% layout cells take the n of their group");
+        Assert.Contains(cases, c => c!["name"]!.GetValue<string>() == "Likert cells take the n of their group");
+    }
+
+    [Fact]
+    public void A_grid_of_an_answer_without_figures_leaves_them_out_of_its_json()
+    {
+        var response = new IndicatorQueryResponse(
+            true,
+            [new IndicatorRow("Cali", 35, null, 3, null, "Piped", SeriesKinds.Value)],
+            false,
+            MissingReferences.None,
+            Series: [new SeriesInfo("Piped", SeriesKinds.Value)],
+            Totals: new SeriesTotals([new GroupTotal("Cali", 35, 3)], [new SeriesTotal("Piped", SeriesKinds.Value, 35, 3)], new GrandTotal(35, 3)));
+
+        var json = JsonSerializer.SerializeToNode(SeriesTable.From(response, "column", "stacked"), Web)!;
+
+        Assert.False(json["rows"]![0]!.AsObject().ContainsKey("figures"));
+    }
+
+    [Fact]
+    public void A_share_cell_has_no_figures_when_its_group_has_no_n_and_a_cell_without_a_value_has_none()
+    {
+        var response = new IndicatorQueryResponse(
+            true,
+            [new IndicatorRow("Cali", 3, null, 1, null, "A", SeriesKinds.Value, 3, 4, 4)],
+            false,
+            MissingReferences.None,
+            Series: [new SeriesInfo("A", SeriesKinds.Value), new SeriesInfo("B", SeriesKinds.Value)],
+            Totals: new SeriesTotals([new GroupTotal("Cali", 3, 1, N: 4)], [new SeriesTotal("A", SeriesKinds.Value, 3, 1), new SeriesTotal("B", SeriesKinds.Value, null, 0)], new GrandTotal(3, 1)));
+
+        var shares = SeriesTable.From(response, "column", "percent");
+        var plain = SeriesTable.From(response, "column", "grouped");
+
+        // The cell with a value takes its group's n; the one with none has no figures.
+        Assert.Equal(new CellFigures?[] { new(null, null, 4), null }, shares.Rows[0].Figures!);
+        Assert.Equal(new CellFigures?[] { new(3, 4, 4), null }, plain.Rows[0].Figures!);
+        var withoutGroupN = SeriesTable.From(response with { Totals = response.Totals! with { Groups = [new GroupTotal("Cali", 3, 1)] } }, "column", "percent");
+        Assert.Null(withoutGroupN.Rows[0].Figures);
     }
 
     [Theory]

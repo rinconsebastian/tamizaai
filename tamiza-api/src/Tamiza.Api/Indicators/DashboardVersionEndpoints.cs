@@ -41,6 +41,8 @@ public sealed record DashboardVersionSummary(
 /// <param name="ValueColors">The colors the dashboard kept by value in the version, in the order they were saved; empty for a version recorded before palettes existed.</param>
 /// <param name="Widgets">In reading order: top to bottom, then left to right, then the older first.</param>
 /// <param name="Source">The dashboard's source in the version; left out of the JSON for a version that has none, which every version recorded before sources is.</param>
+/// <param name="MinN">The dashboard's small-base threshold in the version; left out of the JSON for a version that has none, which every version recorded before base settings is.</param>
+/// <param name="ShowN">Whether the dashboard showed each widget's base n line in the version; written only when true.</param>
 public sealed record DashboardVersionDetails(
     int Number,
     bool Current,
@@ -57,7 +59,9 @@ public sealed record DashboardVersionDetails(
     Person Author,
     DateTimeOffset CreatedAt,
     DateTimeOffset SavedAt,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Source = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Source = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MinN = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool ShowN = false);
 
 /// <summary>
 /// A widget as a version holds it. Its config is read as the dashboard's widgets are, so the widget view and an AI client use it as they

@@ -154,6 +154,20 @@ public static class IndicatorValidation
         CheckBasemap(config.Basemap, chartType, prefix, errors);
         CheckIgnoredDashboardFilters(config.IgnoredDashboardFilters, prefix, errors);
         CheckDisplay(config, chartType, prefix, errors);
+        CheckMissingFooter(config, chartType, prefix, errors);
+    }
+
+    /// <summary>
+    /// Leaving out the values that mean no data (design D6 of add-small-sample-warnings): only the kinds that group their rows and draw
+    /// a mark for each take it. It is not checked against the indicator's metadata: with nothing declared for the group and series columns
+    /// it does nothing. Skipped when <paramref name="chartType"/> is null, as the other per-kind rules are.
+    /// </summary>
+    private static void CheckMissingFooter(WidgetConfig config, string? chartType, string prefix, FieldErrors errors)
+    {
+        if (config.MissingFooter is not null && chartType is not null && !ChartTypes.TakesMissingFooter(chartType))
+        {
+            errors.Add(prefix + "missingFooter", "Only bar, column, line, pie, heat map, population pyramid, Likert and cross table widgets can leave out values that mean no data.");
+        }
     }
 
     /// <summary>
@@ -206,6 +220,12 @@ public static class IndicatorValidation
             {
                 errors.Add(prefix + "display.ramp", "Only map and heatmap widgets have a scale.");
             }
+        }
+
+        // The base settings are accepted on every kind, so a chart-type change never fails on them (design D7 of add-small-sample-warnings).
+        if (display.MinN is { } minN && (minN < 0 || minN > WidgetDisplay.MaxMinN))
+        {
+            errors.Add(prefix + "display.minN", "The small-base threshold must be a whole number from 0 (off) to 10,000.");
         }
 
         CheckLabels(display.Labels, prefix, errors);

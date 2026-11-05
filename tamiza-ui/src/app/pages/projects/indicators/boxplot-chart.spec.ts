@@ -191,6 +191,33 @@ describe('boxplotPlot', () => {
   });
 });
 
+describe('boxplotPlot small bases (add-small-sample-warnings, design D2, D10)', () => {
+  const note = (n: number) => (n < 30 ? `Small base: n = ${n} (below 30)` : null);
+
+  it('says in the tooltip of a box with fewer values than the threshold that its base is small, and marks the box', () => {
+    const p = plot([box('A', { q1: 1, median: 4, q3: 6, values: 16 }), box('B', { q1: 1, median: 4, q3: 6, values: 121 })], { minN: 30, smallNote: note });
+
+    expect(p.marks[0][0]!.content.footer).toBe('Small base: n = 16 (below 30)');
+    expect(p.marks[1][0]!.content.footer).toBeNull();
+    expect(p.boxes.map((b) => b.small)).toEqual([true, false]);
+    expect(p.small).toBe(1);
+  });
+
+  it('keeps the note of the outliers it did not draw, and adds the small base after it', () => {
+    const p = plot([box('A', { q1: 1, median: 4, q3: 6, values: 16, outlierCount: 3, outliers: [9] })], { minN: 30, smallNote: note });
+
+    expect(p.marks[0][0]!.content.footer).toBe('2 outliers not drawn · Small base: n = 16 (below 30)');
+  });
+
+  it('marks no box and adds no note without a threshold', () => {
+    const p = plot(three());
+
+    expect(p.boxes.every((b) => !b.small)).toBe(true);
+    expect(p.small).toBe(0);
+    expect(p.marks.every((row) => row[0]!.content.footer === null)).toBe(true);
+  });
+});
+
 describe('boxTableModel', () => {
   it('lists a box per row with its figures, in the formatter it is given, and whole numbers for its counts', () => {
     const count = valueFormatter({ format: boxFormat('count'), unit: 'people' }, 'en-US');
@@ -256,6 +283,25 @@ describe('box plot widget', () => {
   const spoken = (context: Context) => text(byTestId(context.root, 'marks-announcement')).replaceAll('​', '');
   const colorOf = (element: Element | null) => /var\(--[\w-]+\)/.exec(element?.getAttribute('style') ?? '')?.[0] ?? null;
   const palette = (name: PaletteId, valueColors: ValueColor[] = []): DashboardColors => ({ palette: name, valueColors });
+
+  it('says a box under the threshold has a small base, and draws it lighter with a dashed outline (Small bases of boxes)', async () => {
+    const context = await show({ display: { minN: 30 } }, [box('Cali', { q1: 3, median: 4, q3: 5, values: 16 }), box('Buga', { q1: 1, median: 2, q3: 3, values: 121 })]);
+
+    const rects = all(context.root, 'box-rect');
+    expect(rects.map((rect) => rect.getAttribute('stroke-dasharray'))).toEqual(['3 2', null]);
+    expect(rects.map((rect) => rect.getAttribute('fill-opacity'))).toEqual(['0.07', '0.2']);
+    hits(context)[0].dispatchEvent(new MouseEvent('pointerenter', { clientX: 40, clientY: 30 }));
+    await settle(context.harness);
+    expect(text(overlay().querySelector('[data-testid="tooltip-footer"]'))).toBe('Small base: n = 16 (below 30)');
+    expect(svg(context).getAttribute('aria-label')).toContain(', 1 with a small base');
+  });
+
+  it('draws no box dimmed when no threshold is in force', async () => {
+    const context = await show({}, [box('Cali', { q1: 3, median: 4, q3: 5, values: 16 })]);
+
+    expect(all(context.root, 'box-rect')[0].getAttribute('stroke-dasharray')).toBeNull();
+    expect(svg(context).getAttribute('aria-label')).not.toContain('small base');
+  });
 
   it('asks for the boxes with the box plot chart type, and draws one box for each group', async () => {
     const context = await show();

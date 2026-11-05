@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -31,8 +32,12 @@ public sealed record WidgetExportFilter(
 /// <param name="Filters">At most 8 filter values in force, one per column.</param>
 /// <param name="Locale">The UI's language and region, such as <c>es-CO</c>: the workbook's own words and formats follow it.</param>
 /// <param name="Version">The number of the dashboard version being viewed, for an <c>analyst</c> or <c>admin</c>; omitted for the current dashboard.</param>
+/// <param name="MinN">The small-base threshold the page applies to the widget, its own over the dashboard's or the shown version's: 0 (off) to 10,000. Omitted, the workbook has no n column for it and marks nothing. It replaces any <c>display.minN</c> of <paramref name="Config"/>.</param>
+/// <param name="ShowN">Whether the page shows the widget's base n line, resolved the same way. It replaces any <c>display.showN</c> of <paramref name="Config"/>.</param>
 public sealed record WidgetExportRequest(
-    string? Format, string? Title, string? ChartType, WidgetConfigInput? Config, IReadOnlyList<WidgetExportFilter?>? Filters, string? Locale, int? Version = null);
+    string? Format, string? Title, string? ChartType, WidgetConfigInput? Config, IReadOnlyList<WidgetExportFilter?>? Filters, string? Locale, int? Version = null,
+    [property: Description("The small-base threshold the page applies to the widget, its own over the dashboard's or the shown version's: 0 turns it off, 1 to 10000 marks the values whose base n is below it. Left out, the workbook marks nothing.")] int? MinN = null,
+    [property: Description("Whether the page shows the widget's base n line, its own setting over the dashboard's or the shown version's. Left out, the workbook shows none.")] bool? ShowN = null);
 
 /// <summary>A prepared widget workbook.</summary>
 /// <param name="DownloadUrl">The single-use link that downloads the file.</param>
@@ -82,6 +87,11 @@ public static class WidgetExportEndpoints
             {
                 errors.Add(field.Replace("dashboardFilters", "filters", StringComparison.Ordinal), message);
             }
+        }
+
+        if (request?.MinN is < 0 or > WidgetDisplay.MaxMinN)
+        {
+            errors.Add("minN", "The small-base threshold must be a whole number from 0 (off) to 10,000.");
         }
 
         var locale = ReportText.Resolve(request?.Locale);
@@ -162,7 +172,8 @@ public static class WidgetExportEndpoints
         try
         {
             content = await builder.BuildWidgetExportAsync(
-                projectId, widget, narrowing, notFiltered => notNarrowed = WidgetQuery.NotNarrowedBy(inForceLabels, notFiltered), text, format, ct);
+                projectId, widget, narrowing, notFiltered => notNarrowed = WidgetQuery.NotNarrowedBy(inForceLabels, notFiltered), text, format,
+                new BaseSettings(request.MinN is >= 1 ? request.MinN : null, request.ShowN ?? false), ct);
             publications = await indicators.GetPublicationsAsync(projectId, ct);
         }
         catch (DataTimeoutException)

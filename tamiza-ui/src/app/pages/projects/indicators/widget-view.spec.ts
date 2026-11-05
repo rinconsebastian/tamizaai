@@ -177,6 +177,30 @@ describe('WidgetView colors (add-dashboard-palettes, design D3, D7)', () => {
     }
   });
 
+  it('asks for no rows when the threshold or the n line changes, and asks again when leaving out the no-data values does (add-small-sample-warnings, design D12)', async () => {
+    const { host, settle, queries } = await render();
+
+    for (const display of [{ minN: 30 }, { minN: 0 }, { showN: true }, { showN: false }, { minN: 30, showN: true }]) {
+      host.config.set(config({ display }));
+      await settle();
+      expect(queries()).toHaveLength(0);
+    }
+
+    host.config.set(config({ display: { minN: 30 }, missingFooter: true }));
+    await settle();
+
+    const asked = queries();
+    expect(asked).toHaveLength(1);
+    expect(asked[0].request.body.config).toMatchObject({ missingFooter: true });
+    expect(asked[0].request.body.config).not.toHaveProperty('display');
+    asked[0].flush(result([row('Cali', 75)]));
+    await settle();
+
+    host.config.set(config({ display: { minN: 10 }, missingFooter: true }));
+    await settle();
+    expect(queries()).toHaveLength(0);
+  });
+
   describe('reference lines, steps and data labels (add-chart-annotations, design D4)', () => {
     const ratio = { numerator: 'numerator', denominator: 'denominator' };
 

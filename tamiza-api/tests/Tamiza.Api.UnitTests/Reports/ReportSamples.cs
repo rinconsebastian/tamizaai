@@ -54,4 +54,17 @@ internal static class ReportSamples
                  .. Enumerable.Range(1, 6).Select(f => new ReportCell((double)(b + f) / 2, $"{(b + f) / 2d:0.00} people")),
                  new ReportCell(2d, "2")]).ToList(),
             null, null, []);
+
+    /// <summary>
+    /// The table of a column chart by comuna under the threshold 30 (add-small-sample-warnings): the group, the rate, and the n column the
+    /// email adds while a setting is in force. COMUNA 7 (n 16) and SIN NOMBRE (n 20) are marked with " *"; their cells keep the number.
+    /// </summary>
+    public static ReportWidget SmallBases(int position, string title) =>
+        new(position, title, ChartTypes.Column, "Teatro hoy: numerator / denominator", WidgetOutcome.Shown,
+            [new ReportColumn("Comuna"), new ReportColumn("Teatro hoy: numerator / denominator", "0.00%"), new ReportColumn("n", "#,##0")],
+            [[new ReportCell("COMUNA 1", "COMUNA 1"), new ReportCell(0.5, "50%"), new ReportCell(121d, "121")],
+             [new ReportCell("COMUNA 7", "COMUNA 7"), new ReportCell(0.5, "50% *"), new ReportCell(16d, "16")],
+             [new ReportCell("SIN NOMBRE", "SIN NOMBRE"), new ReportCell(0.45, "45% *"), new ReportCell(20d, "20")]],
+            null, null,
+            ["2 values have a base below 30, marked *.", "n = 157 Hogares que asistieron", "Sin dato: 50%"]);
 }

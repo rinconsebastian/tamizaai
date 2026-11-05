@@ -60,6 +60,7 @@ function job(overrides: Partial<ImageJob> = {}, parts: Partial<ExportParts> = {}
     bodyWidth: 368,
     registration,
     notesAbove: [],
+    notesBelow: [],
     mapPicture: null,
     basemapNote: null,
     facts: { project: 'Census 2026', dashboard: 'Housing', version: null, source: null, filters: ['Municipality: Cali', 'Round: All'], published: 'Data published Nov 2, 2026, 5:12 AM', exported: 'Exported Nov 2, 2026, 10:30 AM (America/Bogota)' },

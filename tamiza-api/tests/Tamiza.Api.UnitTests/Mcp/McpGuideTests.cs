@@ -228,4 +228,24 @@ public sealed class McpGuideTests
         Assert.Contains("Declaring an order can recolor series that have no color kept.", text);
         Assert.Contains("`display.order`", text);
     }
+    [Fact]
+    public void The_instructions_say_how_to_declare_bases_and_when_to_set_the_threshold_and_leave_out_no_data()
+    {
+        var text = McpGuide.Instructions;
+
+        var start = text.IndexOf("## Bases\n", StringComparison.Ordinal);
+        Assert.True(start > text.IndexOf("## Words on a widget\n", StringComparison.Ordinal));
+        var section = text[start..text.IndexOf("\n## Rules\n", start, StringComparison.Ordinal)];
+        foreach (var word in new[] { "categories", "missing", "base: true", "minN", "showN", "missingFooter", "smallBase", "noData", "variable", "orden", "categoria" })
+        {
+            Assert.Contains(word, section);
+        }
+
+        Assert.Contains("a rate's `n` is its `denominator` unless its indicator declares a base column", section);
+        Assert.Contains("Never declare `categories` on a household dimension such as `comuna` or `estrato`", section);
+        Assert.Contains("A widget's own `n` needs one of those declarations", section);
+        Assert.Contains("only when the person asks, or their study's specification does", section);
+        Assert.Contains("replaces hand-written `in` lists that only drop `Sin dato`", section);
+        Assert.Contains("`save_script`'s `columns` replaces the whole map when given, so read it with `get_script` and send back the properties it holds", section);
+    }
 }

@@ -1,4 +1,4 @@
-import { LikertStep, WidgetConfig, WidgetDisplay, WidgetReferenceLine, WidgetSort, WidgetTooltipItem, chartTypes, emptyConfig } from '../../../core/projects/indicators.service';
+import { ChartType, LikertStep, WidgetConfig, WidgetDisplay, WidgetReferenceLine, WidgetSort, WidgetTooltipItem, chartTypes, emptyConfig, takesMissingFooter } from '../../../core/projects/indicators.service';
 import { offersDataLabels, overallFor, queryFor, referenceKindsFor, savedConfig } from './widget-view';
 
 const byColumn: WidgetSort = { by: 'column', column: 'round', compareAs: 'number', direction: 'asc' };
@@ -673,5 +673,64 @@ describe('savedConfig with an own order of values (add-declared-category-order, 
   it('leaves out an empty order, so a widget saved unchanged keeps its stored text', () => {
     expect(savedConfig('column', withOrder({ display: { order: { group: [], series: [] } } })).display).toBeUndefined();
     expect(savedConfig('column', withOrder({ display: { color: 2, order: { group: [] } }, seriesBy: undefined })).display).toEqual({ color: 2 });
+  });
+});
+
+describe('queryFor and savedConfig with the base settings (add-small-sample-warnings, design D6, D7)', () => {
+  const kindsThatTake: ChartType[] = ['bar', 'column', 'line', 'pie', 'heatmap', 'pyramid', 'likert', 'crosstab'];
+  const withSeries = (type: ChartType): Partial<WidgetConfig> => (['heatmap', 'pyramid', 'likert', 'crosstab'].includes(type) ? { seriesBy: 'respuesta' } : {});
+
+  it('names the eight kinds that can leave out the values that mean no data', () => {
+    expect(chartTypes.filter(takesMissingFooter)).toEqual(chartTypes.filter((type) => kindsThatTake.includes(type)));
+  });
+
+  it('sends missingFooter only when it is set and the kind takes it, a false as it was saved', () => {
+    for (const type of kindsThatTake) {
+      const base = { ...config(null), ...withSeries(type) };
+      expect(queryFor(type, { ...base, missingFooter: true }).missingFooter, type).toBe(true);
+      expect(queryFor(type, { ...base, missingFooter: false }).missingFooter, type).toBe(false);
+      expect('missingFooter' in queryFor(type, base), type).toBe(false);
+    }
+    for (const type of chartTypes.filter((type) => !kindsThatTake.includes(type))) {
+      expect('missingFooter' in queryFor(type, { ...config(null), missingFooter: true }), type).toBe(false);
+    }
+  });
+
+  it('gives the query of a widget without it byte for byte as before, and a different key when it is set', () => {
+    const plain = config(null);
+
+    expect(JSON.stringify(queryFor('column', plain))).toBe(JSON.stringify(queryFor('column', { ...plain, missingFooter: undefined })));
+    expect(JSON.stringify(queryFor('column', { ...plain, missingFooter: true }))).not.toBe(JSON.stringify(queryFor('column', plain)));
+  });
+
+  it('drops missingFooter when the chart type changes to a kind that does not take it, and keeps minN and showN', () => {
+    const own = { ...config(null), missingFooter: true, display: { minN: 0, showN: false } };
+
+    expect(savedConfig('column', own).missingFooter).toBe(true);
+    const stat = savedConfig('stat', own);
+    expect('missingFooter' in stat).toBe(false);
+    expect(stat.display).toEqual({ minN: 0, showN: false });
+    expect(savedConfig('histogram', own).display).toEqual({ minN: 0, showN: false });
+  });
+
+  it('keeps a threshold of 0 and a n line that is false as they were saved, on every kind, and saves no display for a widget with neither', () => {
+    for (const type of chartTypes) {
+      expect(savedConfig(type, { ...config(null), display: { minN: 0 } }).display, type).toEqual({ minN: 0 });
+      expect(savedConfig(type, { ...config(null), display: { showN: false } }).display, type).toEqual({ showN: false });
+      expect(savedConfig(type, { ...config(null), display: { minN: 30, showN: true } }).display, type).toEqual({ minN: 30, showN: true });
+    }
+    expect('display' in savedConfig('column', config(null))).toBe(false);
+  });
+
+  it('leaves minN and showN out of the query of every kind, so changing them never queries again', () => {
+    for (const type of chartTypes) {
+      expect(JSON.stringify(queryFor(type, { ...config(null), display: { minN: 30, showN: true } })), type).toBe(JSON.stringify(queryFor(type, config(null))));
+    }
+  });
+
+  it('saves minN and showN after the order, where the API writes them', () => {
+    const saved = savedConfig('column', { ...config(null), display: { showN: true, minN: 30, footnote: 'Nota', dataLabels: true } });
+
+    expect(Object.keys(saved.display!)).toEqual(['footnote', 'dataLabels', 'minN', 'showN']);
   });
 });

@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { TranslocoTestingModule } from '@jsverse/transloco';
 import en from '../../../../../public/i18n/en.json';
 import type { IndicatorMetadata, IndicatorTestView } from '../../../core/projects/pipeline.service';
+import { pressKey } from '../../../../testing/cdk';
 import { valueFormatter } from '../indicators/format';
 import { IndicatorView, ViewWarning, askedWarning, viewWarnings } from './indicator-view';
 
@@ -138,7 +139,7 @@ describe('IndicatorView', () => {
     const { fixture, q, host } = await render();
     expect(q('view-ratio-tile')!.querySelector('[data-testid="stat-label"]')!.textContent).toBe('Households with piped water: numerator / denominator');
 
-    host.metadata.set({ ...percent, columns: { numerator: { label: 'Hogares que asistieron', order: [], last: [], stripPrefix: false }, denominator: { label: '  ', order: [], last: [], stripPrefix: false } } });
+    host.metadata.set({ ...percent, columns: { numerator: { label: 'Hogares que asistieron', order: [], last: [], stripPrefix: false, base: false, missing: [], categories: '' }, denominator: { label: '  ', order: [], last: [], stripPrefix: false, base: false, missing: [], categories: '' } } });
     fixture.detectChanges();
 
     expect(q('view-ratio-tile')!.querySelector('[data-testid="stat-label"]')!.textContent).toBe('Households with piped water: Hogares que asistieron / denominator');
@@ -166,8 +167,18 @@ describe('IndicatorView', () => {
     plot.dispatchEvent(new Event('change'));
     fixture.detectChanges();
 
-    // Each bar says what it shows in its tooltip: the group and the ratio of its sums.
-    const bars = [...q('view-chart')!.querySelectorAll('rect title')].map((title) => title.textContent);
+    // Each bar says what it shows in its tooltip, which the keyboard steps through: the group and the ratio of its sums. A test view has
+    // no base figures, so a tooltip gives the value only (add-small-sample-warnings, design D9).
+    const chart = q('view-chart')!.querySelector('[data-testid="chart-svg"]') as unknown as HTMLElement;
+    const bars: string[] = [];
+    for (const key of ['Home', 'ArrowDown']) {
+      pressKey(chart, key);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const tooltips = document.querySelector('.cdk-overlay-container')!;
+      const lines = [...tooltips.querySelectorAll('[data-testid="tooltip-line"] dd')].map((value) => value.textContent!.trim());
+      bars.push(`${tooltips.querySelector('[data-testid="tooltip-heading"]')!.textContent!.trim()}: ${lines.join(' ')}`);
+    }
     expect(bars).toEqual(['Cali: 90%', 'Buga: 10%']);
   });
 

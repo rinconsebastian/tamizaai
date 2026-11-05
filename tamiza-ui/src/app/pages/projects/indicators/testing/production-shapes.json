@@ -3541,6 +3541,292 @@
     "ignoredDashboardFilters": [],
     "seriesBy": "respuesta"
    }
+  },
+  {
+   "name": "ratio column chart with a small-base threshold and the n line",
+   "chartType": "column",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    },
+    {
+     "name": "numerator",
+     "type": "decimal"
+    },
+    {
+     "name": "denominator",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":{\"numerator\":\"numerator\",\"denominator\":\"denominator\"},\"groupBy\":\"zona\",\"filters\":[{\"column\":\"canal\",\"op\":\"equals\",\"value\":\"Presencial\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"minN\":30,\"showN\":true},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"zona\"::text, (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL) AND \"canal\"::text = @f0\nGROUP BY \"zona\"\nHAVING (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) IS NOT NULL\nORDER BY \"p_x_indicators\".\"encuesta_hoy\".\"zona\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "f0",
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "minN": 30,
+     "showN": true
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial"
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "minN": 30,
+     "showN": true
+    }
+   }
+  },
+  {
+   "name": "ratio column chart that leaves out the values that mean no data",
+   "chartType": "column",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    },
+    {
+     "name": "numerator",
+     "type": "decimal"
+    },
+    {
+     "name": "denominator",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":{\"numerator\":\"numerator\",\"denominator\":\"denominator\"},\"groupBy\":\"zona\",\"filters\":[{\"column\":\"canal\",\"op\":\"equals\",\"value\":\"Presencial\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"missingFooter\":true,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": [],
+    "missingFooter": true
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"zona\"::text, (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL) AND \"canal\"::text = @f0\nGROUP BY \"zona\"\nHAVING (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) IS NOT NULL\nORDER BY \"p_x_indicators\".\"encuesta_hoy\".\"zona\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "f0",
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "missingFooter": true
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "missingFooter": true
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial"
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "missingFooter": true
+   }
   }
  ],
  "dashboard": {
@@ -3769,5 +4055,69 @@
    }
   ],
   "content": "{\"name\":\"Encuesta de hoy con fuente\",\"filters\":[{\"column\":\"zona\",\"label\":\"Zona\",\"kind\":\"text\",\"default\":null},{\"column\":\"canal\",\"label\":\"Canal\",\"kind\":\"text\",\"default\":null},{\"column\":\"grupo\",\"label\":\"Grupo\",\"kind\":\"text\",\"default\":null},{\"column\":\"pregunta\",\"label\":\"Pregunta\",\"kind\":\"text\",\"default\":null},{\"column\":\"respuesta\",\"label\":\"Respuesta\",\"kind\":\"text\",\"default\":null},{\"column\":\"orden\",\"label\":\"Orden\",\"kind\":\"text\",\"default\":null}],\"palette\":\"earth\",\"valueColors\":[{\"column\":\"pregunta\",\"value\":\"1. Opci\\u00F3n A\",\"color\":1},{\"column\":\"pregunta\",\"value\":\"2. Opci\\u00F3n B\",\"color\":2},{\"column\":\"pregunta\",\"value\":\"3. Opci\\u00F3n C\",\"color\":3},{\"column\":\"grupo\",\"value\":\"1. Grupo A\",\"color\":4},{\"column\":\"grupo\",\"value\":\"2. Grupo B\",\"color\":5},{\"column\":\"grupo\",\"value\":\"3. Grupo C\",\"color\":6}],\"source\":\"Encuesta de ejemplo, 120 respuestas, primera ronda\",\"widgets\":[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"title\":\"Asistencia por zona\",\"chartType\":\"column\",\"config\":{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":{\"numerator\":\"numerator\",\"denominator\":\"denominator\"},\"groupBy\":\"zona\",\"filters\":[{\"column\":\"canal\",\"op\":\"equals\",\"value\":\"Presencial\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"column\",\"column\":\"orden\",\"compareAs\":\"text\",\"direction\":\"asc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"color\":3},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]},\"layout\":{\"x\":0,\"y\":0,\"w\":6,\"h\":4}},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"title\":\"Canales de informaci\\u00F3n\",\"chartType\":\"bar\",\"config\":{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":{\"numerator\":\"numerator\",\"denominator\":\"denominator\"},\"groupBy\":\"categoria\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"value\",\"column\":null,\"compareAs\":null,\"direction\":\"desc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"subtitle\":\"\\u00BFQu\\u00E9 canal usa para informarse sobre la zona? (P4)\",\"footnote\":\"No suman 100 %: respuesta m\\u00FAltiple.\",\"caption\":{\"hidden\":true},\"unit\":\"de los consultados\"},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]},\"layout\":{\"x\":6,\"y\":0,\"w\":6,\"h\":4}},{\"id\":\"00000000-0000-0000-0000-000000000003\",\"title\":\"Respuestas de la Zona 1\",\"chartType\":\"stat\",\"config\":{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":null,\"filters\":[{\"column\":\"zona\",\"op\":\"equals\",\"value\":\"Zona 1\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"footnote\":\"Sin ponderar.\",\"caption\":{\"text\":\"Respuestas de la Zona 1\"},\"showDescription\":true},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]},\"layout\":{\"x\":0,\"y\":4,\"w\":3,\"h\":2}}]}"
+ },
+ "declared": {
+  "_comment": "Invented column maps (add-small-sample-warnings, design D15), each what an indicator could declare for the columns of these shapes: \"base\" (the column that counts the units a row stands for), \"missing\" (values that mean no data) and \"categories\" (the columns of a long table that name a question and its answers). The API's ProductionShapesTests plans every shape again with each map and no setting on: the plotted statements, once the figure outputs are removed, stay each shape's \"plan\" golden, and a widget that does not ask for it leaves nothing out. Later changes add maps or shapes and regenerate no golden.",
+  "maps": [
+   {
+    "name": "answers of a long table and values that mean no data",
+    "columns": {
+     "pregunta": {
+      "categories": "multiple"
+     },
+     "orden": {
+      "categories": "multiple"
+     },
+     "respuesta": {
+      "categories": "single"
+     },
+     "categoria": {
+      "categories": "multiple"
+     },
+     "zona": {
+      "missing": [
+       "Sin dato"
+      ]
+     },
+     "canal": {
+      "missing": [
+       "No sabe"
+      ]
+     }
+    }
+   },
+   {
+    "name": "a count base with its question and its answers",
+    "columns": {
+     "conteo": {
+      "base": true
+     },
+     "pregunta": {
+      "categories": "multiple"
+     },
+     "respuesta": {
+      "categories": "single"
+     },
+     "zona": {
+      "missing": [
+       "Sin dato"
+      ]
+     }
+    }
+   },
+   {
+    "name": "a wide table with its denominator as the base",
+    "columns": {
+     "denominator": {
+      "base": true
+     },
+     "canal": {
+      "missing": [
+       "Sin dato"
+      ]
+     }
+    }
+   }
+  ]
  }
 }

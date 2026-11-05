@@ -59,19 +59,42 @@ public sealed class ProductionShapesTests
     internal static JsonNode QueryOf(JsonNode shape) =>
         JsonSerializer.SerializeToNode(WidgetQuery.For(shape["chartType"]!.GetValue<string>(), Read(shape["stored"]!.GetValue<string>())), Web)!;
 
-    internal static IndicatorQueryPlan PlanFor(JsonNode shape)
+    /// <param name="bases">What the shape's indicator declares for its columns, resolved against its table; null when it declares nothing.</param>
+    internal static IndicatorQueryPlan PlanFor(JsonNode shape, IndicatorBases? bases = null)
     {
         var chartType = shape["chartType"]!.GetValue<string>();
         var query = WidgetQuery.For(chartType, Read(shape["stored"]!.GetValue<string>())).Normalize();
-        return IndicatorQueryBuilder.Plan(query, ColumnsOf(shape), "UTC", From, 5000, perRow: chartType == ChartTypes.Histogram, chartType: chartType);
+        return IndicatorQueryBuilder.Plan(query, ColumnsOf(shape), "UTC", From, 5000, perRow: chartType == ChartTypes.Histogram, chartType: chartType, bases: bases);
     }
 
-    /// <summary>A plan as text can be compared: its SQL texts and the names of its parameters, what is built for the database.</summary>
-    internal static JsonNode Describe(IndicatorQueryPlan plan)
+    /// <summary>
+    /// A statement without the figure outputs that <see cref="IndicatorSql.Figures"/> lists (design D5 of add-small-sample-warnings): the
+    /// sums a ratio and a base column append after every output a select list had, and the named sums and columns of a series statement's
+    /// groups and cells. What is left is the text the statement had before, which the shapes' goldens hold.
+    /// </summary>
+    internal static string WithoutFigures(string sql)
     {
-        static JsonObject Sql(IndicatorSql sql) => new()
+        const string Sum = @"sum\(""[^""]+""\)::double precision";
+        // The sums of a group and a cell, named for the rows that read them, and the columns the branches select from them.
+        sql = System.Text.RegularExpressions.Regex.Replace(sql, $@", {Sum} AS f[ndb]\b", "");
+        sql = System.Text.RegularExpressions.Regex.Replace(sql, @", (?:cell\.)?f[ndb]\b", "");
+        // The "left out" branch's NULLs, after its last column.
+        sql = System.Text.RegularExpressions.Regex.Replace(sql, @"(NULL::bigint)(?:, NULL::double precision)+", "$1");
+        // The sums appended to a plain select list and to a series total, and the widget's window.
+        sql = System.Text.RegularExpressions.Regex.Replace(sql, @", \(sum\(sum\(""[^""]+""\)\) OVER \(\)\)::double precision", "");
+        // A plan's aggregates are always parenthesized, so a sum that follows a comma directly is one of the appended outputs.
+        return System.Text.RegularExpressions.Regex.Replace(sql, $@", {Sum}(?:, {Sum})*", "");
+    }
+
+    /// <summary>
+    /// A plan as text can be compared: its SQL texts and the names of its parameters, what is built for the database. The figure outputs
+    /// of design D5 of add-small-sample-warnings are removed unless <paramref name="removeFigures"/> is false.
+    /// </summary>
+    internal static JsonNode Describe(IndicatorQueryPlan plan, bool removeFigures = true)
+    {
+        JsonObject Sql(IndicatorSql sql) => new()
         {
-            ["sql"] = sql.Sql,
+            ["sql"] = removeFigures ? WithoutFigures(sql.Sql) : sql.Sql,
             ["parameters"] = new JsonArray(sql.Parameters.Select(p => (JsonNode?)p.Name).ToArray()),
         };
 
@@ -152,6 +175,8 @@ public sealed class ProductionShapesTests
             dashboard["palette"]!.GetValue<string>(),
             dashboard["valueColors"]!.ToJsonString(),
             dashboard["source"]?.GetValue<string>(),
+            dashboard["minN"]?.GetValue<int>(),
+            dashboard["showN"]?.GetValue<bool>() ?? false,
             widgets);
     }
 
@@ -164,7 +189,7 @@ public sealed class ProductionShapesTests
         }
 
         var names = shapes.Select(s => s!["name"]!.GetValue<string>()).ToList();
-        Assert.Equal(28, names.Count);
+        Assert.Equal(30, names.Count);
         Assert.Equal(names.Count, names.Distinct().Count());
         Assert.Equal(
             [ChartTypes.Column, ChartTypes.Column, ChartTypes.Bar, ChartTypes.Bar, ChartTypes.Bar, ChartTypes.Bar, ChartTypes.Stat, ChartTypes.Stat, ChartTypes.Line,
@@ -174,7 +199,9 @@ public sealed class ProductionShapesTests
              // The shapes of the chart annotations (add-chart-annotations)
              ChartTypes.Column, ChartTypes.Bar, ChartTypes.Line, ChartTypes.Bar, ChartTypes.Column,
              // The shapes of the declared category order (add-declared-category-order)
-             ChartTypes.Column, ChartTypes.Bar, ChartTypes.Heatmap],
+             ChartTypes.Column, ChartTypes.Bar, ChartTypes.Heatmap,
+             // The shapes of the base settings (add-small-sample-warnings)
+             ChartTypes.Column, ChartTypes.Column],
             shapes.Select(s => s!["chartType"]!.GetValue<string>()));
         Assert.All(shapes, s => Assert.True(ChartTypes.IsKnown(s!["chartType"]!.GetValue<string>())));
     }
@@ -207,6 +234,24 @@ public sealed class ProductionShapesTests
         Assert.Null(plan.Errors);
         Assert.Empty(plan.MissingColumns);
         Assert.Equal(shape["plan"]!.ToJsonString(), Describe(plan).ToJsonString());
+    }
+
+    /// <summary>
+    /// A measure, a box plot and a histogram have no figure outputs (design D5 and D15 of add-small-sample-warnings): their plan equals its
+    /// golden as it is, with nothing removed. A ratio's is compared with its figure outputs removed, by the test above.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShapeNames))]
+    public void The_plan_of_a_measure_a_box_plot_or_a_histogram_is_its_golden_with_nothing_removed(string name)
+    {
+        var shape = Shape(name);
+        var chartType = shape["chartType"]!.GetValue<string>();
+        if (Read(shape["stored"]!.GetValue<string>()).Ratio is not null && chartType is not (ChartTypes.Boxplot or ChartTypes.Histogram))
+        {
+            return;
+        }
+
+        Assert.Equal(shape["plan"]!.ToJsonString(), Describe(PlanFor(shape), removeFigures: false).ToJsonString());
     }
 
     /// <summary>
@@ -350,6 +395,147 @@ public sealed class ProductionShapesTests
         Assert.Equal(["overall"], displays[4]["referenceLines"]!.AsArray().Select(l => l!["kind"]!.GetValue<string>()));
     }
 
+    /// <summary>The settings of add-small-sample-warnings that a shape's stored config can hold.</summary>
+    private static readonly string[] BaseMembers = ["minN", "showN"];
+
+    private static bool HoldsBaseSettings(JsonNode shape)
+    {
+        var stored = JsonNode.Parse(shape["stored"]!.GetValue<string>())!.AsObject();
+        return stored.ContainsKey("missingFooter") || (stored["display"] is JsonObject display && BaseMembers.Any(display.ContainsKey));
+    }
+
+    /// <summary>The same shape with its config stored without its base settings: the two members of its display and <c>missingFooter</c>.</summary>
+    private static JsonNode WithoutBaseSettings(JsonNode shape)
+    {
+        var without = WithoutMembers(shape, BaseMembers);
+        var stored = JsonNode.Parse(without["stored"]!.GetValue<string>())!.AsObject();
+        stored.Remove("missingFooter");
+        without["stored"] = Write(Read(stored.ToJsonString()));
+        return without;
+    }
+
+    /// <summary>
+    /// The base settings of a widget only decide what is drawn, and <c>missingFooter</c> only leaves rows out when its indicator declares
+    /// values (design D15 of add-small-sample-warnings): the plan of a shape that holds them is the plan of the same config without them,
+    /// and so is its query, apart from the option that <c>missingFooter</c> adds to it. Both are the shape's goldens.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShapeNames))]
+    public void The_query_and_the_plan_of_a_shape_are_those_of_the_same_config_without_the_base_settings(string name)
+    {
+        var shape = Shape(name);
+        var without = WithoutBaseSettings(shape);
+
+        Assert.Equal(shape["plan"]!.ToJsonString(), Describe(PlanFor(without)).ToJsonString());
+        Assert.Equal(Describe(PlanFor(shape)).ToJsonString(), Describe(PlanFor(without)).ToJsonString());
+        Assert.Equal(shape["query"]!.ToJsonString(), QueryOf(shape).ToJsonString());
+        var expected = QueryOf(without);
+        if (JsonNode.Parse(shape["stored"]!.GetValue<string>())!["missingFooter"] is { } missingFooter)
+        {
+            expected["missingFooter"] = missingFooter.DeepClone();
+        }
+
+        Assert.True(JsonNode.DeepEquals(expected, QueryOf(shape)), $"{name}: {QueryOf(shape).ToJsonString()}");
+    }
+
+    [Fact]
+    public void Only_the_two_base_shapes_hold_base_settings_and_each_holds_its_own()
+    {
+        if (Shapes() is not { } shapes)
+        {
+            return;
+        }
+
+        Assert.Equal(
+            ["ratio column chart with a small-base threshold and the n line", "ratio column chart that leaves out the values that mean no data"],
+            shapes.Where(s => HoldsBaseSettings(s!)).Select(s => s!["name"]!.GetValue<string>()));
+        var threshold = JsonNode.Parse(shapes[28]!["stored"]!.GetValue<string>())!;
+        Assert.Equal((30, true), (threshold["display"]!["minN"]!.GetValue<int>(), threshold["display"]!["showN"]!.GetValue<bool>()));
+        Assert.Null(threshold["missingFooter"]);
+        var missing = JsonNode.Parse(shapes[29]!["stored"]!.GetValue<string>())!;
+        Assert.True(missing["missingFooter"]!.GetValue<bool>());
+        Assert.Null(missing["display"]);
+        // The query of the second carries the option; the first's holds no setting.
+        Assert.True(shapes[29]!["query"]!["missingFooter"]!.GetValue<bool>());
+        Assert.Null(shapes[28]!["query"]!["missingFooter"]);
+    }
+
+    /// <summary>
+    /// Every shape planned again with its indicator declaring a base column, no-data values and answer columns, and no setting on (design
+    /// D15 of add-small-sample-warnings): the plotted statements, once the figure outputs are removed, are the shape's golden, a value that
+    /// means no data leaves nothing out (<c>missingFooter</c> is off), and the only statement that is added is the one that counts the
+    /// answers, run for a widget whose marks have an n over answer columns it declares.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShapeNames))]
+    public void A_shape_planned_with_declared_bases_and_no_setting_on_keeps_its_plotted_statements(string name)
+    {
+        if (Fixture()?["declared"]?["maps"]?.AsArray() is not { } maps)
+        {
+            return;
+        }
+
+        var shape = Shape(name);
+        var chartType = shape["chartType"]!.GetValue<string>();
+        var hasRatio = Read(shape["stored"]!.GetValue<string>()).Ratio is not null;
+        foreach (var map in maps)
+        {
+            var label = $"{name} with {map!["name"]}";
+            var bases = IndicatorBases.Resolve(ColumnMetadata.Read(map["columns"]!.ToJsonString()), ColumnsOf(shape));
+
+            var plan = PlanFor(shape, bases);
+
+            Assert.Null(plan.Errors);
+            var described = Describe(plan).ToJsonString();
+            // A value that means no data leaves a row out only for a widget that asks for it (missingFooter) and whose group column declares one.
+            var group = Read(shape["stored"]!.GetValue<string>()).GroupBy;
+            var leavesOut = HoldsBaseSettings(shape) && group is not null && bases?.Missing.ContainsKey(group) == true
+                && JsonNode.Parse(shape["stored"]!.GetValue<string>())!["missingFooter"] is not null;
+            if (leavesOut)
+            {
+                Assert.True(described.Contains("AND NOT ((", StringComparison.Ordinal) && plan.NoData is not null, $"{label}: {described}");
+            }
+            else
+            {
+                Assert.True(shape["plan"]!.ToJsonString() == described, $"{label}: {described}");
+                Assert.True(plan.NoData is null, label);
+            }
+
+            Assert.True(plan.Overall is null, label);
+            var counted = plan.Counted is not null || plan.Series?.Counted is not null;
+            var expected = bases is { Answers.Count: > 0 } && chartType is not (ChartTypes.Boxplot or ChartTypes.Histogram) && (hasRatio || bases.BaseColumn is not null);
+            Assert.True(expected == counted, $"{label}: the answers statement {(counted ? "was" : "was not")} planned");
+        }
+    }
+
+    [Fact]
+    public void The_declared_maps_are_invented_valid_and_between_them_declare_each_property_on_the_columns_of_the_shapes()
+    {
+        if (Fixture() is not { } fixture || fixture["declared"]?["maps"]?.AsArray() is not { } maps)
+        {
+            return;
+        }
+
+        var all = fixture["shapes"]!.AsArray();
+        var columns = all.SelectMany(s => s!["columns"]!.AsArray().Select(c => c!["name"]!.GetValue<string>())).ToHashSet();
+        Assert.True(maps.Count >= 3);
+        foreach (var map in maps)
+        {
+            var read = ColumnMetadata.Read(map!["columns"]!.ToJsonString())!;
+            var errors = new FieldErrors();
+            ColumnMetadata.Check(read.ToDictionary(e => e.Key, e => (IndicatorColumnMetadata?)e.Value), errors);
+            Assert.Empty(errors.ToDictionary());
+            // Each column a map names is a column of some shape, so a declaration is always about a real one.
+            Assert.All(read.Keys, key => Assert.Contains(key, columns));
+        }
+
+        var entries = maps.SelectMany(m => ColumnMetadata.Read(m!["columns"]!.ToJsonString())!.Values).ToList();
+        Assert.Contains(entries, e => e.Base is true);
+        Assert.Contains(entries, e => e.Missing is { Count: > 0 });
+        Assert.Contains(entries, e => e.Categories == AnswerKinds.Single);
+        Assert.Contains(entries, e => e.Categories == AnswerKinds.Multiple);
+    }
+
     /// <summary>
     /// An indicator that gives its group and series columns only a label declares no order and no hidden prefixes (add-declared-category-order,
     /// task 1.1): no order applies to the shapes that carry such columns, so every consumer runs today's code for them.
@@ -422,7 +608,7 @@ public sealed class ProductionShapesTests
 
         var read = DashboardVersions.ReadContent(content);
         Assert.Equal(dashboard["source"]!.GetValue<string>(), read.Source);
-        Assert.Equal(content, DashboardVersions.Content(read.Name, read.Filters, read.Palette, read.ValueColors, read.Source,
+        Assert.Equal(content, DashboardVersions.Content(read.Name, read.Filters, read.Palette, read.ValueColors, read.Source, read.MinN, read.ShowN,
             read.Widgets.Select((w, i) => new DashboardWidget
             {
                 Id = w.Id,

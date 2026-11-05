@@ -982,4 +982,157 @@ public sealed class ScriptsApiTests(PostgresFixture postgres) : IDisposable
 
         Assert.Equal(Declared(null, ["Sin dato"], null), OrderOf(saved, "columna_que_no_existe"));
     }
+
+    // The base, the values that mean no data and the answer columns of an indicator (design D1 of add-small-sample-warnings)
+
+    private static readonly object TeatroBase = new
+    {
+        hogares = new { label = "Hogares", @base = true },
+        comuna = new { missing = new[] { "Sin dato" } },
+        variable = new { categories = "multiple" },
+        categoria = new { label = "Respuesta", categories = "single" },
+    };
+
+    /// <summary>One column of a version's <c>columns</c> member as the JSON the page and a client read: null when it has none.</summary>
+    private static JsonElement? ColumnOf(JsonElement version, string column) =>
+        version.TryGetProperty("columns", out var columns) && columns.ValueKind == JsonValueKind.Object && columns.TryGetProperty(column, out var entry) ? entry : null;
+
+    [Fact]
+    public async Task A_base_values_that_mean_no_data_and_answer_columns_are_saved_and_returned_by_every_path()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await PutColumnsAsync(h.Admin, h, "teatro_hoy", TeatroBase);
+        var saved = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        void AssertDeclared(JsonElement version)
+        {
+            Assert.True(ColumnOf(version, "hogares")!.Value.GetProperty("base").GetBoolean());
+            Assert.Equal(["Sin dato"], ColumnOf(version, "comuna")!.Value.GetProperty("missing").EnumerateArray().Select(v => v.GetString()));
+            Assert.Equal("multiple", ColumnOf(version, "variable")!.Value.GetProperty("categories").GetString());
+            Assert.Equal("single", ColumnOf(version, "categoria")!.Value.GetProperty("categories").GetString());
+            Assert.Equal("Respuesta", ColumnOf(version, "categoria")!.Value.GetProperty("label").GetString());
+        }
+
+        AssertDeclared(saved);
+        var list = await h.Admin.GetFromJsonAsync<JsonElement>(Scripts(h));
+        var indicator = Assert.Single(list.GetProperty("indicators").EnumerateArray());
+        AssertDeclared(indicator);
+        AssertDeclared(indicator.GetProperty("current"));
+        AssertDeclared(await h.Admin.GetFromJsonAsync<JsonElement>($"{IndicatorUrl(h, "teatro_hoy")}/versions/1"));
+        var overview = await h.Admin.GetFromJsonAsync<JsonElement>($"/api/v1/projects/{h.ProjectId}/indicators");
+        AssertDeclared(Assert.Single(overview.GetProperty("indicators").EnumerateArray()));
+    }
+
+    [Fact]
+    public async Task A_column_with_only_a_base_is_saved_and_one_with_base_false_and_nothing_else_is_not()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var saved = await ReadAsync(await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { hogares = new { @base = true }, personas = new { @base = false } }));
+
+        Assert.Equal("""{"hogares": {"base": true}}""", await StoredColumnsAsync(h, "teatro_hoy", 1));
+        Assert.Null(ColumnOf(saved, "personas"));
+    }
+
+    [Fact]
+    public async Task Two_base_columns_are_refused_on_the_second_and_no_version_is_made()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { hogares = new { @base = true }, personas = new { @base = true } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["Only one column can be the base: hogares already is."], Errors(await ReadAsync(response), "columns.personas.base"));
+        Assert.Equal(0L, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
+
+    [Fact]
+    public async Task A_kind_of_answers_that_is_not_single_or_multiple_is_refused_on_its_column()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { categoria = new { categories = "ranking" } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["Answers are 'single' or 'multiple'."], Errors(await ReadAsync(response), "columns.categoria.categories"));
+        Assert.Equal(0L, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
+
+    [Fact]
+    public async Task Base_declared_with_values_that_mean_no_data_is_refused_on_its_column_and_21_values_on_the_values()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+
+        var response = await PutColumnsAsync(h.Admin, h, "teatro_hoy", new
+        {
+            hogares = new { @base = true, missing = new[] { "Sin dato" } },
+            comuna = new { missing = Enumerable.Range(1, 21).Select(i => $"Valor {i}").ToArray() },
+        });
+        var problem = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["A base column counts units: it holds no answers and no values that mean no data."], Errors(problem, "columns.hogares"));
+        Assert.Equal(["A column lists at most 20 values that mean no data."], Errors(problem, "columns.comuna.missing"));
+    }
+
+    [Fact]
+    public async Task Base_declared_for_a_column_restored_with_a_version_and_not_restored_when_that_version_declared_none()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { hogares = new { @base = true } });
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { personas = new { label = "Personas" } }, "# two\n" + Compute);
+
+        var restored = await ReadAsync(await h.Admin.PostAsync($"{IndicatorUrl(h, "teatro_hoy")}/versions/1/restore", null));
+        var restoredNone = await ReadAsync(await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { }, "# four\n" + Compute));
+        var back = await ReadAsync(await h.Admin.PostAsync($"{IndicatorUrl(h, "teatro_hoy")}/versions/2/restore", null));
+
+        Assert.True(ColumnOf(restored, "hogares")!.Value.GetProperty("base").GetBoolean());
+        Assert.Equal(await StoredColumnsAsync(h, "teatro_hoy", 1), await StoredColumnsAsync(h, "teatro_hoy", 3));
+        Assert.Null(ColumnOf(restoredNone, "hogares"));
+        Assert.Null(ColumnOf(back, "hogares"));
+        Assert.Equal("Personas", ColumnOf(back, "personas")!.Value.GetProperty("label").GetString());
+    }
+
+    [Fact]
+    public async Task A_save_that_leaves_columns_out_keeps_the_declarations_and_an_empty_map_clears_them()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        await PutColumnsAsync(h.Admin, h, "teatro_hoy", TeatroBase);
+
+        var kept = await ReadAsync(await PutWithoutColumnsAsync(h.Admin, h, "teatro_hoy", "# two\n" + Compute));
+        var cleared = await ReadAsync(await PutColumnsAsync(h.Admin, h, "teatro_hoy", new { }, "# three\n" + Compute));
+        var stays = await ReadAsync(await PutWithoutColumnsAsync(h.Admin, h, "teatro_hoy", "# four\n" + Compute));
+
+        Assert.Equal(await StoredColumnsAsync(h, "teatro_hoy", 1), await StoredColumnsAsync(h, "teatro_hoy", 2));
+        Assert.True(ColumnOf(kept, "hogares")!.Value.GetProperty("base").GetBoolean());
+        Assert.Null(await StoredColumnsAsync(h, "teatro_hoy", 3));
+        Assert.Equal(JsonValueKind.Null, cleared.GetProperty("columns").ValueKind);
+        Assert.Equal(JsonValueKind.Null, stays.GetProperty("columns").ValueKind);
+    }
+
+    [Fact]
+    public async Task Facts_for_60_labeled_columns_and_41_others_are_refused_with_the_limit_message_and_100_in_all_are_accepted()
+    {
+        await using var h = await IngestionHarness.CreateAsync(postgres, _kobo);
+        Dictionary<string, object> Columns(int labels, int facts)
+        {
+            var map = Enumerable.Range(1, labels).ToDictionary(i => $"columna_{i}", i => (object)new { label = $"Columna {i}" });
+            foreach (var i in Enumerable.Range(1, facts))
+            {
+                map[$"dato_{i}"] = new { missing = new[] { "Sin dato" } };
+            }
+
+            return map;
+        }
+
+        var many = await PutColumnsAsync(h.Admin, h, "teatro_hoy", Columns(60, 41));
+        var enough = await PutColumnsAsync(h.Admin, h, "teatro_hoy", Columns(60, 40));
+
+        Assert.Equal(HttpStatusCode.BadRequest, many.StatusCode);
+        Assert.Equal(["An indicator labels at most 100 columns."], Errors(await ReadAsync(many), "columns"));
+        Assert.Equal(HttpStatusCode.Created, enough.StatusCode);
+        Assert.Equal(1L, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
 }

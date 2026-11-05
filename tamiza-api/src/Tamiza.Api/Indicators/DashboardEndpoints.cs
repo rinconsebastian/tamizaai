@@ -55,6 +55,7 @@ public static class DashboardEndpoints
         dashboards.MapPut("/{dashboardId:guid}/filters", SaveFiltersAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveDashboardFilters");
         dashboards.MapPut("/{dashboardId:guid}/colors", SaveColorsAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveDashboardColors");
         dashboards.MapPut("/{dashboardId:guid}/source", SaveSourceAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveDashboardSource");
+        dashboards.MapPut("/{dashboardId:guid}/bases", SaveBasesAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveDashboardBases");
         dashboards.MapGet("/{dashboardId:guid}/values", GetValuesAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetDashboardColumnValues");
         dashboards.MapPost("/{dashboardId:guid}/widgets", CreateWidgetAsync)
             .RequireProjectRole(ProjectRole.Analyst).WithName("CreateDashboardWidget");
@@ -87,7 +88,7 @@ public static class DashboardEndpoints
     {
         var dashboard = await db.Dashboards.AsNoTracking()
             .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
-            .Select(d => new { d.Name, d.Filters, d.Palette, d.ValueColors, d.Source })
+            .Select(d => new { d.Name, d.Filters, d.Palette, d.ValueColors, d.Source, d.MinN, d.ShowN })
             .SingleOrDefaultAsync(ct);
         if (dashboard is null)
         {
@@ -98,7 +99,7 @@ public static class DashboardEndpoints
         var version = await DashboardVersions.CurrentAsync(db, projectId, dashboardId, ct);
         return new DashboardView(
             dashboardId, dashboard.Name, ReadFilters(dashboard.Filters), dashboard.Palette, ReadValueColors(dashboard.ValueColors), widgets, version,
-            dashboard.Source);
+            dashboard.Source, dashboard.MinN, dashboard.ShowN);
     }
 
     /// <summary>A dashboard's widgets in reading order: top to bottom, then left to right, then the older first.</summary>
@@ -321,6 +322,60 @@ public static class DashboardEndpoints
         return TypedResults.Ok(new DashboardSource(source));
     }
 
+    /// <summary>
+    /// Replaces the dashboard's base settings, the small-base threshold and whether its widgets show their base n, with those sent, both
+    /// whole (design D8 of add-small-sample-warnings). No lock: the last save wins. A dashboard removed since the check updates no row.
+    /// Settings equal to the stored ones are not written again, so the dashboard keeps its last change and makes no version.
+    /// </summary>
+    internal static async Task<Results<Ok<DashboardBases>, ValidationProblem, ProblemHttpResult>> SaveBasesAsync(
+        Guid projectId, Guid dashboardId, DashboardBasesRequest? request, TamizaDbContext db, DashboardVersions versions, ICurrentUser user,
+        TimeProvider time, CancellationToken ct)
+    {
+        var stored = await db.Dashboards.AsNoTracking()
+            .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
+            .Select(d => new { d.MinN, d.ShowN })
+            .SingleOrDefaultAsync(ct);
+        if (stored is null)
+        {
+            return DashboardNotFound();
+        }
+
+        // A request with no body at all is a client's mistake, not a turning off: turning the threshold off takes a null minN.
+        if (request is null)
+        {
+            return Problems.Validation("minN", "The base settings are required; send minN (null turns the threshold off) and showN.");
+        }
+
+        var errors = new FieldErrors();
+        var minN = DashboardValidation.Bases(request.MinN, errors);
+        if (errors.Any)
+        {
+            return Problems.Validation(errors.ToDictionary());
+        }
+
+        var bases = new DashboardBases(minN, request.ShowN is true);
+        if (minN == stored.MinN && bases.ShowN == stored.ShowN)
+        {
+            return TypedResults.Ok(bases);
+        }
+
+        var now = Now(time);
+        var updated = await db.Dashboards
+            .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(d => d.MinN, minN)
+                .SetProperty(d => d.ShowN, bases.ShowN)
+                .SetProperty(d => d.UpdatedBy, user.Id)
+                .SetProperty(d => d.UpdatedAt, now), ct);
+        if (updated == 0)
+        {
+            return DashboardNotFound();
+        }
+
+        versions.Note(projectId, dashboardId, new DashboardChange(DashboardChangeKinds.BasesChanged));
+        return TypedResults.Ok(bases);
+    }
+
     /// <summary>Adds a dashboard with no widgets after the project's others.</summary>
     internal static async Task<Results<Created<DashboardEntry>, ValidationProblem, ProblemHttpResult>> AddAsync(
         Guid projectId, DashboardNameRequest? request, TamizaDbContext db, DashboardVersions versions, ICurrentUser user, TimeProvider time,
@@ -525,12 +580,14 @@ public static class DashboardEndpoints
 
         var now = Now(time);
         var copy = NewDashboard(projectId, name!, source + 1, user, now);
-        // The filters, colors and source of the original as they are now, read under the lock with it (design D4; design D5 of dashboard
-        // palettes; design D7 of the widget context); the widgets keep what they ignore and how they are drawn in their config.
+        // The filters, colors, source and base settings of the original as they are now, read under the lock with it (design D4; design D5 of
+        // dashboard palettes; design D7 of the widget context; design D8 of add-small-sample-warnings); the widgets keep what they ignore and how they are drawn in their config.
         copy.Filters = dashboards[source].Filters;
         copy.Palette = dashboards[source].Palette;
         copy.ValueColors = dashboards[source].ValueColors;
         copy.Source = dashboards[source].Source;
+        copy.MinN = dashboards[source].MinN;
+        copy.ShowN = dashboards[source].ShowN;
         db.Dashboards.Add(copy);
         dashboards.Insert(source + 1, copy);
         Renumber(dashboards);

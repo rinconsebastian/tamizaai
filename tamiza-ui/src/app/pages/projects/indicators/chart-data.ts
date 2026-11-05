@@ -2,6 +2,7 @@ import { DestroyRef, ElementRef, Signal, effect, inject, signal } from '@angular
 import { QueryRow } from '../../../core/projects/indicators.service';
 import { CategoryOrders, arrange, entryOf, shown, shownValues } from './category-order';
 import { naturalCompare } from './chart-scales';
+import { CellFigures, figuresOf } from './series-table';
 import { DashboardPrint } from './dashboard-print';
 
 export interface Pivot {
@@ -9,6 +10,8 @@ export interface Pivot {
   values: number[];
   /** The group value of each category, null for the missing one: what a color kept by value is looked up by (a category is its label). */
   groups: (string | null)[];
+  /** The base figures of each category's row (add-small-sample-warnings, design D2); null where it has none. */
+  figures: (CellFigures | null)[];
 }
 
 /**
@@ -20,7 +23,7 @@ export interface Pivot {
  * `orders` nothing else changes.
  */
 export function pivot(rows: readonly QueryRow[], emptyLabel: string, order: 'listed' | 'natural', orders: CategoryOrders | null = null): Pivot {
-  let listed = rows.map((row) => ({ category: row.group ?? emptyLabel, group: row.group, missing: row.group === null, value: row.value }));
+  let listed = rows.map((row) => ({ category: row.group ?? emptyLabel, group: row.group, missing: row.group === null, value: row.value, figures: figuresOf(row) }));
   if (order === 'natural') {
     listed.sort((a, b) => (a.missing ? 1 : b.missing ? -1 : naturalCompare(a.category, b.category)));
   }
@@ -32,6 +35,7 @@ export function pivot(rows: readonly QueryRow[], emptyLabel: string, order: 'lis
     categories: listed.map((entry) => (texts ? (shown(texts, entry.group) ?? emptyLabel) : entry.category)),
     values: listed.map((entry) => entry.value),
     groups: listed.map((entry) => entry.group),
+    figures: listed.map((entry) => entry.figures),
   };
 }
 

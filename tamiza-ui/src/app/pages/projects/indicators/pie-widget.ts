@@ -1,16 +1,19 @@
-import { LOCALE_ID, Component, ElementRef, computed, inject, input, viewChild } from '@angular/core';
+import { LOCALE_ID, Component, ElementRef, computed, effect, inject, input, output, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { QueryRow, QuerySeries, WidgetConfig } from '../../../core/projects/indicators.service';
+import { ChartBases, figureNames, figureTooltip, hasNColumn, isSmallBase, markSmall, nCell, noChartBases, smallBaseDash, smallBaseOpacity, smallBaseStroke, summaryWithSmall } from './base-figures';
 import { CategoryOrders, arrange, entryOf } from './category-order';
 import { ChartColors, SeriesKey } from './chart-colors';
 import { registerExportParts } from './export-parts';
 import { observeSize, pivot } from './chart-data';
 import { Box, labelGap, textWidth } from './chart-annotations';
 import { seriesCount, slicePath } from './chart-scales';
-import { ColumnNamer, ValueFormatter, captionShown, named, plotted, rawNames } from './format';
+import { ColumnNamer, ValueFormatter, captionShown, named, ownCaption, plotted, rawNames } from './format';
+import { MarkGrid, markTooltips } from './mark-tooltips';
 import { Label, writeDataLabel } from './series-plot';
+import { CellFigures } from './series-table';
 import { TableModel, WidgetTable } from './widget-table';
-import { PctPipe, percentText } from '../../../shared/ui';
+import { ChartTooltipContent, PctPipe, percentText } from '../../../shared/ui';
 import { countKey } from '../../../core/i18n/plural';
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
@@ -20,6 +23,10 @@ interface Slice {
   value: number;
   share: number;
   color: string;
+  /** The base figures of the slice's group; null for "Other", which has none (design D2). */
+  figures: CellFigures | null;
+  /** A slice with a small base is drawn lighter with a dashed outline (design D10). */
+  small: boolean;
   /** Null for a slice that is the whole circle. */
   d: string | null;
 }
@@ -31,6 +38,7 @@ interface Part {
   group: string | null;
   name: string;
   value: number;
+  figures: CellFigures | null;
 }
 
 /** The identity of a group value, of the missing one and of "Other", for matching a row to the domain. */
@@ -59,22 +67,67 @@ const otherKey: SeriesKey = { value: null, kind: 'other' };
         <!-- A wide tile puts the legend beside the pie, so the pie keeps the tile's height. -->
         <div class="@container flex min-h-0 flex-1 flex-col gap-2 @md:flex-row">
         <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
-          <svg #pieSvg role="img" class="tmz-chart-svg absolute inset-0 block" [attr.width]="geometry().width" [attr.height]="geometry().height" [attr.viewBox]="'0 0 ' + geometry().width + ' ' + geometry().height" [attr.aria-label]="summary(t)" data-testid="chart-svg">
-            @for (slice of slices(); track slice.name) {
+          <svg
+            #pieSvg
+            role="application"
+            class="tmz-chart-svg absolute inset-0 block focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-medium"
+            [attr.width]="geometry().width"
+            [attr.height]="geometry().height"
+            [attr.viewBox]="'0 0 ' + geometry().width + ' ' + geometry().height"
+            [attr.aria-label]="summary(t)"
+            tabindex="0"
+            [attr.aria-roledescription]="t('indicators.series.roleDescription')"
+            [attr.aria-describedby]="marks.helpId"
+            (keydown)="marks.keydown($event)"
+            (focusout)="marks.focusout($event)"
+            data-testid="chart-svg"
+          >
+            <!-- A slice is its own hit area: the pointer and the keyboard reach it as they reach any mark (design D9). -->
+            @for (slice of slices(); track slice.name; let i = $index) {
               @if (slice.d) {
-                <path class="stroke-neutral-primary-soft hover:opacity-80" stroke-width="2" [attr.d]="slice.d" [style.fill]="slice.color" data-testid="pie-slice">
-                  <title>{{ sliceTitle(slice) }}</title>
-                </path>
+                <path
+                  class="hover:opacity-80"
+                  [class.stroke-neutral-primary-soft]="marks.active()?.g !== i"
+                  [class.stroke-heading]="marks.active()?.g === i"
+                  [attr.stroke-width]="marks.active()?.g === i ? 3 : slice.small ? smallStroke : 2"
+                  [attr.d]="slice.d"
+                  [style.fill]="slice.color"
+                  [attr.fill-opacity]="slice.small ? smallOpacity : null"
+                  [style.stroke]="slice.small && marks.active()?.g !== i ? slice.color : null"
+                  [attr.stroke-dasharray]="slice.small ? smallDash : null"
+                  (pointerenter)="marks.hover({ g: i, s: 0 }, $event)"
+                  (pointermove)="marks.move({ g: i, s: 0 }, $event)"
+                  (pointerleave)="marks.leave({ g: i, s: 0 })"
+                  (pointerdown)="marks.tap({ g: i, s: 0 }, $event)"
+                  data-testid="pie-slice"
+                ></path>
               } @else {
-                <circle class="stroke-neutral-primary-soft hover:opacity-80" stroke-width="2" [attr.cx]="geometry().cx" [attr.cy]="geometry().cy" [attr.r]="geometry().radius" [style.fill]="slice.color" data-testid="pie-slice">
-                  <title>{{ sliceTitle(slice) }}</title>
-                </circle>
+                <circle
+                  class="hover:opacity-80"
+                  [class.stroke-neutral-primary-soft]="marks.active()?.g !== i"
+                  [class.stroke-heading]="marks.active()?.g === i"
+                  [attr.stroke-width]="marks.active()?.g === i ? 3 : slice.small ? smallStroke : 2"
+                  [attr.cx]="geometry().cx"
+                  [attr.cy]="geometry().cy"
+                  [attr.r]="geometry().radius"
+                  [style.fill]="slice.color"
+                  [attr.fill-opacity]="slice.small ? smallOpacity : null"
+                  [style.stroke]="slice.small && marks.active()?.g !== i ? slice.color : null"
+                  [attr.stroke-dasharray]="slice.small ? smallDash : null"
+                  (pointerenter)="marks.hover({ g: i, s: 0 }, $event)"
+                  (pointermove)="marks.move({ g: i, s: 0 }, $event)"
+                  (pointerleave)="marks.leave({ g: i, s: 0 })"
+                  (pointerdown)="marks.tap({ g: i, s: 0 }, $event)"
+                  data-testid="pie-slice"
+                ></circle>
               }
             }
             @for (label of dataLabels(); track $index) {
               <text class="fill-heading stroke-neutral-primary-soft" font-size="11" stroke-width="3" stroke-linejoin="round" paint-order="stroke" aria-hidden="true" [attr.x]="label.x" [attr.y]="label.y" [attr.text-anchor]="label.anchor" data-testid="data-label">{{ label.text }}</text>
             }
           </svg>
+          <p [id]="marks.helpId" class="sr-only">{{ t('indicators.series.keyHelpGroups') }}</p>
+          <p class="sr-only" role="status" aria-live="polite" data-testid="marks-announcement">{{ marks.announcement() }}</p>
         </div>
         <!-- On paper the whole legend shows, never a part of it to scroll; the pie is drawn in the room left (dashboard printing). -->
         <ul class="max-h-28 shrink-0 overflow-y-auto text-xs text-body @md:max-h-full @md:w-48 paper:max-h-none paper:overflow-visible" data-testid="chart-legend">
@@ -110,6 +163,13 @@ export class PieWidget {
   readonly names = input<ColumnNamer>(rawNames);
   /** What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D8). */
   readonly orders = input<CategoryOrders | null>(null);
+  /** The threshold in force and the indicator's base column, for the figures and the small bases of the slices (add-small-sample-warnings). */
+  readonly bases = input<ChartBases>(noChartBases);
+  /** How many slices the chart draws dimmed for a small base, so the widget can explain the dimming under it (design D10, D11). */
+  readonly dimmed = output<number>();
+  protected readonly smallStroke = smallBaseStroke;
+  protected readonly smallDash = smallBaseDash;
+  protected readonly smallOpacity = smallBaseOpacity;
   readonly asTable = input(false);
   /** The colors of the widget, from the dashboard's palette and its colors kept by value. */
   readonly colors = input.required<ChartColors>();
@@ -126,7 +186,7 @@ export class PieWidget {
 
   private readonly all = computed(() => {
     const data = pivot(this.rows(), this.transloco.translate('indicators.chart.noGroup'), 'listed', this.orders());
-    return data.categories.map((name, i) => ({ name, group: data.groups[i], value: data.values[i] }));
+    return data.categories.map((name, i) => ({ name, group: data.groups[i], value: data.values[i], figures: data.figures[i] }));
   });
 
   protected readonly notDrawn = computed(() => this.all().filter((entry) => entry.value <= 0).length);
@@ -159,7 +219,7 @@ export class PieWidget {
     let rest = 0;
     for (const entry of this.all().filter((entry) => entry.value > 0)) {
       if (inDomain.has(idOf(entry.group))) {
-        named.push({ id: idOf(entry.group), group: entry.group, name: entry.name, value: entry.value });
+        named.push({ id: idOf(entry.group), group: entry.group, name: entry.name, value: entry.value, figures: entry.figures });
       } else {
         rest += entry.value;
       }
@@ -167,7 +227,7 @@ export class PieWidget {
     // Largest first, or in the order the widget declares for its groups (add-declared-category-order, design D4); "Other" is last either way.
     const declared = this.orders()?.groups ?? null;
     const drawn = declared ? arrange(named, (part) => entryOf(part.group), declared) : named.sort((a, b) => b.value - a.value);
-    return rest > 0 ? [...drawn, { id: 'other', group: null, name: this.transloco.translate('indicators.pie.other'), value: rest }] : drawn;
+    return rest > 0 ? [...drawn, { id: 'other', group: null, name: this.transloco.translate('indicators.pie.other'), value: rest, figures: null }] : drawn;
   });
 
   /**
@@ -195,7 +255,7 @@ export class PieWidget {
       const next = angle + share * 2 * Math.PI;
       const d = parts.length === 1 ? null : slicePath(cx, cy, radius, angle, next);
       angle = next;
-      return { name: part.name, value: part.value, share, color: colors.get(part.id) ?? colors.get('other')!, d };
+      return { name: part.name, value: part.value, share, color: colors.get(part.id) ?? colors.get('other')!, figures: part.figures, small: isSmallBase(part.figures?.n, this.bases().minN), d };
     });
   });
 
@@ -247,8 +307,30 @@ export class PieWidget {
     return { width, height, cx: width / 2, cy: height / 2, radius: Math.max(20, Math.min(width, height) / 2 - 6) };
   });
 
+  /** The tooltips and the keyboard of the slices, in the order they are drawn: the largest first, "Other" last. */
+  protected readonly marks = markTooltips({
+    host: () => this.svg()?.nativeElement,
+    marks: () => this.markGrid(),
+    groupsAcross: () => true,
+  });
+
+  private readonly markGrid = computed<MarkGrid>(() => {
+    const { cx, cy, radius } = this.geometry();
+    const around = radius * 0.62;
+    let angle = 0;
+    return this.slices().map((slice) => {
+      const sweep = slice.share * 2 * Math.PI;
+      const middle = angle + sweep / 2;
+      angle += sweep;
+      // A slice that is the whole circle is anchored at its center.
+      const at = slice.d ? { x: cx + around * Math.sin(middle), y: cy - around * Math.cos(middle) } : { x: cx, y: cy };
+      return [{ content: this.tipContent(slice), ...at }];
+    });
+  });
+
   // What an image of the pie says (add-widget-export): the caption, the whole legend with each slice's value and share, what was not drawn.
   constructor() {
+    effect(() => this.dimmed.emit(this.slices().filter((slice) => slice.small).length));
     registerExportParts({
       plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
       settle: () => undefined,
@@ -256,7 +338,8 @@ export class PieWidget {
         const t: Translate = (key, params) => this.transloco.translate(key, params);
         const caption = t('indicators.chart.caption', { what: this.what(), group: this.groupShown() });
         if (this.asTable()) {
-          return { caption, legend: null, notes: [], stat: null, table: this.table(t) };
+          const table = this.table(t);
+          return { caption, legend: null, notes: table.note ? [table.note] : [], stat: null, table };
         }
         const skipped = this.notDrawn();
         return {
@@ -277,8 +360,22 @@ export class PieWidget {
     });
   }
 
-  protected sliceTitle(slice: Slice): string {
-    return `${slice.name}: ${this.format()(slice.value)} (${new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }).format(slice.share)})`;
+  /**
+   * What a slice says (design D9): its group as the heading, then its value under the widget's own caption text or the indicator's label and
+   * its share, then the numerator, the denominator and the n under their names, and for a small base its note. "Other" has no figures.
+   */
+  private tipContent(slice: Slice): ChartTooltipContent {
+    const t: Translate = (key, params) => this.transloco.translate(key, params);
+    const tip = figureTooltip(slice.figures, { names: figureNames(this.config(), this.names(), this.bases().baseColumn), locale: this.locale, t }, this.bases().minN);
+    return {
+      heading: slice.name,
+      lines: [
+        { label: ownCaption(this.config()) ?? this.label(), value: this.format()(slice.value), align: 'end' },
+        { label: t('indicators.pie.share'), value: new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }).format(slice.share), align: 'end' },
+        ...tip.lines,
+      ],
+      footer: tip.footer,
+    };
   }
 
   protected key(base: string, count: number): string {
@@ -292,24 +389,29 @@ export class PieWidget {
     }
     // The largest slice, whatever the order the slices are drawn in (a declared order is not ranked by size).
     const largest = slices.reduce((top, slice) => (slice.value > top.value ? slice : top));
-    return t(countKey('indicators.chart.summary.pie', slices.length, this.transloco.getActiveLang()), {
+    const words = t(countKey('indicators.chart.summary.pie', slices.length, this.transloco.getActiveLang()), {
       what: this.what(),
       group: this.groupShown(),
       count: slices.length,
       top: largest.name,
       share: new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }).format(largest.share),
     });
+    return summaryWithSmall(words, slices.filter((slice) => slice.small).length, t);
   }
 
   protected table(t: Translate): TableModel {
     const total = this.all().reduce((sum, entry) => sum + Math.max(0, entry.value), 0);
-    return {
-      headers: [this.names()(this.config().groupBy ?? ''), this.what(), t('indicators.pie.share')],
+    // The n column comes after the value, while the n line shows or a threshold is in force (add-small-sample-warnings, design D11).
+    const withN = hasNColumn(this.bases(), this.all().map((entry) => entry.figures));
+    const model: TableModel = {
+      headers: [this.names()(this.config().groupBy ?? ''), this.what(), ...(withN ? [t('indicators.bases.nColumn')] : []), t('indicators.pie.share')],
       rows: this.all().map((entry) => [
         entry.name,
         this.format()(entry.value),
+        ...(withN ? [nCell(entry.figures, this.locale)] : []),
         entry.value > 0 && total ? new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }).format(entry.value / total) : null,
       ]),
     };
+    return markSmall(model, 1, this.all().map((entry) => isSmallBase(entry.figures?.n, this.bases().minN)), this.bases().minN, this.locale, t);
   }
 }

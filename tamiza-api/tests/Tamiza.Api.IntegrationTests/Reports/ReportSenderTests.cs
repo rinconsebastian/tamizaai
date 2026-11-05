@@ -381,4 +381,77 @@ public sealed class ReportSenderTests(PostgresFixture postgres)
         Assert.Equal(["address", "at", "code"], failure.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
         Assert.Empty(h.Indicators.ExportFiles);
     }
+
+    [Fact]
+    public async Task Sends_a_widget_under_a_threshold_with_its_n_line_and_its_no_data_line_in_the_body_the_text_and_the_workbook()
+    {
+        await using var h = await ReportsHarness.CreateAsync(postgres);
+        // A long table shaped like teatro_hoy with invented values: COMUNA 7 rests on 16 households, SIN NOMBRE on 20 and "Sin dato" on 4.
+        (string Comuna, int Households)[] comunas = [("COMUNA 1", 120), ("COMUNA 7", 16), ("SIN NOMBRE", 20), ("Sin dato", 4)];
+        var rows = string.Join(", ", comunas.SelectMany(c => new[]
+        {
+            $"('Asistio (E1)', '1', 'Si', '{c.Comuna}', 0, {c.Households / 2}, {c.Households})",
+            $"('Asistio (E1)', '2', 'No', '{c.Comuna}', 0, {c.Households / 2}, {c.Households})",
+        }));
+        await h.Indicators.PublishAsync(
+            "teatro_hoy", "variable text, orden text, categoria text, comuna text, value numeric, numerator numeric, denominator numeric", rows,
+            label: "Teatro hoy", format: "percent",
+            labels: new
+            {
+                variable = new { categories = "multiple" }, orden = new { categories = "multiple" }, categoria = new { categories = "multiple" },
+                comuna = new { missing = new[] { "Sin dato" } }, denominator = new { label = "Hogares" },
+            });
+        var ratio = new { numerator = "numerator", denominator = "denominator" };
+        var filters = new object[] { new { column = "variable", op = "equals", value = "Asistio (E1)" }, new { column = "categoria", op = "equals", value = "Si" } };
+        await h.Indicators.AddWidgetAsync(new
+        {
+            title = "Asistieron", chartType = "stat", config = new { indicator = "teatro_hoy", ratio, filters }, layout = new { x = 0, y = 0, w = 3, h = 2 },
+        });
+        await h.Indicators.AddWidgetAsync(new
+        {
+            title = "2.1. Asistio, por comuna", chartType = "column",
+            config = new { indicator = "teatro_hoy", ratio, groupBy = "comuna", filters, missingFooter = true, display = new { footnote = "Sin ponderar." } },
+            layout = new { x = 0, y = 2, w = 12, h = 4 },
+        });
+        await h.Indicators.SaveBasesAsync(30, true);
+        await h.SaveReportAsync();
+
+        await SendAsync(h);
+
+        var sent = Assert.Single(h.Email.Sent);
+        Assert.Null(await FailureAsync(h));
+        foreach (var body in new[] { sent.Message.HtmlBody, sent.Message.TextBody })
+        {
+            // The mark of a small base, the n column's values, and the three lines of the widget above its table, before its footnote.
+            Assert.Contains("50% *", body);
+            Assert.Contains("2 values have a base below 30, marked *.", body);
+            Assert.Contains("n = 156 Hogares", body);
+            Assert.Contains("Sin dato: 50% \u00b7 n = 4", body);
+            Assert.DoesNotContain("COMUNA 1 *", body);
+            Assert.True(body.IndexOf("n = 156 Hogares", StringComparison.Ordinal) < body.IndexOf("SIN NOMBRE", StringComparison.Ordinal));
+            Assert.True(body.IndexOf("Sin ponderar.", StringComparison.Ordinal) > body.LastIndexOf("SIN NOMBRE", StringComparison.Ordinal));
+        }
+
+        // "Sin dato" is left out of the body's table, and the stat tile carries its n line too (it does not leave "Sin dato" out, so its n counts it; it is not a table, so it is not marked).
+        Assert.DoesNotContain(">Sin dato</td>", sent.Message.HtmlBody);
+        Assert.Contains("  n = 160 Hogares", sent.Message.TextBody);
+        Assert.Contains(">n</th>", sent.Message.HtmlBody);
+
+        // The workbook holds the numbers alone, and its Summary the notes.
+        var attachment = Assert.IsType<MimePart>(Assert.Single(sent.Message.Attachments));
+        using var content = new MemoryStream();
+        await attachment.Content.DecodeToAsync(content);
+        content.Position = 0;
+        var sheet = MiniExcelLibs.MiniExcel.Query(content, useHeaderRow: true, sheetName: "2. 2.1. Asistio, por comuna").Cast<IDictionary<string, object?>>().ToList();
+        Assert.Equal(["comuna", "Teatro hoy: numerator / Hogares", "n"], sheet[0].Keys.Select(key => key.Split(" (")[0]));
+        var comuna7 = sheet.Single(r => r["comuna"]?.ToString() == "COMUNA 7");
+        Assert.Equal(0.5, Convert.ToDouble(comuna7["Teatro hoy: numerator / Hogares"], System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(16d, Convert.ToDouble(comuna7["n"], System.Globalization.CultureInfo.InvariantCulture));
+        content.Position = 0;
+        var summary = MiniExcelLibs.MiniExcel.Query(content, useHeaderRow: true, sheetName: "Summary").Cast<IDictionary<string, object?>>()
+            .Select(r => r.Values.Select(v => v?.ToString() ?? "").ToArray()).ToList();
+        Assert.Contains(summary, r => r[0] == "Notes: 2.1. Asistio, por comuna" && r[1].Contains("n = 156 Hogares", StringComparison.Ordinal)
+            && r[1].Contains("Sin dato: 50%", StringComparison.Ordinal));
+        Assert.Contains(summary, r => r[0] == "Notes: Asistieron" && r[1] == "n = 160 Hogares");
+    }
 }

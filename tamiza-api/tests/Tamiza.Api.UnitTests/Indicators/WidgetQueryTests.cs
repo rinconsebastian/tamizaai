@@ -349,4 +349,44 @@ public sealed class WidgetQueryTests
             System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, annotated), json));
         Assert.DoesNotContain("overall", System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, annotated), json));
     }
+
+    // Leaving out the values that mean no data is a query setting (design D6 of add-small-sample-warnings); twin of query-for.spec.ts.
+
+    private static readonly string[] KindsThatTakeMissingFooter =
+        [ChartTypes.Bar, ChartTypes.Column, ChartTypes.Line, ChartTypes.Pie, ChartTypes.Heatmap, ChartTypes.Pyramid, ChartTypes.Likert, ChartTypes.Crosstab];
+
+    [Fact]
+    public void The_kinds_that_take_missing_footer_are_the_eight_of_the_design()
+    {
+        Assert.Equal(
+            ChartTypes.All.Where(KindsThatTakeMissingFooter.Contains),
+            ChartTypes.All.Where(ChartTypes.TakesMissingFooter));
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void Missing_footer_is_sent_only_when_it_is_set_and_the_kind_takes_it(string chartType)
+    {
+        var plain = Lined(null, Rate);
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var takes = KindsThatTakeMissingFooter.Contains(chartType);
+
+        Assert.Null(WidgetQuery.For(chartType, plain).MissingFooter);
+        Assert.DoesNotContain("missingFooter", System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, plain), json));
+        Assert.Equal(takes ? true : null, WidgetQuery.For(chartType, plain with { MissingFooter = true }).MissingFooter);
+        Assert.Equal(takes ? false : null, WidgetQuery.For(chartType, plain with { MissingFooter = false }).MissingFooter);
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void The_base_settings_of_the_display_never_change_the_query(string chartType)
+    {
+        var plain = Lined(null, Rate, display: new WidgetDisplay(Color: 2));
+        var based = Lined(null, Rate, display: new WidgetDisplay(Color: 2, MinN: 30, ShowN: true));
+
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, plain), json),
+            System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, based), json));
+    }
 }

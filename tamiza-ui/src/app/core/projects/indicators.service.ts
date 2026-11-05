@@ -26,6 +26,14 @@ export function takesSeries(type: ChartType): boolean {
   return type === 'bar' || type === 'column' || type === 'line';
 }
 
+/**
+ * Bar, column, line, pie, heat map, population pyramid, Likert and cross table widgets can leave out the values their indicator declares as
+ * meaning no data (add-small-sample-warnings, design D6; `ChartTypes.TakesMissingFooter` in tamiza-api).
+ */
+export function takesMissingFooter(type: ChartType): boolean {
+  return type === 'bar' || type === 'column' || type === 'line' || type === 'pie' || type === 'heatmap' || type === 'pyramid' || type === 'likert' || type === 'crosstab';
+}
+
 /** Heat map, population pyramid, diverging Likert and cross table widgets cannot be drawn without one (`ChartTypes.NeedsSeries`). */
 export function needsSeries(type: ChartType): boolean {
   return type === 'heatmap' || type === 'pyramid' || type === 'likert' || type === 'crosstab';
@@ -113,6 +121,12 @@ export const maxReferenceLineLabel = 40;
 export const maxOrderValues = 100;
 /** The most values an indicator's column keeps at the end (`CategoryOrder.MaxLast`). */
 export const maxKeptLast = 20;
+/** The largest small-base threshold, for a dashboard and for a widget (`DashboardValidation.MaxMinN`). */
+export const maxMinN = 10000;
+/** The most values that mean no data an indicator declares for one column (`ColumnMetadata.MaxMissingValues`). */
+export const maxMissingValues = 20;
+/** The longest value that means no data (`ColumnMetadata.MaxMissingLength`). */
+export const maxMissingLength = 500;
 
 /**
  * The kinds of dashboard filter (`DashboardFilterKinds`). Each narrows a family of column types: text, true/false, integer or decimal
@@ -163,6 +177,12 @@ export interface WidgetExportRequest {
   /** The interface's language and region, such as `es-CO`: the workbook's own words and formats follow it. */
   locale: string;
   version?: number;
+  /**
+   * The base settings the page applies to the widget (add-small-sample-warnings, design D13): its own over the dashboard's, or the shown
+   * version's. `minN` 0 is off. Left out when the dashboard has none and the widget sets none.
+   */
+  minN?: number;
+  showN?: boolean;
 }
 
 /** A prepared widget workbook: the single-use link that downloads it, and what the file read. */
@@ -266,6 +286,10 @@ export interface DashboardColors {
  *
  * `order` (add-declared-category-order, design D1) is the widget's own order of its groups and of its series, which replaces the order its
  * indicator declares for the column; it is a display setting, so changing it never queries again.
+ *
+ * The base settings (add-small-sample-warnings, design D7), accepted on every kind and never part of a query: `minN` is the widget's own
+ * small-base threshold (0 turns it off for the widget, 1 to `maxMinN` sets one; absent follows the dashboard's) and `showN` whether the
+ * widget shows its base n under it (`true` or `false`, both kept as saved; absent follows the dashboard's).
  */
 export interface WidgetDisplay {
   color?: number;
@@ -281,6 +305,8 @@ export interface WidgetDisplay {
   interpolation?: LineInterpolation;
   dataLabels?: boolean;
   order?: WidgetCategoryOrder;
+  minN?: number;
+  showN?: boolean;
 }
 
 /**
@@ -352,6 +378,12 @@ export interface WidgetConfig {
   pyramid?: WidgetPyramid | null;
   /** Diverging Likert widgets only: the scale's values in order. */
   scale?: LikertStep[];
+  /**
+   * Bar, column, line, pie, heat map, pyramid, Likert and cross table widgets (add-small-sample-warnings, design D6): leave out the rows whose
+   * group or series value the indicator declares as meaning no data. Part of the query (it changes the rows); left out of a query and of a
+   * saved widget unless set, `false` kept as saved.
+   */
+  missingFooter?: boolean;
   /** Maps only; null draws none. Saved with the widget, never part of the query. */
   basemap: BasemapKind | null;
   /**
@@ -400,10 +432,24 @@ export interface IndicatorsOverview {
 }
 
 /**
+ * What a dashboard says about bases (add-small-sample-warnings, design D7, D8): its small-base threshold (1 to `maxMinN`, null for off) and
+ * whether each widget shows its base n under it. A dashboard that has none sends no `minN` and no `showN`: a missing `showN` reads as false.
+ */
+export interface DashboardBases {
+  minN: number | null;
+  showN: boolean;
+}
+
+/** The base settings of a dashboard or of a version, with a missing one read as off. */
+export function basesOf(source: { minN?: number | null; showN?: boolean } | null | undefined): DashboardBases {
+  return { minN: source?.minN ?? null, showN: source?.showN === true };
+}
+
+/**
  * One of the project's dashboards with its filters, in order, its colors (absent from an API that predates palettes, add-dashboard-palettes
  * design D5: read as `tamiza` and none) and its widgets, ordered top to bottom then left to right.
  */
-export interface Dashboard extends DashboardEntry, Partial<DashboardColors> {
+export interface Dashboard extends DashboardEntry, Partial<DashboardColors>, Partial<DashboardBases> {
   filters: DashboardFilter[];
   widgets: Widget[];
   /** Where its data comes from, 1 to `maxSourceLength` characters (add-widget-context, design D7); absent while it has none. */
@@ -428,6 +474,7 @@ export type DashboardChangeKind =
   | 'filtersChanged'
   | 'colorsChanged'
   | 'sourceChanged'
+  | 'basesChanged'
   | 'widgetAdded'
   | 'widgetChanged'
   | 'widgetRemoved'
@@ -445,6 +492,7 @@ export const dashboardChangeKinds: readonly DashboardChangeKind[] = [
   'filtersChanged',
   'colorsChanged',
   'sourceChanged',
+  'basesChanged',
   'widgetAdded',
   'widgetChanged',
   'widgetRemoved',
@@ -513,7 +561,7 @@ export interface VersionWidget {
  * A kept version with what it holds: its name, its filters as a dashboard returns them, its colors (absent from an API that predates
  * palettes: `tamiza` and none) and its widgets in reading order.
  */
-export interface DashboardVersionDetails extends Omit<DashboardVersionSummary, 'widgetCount' | 'filterCount'>, Partial<DashboardColors> {
+export interface DashboardVersionDetails extends Omit<DashboardVersionSummary, 'widgetCount' | 'filterCount'>, Partial<DashboardColors>, Partial<DashboardBases> {
   filters: DashboardFilter[];
   widgets: VersionWidget[];
   /** The dashboard's source at the time, absent when it had none (add-widget-context, design D7). */
@@ -557,6 +605,11 @@ export interface IndicatorColumns {
   numeric: string[];
   /** What a new widget starts with: `value` or the first numeric column, and the first column that is not numeric. */
   defaults: { measure: string | null; groupBy: string | null };
+  /**
+   * What the indicator declares for its columns besides their names (add-small-sample-warnings, design D1): the entries that hold a base,
+   * values that mean no data or a kind of answers, by column name. Absent while it declares none.
+   */
+  declared?: ColumnMetadataMap;
 }
 
 /**
@@ -574,10 +627,32 @@ export interface QuerySeries {
 /** The totals of a widget with a series, computed from the rows (design D12): never a sum or a mean of the plotted cells. */
 export interface QueryTotals {
   /** One per group, and the authority on the order of the groups. */
-  groups: { group: string | null; value: number | null; rows: number }[];
+  groups: ({ group: string | null; value: number | null; rows: number } & QueryFigures)[];
   /** One per entry of `QueryResult.series`, in the same order; `value` null and `rows` 0 for a series with no rows. */
-  series: { series: string | null; kind: SeriesKind; value: number | null; rows: number }[];
-  all: { value: number | null; rows: number };
+  series: ({ series: string | null; kind: SeriesKind; value: number | null; rows: number } & QueryFigures)[];
+  all: { value: number | null; rows: number } & QueryFigures;
+}
+
+/**
+ * The base figures of a value or a total (add-small-sample-warnings, design D5): a ratio's sum of numerators and of denominators, and the
+ * base n (the sum of the indicator's base column, else of the denominator, the largest per-answer sum over declared answers). A member is
+ * left out when it does not exist: a measure with no base column has none of the three.
+ */
+export interface QueryFigures {
+  numerator?: number | null;
+  denominator?: number | null;
+  n?: number | null;
+}
+
+/**
+ * What a widget that leaves out no-data values left out (add-small-sample-warnings, design D6): the declared values that had rows, in
+ * natural order, their value (a ratio's, else a measure's sum), numerator and denominator, n, and for a measure their share of the
+ * widget's total. Absent when nothing was left out.
+ */
+export interface QueryNoData extends QueryFigures {
+  values: string[];
+  value?: number | null;
+  share?: number | null;
 }
 
 /** One box of a box plot, computed over every value of its group (`IndicatorBox` in tamiza-api). */
@@ -598,7 +673,7 @@ export interface QueryBox {
   outliers: number[];
 }
 
-export interface QueryRow {
+export interface QueryRow extends QueryFigures {
   group: string | null;
   value: number;
   geometry: string | null;
@@ -635,6 +710,10 @@ export interface QueryResult {
    * matches, as a stat tile with the same indicator and filters shows it (add-chart-annotations, design D4). Absent when there is no row.
    */
   overall?: number;
+  /** The widget's base n (add-small-sample-warnings, design D4): present only when its indicator declares a base column or answers. */
+  n?: number | null;
+  /** What the widget left out as no data, when it asked to and some rows were left out. */
+  noData?: QueryNoData | null;
   leftOut?: number;
   /**
    * The columns of the dashboard filters sent that did not narrow the rows: the table has no such column, or has it with another kind
@@ -806,6 +885,14 @@ export class IndicatorsService {
    */
   saveSource(projectId: string, dashboardId: string, source: string | null): Observable<{ source: string | null }> {
     return this.http.put<{ source: string | null }>(`${this.dashboardUrl(projectId, dashboardId)}/source`, { source });
+  }
+
+  /**
+   * Sets the dashboard's small-base threshold (null is off) and whether its widgets show their base n, and answers them as saved
+   * (add-small-sample-warnings, design D8). Saving what is stored changes nothing and makes no version.
+   */
+  saveBases(projectId: string, dashboardId: string, bases: DashboardBases): Observable<DashboardBases> {
+    return this.http.put<DashboardBases>(`${this.dashboardUrl(projectId, dashboardId)}/bases`, { minN: bases.minN, showN: bases.showN });
   }
 
   /**

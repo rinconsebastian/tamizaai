@@ -66,6 +66,17 @@ const orderShapes = [
 ];
 
 /**
+ * The shapes the base settings add (add-small-sample-warnings, task 8.1) to the fixture, after the others: a ratio column chart with a
+ * small-base threshold and the n line of its own, and one that leaves out the values that mean no data. The API's ProductionShapesTests pins
+ * their stored text, query and plan; each has its `saved`, `uiQuery` and `formSaved` goldens, so the widget form is checked to send the
+ * settings back when it is saved without a change.
+ */
+const baseShapes = [
+  'ratio column chart with a small-base threshold and the n line',
+  'ratio column chart that leaves out the values that mean no data',
+];
+
+/**
  * The shapes whose indicator publishes its group and series columns with only a label (`indicatorColumns`), so that no order applies to
  * them: the three above and the line over text prices, the box plot with kept colors, both Likert widgets, the cross table and the pie.
  */
@@ -139,8 +150,8 @@ describe('the production shapes', () => {
   afterEach(clearOverlay);
 
   it('lists the shapes the design names, once each', () => {
-    expect(shapes).toHaveLength(28);
-    expect(new Set(shapes.map((s) => s.name)).size).toBe(28);
+    expect(shapes).toHaveLength(30);
+    expect(new Set(shapes.map((s) => s.name)).size).toBe(30);
     expect(shapes.every(hasQueryGoldens)).toBe(true);
   });
 
@@ -159,7 +170,7 @@ describe('the production shapes', () => {
   });
 
   it('has the shapes of the declared category order, last, and the columns of the indicators that label their columns only', () => {
-    expect(shapes.slice(25).map((s) => s.name)).toEqual(orderShapes);
+    expect(shapes.slice(25, 28).map((s) => s.name)).toEqual(orderShapes);
     const labelled = shapes.filter((s) => s.indicatorColumns);
     expect(labelled.map((s) => s.name).sort()).toEqual([...labelledShapes].sort());
     for (const shape of labelled) {
@@ -170,6 +181,32 @@ describe('the production shapes', () => {
         expect(Object.keys(shape.indicatorColumns![column] ?? {}), `${shape.name}: ${column}`).toEqual(['label']);
       }
     }
+  });
+
+  it('has the shapes of the base settings, last, and only they hold its settings', () => {
+    expect(shapes.slice(28).map((s) => s.name)).toEqual(baseShapes);
+    const holding = shapes.filter((s) => {
+      const config = JSON.parse(s.stored);
+      return 'missingFooter' in config || 'minN' in (config.display ?? {}) || 'showN' in (config.display ?? {});
+    });
+    expect(holding.map((s) => s.name)).toEqual(baseShapes);
+  });
+
+  describe.each(shapes.slice(28).map((s) => [s.name, s] as const))('%s (base settings)', (_name, shape) => {
+    it('saves its settings as they are stored', () => {
+      const stored = configOf(shape);
+      const saved = wire(savedConfig(shape.chartType, stored)) as WidgetConfig;
+      expect(saved.display?.minN).toEqual(stored.display?.minN);
+      expect(saved.display?.showN).toEqual(stored.display?.showN);
+      expect(saved.missingFooter).toEqual(stored.missingFooter);
+    });
+
+    it('queries what the same shape without its settings queries, apart from the option that leaves rows out', () => {
+      const without = { ...configOf(shape), display: undefined, missingFooter: undefined };
+      const { missingFooter, ...asked } = wire(queryFor(shape.chartType, configOf(shape))) as Record<string, unknown>;
+      expect(asked).toEqual(wire(queryFor(shape.chartType, without)));
+      expect(missingFooter).toEqual(configOf(shape).missingFooter);
+    });
   });
 
   describe.each(shapes.filter(withTexts).map((s) => [s.name, s] as const))('%s (widget context)', (_name, shape) => {

@@ -90,6 +90,8 @@ public sealed partial class ReportText
         ["referenceMedian"] = "Median",
         ["referenceOverall"] = "Overall",
         ["referenceValue"] = "Reference",
+        // The note of a chart that draws no overall line over the answers of one question (add-small-sample-warnings); as in tamiza-ui's en.json.
+        ["noOverall"] = "No overall line: the bars are the answers of one question.",
     };
 
     private static readonly IReadOnlyDictionary<string, string> Spanish = new Dictionary<string, string>
@@ -171,6 +173,7 @@ public sealed partial class ReportText
         ["referenceMedian"] = "Mediana",
         ["referenceOverall"] = "Valor general",
         ["referenceValue"] = "Referencia",
+        ["noOverall"] = "Sin línea de valor general: las barras son las respuestas de una pregunta.",
     };
 
     private readonly IReadOnlyDictionary<string, string> _texts;

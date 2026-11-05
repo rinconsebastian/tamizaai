@@ -225,6 +225,21 @@ public sealed class IndicatorsHarness : IAsyncDisposable
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
+    /// <summary>The base settings (small-base threshold and base n line) of a dashboard of the project, the first one unless given another.</summary>
+    public string BasesUrl(Guid? dashboardId = null) => DashboardUrl(dashboardId) + "/bases";
+
+    /// <summary>Asks the API to replace a dashboard's base settings, as the analyst unless given another client; a null <paramref name="minN"/> turns the threshold off.</summary>
+    public Task<HttpResponseMessage> PutBasesAsync(int? minN, bool? showN, HttpClient? client = null, Guid? dashboardId = null) =>
+        (client ?? Analyst).PutAsJsonAsync(BasesUrl(dashboardId), new { minN, showN });
+
+    /// <summary>Replaces a dashboard's base settings through the API and returns the saved <c>{ minN, showN }</c>; fails the test when they are not saved.</summary>
+    public async Task<JsonElement> SaveBasesAsync(int? minN, bool? showN, HttpClient? client = null, Guid? dashboardId = null)
+    {
+        var response = await PutBasesAsync(minN, showN, client, dashboardId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
     /// <summary>Adds a dashboard through the API, after the project's others, and returns its id; fails the test when it is not created.</summary>
     public async Task<Guid> AddDashboardAsync(string name, HttpClient? client = null)
     {
@@ -241,14 +256,14 @@ public sealed class IndicatorsHarness : IAsyncDisposable
             .ToArray();
 
     /// <summary>
-    /// The project's dashboards in their order as <c>position|id|name|normalized name|filters|updated_by|updated_at|palette|value colors|source</c>,
+    /// The project's dashboards in their order as <c>position|id|name|normalized name|filters|updated_by|updated_at|palette|value colors|source|min n|show n</c>,
     /// to check that a refused request changed nothing.
     /// </summary>
     public async Task<string[]> StoredDashboardsAsync()
     {
         var rows = await TestData.ScalarAsync<string>(Db,
             """
-            SELECT coalesce(string_agg(concat_ws('|', position, id, name, normalized_name, filters, updated_by, updated_at, palette, value_colors, source), E'\n'
+            SELECT coalesce(string_agg(concat_ws('|', position, id, name, normalized_name, filters, updated_by, updated_at, palette, value_colors, source, min_n, show_n), E'\n'
                                        ORDER BY position, created_at, id), '')
             FROM tamiza.dashboards WHERE project_id = @id
             """,

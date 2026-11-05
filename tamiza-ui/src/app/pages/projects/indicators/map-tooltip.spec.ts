@@ -1,3 +1,4 @@
+import en from '../../../../../public/i18n/en.json';
 import { QueryRow, WidgetTooltipItem } from '../../../core/projects/indicators.service';
 import { DataColumnType } from '../../../core/projects/data.service';
 import { columnLabels, plainIndicator, valueFormatter } from './format';
@@ -180,5 +181,77 @@ describe('map tooltip', () => {
       expect(tooltipValue(20, undefined, item('c'), 'en-US', t)).toBe('20');
       expect(tooltipValue(0.45, undefined, item('c', null, 'percent'), 'en-US', t)).toBe('45%');
     });
+  });
+});
+
+describe('map tooltip figures (add-small-sample-warnings, design D9)', () => {
+  const ratio = { numerator: 'registros', denominator: 'meta' };
+  const names = columnLabels({ columns: {} }, null);
+  const progress = { format: 'percent' as const, unit: null };
+  const bases = { minN: null, baseColumn: null };
+  const english = (key: string, params: Record<string, unknown> = {}): string => {
+    const text = key.split('.').reduce<unknown>((node, part) => (typeof node === 'object' && node ? (node as Record<string, unknown>)[part] : undefined), en);
+    return typeof text === 'string' ? text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, name: string) => String(params[name])) : key;
+  };
+  const withFigures = (items: WidgetTooltipItem[], types: DataColumnType[] | undefined, extra: Partial<TooltipContext> = {}): TooltipContext => ({
+    items,
+    types,
+    label: 'Survey progress',
+    format: valueFormatter(progress, 'en-US'),
+    locale: 'en-US',
+    t: english,
+    names,
+    ratio,
+    bases,
+    ...extra,
+  });
+  const lines = (content: ReturnType<typeof tooltipContent>) => content.lines.map((line) => `${line.label}: ${line.value}`);
+
+  it('gives the numerator and the denominator of a block after its value, and no n line (Ratio of a block)', () => {
+    const content = tooltipContent({ group: '0042', value: 0.45, geometry: null, rows: 1, tooltip: [], numerator: 9, denominator: 20, n: 20 }, withFigures([], []));
+
+    expect(content.heading).toBe('0042');
+    expect(lines(content)).toEqual(['Survey progress: 45%', 'registros: 9', 'meta: 20']);
+  });
+
+  it('shows a ratio column once, as the tooltip column it is, with no figure line of its own (Ratio columns already in the tooltip)', () => {
+    const items: WidgetTooltipItem[] = [
+      { column: 'registros', label: null, format: null },
+      { column: 'meta', label: null, format: null },
+    ];
+    const content = tooltipContent({ group: '0042', value: 0.45, geometry: null, rows: 1, tooltip: [9, 20], numerator: 9, denominator: 20, n: 20 }, withFigures(items, ['integer', 'integer']));
+
+    expect(lines(content)).toEqual(['Survey progress: 45%', 'registros: 9', 'meta: 20']);
+    expect(content.lines).toHaveLength(3);
+  });
+
+  it('leaves out only the figure that is a tooltip column of its own, and the n that is the denominator', () => {
+    const content = tooltipContent(
+      { group: '0042', value: 0.45, geometry: null, rows: 1, tooltip: [20], numerator: 9, denominator: 20, n: 20 },
+      withFigures([{ column: 'meta', label: 'Meta muestral', format: null }], ['integer']),
+    );
+
+    expect(lines(content)).toEqual(['Survey progress: 45%', 'registros: 9', 'Meta muestral: 20']);
+  });
+
+  it('keeps the plain tooltip of a map whose answer gives no figures, and of a map given no settings (City block)', () => {
+    const row = { group: '0042', value: 0.45, geometry: null, rows: 1, tooltip: ['Cra 5 # 10-20'] };
+    const items: WidgetTooltipItem[] = [{ column: 'address', label: 'Dirección', format: null }];
+
+    expect(lines(tooltipContent(row, withFigures(items, ['text'])))).toEqual(['Survey progress: 45%', 'Dirección: Cra 5 # 10-20']);
+    expect(lines(tooltipContent({ ...row, numerator: 9, denominator: 20 }, { ...withFigures(items, ['text']), bases: undefined, ratio: undefined }))).toEqual([
+      'Survey progress: 45%',
+      'Dirección: Cra 5 # 10-20',
+    ]);
+  });
+
+  it('adds the n under the name of the declared base column, and the note of a small base to the rows it combines', () => {
+    const content = tooltipContent(
+      { group: '0042', value: 0.45, geometry: null, rows: 3, tooltip: [], numerator: 9, denominator: 20, n: 18 },
+      withFigures([], [], { bases: { minN: 30, baseColumn: 'registros' } }),
+    );
+
+    expect(lines(content)).toEqual(['Survey progress: 45%', 'registros: 9', 'meta: 20', 'n (registros): 18']);
+    expect(content.footer).toBe('Combines 3 rows · Small base: n = 18 (below 30)');
   });
 });

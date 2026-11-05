@@ -112,6 +112,25 @@ Pointing at a shape, tapping it, or reaching it from the keyboard SHALL show its
 - **WHEN** a map plots the ratio of `registros` to `meta` with no tooltip columns, and block `0042` has 9 of 20
 - **THEN** its tooltip reads `0042`, the value `45%`, `registros: 9` and `meta: 20`, and no n line
 
+### Requirement: Overall reference line
+An `overall` line SHALL be at the ratio of the sums of the widget's numerator and denominator over every row its query matches, with the widget's and the dashboard's filters, whatever bars are drawn and wherever the row limit falls: the figure a stat tile with the same indicator, ratio and filters shows. An `overall` line SHALL need a ratio. An `overall` line with no value, because the denominators sum to zero, SHALL NOT be drawn.
+
+#### Scenario: Same figure as a stat tile
+- **WHEN** a stat tile of `teatro_hoy` with the ratio of `numerator` to `denominator` and the filters `variable` = `Asistió (E1)` and `categoria` = `Sí` shows 46.85%, and a column chart grouped by `comuna` with the same ratio and filters has an `overall` line
+- **THEN** the overall line is at 46.85%
+
+#### Scenario: Overall unlike the mean
+- **WHEN** a column chart of that ratio draws `COMUNA 1` with 60 of 121 households and `COMUNA 7` with 3 of 16, with a `mean` and an `overall` line
+- **THEN** the mean line is at 34.17% and the overall line at 45.99%
+
+#### Scenario: Answers of one question
+- **WHEN** a bar chart of `teatro_hoy` grouped by `categoria` with the filter `variable` = `Lugar (E4)`, whose indicator declares no answer columns, in which every place has the same denominator in every cell of the table, has a `mean` and an `overall` line
+- **THEN** both lines are at the same value
+
+#### Scenario: Rows past the row limit
+- **WHEN** a bar chart with an `overall` line matches more groups than the row limit
+- **THEN** it says that the limit was reached, and its overall line still covers every row its query matches
+
 ## ADDED Requirements
 
 ### Requirement: Base n of a mark

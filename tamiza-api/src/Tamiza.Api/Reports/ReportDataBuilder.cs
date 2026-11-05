@@ -23,7 +23,7 @@ public sealed class ReportDataBuilder(
     {
         var dashboard = await db.Dashboards.AsNoTracking()
             .Where(d => d.Id == dashboardId)
-            .Select(d => new { d.ProjectId, d.Name, d.Filters, d.Source })
+            .Select(d => new { d.ProjectId, d.Name, d.Filters, d.Source, d.MinN, d.ShowN })
             .SingleOrDefaultAsync(ct);
         if (dashboard is null)
         {
@@ -48,9 +48,11 @@ public sealed class ReportDataBuilder(
         {
             var widget = widgets[i];
             var meta = MetaOf(widget, metadata.GetValueOrDefault(widget.Config.Indicator));
+            // The widget's own base settings over the dashboard's (design D13 of add-small-sample-warnings).
+            var bases = BaseFigures.InForce(widget.Config.Display, dashboard.MinN, dashboard.ShowN);
             built.Add(await BuildWidgetAsync(
                 dashboard.ProjectId, i + 1, widget, WidgetQuery.AppliedDefaults(filters, widget.Config),
-                notFiltered => WidgetQuery.NotNarrowedBy(filters, widget.Config, notFiltered), meta, format, text, ct));
+                notFiltered => WidgetQuery.NotNarrowedBy(filters, widget.Config, notFiltered), meta, format, text, bases, ct));
         }
 
         return new ReportModel(
@@ -86,13 +88,14 @@ public sealed class ReportDataBuilder(
     /// </summary>
     /// <param name="applied">The filter values in force that narrow the widget: those it does not ignore.</param>
     /// <param name="notNarrowedBy">The labels of the filters in force that do not narrow it, given the columns the table lacked.</param>
+    /// <param name="bases">The base settings the member's screen applies to the widget (design D13 of add-small-sample-warnings).</param>
     public async Task<WidgetExportContent> BuildWidgetExportAsync(
         Guid projectId, Widget widget, IReadOnlyList<AppliedDashboardFilter> applied, Func<IReadOnlyList<string>?, IReadOnlyList<string>> notNarrowedBy,
-        ReportText text, ReportFormat format, CancellationToken ct)
+        ReportText text, ReportFormat format, BaseSettings bases, CancellationToken ct)
     {
         var indicator = (await ScriptEndpoints.CurrentIndicatorsAsync(db, projectId, ct)).FirstOrDefault(v => v.Name == widget.Config.Indicator);
         var meta = MetaOf(widget, indicator);
-        return new WidgetExportContent(await BuildWidgetAsync(projectId, 1, widget, applied, notNarrowedBy, meta, format, text, ct), meta.Label);
+        return new WidgetExportContent(await BuildWidgetAsync(projectId, 1, widget, applied, notNarrowedBy, meta, format, text, bases, ct), meta.Label);
     }
 
     private async Task<DateTimeOffset?> PublishedAtAsync(Guid projectId, IReadOnlyList<Widget> widgets, CancellationToken ct)
@@ -115,9 +118,10 @@ public sealed class ReportDataBuilder(
     /// <summary>The widget's table or value, with the texts it carries whatever became of it: its subtitle, its footnote and whether it hides its caption.</summary>
     private async Task<ReportWidget> BuildWidgetAsync(
         Guid projectId, int position, Widget widget, IReadOnlyList<AppliedDashboardFilter> applied,
-        Func<IReadOnlyList<string>?, IReadOnlyList<string>> notNarrowedBy, IndicatorMeta meta, ReportFormat format, ReportText text, CancellationToken ct)
+        Func<IReadOnlyList<string>?, IReadOnlyList<string>> notNarrowedBy, IndicatorMeta meta, ReportFormat format, ReportText text, BaseSettings bases,
+        CancellationToken ct)
     {
-        var built = await ReadWidgetAsync(projectId, position, widget, applied, notNarrowedBy, meta, format, text, ct);
+        var built = await ReadWidgetAsync(projectId, position, widget, applied, notNarrowedBy, meta, format, text, bases, ct);
         var display = widget.Config.Display;
         return display is null
             ? built
@@ -126,7 +130,8 @@ public sealed class ReportDataBuilder(
 
     private async Task<ReportWidget> ReadWidgetAsync(
         Guid projectId, int position, Widget widget, IReadOnlyList<AppliedDashboardFilter> applied,
-        Func<IReadOnlyList<string>?, IReadOnlyList<string>> notNarrowedBy, IndicatorMeta meta, ReportFormat format, ReportText text, CancellationToken ct)
+        Func<IReadOnlyList<string>?, IReadOnlyList<string>> notNarrowedBy, IndicatorMeta meta, ReportFormat format, ReportText text, BaseSettings bases,
+        CancellationToken ct)
     {
         // The name shown for each column, once for the widget: its own labels, else its indicator's current ones (design D10).
         var names = ColumnLabels.For(meta.Columns, widget.Config.Display?.Labels);
@@ -182,25 +187,56 @@ public sealed class ReportDataBuilder(
             notes.Add(text.LeftOut(leftOut));
         }
 
+        // The lines under a widget (design D11, D13 of add-small-sample-warnings): the overall line that is not drawn over answers, the small
+        // bases, the base n and the no-data values, in that order, among the notes above the table (the footnote follows the table, last).
+        var answerColumns = BaseFigures.AnswerColumnsOf(meta.Columns);
+        List<string> BaseNotes(int small)
+        {
+            var figures = BaseFigures.Names(widget.Config.Ratio, names, BaseFigures.BaseColumnOf(meta.Columns));
+            var lines = new List<string>();
+            if (ReferenceLines.OverallLeftOut(widget.ChartType, widget.Config, answerColumns))
+            {
+                lines.Add(text["noOverall"]);
+            }
+
+            if (bases.MinN is { } threshold && BaseFigures.SmallValuesNote(small, threshold, format) is { } smallNote)
+            {
+                lines.Add(smallNote);
+            }
+
+            if (bases.ShowN && BaseFigures.NLine(response.N, figures.Base, format) is { } nLine)
+            {
+                lines.Add(nLine);
+            }
+
+            if (BaseFigures.NoDataLine(response.NoData, value => format.Value(value, meta.Format, meta.Unit), bases.ShowN, format) is { } noDataLine)
+            {
+                lines.Add(noDataLine);
+            }
+
+            return lines;
+        }
+
         if (response.Rows.Count == 0)
         {
-            return Without(WidgetOutcome.NoRows, text["empty"], notes);
+            return Without(WidgetOutcome.NoRows, text["empty"], [.. notes, .. BaseNotes(0)]);
         }
 
         if (response.Series is not null)
         {
-            var (seriesColumns, seriesRows, seriesCount, seriesNotes) = SeriesReportTable(response, widget, caption, meta, format, text, names, orders);
+            var (seriesColumns, seriesRows, seriesCount, seriesNotes, seriesSmall) = SeriesReportTable(response, widget, caption, meta, format, text, names, orders, bases);
             return new ReportWidget(
-                position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, seriesColumns, seriesRows, null, null, [.. notes, .. seriesNotes], seriesCount)
+                position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, seriesColumns, seriesRows, null, null,
+                [.. notes, .. seriesNotes, .. BaseNotes(seriesSmall)], seriesCount)
             {
-                ReferenceLines = ReferenceLinesOf(widget, response, meta, format, text),
+                ReferenceLines = ReferenceLinesOf(widget, response, meta, format, text, answerColumns),
             };
         }
 
         if (widget.ChartType == ChartTypes.Stat)
         {
             return new(position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, [], [],
-                format.Value(response.Rows[0].Value, meta.Format, meta.Unit), null, notes,
+                format.Value(response.Rows[0].Value, meta.Format, meta.Unit), null, [.. notes, .. BaseNotes(0)],
                 StatColumn: ValueColumn(caption, meta), StatCell: ValueCell(response.Rows[0].Value, meta, format));
         }
 
@@ -210,21 +246,38 @@ public sealed class ReportDataBuilder(
             return Without(WidgetOutcome.NoLongerFits, text["noLongerFits"], notes);
         }
 
+        // Every row of a bar, column, line, pie or map is a value of its table, and so is a value that can have a small base.
+        var small = widget.ChartType is ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line or ChartTypes.Pie or ChartTypes.Map
+            ? response.Rows.Count(row => BaseFigures.Small(row.N, bases.MinN))
+            : 0;
         var (columns, rows) = widget.ChartType switch
         {
             ChartTypes.Histogram => HistogramTable(response.Rows, widget.Config, caption, meta, format, text),
-            ChartTypes.Pie => PieTable(response.Rows, widget.Config, caption, meta, format, text, names, orders),
-            ChartTypes.Map => MapTable(response, widget.Config, caption, meta, format, text, names, orders),
+            ChartTypes.Pie => PieTable(response.Rows, widget.Config, caption, meta, format, text, names, orders, bases),
+            ChartTypes.Map => MapTable(response, widget.Config, caption, meta, format, text, names, orders, bases),
             ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line =>
-                AxisTable(response.Rows, widget.Config, caption, meta, format, text, names, natural: widget.ChartType == ChartTypes.Line, orders),
+                AxisTable(response.Rows, widget.Config, caption, meta, format, text, names, natural: widget.ChartType == ChartTypes.Line, orders, bases),
             ChartTypes.Boxplot => BoxplotTable(response.Boxes ?? [], widget.Config, meta, format, text, names, orders),
             _ => throw new InvalidOperationException($"A {widget.ChartType} widget has no table."),
         };
-        return new ReportWidget(position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, columns, rows, null, null, notes)
+        return new ReportWidget(position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, columns, rows, null, null, [.. notes, .. BaseNotes(small)])
         {
-            ReferenceLines = ReferenceLinesOf(widget, response, meta, format, text),
+            ReferenceLines = ReferenceLinesOf(widget, response, meta, format, text, answerColumns),
         };
     }
+
+    /// <summary>
+    /// The n column of a table with no series and the "*" after a value with a small base (design D11, D13 of add-small-sample-warnings).
+    /// The column comes while the n line shows or a threshold is in force and the values have an n; the mark follows a value whose n is below
+    /// the threshold, in the text only, so the workbook's cell keeps the number.
+    /// </summary>
+    private static bool HasNColumn(BaseSettings bases, IEnumerable<double?> ns) => (bases.ShowN || bases.MinN is not null) && ns.Any(n => n is not null);
+
+    private static ReportColumn NColumn(ReportFormat format) => new(BaseFigures.NColumn(format), "#,##0");
+
+    private static ReportCell NCell(double? n, ReportFormat format) => n is { } count ? new((double)count, format.Figure(count)) : new(null, "—");
+
+    private static ReportCell Marked(ReportCell cell, double? n, BaseSettings bases) => BaseFigures.Small(n, bases.MinN) ? cell with { Text = cell.Text + " *" } : cell;
 
     /// <summary>
     /// The reference lines of a bar, column or line that is shown (design D10 of add-chart-annotations): the values of
@@ -233,9 +286,10 @@ public sealed class ReportDataBuilder(
     /// share, as that layout's cells are. Any other kind of widget has none.
     /// </summary>
     private static IReadOnlyList<ReportReferenceLine> ReferenceLinesOf(
-        Widget widget, IndicatorQueryResponse response, IndicatorMeta meta, ReportFormat format, ReportText text)
+        Widget widget, IndicatorQueryResponse response, IndicatorMeta meta, ReportFormat format, ReportText text, IReadOnlyCollection<string> answerColumns)
     {
-        var lines = ReferenceLines.Of(widget.ChartType, widget.Config, response);
+        // An overall line over the indicator's declared answers is left out (design D16 of add-small-sample-warnings); its note is among the widget's notes.
+        var lines = ReferenceLines.Of(widget.ChartType, widget.Config, response, answerColumns);
         if (lines.Count == 0)
         {
             return [];
@@ -274,13 +328,26 @@ public sealed class ReportDataBuilder(
     /// </summary>
     private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>) AxisTable(
         IReadOnlyList<IndicatorRow> rows, WidgetConfig config, string caption, IndicatorMeta meta, ReportFormat format, ReportText text,
-        Func<string, string> names, bool natural, CategoryOrders? orders)
+        Func<string, string> names, bool natural, CategoryOrders? orders, BaseSettings bases)
     {
         IReadOnlyList<IndicatorRow> ordered = natural ? rows.Order(NaturalOrder.ByGroup.Instance).ToList() : rows;
         ordered = CategoryOrder.Arrange(ordered, r => OrderEntry.OfValue(r.Group), orders?.Groups);
         var shown = GroupTexts(rows.Select(r => r.Group), orders);
-        return ([new(GroupHeader(config.GroupBy, names)), ValueColumn(caption, meta)],
-            ordered.Select(r => (IReadOnlyList<ReportCell>)[GroupCell(CategoryOrder.Shown(shown, r.Group), text), ValueCell(r.Value, meta, format)]).ToList());
+        // The n column comes after the value, while a base setting is in force and the values have an n (design D13).
+        var withN = HasNColumn(bases, rows.Select(r => r.N));
+        IReadOnlyList<ReportColumn> columns = withN
+            ? [new(GroupHeader(config.GroupBy, names)), ValueColumn(caption, meta), NColumn(format)]
+            : [new(GroupHeader(config.GroupBy, names)), ValueColumn(caption, meta)];
+        return (columns, ordered.Select(r =>
+        {
+            var cells = new List<ReportCell> { GroupCell(CategoryOrder.Shown(shown, r.Group), text), Marked(ValueCell(r.Value, meta, format), r.N, bases) };
+            if (withN)
+            {
+                cells.Add(NCell(r.N, format));
+            }
+
+            return (IReadOnlyList<ReportCell>)cells;
+        }).ToList());
     }
 
     /// <summary>The text each group is written with when its column hides numbered prefixes (design D5); null writes a group as it is.</summary>
@@ -291,9 +358,9 @@ public sealed class ReportDataBuilder(
     /// A widget with a series, as its cross table (design D8): the group, one column per series and a "Total" column, then a "Total" row.
     /// A 100% layout and a Likert widget show shares in the series columns and have no "Total" row.
     /// </summary>
-    private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>, int, IReadOnlyList<string>) SeriesReportTable(
+    private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>, int, IReadOnlyList<string>, int) SeriesReportTable(
         IndicatorQueryResponse response, Widget widget, string caption, IndicatorMeta meta, ReportFormat format, ReportText text, Func<string, string> names,
-        CategoryOrders? orders)
+        CategoryOrders? orders, BaseSettings bases)
     {
         var table = CategoryOrder.ArrangeTable(SeriesTable.From(response, widget.ChartType, widget.Config.Layout), orders);
         var shares = SeriesTable.ShowsShares(widget.ChartType, widget.Config.Layout);
@@ -316,11 +383,25 @@ public sealed class ReportDataBuilder(
         ReportCell Value(double? value) => value is { } number ? ValueCell(number, meta, format) : new(null, "—");
         ReportCell Share(double? share) => share is { } fraction ? new(fraction, format.Share(fraction)) : new(null, "—");
 
+        // A cell with a small base is followed by "*" (design D13 of add-small-sample-warnings); the totals are not marked.
+        var small = 0;
+        ReportCell Body(SeriesTableRow row, int i)
+        {
+            var cell = shares ? Share(row.Shares?[i]) : Value(row.Cells[i]);
+            if (row.Cells[i] is null || !BaseFigures.Small(row.Figures?[i]?.N, bases.MinN))
+            {
+                return cell;
+            }
+
+            small++;
+            return Marked(cell, row.Figures![i]!.N, bases);
+        }
+
         var rows = new List<IReadOnlyList<ReportCell>>();
         foreach (var row in table.Rows)
         {
             var cells = new List<ReportCell> { GroupCell(CategoryOrder.Shown(groupText, row.Group), text) };
-            cells.AddRange(row.Cells.Select((value, i) => shares ? Share(row.Shares?[i]) : Value(value)));
+            cells.AddRange(row.Cells.Select((_, i) => Body(row, i)));
             cells.Add(Value(row.Total));
             rows.Add(cells);
         }
@@ -335,7 +416,7 @@ public sealed class ReportDataBuilder(
         }
 
         var notes = table.NegativeLeftOut > 0 ? new[] { text.NegativeLeftOut(table.NegativeLeftOut) } : [];
-        return (columns, rows, table.Columns.Count, notes);
+        return (columns, rows, table.Columns.Count, notes, small);
     }
 
     /// <summary>
@@ -396,27 +477,50 @@ public sealed class ReportDataBuilder(
     /// <summary>A pie chart: every group value, in the order the rows list them (or the order the widget declares), with its share of the positive total.</summary>
     private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>) PieTable(
         IReadOnlyList<IndicatorRow> rows, WidgetConfig config, string caption, IndicatorMeta meta, ReportFormat format, ReportText text, Func<string, string> names,
-        CategoryOrders? orders)
+        CategoryOrders? orders, BaseSettings bases)
     {
         var total = rows.Sum(r => Math.Max(0, r.Value));
         var shown = GroupTexts(rows.Select(r => r.Group), orders);
-        return ([new(GroupHeader(config.GroupBy, names)), ValueColumn(caption, meta), new(text["share"], "0.0%")],
+        // The n column comes after the value and before the share (design D13 of add-small-sample-warnings).
+        var withN = HasNColumn(bases, rows.Select(r => r.N));
+        List<ReportColumn> columns = [new(GroupHeader(config.GroupBy, names)), ValueColumn(caption, meta)];
+        if (withN)
+        {
+            columns.Add(NColumn(format));
+        }
+
+        columns.Add(new(text["share"], "0.0%"));
+        return (columns,
             CategoryOrder.Arrange(rows, r => OrderEntry.OfValue(r.Group), orders?.Groups).Select(r =>
             {
                 ReportCell share = r.Value > 0 && total > 0 ? new(r.Value / total, format.Share(r.Value / total)) : new(null, "—");
-                return (IReadOnlyList<ReportCell>)[GroupCell(CategoryOrder.Shown(shown, r.Group), text), ValueCell(r.Value, meta, format), share];
+                var cells = new List<ReportCell> { GroupCell(CategoryOrder.Shown(shown, r.Group), text), Marked(ValueCell(r.Value, meta, format), r.N, bases) };
+                if (withN)
+                {
+                    cells.Add(NCell(r.N, format));
+                }
+
+                cells.Add(share);
+                return (IReadOnlyList<ReportCell>)cells;
             }).ToList());
     }
 
     /// <summary>A map: each shape's group, its plotted value and each tooltip column under its label, without the geometry.</summary>
     private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>) MapTable(
         IndicatorQueryResponse response, WidgetConfig config, string caption, IndicatorMeta meta, ReportFormat format, ReportText text, Func<string, string> names,
-        CategoryOrders? orders)
+        CategoryOrders? orders, BaseSettings bases)
     {
         var shown = GroupTexts(response.Rows.Select(r => r.Group), orders);
         var items = config.Tooltip;
         var types = response.TooltipTypes ?? [];
         var columns = new List<ReportColumn> { new(GroupHeader(config.GroupBy, names)), ValueColumn(caption, meta) };
+        // The n column comes after the value, before the tooltip columns (design D13 of add-small-sample-warnings).
+        var withN = HasNColumn(bases, response.Rows.Select(r => r.N));
+        if (withN)
+        {
+            columns.Add(NColumn(format));
+        }
+
         for (var i = 0; i < items.Count; i++)
         {
             var type = i < types.Count ? types[i] : (DataColumnType?)null;
@@ -425,7 +529,12 @@ public sealed class ReportDataBuilder(
 
         return (columns, response.Rows.Select(r =>
         {
-            var cells = new List<ReportCell> { GroupCell(CategoryOrder.Shown(shown, r.Group), text), ValueCell(r.Value, meta, format) };
+            var cells = new List<ReportCell> { GroupCell(CategoryOrder.Shown(shown, r.Group), text), Marked(ValueCell(r.Value, meta, format), r.N, bases) };
+            if (withN)
+            {
+                cells.Add(NCell(r.N, format));
+            }
+
             for (var i = 0; i < items.Count; i++)
             {
                 cells.Add(TooltipCell(r.Tooltip is { } values && i < values.Count ? values[i] : null, i < types.Count ? types[i] : null, items[i], format, text));
