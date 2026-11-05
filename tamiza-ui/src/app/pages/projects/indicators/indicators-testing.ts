@@ -190,6 +190,8 @@ export interface OpenAt {
   dashboards?: DashboardEntry[];
   filters?: DashboardFilter[];
   colors?: DashboardColors;
+  /** The dashboard's source (add-widget-context, design D7); none when left out. */
+  source?: string;
   query?: string;
   project?: Partial<ProjectDetails>;
   lang?: InterfaceLanguage;
@@ -201,7 +203,7 @@ export async function open(role: ProjectRole, widgets: Widget[], answer: Answer 
   const address = `dashboards/${id}${at.query ? `?${at.query}` : ''}`;
   const project = { ...(at.dashboards ? { dashboards: at.dashboards } : {}), ...at.project };
   const context = await openProjectSection(address, role, project, [{ provide: Downloader, useValue: downloader }], at.lang);
-  await answerLoad(context, widgets, extra, id, at.filters, at.colors);
+  await answerLoad(context, widgets, extra, id, at.filters, at.colors, at.source);
   if (answer) {
     await answerQueries(context, answer);
   }
@@ -218,9 +220,10 @@ export async function answerLoad(
   id = dashboardId,
   filters: DashboardFilter[] = [],
   colors?: DashboardColors,
+  source?: string,
 ): Promise<void> {
   context.http.expectOne(isOverview).flush(overview(extra));
-  context.http.expectOne(isDashboardOf(id)).flush(dashboard(widgets, { id, filters, ...colors }));
+  context.http.expectOne(isDashboardOf(id)).flush(dashboard(widgets, { id, filters, ...colors, ...(source ? { source } : {}) }));
   await settle(context.harness);
 }
 

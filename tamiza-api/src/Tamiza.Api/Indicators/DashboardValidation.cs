@@ -48,6 +48,39 @@ public static class DashboardValidation
         return (name, null);
     }
 
+    /// <summary>The longest source, counted as a name is: UTF-16 units once trimmed. The <c>ck_dashboards_source</c> check allows as many code points.</summary>
+    public const int MaxSourceLength = 300;
+
+    /// <summary>
+    /// The trimmed source of a dashboard (design D7 of the widget context), or null for a blank one, which removes it. A source longer than
+    /// <see cref="MaxSourceLength"/> characters once trimmed, or with a control character (a line break, a tab or NUL among them), adds an
+    /// error on <c>source</c> and gives null too: <paramref name="errors"/> tells a refusal from a removal.
+    /// </summary>
+    public static string? Source(string? input, FieldErrors errors)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return null;
+        }
+
+        var source = input.Trim();
+        var valid = true;
+        if (source.Length > MaxSourceLength)
+        {
+            errors.Add("source", $"The source is longer than {MaxSourceLength} characters.");
+            valid = false;
+        }
+
+        // Checked on the source as sent, as a name is: trimming would quietly drop a trailing line break.
+        if (input.Any(char.IsControl))
+        {
+            errors.Add("source", "The source cannot contain line breaks or other control characters.");
+            valid = false;
+        }
+
+        return valid ? source : null;
+    }
+
     /// <summary>The name as <c>dashboards.normalized_name</c> stores it: trimmed and in lower case.</summary>
     public static string Normalize(string name) => name.Trim().ToLowerInvariant();
 

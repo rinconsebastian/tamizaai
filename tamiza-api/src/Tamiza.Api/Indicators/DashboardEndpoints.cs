@@ -54,6 +54,7 @@ public static class DashboardEndpoints
         dashboards.MapPost("/{dashboardId:guid}/copies", DuplicateAsync).RequireProjectRole(ProjectRole.Analyst).WithName("DuplicateDashboard");
         dashboards.MapPut("/{dashboardId:guid}/filters", SaveFiltersAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveDashboardFilters");
         dashboards.MapPut("/{dashboardId:guid}/colors", SaveColorsAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveDashboardColors");
+        dashboards.MapPut("/{dashboardId:guid}/source", SaveSourceAsync).RequireProjectRole(ProjectRole.Analyst).WithName("SaveDashboardSource");
         dashboards.MapGet("/{dashboardId:guid}/values", GetValuesAsync).RequireProjectRole(ProjectRole.Viewer).WithName("GetDashboardColumnValues");
         dashboards.MapPost("/{dashboardId:guid}/widgets", CreateWidgetAsync)
             .RequireProjectRole(ProjectRole.Analyst).WithName("CreateDashboardWidget");
@@ -86,7 +87,7 @@ public static class DashboardEndpoints
     {
         var dashboard = await db.Dashboards.AsNoTracking()
             .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
-            .Select(d => new { d.Name, d.Filters, d.Palette, d.ValueColors })
+            .Select(d => new { d.Name, d.Filters, d.Palette, d.ValueColors, d.Source })
             .SingleOrDefaultAsync(ct);
         if (dashboard is null)
         {
@@ -96,7 +97,8 @@ public static class DashboardEndpoints
         var widgets = await ReadWidgetsAsync(db, dashboardId, ct);
         var version = await DashboardVersions.CurrentAsync(db, projectId, dashboardId, ct);
         return new DashboardView(
-            dashboardId, dashboard.Name, ReadFilters(dashboard.Filters), dashboard.Palette, ReadValueColors(dashboard.ValueColors), widgets, version);
+            dashboardId, dashboard.Name, ReadFilters(dashboard.Filters), dashboard.Palette, ReadValueColors(dashboard.ValueColors), widgets, version,
+            dashboard.Source);
     }
 
     /// <summary>A dashboard's widgets in reading order: top to bottom, then left to right, then the older first.</summary>
@@ -265,6 +267,58 @@ public static class DashboardEndpoints
 
         versions.Note(projectId, dashboardId, new DashboardChange(DashboardChangeKinds.ColorsChanged));
         return TypedResults.Ok(colors);
+    }
+
+    /// <summary>
+    /// Replaces the dashboard's source with the one sent, or removes it when the one sent is null or blank (design D7 of the widget
+    /// context). No lock: the last save wins. A dashboard removed since the check updates no row. A source equal to the stored one is not
+    /// written again, so the dashboard keeps its last change and makes no version.
+    /// </summary>
+    internal static async Task<Results<Ok<DashboardSource>, ValidationProblem, ProblemHttpResult>> SaveSourceAsync(
+        Guid projectId, Guid dashboardId, DashboardSourceRequest? request, TamizaDbContext db, DashboardVersions versions, ICurrentUser user,
+        TimeProvider time, CancellationToken ct)
+    {
+        var stored = await db.Dashboards.AsNoTracking()
+            .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
+            .Select(d => new { d.Source })
+            .SingleOrDefaultAsync(ct);
+        if (stored is null)
+        {
+            return DashboardNotFound();
+        }
+
+        // A request with no body at all is a client's mistake, not a removal: removing the source takes a null or an empty text.
+        if (request is null)
+        {
+            return Problems.Validation("source", "The source is required; send null or an empty text to remove it.");
+        }
+
+        var errors = new FieldErrors();
+        var source = DashboardValidation.Source(request.Source, errors);
+        if (errors.Any)
+        {
+            return Problems.Validation(errors.ToDictionary());
+        }
+
+        if (source == stored.Source)
+        {
+            return TypedResults.Ok(new DashboardSource(source));
+        }
+
+        var now = Now(time);
+        var updated = await db.Dashboards
+            .Where(d => d.Id == dashboardId && d.ProjectId == projectId)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(d => d.Source, source)
+                .SetProperty(d => d.UpdatedBy, user.Id)
+                .SetProperty(d => d.UpdatedAt, now), ct);
+        if (updated == 0)
+        {
+            return DashboardNotFound();
+        }
+
+        versions.Note(projectId, dashboardId, new DashboardChange(DashboardChangeKinds.SourceChanged));
+        return TypedResults.Ok(new DashboardSource(source));
     }
 
     /// <summary>Adds a dashboard with no widgets after the project's others.</summary>
@@ -471,11 +525,12 @@ public static class DashboardEndpoints
 
         var now = Now(time);
         var copy = NewDashboard(projectId, name!, source + 1, user, now);
-        // The filters and colors as they are now, read under the lock with the source (design D4; design D5 of dashboard palettes); the
-        // widgets keep what they ignore and how they are drawn in their config.
+        // The filters, colors and source of the original as they are now, read under the lock with it (design D4; design D5 of dashboard
+        // palettes; design D7 of the widget context); the widgets keep what they ignore and how they are drawn in their config.
         copy.Filters = dashboards[source].Filters;
         copy.Palette = dashboards[source].Palette;
         copy.ValueColors = dashboards[source].ValueColors;
+        copy.Source = dashboards[source].Source;
         db.Dashboards.Add(copy);
         dashboards.Insert(source + 1, copy);
         Renumber(dashboards);

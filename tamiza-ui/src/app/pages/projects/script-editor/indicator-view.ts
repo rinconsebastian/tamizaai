@@ -6,7 +6,8 @@ import type { IndicatorMetadata, IndicatorTestView } from '../../../core/project
 import { Alert, Badge, Button, Input } from '../../../shared/ui';
 import { AxisChart } from '../indicators/axis-chart';
 import { chartColors, defaultColors } from '../indicators/chart-colors';
-import { ValueFormatter, valueFormatter } from '../indicators/format';
+import { ValueFormatter, columnLabels, valueFormatter } from '../indicators/format';
+import { columnsOf } from '../column-names';
 import { StatWidget } from '../indicators/stat-widget';
 
 export interface ViewWarning {
@@ -119,12 +120,12 @@ export function viewWarnings(facts: IndicatorTestView, format: ValueFormatter, i
       <div class="grid gap-3 sm:grid-cols-2">
         @if (facts().defaultMeasure; as measure) {
           <div class="h-28 rounded-base border border-default p-3" data-testid="view-measure-tile">
-            <app-stat-widget [rows]="measureTotal()" [config]="measureConfig()" [label]="label()" [format]="format()" />
+            <app-stat-widget [rows]="measureTotal()" [config]="measureConfig()" [label]="label()" [format]="format()" [names]="names()" />
           </div>
         }
         @if (facts().ratio) {
           <div class="h-28 rounded-base border border-default p-3" data-testid="view-ratio-tile">
-            <app-stat-widget [rows]="ratioTotal()" [config]="ratioConfig()" [label]="label()" [format]="format()" />
+            <app-stat-widget [rows]="ratioTotal()" [config]="ratioConfig()" [label]="label()" [format]="format()" [names]="names()" />
           </div>
         }
       </div>
@@ -147,7 +148,7 @@ export function viewWarnings(facts: IndicatorTestView, format: ValueFormatter, i
             }
           </div>
           <div class="h-72" data-testid="view-chart">
-            <app-axis-chart kind="bar" [rows]="chartRows()" [config]="plot() === 'ratio' ? ratioConfig() : measureConfig()" [label]="label()" [format]="format()" [colors]="colors" />
+            <app-axis-chart kind="bar" [rows]="chartRows()" [config]="plot() === 'ratio' ? ratioConfig() : measureConfig()" [label]="label()" [format]="format()" [names]="names()" [colors]="colors" />
           </div>
         </div>
       }
@@ -171,6 +172,8 @@ export class IndicatorView {
   protected readonly chosenDimension = signal<string | null>(null);
   protected readonly chosenPlot = signal<'measure' | 'ratio'>('measure');
 
+  /** The column names as they are typed, saved or not (add-indicator-column-metadata, design D7). */
+  protected readonly names = computed(() => columnLabels({ columns: columnsOf(this.metadata().columns) }, null));
   protected readonly format = computed(() => valueFormatter({ format: this.metadata().format, unit: this.metadata().unit.trim() || null }, this.locale));
   protected readonly label = computed(() => this.metadata().label.trim() || this.facts().defaultMeasure || '');
   protected readonly warnings = computed(() => viewWarnings(this.facts(), this.format(), this.metadata().format));

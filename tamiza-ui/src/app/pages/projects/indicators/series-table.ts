@@ -1,4 +1,5 @@
 import { ChartType, QueryResult, SeriesKind, SeriesLayout } from '../../../core/projects/indicators.service';
+import { CategoryOrders, arrange, arrangeColumns, entryOf } from './category-order';
 import { naturalCompare } from './chart-scales';
 
 // The grid every consumer of a widget with a series reads (design D4, D12): the chart's tooltips and marks, "Show as table", and so
@@ -92,17 +93,22 @@ export function buildSeriesTable(answer: SeriesAnswer, type: ChartType, layout: 
  * (2 before 10, a missing group last) for the kinds that cannot be ordered: a line chart, a heat map, a population pyramid, Likert
  * bars and a cross table. A stable sort, so equal groups keep the table's order. Twin of `NaturalGroups` in the API's SeriesQueryBuilder.
  */
-export function chartOrder(table: SeriesTable, type: ChartType): SeriesRow[] {
-  if (type === 'bar' || type === 'column') {
-    return table.rows;
-  }
-  return [...table.rows].sort((a, b) => (a.group === null ? (b.group === null ? 0 : 1) : b.group === null ? -1 : naturalCompare(a.group, b.group)));
+export function chartOrder(table: SeriesTable, type: ChartType, orders: CategoryOrders | null = null): SeriesRow[] {
+  const rows =
+    type === 'bar' || type === 'column'
+      ? table.rows
+      : [...table.rows].sort((a, b) => (a.group === null ? (b.group === null ? 0 : 1) : b.group === null ? -1 : naturalCompare(a.group, b.group)));
+  // A declared order of the groups (add-declared-category-order, design D4) comes last, over the order above.
+  return orders?.groups ? arrange(rows, (row) => entryOf(row.group), orders.groups) : rows;
 }
 
-/** The table of an answer with its groups in the order the chart draws them (see {@link chartOrder}). */
-export function orderedSeriesTable(answer: SeriesAnswer, type: ChartType, layout: SeriesLayout | null | undefined): SeriesTable {
-  const table = buildSeriesTable(answer, type, layout);
-  return { ...table, rows: chartOrder(table, type) };
+/**
+ * The table of an answer with its groups in the order the chart draws them (see {@link chartOrder}) and, with `orders`, its columns in
+ * the order of the series they declare.
+ */
+export function orderedSeriesTable(answer: SeriesAnswer, type: ChartType, layout: SeriesLayout | null | undefined, orders: CategoryOrders | null = null): SeriesTable {
+  const table = arrangeColumns(buildSeriesTable(answer, type, layout), orders?.series ? { ...orders, groups: null } : null);
+  return { ...table, rows: chartOrder(table, type, orders) };
 }
 
 /** True when an answer is that of a widget with a series: the server sent the series domain and the totals. */

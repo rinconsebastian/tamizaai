@@ -3,10 +3,10 @@ import { Router } from '@angular/router';
 import { vi } from 'vitest';
 import { pressKey, tick } from '../../../../testing/cdk';
 import { configureApp, projectId, settle } from '../../../../testing/project-harness';
-import { DashboardFilter, WidgetConfig } from '../../../core/projects/indicators.service';
+import { DashboardFilter, Widget, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartTooltips } from '../../../shared/ui';
 import { encodeFilters } from '../data-view';
-import { Context, all, answerLoad, answerQueries, clearOverlay, colorsOfWidgets, config, flushLayout, isLayout, isQuery, layoutUrlOf, layoutsOf, menuItem, open, openWidgetMenu, paperOn, result, row, text, toggleTable, wait, widget } from './indicators-testing';
+import { Context, all, answerLoad, answerQueries, clearOverlay, colorsOfWidgets, config, flushLayout, indicator, isLayout, isQuery, layoutUrlOf, layoutsOf, menuItem, open, openWidgetMenu, paperOn, result, row, text, toggleTable, wait, widget } from './indicators-testing';
 import { layoutSaveDelayMs } from '../project-indicators';
 import { WidgetGrid } from './widget-grid';
 
@@ -549,5 +549,154 @@ describe('the colors of the dashboard shown', () => {
 
     const [request] = context.http.match(isQuery);
     expect(request.request.body.config).not.toHaveProperty('display');
+  });
+});
+
+describe('the texts of a widget in its tile (add-widget-context, design D5, D6)', () => {
+  afterEach(clearOverlay);
+
+  const subtitle = '¿En qué lugares ha visto teatro en el último año? (E4)';
+  const withDisplay = (id: string, display: NonNullable<WidgetConfig['display']>, overrides: Partial<Widget> = {}) =>
+    widget(id, { title: `Title ${id}`, config: config({ display }), ...overrides });
+  const headerOf = (context: Context, id: string) => item(context, id).querySelector('header')!;
+  const subtitleOf = (context: Context, id: string) => item(context, id).querySelector<HTMLElement>('[data-testid="widget-subtitle"]');
+  const articleOf = (context: Context, id: string) => item(context, id).querySelector('article')!;
+
+  it('shows the subtitle under the title, in a header of two rows (Subtitle under the title)', async () => {
+    const context = await open('viewer', [withDisplay('w1', { subtitle })], rows);
+
+    const line = subtitleOf(context, 'w1')!;
+    expect(text(line)).toBe(subtitle);
+    expect(line.id).toBe('widget-subtitle-w1');
+    const header = headerOf(context, 'w1');
+    expect(header.classList.contains('flex-col')).toBe(true);
+    expect(header.children[0].contains(item(context, 'w1').querySelector('[data-testid="widget-title"]'))).toBe(true);
+    expect(header.children[1]).toBe(line);
+    expect(articleOf(context, 'w1').getAttribute('aria-describedby')).toBe('widget-subtitle-w1');
+    expect(articleOf(context, 'w1').getAttribute('aria-labelledby')).toBe('widget-title-w1');
+  });
+
+  it('keeps the title row whole when a widget has a subtitle: the handle, the title and the menu', async () => {
+    const context = await open('analyst', [withDisplay('w1', { subtitle })], rows);
+
+    const titleRow = headerOf(context, 'w1').children[0];
+    expect(titleRow.querySelector('[data-testid="widget-move"]')).not.toBeNull();
+    expect(titleRow.querySelector('[data-testid="widget-title"]')).not.toBeNull();
+    expect(titleRow.querySelector('[data-testid="widget-menu"]')).not.toBeNull();
+    // The handle still moves the tile when it sits in the first row of the two-row header.
+    await pressAndSettle(context, handle(context, 'w1', 'move'), 'ArrowDown');
+    expect(place(context, 'w1')).toEqual({ column: '1 / span 6', row: '2 / span 4' });
+    layoutSaves(context);
+  });
+
+  it('shows the subtitle of a stat tile under its title, above its figure (Subtitle of a stat tile)', async () => {
+    const stat = widget('w1', { chartType: 'stat', title: 'Centro cultural', layout: { x: 0, y: 0, w: 3, h: 2 }, config: config({ groupBy: null, display: { subtitle: '% de quienes asistieron (E4)' } }) });
+    const context = await open('viewer', [stat], result([row(null, 0.2422)]));
+
+    const line = subtitleOf(context, 'w1')!;
+    expect(text(line)).toBe('% de quienes asistieron (E4)');
+    expect(headerOf(context, 'w1').contains(line)).toBe(true);
+    expect(item(context, 'w1').querySelector('[data-testid="stat"]')!.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+
+  it('holds the whole text for pointing, and cuts it at two lines, or one on a tile two rows high (Whole text on pointing)', async () => {
+    const tall = withDisplay('w1', { subtitle: 'A'.repeat(180) });
+    const low = withDisplay('w2', { subtitle }, { layout: { x: 6, y: 0, w: 6, h: 2 } });
+    const context = await open('viewer', [tall, low], rows);
+
+    expect(subtitleOf(context, 'w1')!.getAttribute('title')).toBe('A'.repeat(180));
+    expect(text(subtitleOf(context, 'w1'))).toBe('A'.repeat(180));
+    expect(subtitleOf(context, 'w1')!.classList.contains('line-clamp-2')).toBe(true);
+    expect(subtitleOf(context, 'w1')!.classList.contains('line-clamp-1')).toBe(false);
+    expect(subtitleOf(context, 'w2')!.getAttribute('title')).toBe(subtitle);
+    expect(subtitleOf(context, 'w2')!.classList.contains('line-clamp-1')).toBe(true);
+    expect(subtitleOf(context, 'w2')!.classList.contains('line-clamp-2')).toBe(false);
+    // The clamp is lifted on paper, where texts print whole.
+    expect(subtitleOf(context, 'w1')!.classList.contains('paper:line-clamp-none')).toBe(true);
+  });
+
+  it('reads a blank subtitle as none', async () => {
+    const context = await open('viewer', [withDisplay('w1', { subtitle: '   ' })], rows);
+
+    expect(subtitleOf(context, 'w1')).toBeNull();
+    expect(articleOf(context, 'w1').hasAttribute('aria-describedby')).toBe(false);
+  });
+
+  it('keeps the header of a widget with no subtitle as it was: one row, no subtitle, no description (Widgets saved before)', async () => {
+    const context = await open('analyst', [left, withDisplay('w2', { color: 3 }, { layout: { x: 6, y: 0, w: 6, h: 4 } })], rows);
+
+    for (const id of ['w1', 'w2']) {
+      const header = headerOf(context, id);
+      expect(header.className).toBe('flex shrink-0 items-center gap-1 border-b border-default px-3 py-1.5');
+      expect(Array.from(header.children).map((child) => child.tagName.toLowerCase())).toEqual(['button', 'h3', 'tmz-dropdown-menu']);
+      expect(subtitleOf(context, id)).toBeNull();
+      expect(articleOf(context, id).hasAttribute('aria-describedby')).toBe(false);
+      expect(item(context, id).querySelector('[data-testid="widget-description"]')).toBeNull();
+    }
+  });
+
+  describe('the description button', () => {
+    const described = indicator('coverage', { label: 'Coverage', description: 'Share of households that\nwatched a play.' });
+    const button = (context: Context, id: string) => item(context, id).querySelector<HTMLButtonElement>('[data-testid="widget-description"]');
+    const panel = () => document.querySelector<HTMLElement>('[data-testid="widget-description-panel"]');
+    const offering = (id: string, extra: Partial<Widget> = {}) => withDisplay(id, { showDescription: true }, extra);
+    const opened = async (context: Context, id: string) => {
+      button(context, id)!.click();
+      await settle(context.harness);
+      await tick();
+    };
+
+    it('opens the indicator\'s description next to the button (Description opened)', async () => {
+      const context = await open('viewer', [offering('w1')], rows, { indicators: [described] });
+      const trigger = button(context, 'w1')!;
+      expect(trigger.getAttribute('aria-label')).toBe('About Coverage');
+      expect(trigger.getAttribute('aria-expanded')).toBe('false');
+      expect(panel()).toBeNull();
+
+      await opened(context, 'w1');
+
+      expect(panel()).not.toBeNull();
+      expect(text(panel()!.querySelector('[data-testid="widget-description-text"]'))).toBe('Share of households that watched a play.');
+      expect(trigger.getAttribute('aria-expanded')).toBe('true');
+      expect(trigger.getAttribute('aria-controls')).toBe(panel()!.id);
+    });
+
+    it('sits in the header before the menu, and is hidden on paper', async () => {
+      const context = await open('viewer', [offering('w1')], rows, { indicators: [described] });
+
+      const kinds = Array.from(headerOf(context, 'w1').children).map((child) => child.tagName.toLowerCase());
+      expect(kinds).toEqual(['h3', 'app-description-popover', 'tmz-dropdown-menu']);
+      expect(headerOf(context, 'w1').querySelector('app-description-popover')!.classList.contains('paper:hidden')).toBe(true);
+    });
+
+    it('has no button for a widget that does not offer it, or an indicator with no description (Indicator without a description)', async () => {
+      const none = indicator('coverage', { label: 'Coverage', description: null });
+      const blank = indicator('target', { label: 'Target', description: '   ' });
+      const plain = widget('w3', { config: config({ indicator: 'coverage' }) });
+      const context = await open('viewer', [offering('w1'), offering('w2', { config: config({ indicator: 'target', display: { showDescription: true } }) }), plain], rows, { indicators: [none, blank, described] });
+
+      expect(button(context, 'w1')).toBeNull();
+      expect(button(context, 'w2')).toBeNull();
+      expect(button(context, 'w3')).toBeNull();
+    });
+
+    it('has no button for a widget whose indicator the project no longer lists', async () => {
+      const context = await open('viewer', [offering('w1')], rows, { indicators: [] });
+
+      expect(button(context, 'w1')).toBeNull();
+    });
+
+    it('opens one description at a time', async () => {
+      const second = indicator('target', { label: 'Target', description: 'The goal for the round.' });
+      const context = await open('viewer', [offering('w1'), offering('w2', { config: config({ indicator: 'target', display: { showDescription: true } }), layout: { x: 6, y: 0, w: 6, h: 4 } })], rows, { indicators: [described, second] });
+
+      await opened(context, 'w1');
+      await opened(context, 'w2');
+
+      expect(document.querySelectorAll('[data-testid="widget-description-panel"]')).toHaveLength(1);
+      expect(text(panel()!.querySelector('[data-testid="widget-description-text"]'))).toBe('The goal for the round.');
+      expect(button(context, 'w1')!.getAttribute('aria-expanded')).toBe('false');
+      expect(button(context, 'w2')!.getAttribute('aria-expanded')).toBe('true');
+    });
   });
 });

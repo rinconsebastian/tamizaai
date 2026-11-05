@@ -6,7 +6,6 @@ Lets every member take one widget of a project's own dashboard out of Tamiza, as
 
 ## Requirements
 
-
 ### Requirement: Export in the widget menu
 Every member SHALL find an "Export" group in the menu of each widget of a project's own dashboards (see `dashboard-indicators` "Widget menu"), under a visible heading, after "Show as table" and before the editing actions. It SHALL offer "PNG image", "SVG image" and "Excel workbook (XLSX)" as items of the menu itself, with no submenu. It SHALL be offered wherever the widget menu is, and SHALL NOT be offered in the widget form's preview or in the script editor.
 
@@ -100,7 +99,7 @@ A PNG or SVG image SHALL show the widget as the member sees it when exporting: t
 - **THEN** the image shows the rows on the member's screen
 
 ### Requirement: Parts of a widget image
-An image SHALL hold, top to bottom: the widget's full title, the notes shown above its chart, its caption, its chart or table, its whole legend, key or scale, the notes shown below it, and a footer. It SHALL NOT hold tooltips, buttons, handles, map controls, menus, focus or hover marks, or text meant only for screen readers.
+An image SHALL hold, top to bottom: the widget's full title, its whole subtitle when it has one, the notes shown above its chart, its caption unless the widget hides it, its chart or table, its whole legend, key or scale, the notes shown below it, its whole footnote when it has one, and a footer. It SHALL NOT hold tooltips, buttons, handles, map controls, menus, focus or hover marks, the indicator's description, or text meant only for screen readers.
 
 #### Scenario: Long title
 - **WHEN** a widget's title has 120 characters and is cut with an ellipsis on screen
@@ -126,8 +125,20 @@ An image SHALL hold, top to bottom: the widget's full title, the notes shown abo
 - **WHEN** a bar's tooltip is open when a member exports the chart
 - **THEN** the image shows no tooltip and no bar drawn as pointed at
 
+#### Scenario: Subtitle and footnote
+- **WHEN** a member exports "2.4. En qué lugares", whose subtitle shows two cut lines on screen and whose footnote is "No suman 100 %: respuesta múltiple.", as a PNG image
+- **THEN** the image shows the whole subtitle under the title, and the footnote under the chart and its notes, above the footer
+
+#### Scenario: Caption hidden
+- **WHEN** a member exports a column chart that hides its caption
+- **THEN** the image shows no caption line
+
+#### Scenario: Own caption text
+- **WHEN** a member exports a bar chart grouped by `categoria` whose caption text is "% de quienes asistieron", in the English interface
+- **THEN** the image's caption line reads "% de quienes asistieron by categoria"
+
 ### Requirement: Footer of a widget image
-An image's footer SHALL name the project and the dashboard, the version while one is shown, every filter of the dashboard with its value in force or "All", when the widget's indicator was published as the page knows it, and when the image was made, in the project's time zone, which it SHALL name. It SHALL carry no logo.
+An image's footer SHALL name the project and the dashboard, the version while one is shown, every filter of the dashboard with its value in force or "All", when the widget's indicator was published as the page knows it, and when the image was made, in the project's time zone, which it SHALL name. It SHALL give the source of the dashboard, or of the version shown, when it has one. It SHALL carry no logo.
 
 #### Scenario: Footer
 - **WHEN** a member of "Census 2026", whose time zone is `America/Bogota`, exports a widget of "Housing" with "Municipality" set to `Cali` and "Round" without a value
@@ -140,6 +151,14 @@ An image's footer SHALL name the project and the dashboard, the version while on
 #### Scenario: Dashboard without filters
 - **WHEN** a member exports a widget of a dashboard with no filters
 - **THEN** the footer has no filter line
+
+#### Scenario: Source in the footer
+- **WHEN** a member exports a widget of "Teatro", whose source is "Encuesta de mercado del Centro Bicentenario de Duitama, 478 encuestas", in the English interface
+- **THEN** the footer reads "Source: Encuesta de mercado del Centro Bicentenario de Duitama, 478 encuestas"
+
+#### Scenario: Dashboard without a source
+- **WHEN** a member exports a widget of a dashboard with no source
+- **THEN** the footer has no source line
 
 ### Requirement: Tables in widget images
 An image of a table, a cross table or a widget shown as a table, SHALL hold its header and at most 100 rows, and the columns that fit in 2,400 pixels, always keeping the first column. Its cells SHALL read as on screen. The image SHALL say how many rows and columns it left out and that the workbook holds them all.
@@ -247,7 +266,7 @@ A widget's workbook SHALL have two sheets. The first SHALL be named after the wi
 - **THEN** the data sheet lists each block, its plotted value, its address and its sample target, and no shape kind or geometry
 
 ### Requirement: Summary of a widget workbook
-The "Summary" sheet SHALL list the project, the dashboard, the version when one is shown, the widget's title, its indicator, what it plots, each filter of the dashboard with its value in force or "All", the filters that do not narrow the widget, when the indicator's table was published, when the workbook was made in the project's time zone, the number of rows and the widget's notes.
+The "Summary" sheet SHALL list the project, the dashboard, the version when one is shown and the dashboard's source (the version's while a version is shown), the widget's title and subtitle, its indicator, what it plots, each filter of the dashboard with its value in force or "All", the filters that do not narrow the widget, when the indicator's table was published, when the workbook was made in the project's time zone, the number of rows, and the widget's footnote and notes.
 
 #### Scenario: Summary
 - **WHEN** a member of "Census 2026" exports, with "Municipality" set to `Cali`, the workbook of a widget whose query reached the row limit
@@ -256,6 +275,14 @@ The "Summary" sheet SHALL list the project, the dashboard, the version when one 
 #### Scenario: Dashboard without filters
 - **WHEN** a member exports the workbook of a widget of a dashboard with no filters
 - **THEN** its "Summary" sheet says that no filter applies
+
+#### Scenario: Widget texts in the summary
+- **WHEN** a member exports the workbook of "2.4. En qué lugares" of "Teatro", which has a subtitle, a footnote and the caption text "% de quienes asistieron", and "Teatro" has a source
+- **THEN** its "Summary" sheet lists the source, the subtitle, "% de quienes asistieron" as what it plots, and the footnote
+
+#### Scenario: No texts in the summary
+- **WHEN** a member exports the workbook of a widget with no subtitle or footnote, on a dashboard with no source
+- **THEN** its "Summary" sheet has no line for a source, a subtitle or a footnote
 
 ### Requirement: Numbers in a widget workbook
 The data sheet's numbers SHALL be numbers in the formats of a scheduled email's workbook (see `dashboard-reports` "Numbers in the workbook"), and a stat tile's value SHALL follow the indicator's format. Text SHALL never be written as a formula, and a cell longer than 32,767 characters SHALL be cut to that length.
@@ -353,3 +380,78 @@ Every member of the project, `viewer`, `analyst` and `admin`, SHALL be able to e
 #### Scenario: Viewer asks for a version
 - **WHEN** a `viewer` asks the API for the workbook of a widget of version 9 of "Housing"
 - **THEN** the API responds 403 and issues no link
+
+### Requirement: Column labels in widget files
+An image of a widget SHALL name its columns as the screen does, in its caption and its table. A widget's workbook SHALL name them as a scheduled email's workbook does, with the widget's own labels as the member's screen sent them and its indicator's labels as the current version of its script gives them, and its "Summary" sheet SHALL say what the widget plots with those names.
+
+#### Scenario: Image caption
+- **WHEN** a member exports as a PNG image a column chart of the ratio of `numerator` to `denominator` of `teatro_hoy` grouped by `comuna`, whose indicator labels them "Hogares que asistieron", "Hogares" and "Comuna"
+- **THEN** the image's caption reads "Teatro hoy: Hogares que asistieron / Hogares by Comuna"
+
+#### Scenario: Widget's own label in the workbook
+- **WHEN** a member exports the workbook of that chart, whose own label for `denominator` is "Hogares de la base E1"
+- **THEN** the data sheet's value header and the "Summary" sheet's line of what it plots read "Teatro hoy: Hogares que asistieron / Hogares de la base E1"
+
+#### Scenario: Widget of a version
+- **WHEN** an `analyst` exports the workbook of a widget of version 9 of "Teatro", whose own labels differ from the widget's labels today
+- **THEN** the workbook names the columns with version 9's labels
+
+### Requirement: Widget context in a widget workbook
+A widget's workbook SHALL be prepared from the widget's saved settings as the page shows them, not only from its query. Its value column's header and its "Summary" line of what it plots SHALL use the widget's own caption text when it has one, and still name what it plots when its caption is hidden; the header SHALL name the widget's own unit, and a map's tooltip columns SHALL be headed by their labels and written in their formats, as in a scheduled email's workbook.
+
+#### Scenario: Own text and unit in the header
+- **WHEN** a member exports the workbook of the column chart "2.2" over `teatro_hoy`, whose caption text is "% de quienes asistieron" and whose unit is "de quienes asistieron"
+- **THEN** its value column is headed "% de quienes asistieron" and names the unit "de quienes asistieron"
+
+#### Scenario: Map tooltip labels
+- **WHEN** a member exports the workbook of a map whose tooltip column `meta` has the label "Meta muestral" and the format `count`
+- **THEN** that column of the data sheet is headed "Meta muestral" and holds whole numbers, as in the dashboard's email
+
+#### Scenario: Hidden caption in the workbook
+- **WHEN** a member exports the workbook of a column chart that hides its caption
+- **THEN** its value column is still headed by what the widget plots
+
+### Requirement: Chart annotations in widget images
+An image of a bar, column, line or pie widget SHALL show its reference lines with the labels drawn at them, its steps and its data labels as the member sees them. Its legend SHALL list each reference line drawn with its dash pattern, label and formatted value, after the series of a widget with a series. An image of such a widget shown as a table SHALL list the lines under the table. The lines SHALL come before the footnote. An image of a widget without them SHALL have the parts it has today.
+
+#### Scenario: Mean line in an image
+- **WHEN** a member exports as a PNG image the column chart "2.1. Asistió, por comuna" over `teatro_hoy`, which has a `mean` line at 34.17%
+- **THEN** the image shows the dashed line across the columns, and its legend reads "Mean: 34.17% de los hogares" next to a dashed swatch
+
+#### Scenario: Data labels in an image
+- **WHEN** a member exports as an SVG image a bar chart with data labels
+- **THEN** the image shows each label the chart draws on screen, and no label the chart left out
+
+#### Scenario: Shown as a table
+- **WHEN** a member shows a column chart of a `percent` indicator with no unit and an `overall` line at 45.99% as a table, and exports it as a PNG image
+- **THEN** the image shows the table and, under it, "Overall: 45.99%"
+
+#### Scenario: Lines above the footnote
+- **WHEN** a member exports as a PNG image the column chart "2.1. Asistió, por comuna", which has a footnote and a `mean` line
+- **THEN** the image shows the legend with the line under the columns, the footnote under the legend, and the footer under the footnote
+
+### Requirement: Reference lines in a widget workbook
+The "Summary" sheet of the workbook of a widget with reference lines SHALL list each line drawn, with its label and its value as the widget's values are written, in the order the widget lists them, after what the widget plots. The data sheet SHALL keep the widget's table, with no row or column for the lines.
+
+#### Scenario: Lines in the summary
+- **WHEN** a member exports the workbook of a column chart of a `percent` indicator with no unit, with a `mean` line at 34.17% and a `value` line of 0.5 labelled "Meta"
+- **THEN** its "Summary" sheet lists the reference lines as "Mean: 34.17%" and "Meta: 50%", and its data sheet lists the comunas as before
+
+#### Scenario: Widget without reference lines
+- **WHEN** a member exports the workbook of a column chart without reference lines
+- **THEN** its "Summary" sheet has no reference line item
+
+### Requirement: Declared category order in widget files
+A widget's PNG or SVG image SHALL show its values in the order and with the text the member sees on screen. A widget's workbook SHALL list its groups and series in that order and with that text, from the widget's settings as the member's page shows them, its own order included, and from its indicator's current column metadata.
+
+#### Scenario: Image in the declared order
+- **WHEN** a member exports as a PNG image a column chart whose series follow a declared order with prefixes hidden
+- **THEN** the image shows the segments and the legend in that order, without the prefixes
+
+#### Scenario: Workbook in the widget's order
+- **WHEN** a member exports the workbook of a widget with its own order of series
+- **THEN** the data sheet's series columns follow that order
+
+#### Scenario: Workbook of a version
+- **WHEN** an `analyst` exports the workbook of a widget of version 9 of "2. Teatro", where that widget had its own order of groups that it no longer has
+- **THEN** the data sheet lists the groups in the order the widget had in version 9

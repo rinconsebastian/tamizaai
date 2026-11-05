@@ -858,3 +858,140 @@ describe('the new kinds in both languages', () => {
     expect(text(byTestId(heat.root, 'heatmap-legend-empty'))).toBe('Sin valor');
   });
 });
+
+describe('column labels in charts with a series (add-indicator-column-metadata)', () => {
+  afterEach(clearOverlay);
+
+  /** `teatro_conteo`, labelled "Teatro conteo", with names for its measure and its two dimensions. */
+  const conteo = indicator('teatro_conteo', {
+    label: 'Teatro conteo',
+    columns: { value: { label: 'Hogares' }, pregunta: { label: 'Pregunta' }, respuesta: { label: 'Respuesta' } },
+  });
+  const settings = { indicator: 'teatro_conteo', groupBy: 'pregunta', seriesBy: 'respuesta', measure: 'value' } as const;
+  const answer = () =>
+    seriesResult([cell('2.1', '1. Sí', 30), cell('2.1', '2. Tal vez', 10), cell('2.2', '1. Sí', 20), cell('2.2', '2. Tal vez', 25)], ['1. Sí', '2. Tal vez']);
+
+  it('names the measure, the group and the series in the accessible name of a stacked column chart (Measure named)', async () => {
+    const context = await show('column', { ...settings, layout: 'stacked' }, answer(), [conteo]);
+
+    expect(label(context)).toContain('Teatro conteo: Hogares');
+    expect(label(context)).toContain('Pregunta');
+    expect(label(context)).toContain('Respuesta');
+    expect(label(context)).not.toContain('pregunta');
+    expect(context.query.config).toMatchObject({ groupBy: 'pregunta', seriesBy: 'respuesta', measure: 'value' });
+  });
+
+  it('names the group in the first header of the cross table of a chart and keeps the answers as the series headers (Cross table headers)', async () => {
+    const context = await show('column', { ...settings, layout: 'stacked' }, answer(), [conteo]);
+
+    await toggle(context);
+
+    expect(tableHeaders(context)).toEqual(['Pregunta', '1. Sí', '2. Tal vez', 'Total']);
+    expect(text(byTestId(context.root, 'chart-caption'))).toBe('Teatro conteo: Hogares by Pregunta and Respuesta');
+  });
+
+  it('names the columns in the caption and the headers of a cross table widget', async () => {
+    const context = await show('crosstab', settings, answer(), [conteo]);
+
+    expect(tableHeaders(context)).toEqual(['Pregunta', '1. Sí', '2. Tal vez', 'Total']);
+    expect(text(byTestId(context.root, 'chart-caption'))).toBe('Teatro conteo: Hogares by Pregunta and Respuesta');
+  });
+
+  it('names the columns in the caption of a heat map and in its accessible name', async () => {
+    const context = await show('heatmap', settings, answer(), [conteo]);
+
+    expect(text(byTestId(context.root, 'chart-caption'))).toBe('Teatro conteo: Hogares by Pregunta and Respuesta');
+    expect(label(context)).toContain('Pregunta by Respuesta');
+  });
+
+  it('names the group of a population pyramid and of a Likert widget in their accessible names', async () => {
+    const pyramid = await show('pyramid', { ...settings, pyramid: { left: '1. Sí', right: '2. Tal vez' } }, answer(), [conteo]);
+    expect(label(pyramid)).toContain('Teatro conteo: Hogares');
+    expect(label(pyramid)).toContain('Pregunta');
+  });
+
+  it('keeps the colors of the series by value, whatever the columns are called (Colors kept by value)', async () => {
+    const colors = palette('tamiza', [{ column: 'respuesta', value: '1. Sí', color: 8 }]);
+    const context = await show('column', { ...settings, layout: 'stacked' }, answer(), [conteo], colors);
+
+    // The answers "1. Sí" keep color 8 and "2. Tal vez" takes the first free one, as it does with no label.
+    expect(marks(context).map(colorOf)).toEqual([pal('tamiza', 8), pal('tamiza', 1), pal('tamiza', 8), pal('tamiza', 1)]);
+  });
+
+  it('names the columns of a chart in the tooltip of a stacked 100% mark', async () => {
+    const context = await show('column', { ...settings, layout: 'percent' }, answer(), [conteo]);
+
+    await hover(context, hits(context)[0]);
+
+    expect(tooltipLines().join(' ')).toContain('Teatro conteo: Hogares');
+  });
+});
+
+describe('the caption of a widget with a series (add-widget-context, design D3)', () => {
+  afterEach(clearOverlay);
+
+  const conteo = indicator('teatro_conteo', { label: 'Teatro conteo', columns: { value: { label: 'Hogares' }, pregunta: { label: 'Pregunta' }, respuesta: { label: 'Respuesta' } } });
+  const settings = { indicator: 'teatro_conteo', groupBy: 'pregunta', seriesBy: 'respuesta', measure: 'value' } as const;
+  const answer = () => seriesResult([cell('2.1', '1. Sí', 30), cell('2.1', '2. Tal vez', 10), cell('2.2', '1. Sí', 20), cell('2.2', '2. Tal vez', 25)], ['1. Sí', '2. Tal vez']);
+  const caption = (context: Context) => byTestId(context.root, 'chart-caption')!;
+  const hidden = { caption: { hidden: true as const } };
+
+  it('replaces what a heat map plots in its line and its accessible name, and keeps "by … and …"', async () => {
+    const context = await show('heatmap', { ...settings, display: { caption: { text: 'Iría al teatro (I1)' } } }, answer(), [conteo]);
+
+    expect(text(caption(context))).toBe('Iría al teatro (I1) by Pregunta and Respuesta');
+    expect(label(context)).toContain('Iría al teatro (I1)');
+    expect(context.query.config).not.toHaveProperty('display');
+  });
+
+  it('replaces what a cross table plots in its line', async () => {
+    const context = await show('crosstab', { ...settings, display: { caption: { text: 'Iría al teatro (I1)' } } }, answer(), [conteo]);
+
+    expect(text(caption(context))).toBe('Iría al teatro (I1) by Pregunta and Respuesta');
+    expect(tableHeaders(context)).toEqual(['Pregunta', '1. Sí', '2. Tal vez', 'Total']);
+  });
+
+  it('takes the line of a heat map out of sight and keeps it for screen readers when hidden', async () => {
+    const context = await show('heatmap', { ...settings, display: hidden }, answer(), [conteo]);
+
+    expect(caption(context).classList).toContain('sr-only');
+    expect(text(caption(context))).toBe('Teatro conteo: Hogares by Pregunta and Respuesta');
+    expect(label(context)).toContain('Pregunta by Respuesta');
+  });
+
+  it('takes the line of a cross table out of sight and keeps it for screen readers when hidden', async () => {
+    const context = await show('crosstab', { ...settings, display: hidden }, answer(), [conteo]);
+
+    expect(caption(context).classList).toContain('sr-only');
+    expect(text(caption(context))).toBe('Teatro conteo: Hogares by Pregunta and Respuesta');
+    expect(tableHeaders(context)).toEqual(['Pregunta', '1. Sí', '2. Tal vez', 'Total']);
+  });
+
+  it('takes the line out of sight in the cross table that a pyramid shows as a table', async () => {
+    const context = await show('pyramid', { ...settings, pyramid: { left: '1. Sí', right: '2. Tal vez' }, display: hidden }, answer(), [conteo]);
+
+    await toggle(context);
+
+    expect(caption(context).classList).toContain('sr-only');
+    expect(text(caption(context))).toContain('Teatro conteo: Hogares');
+  });
+
+  it('takes the line out of sight in the cross table that a Likert widget shows as a table', async () => {
+    const scale: LikertStep[] = [
+      { value: '1. Sí', side: 'positive' },
+      { value: '2. Tal vez', side: 'negative' },
+    ];
+    const context = await show('likert', { ...settings, scale, display: hidden }, answer(), [conteo]);
+
+    await toggle(context);
+
+    expect(caption(context).classList).toContain('sr-only');
+    expect(text(caption(context))).toContain('Teatro conteo: Hogares');
+  });
+
+  it('shows the line of a cross table with no caption setting, with no sr-only on it', async () => {
+    const context = await show('crosstab', settings, answer(), [conteo]);
+
+    expect(caption(context).classList).not.toContain('sr-only');
+  });
+});

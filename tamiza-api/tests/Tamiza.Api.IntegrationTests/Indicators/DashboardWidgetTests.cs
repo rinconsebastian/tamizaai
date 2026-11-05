@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Npgsql;
 using Tamiza.Api.IntegrationTests.Infrastructure;
 
@@ -363,6 +364,588 @@ public sealed class DashboardWidgetTests(PostgresFixture postgres)
         Assert.Equal(0, (await h.GetWidgetsAsync()).GetArrayLength());
         var result = await h.QueryAsync(JsonSerializer.Deserialize<JsonElement>(moved.GetProperty("config").GetRawText()), "bar");
         Assert.Equal(["year"], IndicatorsHarness.Strings(result.GetProperty("missing").GetProperty("columns")));
+    }
+
+    // Column labels of a widget (dashboard-indicators: Column labels of a widget)
+
+    private static object Labelled(string chartType, object? labels, string title = "Labelled") => new
+    {
+        title,
+        chartType,
+        config = new { indicator = "coverage", groupBy = chartType == "stat" ? null : "municipality", display = new { labels } },
+    };
+
+    [Fact]
+    public async Task A_stat_tile_is_saved_with_its_own_label_for_a_column_and_returns_it()
+    {
+        await using var h = await PublishedAsync();
+
+        var created = await h.AddWidgetAsync(Labelled("stat", new { numerator = "Hogares que asistieron" }));
+
+        var labels = created.GetProperty("config").GetProperty("display").GetProperty("labels");
+        Assert.Equal(["numerator"], labels.EnumerateObject().Select(l => l.Name));
+        Assert.Equal("Hogares que asistieron", labels.GetProperty("numerator").GetString());
+        Assert.False(created.GetProperty("config").GetProperty("display").TryGetProperty("color", out _));
+        var read = (await h.GetWidgetsAsync(client: h.Viewer))[0];
+        Assert.Equal("Hogares que asistieron", read.GetProperty("config").GetProperty("display").GetProperty("labels").GetProperty("numerator").GetString());
+        Assert.Equal(
+            """{"labels": {"numerator": "Hogares que asistieron"}}""",
+            await TestData.ScalarAsync<string>(h.Db, "SELECT config -> 'display' FROM tamiza.dashboard_widgets WHERE id = @id", ("id", created.GetProperty("id").GetGuid())));
+    }
+
+    [Fact]
+    public async Task A_widget_of_every_kind_takes_labels()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("coverage", IndicatorsHarness.StandardColumns + ", geometry text, water_source text", "('Cali', 40, 4, 10, 'POINT(0 0)', 'Piped')");
+        var configs = new (string Type, object Config)[]
+        {
+            ("stat", new { indicator = "coverage" }),
+            ("bar", new { indicator = "coverage", groupBy = "municipality" }),
+            ("column", new { indicator = "coverage", groupBy = "municipality" }),
+            ("line", new { indicator = "coverage", groupBy = "municipality" }),
+            ("histogram", new { indicator = "coverage", measure = "value" }),
+            ("pie", new { indicator = "coverage", groupBy = "municipality" }),
+            ("map", new { indicator = "coverage", groupBy = "municipality", geometryColumn = "geometry" }),
+            ("boxplot", new { indicator = "coverage", measure = "value", groupBy = "municipality" }),
+        };
+
+        foreach (var (type, config) in configs)
+        {
+            var body = JsonSerializer.SerializeToNode(new { title = type, chartType = type, config })!;
+            body["config"]!["display"] = JsonSerializer.SerializeToNode(new { labels = new { value = "Hogares" } });
+            var response = await h.PostWidgetAsync(body);
+
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            Assert.Equal("Hogares", (await ReadAsync(response)).GetProperty("config").GetProperty("display").GetProperty("labels").GetProperty("value").GetString());
+        }
+    }
+
+    [Fact]
+    public async Task A_widget_labelling_a_column_that_the_table_loses_is_drawn_with_no_missing_column()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync("coverage", IndicatorsHarness.StandardColumns + ", estrato text", "('Cali', 40, 4, 10, '1')");
+        var created = await h.AddWidgetAsync(Labelled("column", new { estrato = "Estrato" }));
+        await h.PublishAsync("coverage", IndicatorsHarness.StandardColumns, "('Cali', 1, 1, 1)"); // no estrato any more
+
+        var result = await h.QueryAsync(JsonSerializer.Deserialize<JsonElement>(created.GetProperty("config").GetRawText()), "column");
+
+        Assert.Empty(result.GetProperty("missing").GetProperty("columns").EnumerateArray());
+        Assert.Equal(["Cali|1"], IndicatorsHarness.Rows(result));
+        var widget = (await h.GetWidgetsAsync())[0];
+        Assert.Equal("Estrato", widget.GetProperty("config").GetProperty("display").GetProperty("labels").GetProperty("estrato").GetString());
+    }
+
+    [Fact]
+    public async Task A_widget_with_labels_for_11_columns_is_refused_on_its_labels_and_nothing_is_saved()
+    {
+        await using var h = await PublishedAsync();
+        var labels = Enumerable.Range(1, 11).ToDictionary(i => $"columna_{i}", i => $"Columna {i}");
+
+        var response = await h.PostWidgetAsync(Labelled("column", labels));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["A widget labels at most 10 columns."], IndicatorsHarness.Errors(await ReadAsync(response), "config.display.labels"));
+        Assert.Empty(await h.StoredWidgetsAsync());
+        Assert.Equal(HttpStatusCode.Created, (await h.PostWidgetAsync(Labelled("column", labels.Take(10).ToDictionary(l => l.Key, l => l.Value)))).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_label_of_81_characters_is_refused_on_its_column_and_nothing_is_saved()
+    {
+        await using var h = await PublishedAsync();
+
+        var response = await h.PostWidgetAsync(Labelled("column", new { numerator = new string('a', 81) }));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["A column label can have up to 80 characters."], IndicatorsHarness.Errors(await ReadAsync(response), "config.display.labels.numerator"));
+        Assert.Empty(await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task A_label_for_a_name_that_is_not_a_columns_is_refused_on_the_labels_and_the_edit_changes_nothing()
+    {
+        await using var h = await PublishedAsync();
+        var created = await h.AddWidgetAsync(Column());
+        var before = await h.StoredWidgetsAsync();
+
+        var response = await h.Analyst.PatchJsonAsync(
+            h.WidgetUrl(created.GetProperty("id").GetGuid()),
+            new { config = new { indicator = "coverage", groupBy = "municipality", display = new { labels = new Dictionary<string, string> { ["Comuna"] = "Comuna" } } } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var errors = IndicatorsHarness.Errors(await ReadAsync(response), "config.display.labels");
+        Assert.StartsWith("'Comuna' is not a column's name", Assert.Single(errors));
+        Assert.Equal(before, await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task A_widget_moved_to_another_dashboard_keeps_its_column_labels()
+    {
+        await using var h = await PublishedAsync();
+        var cruces = await h.InsertDashboardAsync("Cruces");
+        var created = await h.AddWidgetAsync(Labelled("column", new { denominator = "Hogares que asistieron" }));
+        var id = created.GetProperty("id").GetGuid();
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { dashboardId = cruces });
+        var moved = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(created.GetProperty("config").ToString(), moved.GetProperty("config").ToString());
+        var onCruces = (await h.GetWidgetsAsync(cruces))[0];
+        Assert.Equal("Hogares que asistieron", onCruces.GetProperty("config").GetProperty("display").GetProperty("labels").GetProperty("denominator").GetString());
+    }
+
+    [Fact]
+    public async Task A_chart_type_change_keeps_the_labels()
+    {
+        await using var h = await PublishedAsync();
+        var created = await h.AddWidgetAsync(Labelled("column", new { municipality = "Municipio", denominator = "Hogares" }));
+        var id = created.GetProperty("id").GetGuid();
+
+        var toBar = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { chartType = "bar" });
+        var toStat = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { chartType = "stat", config = new { indicator = "coverage", display = new { labels = new { municipality = "Municipio", denominator = "Hogares" } } } });
+
+        Assert.Equal(HttpStatusCode.OK, toBar.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, toStat.StatusCode);
+        var labels = (await ReadAsync(toBar)).GetProperty("config").GetProperty("display").GetProperty("labels");
+        Assert.Equal(["denominator", "municipality"], labels.EnumerateObject().Select(l => l.Name));
+    }
+
+    // The texts of a widget (dashboard-indicators: Widget context validation)
+
+    private static object Texted(string chartType, object display, string title = "Texted") => new
+    {
+        title,
+        chartType,
+        config = new { indicator = "coverage", groupBy = chartType == "stat" ? null : "municipality", display },
+    };
+
+    public static TheoryData<string, string> RefusedTexts() => new()
+    {
+        // Long subtitle, Line break in a footnote, Caption with a text and hidden, Long unit
+        { "subtitle", "config.display.subtitle" },
+        { "footnote", "config.display.footnote" },
+        { "caption", "config.display.caption" },
+        { "unit", "config.display.unit" },
+    };
+
+    private static (object Display, string Message) RefusedDisplay(string field) => field switch
+    {
+        "subtitle" => (new { subtitle = new string('s', 201) }, "The subtitle is longer than 200 characters."),
+        "footnote" => (new { footnote = "No suman 100 %\nrespuesta múltiple" }, "The footnote cannot contain line breaks or other control characters."),
+        "caption" => (new { caption = new { text = "% de quienes asistieron", hidden = true } }, "Give the caption its own text or hide it, not both."),
+        _ => (new { unit = new string('u', 33) }, "The unit is longer than 32 characters."),
+    };
+
+    [Theory]
+    [MemberData(nameof(RefusedTexts))]
+    public async Task A_text_that_breaks_a_rule_is_refused_on_its_field_when_a_widget_is_created_and_nothing_is_saved(string field, string key)
+    {
+        await using var h = await PublishedAsync();
+        var (display, message) = RefusedDisplay(field);
+
+        var response = await h.PostWidgetAsync(Texted("column", display));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal([message], IndicatorsHarness.Errors(await ReadAsync(response), key));
+        Assert.Empty(await h.StoredWidgetsAsync());
+    }
+
+    [Theory]
+    [MemberData(nameof(RefusedTexts))]
+    public async Task A_text_that_breaks_a_rule_is_refused_on_its_field_when_a_widget_is_updated_and_nothing_is_saved(string field, string key)
+    {
+        await using var h = await PublishedAsync();
+        var created = await h.AddWidgetAsync(Texted("column", new { subtitle = "Pregunta", unit = "hogares" }));
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await VersionCountAsync(h);
+        var (display, message) = RefusedDisplay(field);
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(created.GetProperty("id").GetGuid()), new { config = new { indicator = "coverage", groupBy = "municipality", display } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal([message], IndicatorsHarness.Errors(await ReadAsync(response), key));
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await VersionCountAsync(h));
+    }
+
+    [Fact]
+    public async Task A_subtitle_of_spaces_is_saved_as_no_subtitle_and_the_texts_are_stored_trimmed()
+    {
+        await using var h = await PublishedAsync();
+
+        var blank = await h.AddWidgetAsync(Texted("column", new { subtitle = "   " }, "Blank"));
+        var trimmed = await h.AddWidgetAsync(Texted("column", new { subtitle = "  Pregunta  ", footnote = " Nota ", caption = new { text = " Mi texto " }, unit = " hogares " }, "Trimmed"));
+
+        Assert.False(blank.GetProperty("config").TryGetProperty("display", out _));
+        var display = trimmed.GetProperty("config").GetProperty("display");
+        Assert.Equal(("Pregunta", "Nota", "Mi texto", "hogares"),
+            (display.GetProperty("subtitle").GetString(), display.GetProperty("footnote").GetString(), display.GetProperty("caption").GetProperty("text").GetString(), display.GetProperty("unit").GetString()));
+        Assert.Equal(
+            """{"unit": "hogares", "caption": {"text": "Mi texto"}, "footnote": "Nota", "subtitle": "Pregunta"}""",
+            await TestData.ScalarAsync<string>(h.Db, "SELECT config -> 'display' FROM tamiza.dashboard_widgets WHERE id = @id", ("id", trimmed.GetProperty("id").GetGuid())));
+        Assert.DoesNotContain("display", (await h.StoredWidgetsAsync()).Single(w => w.StartsWith("Blank|", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task A_widget_of_every_chart_type_takes_the_texts()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync(
+            "households_by_source", "municipality text, water_source text, value numeric, numerator numeric, denominator numeric, geometry text",
+            "('Cali', 'Piped', 35, 7, 10, 'POINT(1 1)'), ('Palmira', 'Well', 15, 3, 10, 'POINT(2 2)')");
+        const string indicator = "households_by_source";
+        var configs = new (string Type, object Config)[]
+        {
+            ("stat", new { indicator, measure = "value" }),
+            ("bar", new { indicator, measure = "value", groupBy = "municipality" }),
+            ("column", new { indicator, measure = "value", groupBy = "municipality", seriesBy = "water_source" }),
+            ("line", new { indicator, measure = "value", groupBy = "municipality" }),
+            ("histogram", new { indicator, measure = "value", buckets = 3 }),
+            ("pie", new { indicator, measure = "value", groupBy = "municipality" }),
+            ("map", new { indicator, measure = "value", groupBy = "municipality", geometryColumn = "geometry" }),
+            ("heatmap", new { indicator, measure = "value", groupBy = "municipality", seriesBy = "water_source" }),
+            ("crosstab", new { indicator, measure = "value", groupBy = "municipality", seriesBy = "water_source" }),
+            ("pyramid", new { indicator, measure = "value", groupBy = "municipality", seriesBy = "water_source", pyramid = new { left = "Piped", right = "Well" } }),
+            ("boxplot", new { indicator, measure = "value", groupBy = "municipality" }),
+            ("likert", new
+            {
+                indicator, measure = "value", groupBy = "municipality", seriesBy = "water_source",
+                scale = new object[] { new { value = "Piped", side = "negative" }, new { value = "Well", side = "positive" } },
+            }),
+        };
+        Assert.Equal(Tamiza.Api.Indicators.ChartTypes.All.Order(StringComparer.Ordinal), configs.Select(c => c.Type).Order(StringComparer.Ordinal));
+
+        foreach (var (type, config) in configs)
+        {
+            var body = JsonSerializer.SerializeToNode(new { title = type, chartType = type, config })!;
+            body["config"]!["display"] = JsonSerializer.SerializeToNode(new
+            {
+                subtitle = "¿En qué lugares ha visto teatro?", footnote = "No suman 100 %", caption = new { text = "% de quienes asistieron" }, unit = "de quienes asistieron",
+                showDescription = true,
+            });
+            var response = await h.PostWidgetAsync(body);
+
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var display = (await ReadAsync(response)).GetProperty("config").GetProperty("display");
+            Assert.Equal(("¿En qué lugares ha visto teatro?", "No suman 100 %", "% de quienes asistieron", "de quienes asistieron", true),
+                (display.GetProperty("subtitle").GetString(), display.GetProperty("footnote").GetString(), display.GetProperty("caption").GetProperty("text").GetString(),
+                 display.GetProperty("unit").GetString(), display.GetProperty("showDescription").GetBoolean()));
+        }
+
+        var hidden = await h.PostWidgetAsync(JsonSerializer.SerializeToNode(new { title = "Hidden", chartType = "map", config = new { indicator, measure = "value", groupBy = "municipality", geometryColumn = "geometry", display = new { caption = new { hidden = true } } } })!);
+        Assert.Equal(HttpStatusCode.Created, hidden.StatusCode);
+        Assert.True((await ReadAsync(hidden)).GetProperty("config").GetProperty("display").GetProperty("caption").GetProperty("hidden").GetBoolean());
+    }
+
+    [Fact]
+    public async Task A_chart_type_change_keeps_the_subtitle_and_the_unit()
+    {
+        await using var h = await PublishedAsync();
+        var created = await h.AddWidgetAsync(Texted("bar", new { subtitle = "Pregunta", unit = "hogares" }));
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(created.GetProperty("id").GetGuid()), new { chartType = "pie" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var widget = await ReadAsync(response);
+        Assert.Equal("pie", widget.GetProperty("chartType").GetString());
+        var display = widget.GetProperty("config").GetProperty("display");
+        Assert.Equal(("Pregunta", "hogares"), (display.GetProperty("subtitle").GetString(), display.GetProperty("unit").GetString()));
+        Assert.Equal(created.GetProperty("config").GetRawText(), widget.GetProperty("config").GetRawText());
+    }
+
+    [Fact]
+    public async Task A_column_chart_in_color_2_stored_before_the_texts_sent_back_unchanged_writes_nothing_and_makes_no_version()
+    {
+        await using var h = await PublishedAsync();
+        var created = await h.AddWidgetAsync(Column());
+        var id = created.GetProperty("id").GetGuid();
+        // As an earlier release stored it: a display with a color and nothing else.
+        await h.ExecuteAsync(
+            """UPDATE tamiza.dashboard_widgets SET config = '{"indicator": "coverage", "groupBy": "municipality", "display": {"color": 2}}' WHERE id = @id""", ("id", id));
+        var widget = (await h.GetWidgetsAsync()).EnumerateArray().Single();
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await VersionCountAsync(h);
+
+        var form = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new
+        {
+            title = widget.GetProperty("title").GetString(),
+            chartType = widget.GetProperty("chartType").GetString(),
+            config = widget.GetProperty("config"),
+        });
+
+        Assert.Equal(HttpStatusCode.OK, form.StatusCode);
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await VersionCountAsync(h));
+        Assert.Equal("""{"color": 2}""", await TestData.ScalarAsync<string>(h.Db, "SELECT config -> 'display' FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id)));
+    }
+
+    [Fact]
+    public async Task A_widget_with_texts_sent_back_unchanged_writes_nothing_and_makes_no_version()
+    {
+        await using var h = await PublishedAsync();
+        var created = await h.AddWidgetAsync(Texted("column", new { subtitle = "¿En qué lugares?", footnote = "No suman 100 %", caption = new { hidden = true }, unit = "hogares", showDescription = true }));
+        var id = created.GetProperty("id").GetGuid();
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await VersionCountAsync(h);
+        var read = (await h.GetWidgetsAsync()).EnumerateArray().Single();
+
+        var form = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { title = "Texted", chartType = "column", config = read.GetProperty("config") });
+
+        Assert.Equal(HttpStatusCode.OK, form.StatusCode);
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await VersionCountAsync(h));
+    }
+
+    [Fact]
+    public async Task A_widget_moved_to_another_dashboard_keeps_its_texts_byte_for_byte()
+    {
+        await using var h = await PublishedAsync();
+        var segments = await h.InsertDashboardAsync("Segmentos");
+        var created = await h.AddWidgetAsync(Texted("bar", new { subtitle = "¿En qué lugares?", footnote = "No suman 100 %", caption = new { hidden = true }, unit = "hogares", showDescription = true }));
+        var id = created.GetProperty("id").GetGuid();
+        var before = await TestData.ScalarAsync<string>(h.Db, "SELECT config::text FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id));
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { dashboardId = segments });
+        var moved = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(created.GetProperty("config").GetRawText(), moved.GetProperty("config").GetRawText());
+        Assert.Equal(before, await TestData.ScalarAsync<string>(h.Db, "SELECT config::text FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id)));
+        Assert.Equal(segments, (await TestData.ScalarAsync<Guid>(h.Db, "SELECT dashboard_id FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id))));
+    }
+
+    private static async Task<long> VersionCountAsync(IndicatorsHarness h) =>
+        await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_versions WHERE project_id = @id", ("id", h.ProjectId));
+
+    // Reference lines, steps and data labels (dashboard-indicators: Reference line settings refused, Chart annotations kept with the widget)
+
+    private const string BySource = "households_by_source";
+
+    private async Task<IndicatorsHarness> PublishedBySourceAsync()
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync(
+            BySource, "municipality text, water_source text, value numeric, numerator numeric, denominator numeric",
+            "('Cali', 'Piped', 35, 7, 10), ('Cali', 'Well', 15, 3, 10), ('Palmira', 'Piped', 20, 4, 10), ('Palmira', 'Well', 30, 6, 10)");
+        return h;
+    }
+
+    private static readonly object Ratio = new { numerator = "numerator", denominator = "denominator" };
+
+    private static object Annotated(string chartType, object display, string title = "Annotated") => new
+    {
+        title,
+        chartType,
+        config = new { indicator = BySource, ratio = Ratio, groupBy = "municipality", display },
+    };
+
+    private static object[] Lines(params object[] each) => each;
+
+    public static TheoryData<string> RefusedAnnotations() => new()
+    {
+        "Five lines", "Line on a pie chart", "Mean line with a series", "Overall line over a measure", "Value line without its number",
+        "Share past the whole bar", "Line break in a label", "Steps on a column chart", "Stacked bars",
+    };
+
+    /// <summary>The chart type, the config, and the key and message the API answers for each refused case.</summary>
+    private static (string ChartType, object Config, string Key, string Message) RefusedAnnotation(string name)
+    {
+        return name switch
+        {
+            "Five lines" => ("column",
+                new { indicator = BySource, ratio = Ratio, groupBy = "municipality", display = new { referenceLines = Enumerable.Range(1, 5).Select(i => new { kind = "value", value = i }).ToArray() } },
+                "config.display.referenceLines", "A widget has at most 4 reference lines."),
+            "Line on a pie chart" => ("pie",
+                new { indicator = BySource, measure = "value", groupBy = "municipality", display = new { referenceLines = Lines(new { kind = "mean" }) } },
+                "config.display.referenceLines", "Only bar, column and line widgets have reference lines."),
+            "Mean line with a series" => ("bar",
+                new { indicator = BySource, measure = "value", groupBy = "municipality", seriesBy = "water_source", layout = "percent", display = new { referenceLines = Lines(new { kind = "mean" }) } },
+                "config.display.referenceLines[0].kind", "A mean or median line needs a chart with no series."),
+            "Overall line over a measure" => ("bar",
+                new { indicator = BySource, measure = "value", groupBy = "municipality", display = new { referenceLines = Lines(new { kind = "overall" }) } },
+                "config.display.referenceLines[0].kind", "An overall line needs a ratio: over a measure it would be the sum of every bar."),
+            "Value line without its number" => ("column",
+                new { indicator = BySource, ratio = Ratio, groupBy = "municipality", display = new { referenceLines = Lines(new { kind = "value" }) } },
+                "config.display.referenceLines[0].value", "A 'value' line needs its value."),
+            "Share past the whole bar" => ("bar",
+                new { indicator = BySource, measure = "value", groupBy = "municipality", seriesBy = "water_source", layout = "percent", display = new { referenceLines = Lines(new { kind = "value", value = 1.5 }) } },
+                "config.display.referenceLines[0].value", "In a 100% layout a value is a share from 0 to 1."),
+            "Line break in a label" => ("column",
+                new { indicator = BySource, ratio = Ratio, groupBy = "municipality", display = new { referenceLines = Lines(new { kind = "value", value = 0.5, label = "Meta\n2027" }) } },
+                "config.display.referenceLines[0].label", "A reference line's label cannot contain line breaks or other control characters."),
+            "Steps on a column chart" => ("column",
+                new { indicator = BySource, ratio = Ratio, groupBy = "municipality", display = new { interpolation = "step" } },
+                "config.display.interpolation", "Only a line chart has an interpolation."),
+            _ => ("bar",
+                new { indicator = BySource, measure = "value", groupBy = "municipality", seriesBy = "water_source", layout = "stacked", display = new { dataLabels = true } },
+                "config.display.dataLabels", "Stacked bars have no data labels."),
+        };
+    }
+
+    [Fact]
+    public async Task A_column_chart_with_two_lines_and_a_line_chart_with_steps_and_data_labels_are_saved_and_read_back_as_sent()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var lines = new object[] { new { kind = "mean" }, new { kind = "value", value = 0.5, label = "Meta" } };
+
+        var column = await h.AddWidgetAsync(Annotated("column", new { referenceLines = lines }, "Column"));
+        var line = await h.AddWidgetAsync(Annotated("line", new { interpolation = "step", dataLabels = true }, "Line"));
+
+        var sentColumn = JsonSerializer.SerializeToNode(new { referenceLines = lines });
+        var sentLine = JsonSerializer.SerializeToNode(new { interpolation = "step", dataLabels = true });
+        Assert.True(JsonNode.DeepEquals(sentColumn, JsonNode.Parse(column.GetProperty("config").GetProperty("display").GetRawText())));
+        Assert.True(JsonNode.DeepEquals(sentLine, JsonNode.Parse(line.GetProperty("config").GetProperty("display").GetRawText())));
+        var read = await h.GetWidgetsAsync(client: h.Viewer);
+        var readByTitle = read.EnumerateArray().ToDictionary(w => w.GetProperty("title").GetString()!);
+        Assert.True(JsonNode.DeepEquals(sentColumn, JsonNode.Parse(readByTitle["Column"].GetProperty("config").GetProperty("display").GetRawText())));
+        Assert.True(JsonNode.DeepEquals(sentLine, JsonNode.Parse(readByTitle["Line"].GetProperty("config").GetProperty("display").GetRawText())));
+        Assert.Equal(
+            """{"referenceLines": [{"kind": "mean"}, {"kind": "value", "label": "Meta", "value": 0.5}]}""",
+            await TestData.ScalarAsync<string>(h.Db, "SELECT config -> 'display' FROM tamiza.dashboard_widgets WHERE id = @id", ("id", column.GetProperty("id").GetGuid())));
+    }
+
+    [Fact]
+    public async Task A_label_of_spaces_is_saved_as_no_label_and_the_others_are_stored_trimmed()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var created = await h.AddWidgetAsync(Annotated("column", new { referenceLines = new object[] { new { kind = "mean", label = "   " }, new { kind = "median", label = "  Mediana  " } } }));
+
+        var lines = created.GetProperty("config").GetProperty("display").GetProperty("referenceLines");
+        Assert.Equal("""[{"kind":"mean"},{"kind":"median","label":"Mediana"}]""", lines.GetRawText());
+    }
+
+    [Theory]
+    [MemberData(nameof(RefusedAnnotations))]
+    public async Task An_annotation_that_breaks_a_rule_is_refused_on_its_key_when_a_widget_is_created_and_nothing_is_saved(string name)
+    {
+        await using var h = await PublishedBySourceAsync();
+        var (chartType, config, key, message) = RefusedAnnotation(name);
+
+        var response = await h.PostWidgetAsync(new { title = name, chartType, config });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal([message], IndicatorsHarness.Errors(await ReadAsync(response), key));
+        Assert.Empty(await h.StoredWidgetsAsync());
+    }
+
+    [Theory]
+    [MemberData(nameof(RefusedAnnotations))]
+    public async Task An_annotation_that_breaks_a_rule_is_refused_on_its_key_when_a_widget_is_updated_and_nothing_is_saved(string name)
+    {
+        await using var h = await PublishedBySourceAsync();
+        var (chartType, config, key, message) = RefusedAnnotation(name);
+        var created = await h.AddWidgetAsync(Annotated("column", new { color = 2 }));
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await VersionCountAsync(h);
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(created.GetProperty("id").GetGuid()), new { chartType, config });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal([message], IndicatorsHarness.Errors(await ReadAsync(response), key));
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await VersionCountAsync(h));
+    }
+
+    [Fact]
+    public async Task A_widget_saved_before_reference_lines_reads_without_them_and_keeps_its_stored_text_when_renamed()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var created = await h.AddWidgetAsync(Annotated("column", new { color = 2 }));
+        var id = created.GetProperty("id").GetGuid();
+        // As an earlier release stored it: a display with a color and nothing else.
+        await h.ExecuteAsync(
+            """UPDATE tamiza.dashboard_widgets SET config = '{"indicator": "households_by_source", "groupBy": "municipality", "display": {"color": 2}}' WHERE id = @id""", ("id", id));
+        var before = await TestData.ScalarAsync<string>(h.Db, "SELECT config::text FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id));
+
+        var read = (await h.GetWidgetsAsync(client: h.Viewer)).EnumerateArray().Single().GetProperty("config").GetProperty("display");
+        var renamed = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { title = "Renamed" });
+
+        Assert.Equal("""{"color":2}""", read.GetRawText());
+        Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
+        Assert.Equal(before, await TestData.ScalarAsync<string>(h.Db, "SELECT config::text FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id)));
+    }
+
+    [Fact]
+    public async Task A_widget_with_lines_steps_and_data_labels_sent_back_unchanged_writes_nothing_and_makes_no_version()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var display = new
+        {
+            referenceLines = new object[] { new { kind = "mean" }, new { kind = "overall", label = "General" }, new { kind = "value", value = 0.5, label = "Meta" } },
+            interpolation = "linear",
+            dataLabels = false,
+        };
+        var created = await h.AddWidgetAsync(Annotated("line", display));
+        var id = created.GetProperty("id").GetGuid();
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await VersionCountAsync(h);
+        var read = (await h.GetWidgetsAsync()).EnumerateArray().Single();
+
+        var form = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { title = "Annotated", chartType = "line", config = read.GetProperty("config") });
+
+        Assert.Equal(HttpStatusCode.OK, form.StatusCode);
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await VersionCountAsync(h));
+        Assert.Contains("\"linear\"", stored.Single());
+        Assert.Contains("false", stored.Single());
+    }
+
+    [Fact]
+    public async Task A_widget_moved_to_another_dashboard_keeps_its_data_labels_byte_for_byte()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var centro = await h.InsertDashboardAsync("Centro");
+        var created = await h.AddWidgetAsync(Annotated("bar", new { dataLabels = true, referenceLines = new object[] { new { kind = "median" } } }));
+        var id = created.GetProperty("id").GetGuid();
+        var before = await TestData.ScalarAsync<string>(h.Db, "SELECT config::text FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id));
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { dashboardId = centro });
+        var moved = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(created.GetProperty("config").GetRawText(), moved.GetProperty("config").GetRawText());
+        Assert.Equal(before, await TestData.ScalarAsync<string>(h.Db, "SELECT config::text FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id)));
+        var onCentro = (await h.GetWidgetsAsync(centro)).EnumerateArray().Single().GetProperty("config").GetProperty("display");
+        Assert.True(onCentro.GetProperty("dataLabels").GetBoolean());
+    }
+
+    [Fact]
+    public async Task A_chart_type_change_alone_keeps_the_new_settings_in_the_config()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var created = await h.AddWidgetAsync(Annotated("column", new { referenceLines = new object[] { new { kind = "mean" } }, dataLabels = true }));
+
+        var toLine = await h.Analyst.PatchJsonAsync(h.WidgetUrl(created.GetProperty("id").GetGuid()), new { chartType = "line" });
+        var toPie = await h.Analyst.PatchJsonAsync(h.WidgetUrl(created.GetProperty("id").GetGuid()), new { chartType = "pie" });
+
+        Assert.Equal(HttpStatusCode.OK, toLine.StatusCode);
+        Assert.Equal(created.GetProperty("config").GetRawText(), (await ReadAsync(toLine)).GetProperty("config").GetRawText());
+        // The config is kept as it is, so a pie refuses the lines it carries: a client changing to it sends the display it wants.
+        Assert.Equal(HttpStatusCode.BadRequest, toPie.StatusCode);
+        Assert.Equal(["Only bar, column and line widgets have reference lines."], IndicatorsHarness.Errors(await ReadAsync(toPie), "config.display.referenceLines"));
+    }
+
+    [Fact]
+    public async Task A_flag_that_is_not_a_setting_of_a_widget_is_not_stored()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var response = await h.PostWidgetAsync(new
+        {
+            title = "Overall",
+            chartType = "column",
+            config = new { indicator = BySource, ratio = Ratio, groupBy = "municipality", overall = true, display = new { referenceLines = new object[] { new { kind = "overall" } }, overall = true } },
+        });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var config = (await ReadAsync(response)).GetProperty("config");
+        Assert.False(config.TryGetProperty("overall", out _));
+        Assert.False(config.GetProperty("display").TryGetProperty("overall", out _));
+        Assert.DoesNotContain("\"overall\":", (await h.StoredWidgetsAsync()).Single());
     }
 
     // Full dashboard
@@ -731,5 +1314,265 @@ public sealed class DashboardWidgetTests(PostgresFixture postgres)
         await RunAsync(meanwhile, parameters);
         await transaction.CommitAsync();
         return await move;
+    }
+
+    // The own order of a widget's values (dashboard-indicators: Declared category order of a widget)
+
+    private static object Ordered(string chartType, object? display, string? groupBy = "municipality", string? seriesBy = "water_source", object? sort = null, string title = "Ordered") => new
+    {
+        title,
+        chartType,
+        config = new { indicator = BySource, measure = "value", groupBy, seriesBy, sort, display },
+    };
+
+    private static readonly object ByValueDesc = new { by = "value", direction = "desc" };
+
+    [Fact]
+    public async Task A_widget_is_saved_with_its_own_order_of_groups_and_of_series_and_returns_it()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var created = await h.AddWidgetAsync(Ordered("column", new { order = new { group = new[] { "Palmira", "Cali" }, series = new[] { "Well", "Piped" } } }));
+
+        var order = created.GetProperty("config").GetProperty("display").GetProperty("order");
+        Assert.Equal(["Palmira", "Cali"], IndicatorsHarness.Strings(order.GetProperty("group")));
+        Assert.Equal(["Well", "Piped"], IndicatorsHarness.Strings(order.GetProperty("series")));
+        var read = (await h.GetWidgetsAsync(client: h.Viewer))[0];
+        Assert.Equal(order.GetRawText(), read.GetProperty("config").GetProperty("display").GetProperty("order").GetRawText());
+        Assert.Equal(
+            """{"order": {"group": ["Palmira", "Cali"], "series": ["Well", "Piped"]}}""",
+            await TestData.ScalarAsync<string>(h.Db, "SELECT config -> 'display' FROM tamiza.dashboard_widgets WHERE id = @id", ("id", created.GetProperty("id").GetGuid())));
+    }
+
+    [Fact]
+    public async Task A_widget_with_no_series_is_saved_with_an_order_of_groups_and_a_sorted_one_with_an_order_of_series()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var bar = await h.AddWidgetAsync(Ordered("bar", new { order = new { group = new[] { "Palmira" } } }, seriesBy: null, title: "Bar"));
+        var sorted = await h.AddWidgetAsync(Ordered("bar", new { order = new { series = new[] { "Well" } } }, sort: ByValueDesc, title: "Sorted"));
+
+        Assert.Equal(["Palmira"], IndicatorsHarness.Strings(bar.GetProperty("config").GetProperty("display").GetProperty("order").GetProperty("group")));
+        Assert.Equal(["Well"], IndicatorsHarness.Strings(sorted.GetProperty("config").GetProperty("display").GetProperty("order").GetProperty("series")));
+    }
+
+    [Fact]
+    public async Task An_empty_order_is_saved_as_none_and_the_widget_is_stored_without_a_display()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var created = await h.AddWidgetAsync(Ordered("column", new { order = new { group = Array.Empty<string>(), series = Array.Empty<string>() } }));
+
+        Assert.False(created.GetProperty("config").TryGetProperty("display", out _));
+        Assert.DoesNotContain("display", (await h.StoredWidgetsAsync()).Single());
+        Assert.DoesNotContain("order", (await h.StoredWidgetsAsync()).Single());
+    }
+
+    [Fact]
+    public async Task A_widget_updated_with_an_order_then_with_none_is_stored_each_time_as_sent()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var created = await h.AddWidgetAsync(Ordered("column", new { color = (int?)null, order = new { series = new[] { "Well", "Piped" } } }));
+        var id = created.GetProperty("id").GetGuid();
+
+        var cleared = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { config = new { indicator = BySource, measure = "value", groupBy = "municipality", seriesBy = "water_source" } });
+        var again = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { config = new { indicator = BySource, measure = "value", groupBy = "municipality", seriesBy = "water_source", display = new { order = new { group = new[] { "Palmira" } } } } });
+
+        Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
+        Assert.False((await ReadAsync(cleared)).GetProperty("config").TryGetProperty("display", out _));
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        Assert.Equal(["Palmira"], IndicatorsHarness.Strings((await ReadAsync(again)).GetProperty("config").GetProperty("display").GetProperty("order").GetProperty("group")));
+    }
+
+    public static TheoryData<string, string> RefusedOrders() => new()
+    {
+        { "stat", "A stat widget has no groups to order." },
+        { "histogram", "A histogram widget has no groups to order." },
+        { "map", "A map widget has no groups to order." },
+    };
+
+    [Theory]
+    [MemberData(nameof(RefusedOrders))]
+    public async Task An_order_of_groups_on_a_stat_tile_a_histogram_or_a_map_is_refused_and_nothing_is_saved(string chartType, string message)
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var response = await h.PostWidgetAsync(new
+        {
+            title = "Ordered",
+            chartType,
+            config = new { indicator = BySource, measure = "value", groupBy = "municipality", geometryColumn = chartType == "map" ? "municipality" : null, display = new { order = new { group = new[] { "Cali" } } } },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal([message], IndicatorsHarness.Errors(await ReadAsync(response), "config.display.order.group"));
+        Assert.Empty(await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task An_order_of_groups_without_a_group_column_is_refused()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var response = await h.PostWidgetAsync(Ordered("boxplot", new { order = new { group = new[] { "Cali" } } }, groupBy: null, seriesBy: null));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["Ordering groups needs a column to group by."], IndicatorsHarness.Errors(await ReadAsync(response), "config.display.order.group"));
+        Assert.Empty(await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task An_order_of_series_without_a_series_column_is_refused()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var response = await h.PostWidgetAsync(Ordered("column", new { order = new { series = new[] { "Well" } } }, seriesBy: null));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["Only a widget with a series has an order of series."], IndicatorsHarness.Errors(await ReadAsync(response), "config.display.order.series"));
+        Assert.Empty(await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task An_order_of_series_on_a_pyramid_or_a_Likert_widget_is_refused_saying_what_sets_that_order()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var display = new { order = new { series = new[] { "Well" } } };
+
+        var pyramid = await h.PostWidgetAsync(new
+        {
+            title = "Pyramid", chartType = "pyramid",
+            config = new { indicator = BySource, measure = "value", groupBy = "municipality", seriesBy = "water_source", pyramid = new { left = "Piped", right = "Well" }, display },
+        });
+        var likert = await h.PostWidgetAsync(new
+        {
+            title = "Likert", chartType = "likert",
+            config = new
+            {
+                indicator = BySource, measure = "value", groupBy = "municipality", seriesBy = "water_source", display,
+                scale = new object[] { new { value = "Piped", side = "negative" }, new { value = "Well", side = "positive" } },
+            },
+        });
+
+        Assert.Equal(["A population pyramid's sides are its left and right values."], IndicatorsHarness.Errors(await ReadAsync(pyramid), "config.display.order.series"));
+        Assert.Equal(["A Likert widget's answers follow its scale."], IndicatorsHarness.Errors(await ReadAsync(likert), "config.display.order.series"));
+        Assert.Empty(await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task An_order_of_101_values_and_a_value_listed_twice_are_refused_on_their_own_keys()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var response = await h.PostWidgetAsync(Ordered("column", new
+        {
+            order = new
+            {
+                group = Enumerable.Range(1, 101).Select(i => $"Value {i}").ToArray(),
+                series = new[] { "Well", "Piped", "Well" },
+            },
+        }));
+        var problem = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["An order lists at most 100 values."], IndicatorsHarness.Errors(problem, "config.display.order.group"));
+        Assert.Equal(["'Well' is listed twice."], IndicatorsHarness.Errors(problem, "config.display.order.series[2]"));
+        Assert.Empty(await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task A_sort_and_an_own_order_of_groups_are_refused_together_and_the_order_of_series_is_not()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var refused = await h.PostWidgetAsync(Ordered("column", new { order = new { group = new[] { "Cali" } } }, seriesBy: null, sort: ByValueDesc));
+        var accepted = await h.PostWidgetAsync(Ordered("column", new { order = new { series = new[] { "Well" } } }, sort: ByValueDesc));
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(
+            ["A sorted widget takes the order of its groups from its sort: remove the sort or this order."],
+            IndicatorsHarness.Errors(await ReadAsync(refused), "config.display.order.group"));
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+    }
+
+    [Fact]
+    public async Task An_order_by_median_and_an_own_order_of_boxes_are_refused_together()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        var refused = await h.PostWidgetAsync(Ordered("boxplot", new { order = new { group = new[] { "Cali" } } }, seriesBy: null, sort: ByValueDesc));
+        var accepted = await h.PostWidgetAsync(Ordered("boxplot", new { order = new { group = new[] { "Cali" } } }, seriesBy: null, title: "Boxes"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(
+            ["A box plot ordered by median takes the order of its boxes from their medians: remove that order or this one."],
+            IndicatorsHarness.Errors(await ReadAsync(refused), "config.display.order.group"));
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_chart_type_change_that_keeps_an_order_of_series_the_new_kind_does_not_take_is_refused()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var created = await h.AddWidgetAsync(Ordered("column", new { order = new { series = new[] { "Well", "Piped" } } }));
+        var stored = await h.StoredWidgetsAsync();
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(created.GetProperty("id").GetGuid()), new { chartType = "pie" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("config.display.order.series", (await ReadAsync(response)).GetProperty("errors").EnumerateObject().Select(p => p.Name));
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+    }
+
+    [Fact]
+    public async Task A_widget_with_an_order_sent_back_unchanged_writes_nothing_and_makes_no_version()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var created = await h.AddWidgetAsync(Ordered("column", new { order = new { group = new[] { "Palmira" }, series = new[] { "Well", "Piped" } } }));
+        var id = created.GetProperty("id").GetGuid();
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await VersionCountAsync(h);
+        var read = (await h.GetWidgetsAsync()).EnumerateArray().Single();
+
+        var form = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { title = "Ordered", chartType = "column", config = read.GetProperty("config") });
+
+        Assert.Equal(HttpStatusCode.OK, form.StatusCode);
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await VersionCountAsync(h));
+    }
+
+    [Fact]
+    public async Task A_change_of_the_order_makes_a_version_that_says_the_widget_changed()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var created = await h.AddWidgetAsync(Ordered("column", new { order = new { series = new[] { "Well", "Piped" } } }));
+        var versions = await VersionCountAsync(h);
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(created.GetProperty("id").GetGuid()), new
+        {
+            config = new { indicator = BySource, measure = "value", groupBy = "municipality", seriesBy = "water_source", display = new { order = new { series = new[] { "Piped", "Well" } } } },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(versions + 1, await VersionCountAsync(h));
+    }
+
+    [Fact]
+    public async Task A_widget_moved_to_another_dashboard_keeps_its_own_order_byte_for_byte()
+    {
+        await using var h = await PublishedBySourceAsync();
+        var cruces = await h.InsertDashboardAsync("Cruces");
+        var created = await h.AddWidgetAsync(Ordered("column", new { order = new { group = new[] { "Palmira", "Cali" }, series = new[] { "Well", "Piped" } } }));
+        var id = created.GetProperty("id").GetGuid();
+        var before = await TestData.ScalarAsync<string>(h.Db, "SELECT config::text FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id));
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { dashboardId = cruces });
+        var moved = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(created.GetProperty("config").GetRawText(), moved.GetProperty("config").GetRawText());
+        Assert.Equal(before, await TestData.ScalarAsync<string>(h.Db, "SELECT config::text FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id)));
+        var onCruces = (await h.GetWidgetsAsync(cruces))[0];
+        Assert.Equal(["Well", "Piped"], IndicatorsHarness.Strings(onCruces.GetProperty("config").GetProperty("display").GetProperty("order").GetProperty("series")));
     }
 }

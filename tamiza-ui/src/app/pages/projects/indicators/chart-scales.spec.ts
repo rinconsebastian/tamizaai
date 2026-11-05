@@ -9,6 +9,7 @@ import {
   ringsPath,
   sequentialStep,
   slicePath,
+  stepPath,
   truncate,
 } from './chart-scales';
 
@@ -72,6 +73,15 @@ describe('chart scales', () => {
     it('writes a line through points', () => {
       expect(linePath([{ x: 0, y: 10 }, { x: 5.123, y: 20 }])).toBe('M0 10 L5.12 20');
       expect(linePath([])).toBe('');
+    });
+
+    it('writes a line that steps, each value holding until the next point and the last point ending it (add-chart-annotations, design D6)', () => {
+      const points = [{ x: 10, y: 20 }, { x: 40.123, y: 50 }, { x: 70, y: 5 }];
+
+      expect(stepPath(points)).toBe('M10 20 H40.12 V50 H70 V5');
+      expect(stepPath(points).match(/[MHV]/g)).toEqual(['M', 'H', 'V', 'H', 'V']);
+      expect(stepPath([{ x: 3, y: 4 }])).toBe('M3 4');
+      expect(stepPath([])).toBe('');
     });
 
     it('closes each ring of a polygon', () => {

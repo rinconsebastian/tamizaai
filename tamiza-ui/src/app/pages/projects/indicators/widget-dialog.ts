@@ -1,5 +1,5 @@
 import { DIALOG_DATA, Dialog, DialogRef } from '@angular/cdk/dialog';
-import { Component, ElementRef, Injector, Signal, afterNextRender, computed, inject, signal } from '@angular/core';
+import { Component, Directive, ElementRef, Injector, Signal, afterNextRender, computed, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { Observable, catchError, map, of, switchMap, tap, timer } from 'rxjs';
@@ -17,19 +17,32 @@ import {
   IndicatorsService,
   LikertSide,
   LikertStep,
+  LineInterpolation,
+  ReferenceLineKind,
   ScaleId,
   SeriesLayout,
   Widget,
   WidgetConfig,
+  WidgetCaption,
   WidgetDisplay,
+  WidgetReferenceLine,
   boxOrientations,
   WidgetPatch,
   chartTypes,
   emptyConfig,
   hasSeries,
   maxBuckets,
+  defaultBuckets,
+  maxCaptionLength,
+  maxColumnLabel,
   maxDashboardFilters,
   maxFilters,
+  maxFootnoteLength,
+  maxReferenceLineLabel,
+  maxReferenceLines,
+  maxSubtitleLength,
+  maxWidgetUnitLength,
+  maxWidgetLabels,
   maxTitleLength,
   maxLikertSide,
   maxLikertValues,
@@ -38,6 +51,7 @@ import {
   minLikertValues,
   needsGroup,
   needsSeries,
+  lineInterpolations,
   paletteSize,
   scaleIds,
   seriesLayouts,
@@ -52,7 +66,10 @@ import { Alert, ApiLang, Button, Disclosure, FormField, Input, markApiText } fro
 import { DataFilterDialog, DataFilterDialogData, DataFilterDialogResult } from '../data-filter-dialog';
 import { describeFilter, normalizeFilter } from '../data-view';
 import { FilterValues, activeFilters } from './dashboard-filters';
-import { WidgetView, queryFor, savedConfig } from './widget-view';
+import { columnLabels, textsCrowd } from './format';
+import { defaultSize } from './grid-layout';
+import { ValueOrderEditor } from './value-order-editor';
+import { ShownValues, WidgetView, offersDataLabels, queryFor, referenceKindsFor, savedConfig } from './widget-view';
 import { naturalCompare } from './chart-scales';
 import { colorsOf, defaultScale, paletteColor, rampGradient } from './chart-colors';
 
@@ -80,6 +97,80 @@ export interface WidgetDialogData {
 /** The widget saved, or `gone` when its dashboard no longer exists (`dashboards.notFound`), for the page to catch up. */
 export type WidgetDialogResult = Widget | { gone: true };
 
+/**
+ * A widget's text as it is saved (add-widget-context, design D11): control characters, line breaks included, become a space and the
+ * ends are trimmed, so a stored text is saved as it is and a pasted line break never reaches the server.
+ */
+function singleLine(text: string): string {
+  return text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
+}
+
+/**
+ * Moves the decimal point of a plain decimal text `places` digits to the right (a negative number moves it left) by working on the
+ * digits, never by multiplying or dividing: 33.3 typed as a percent is 0.333, not 0.33299999999999996 (add-chart-annotations, design D8).
+ * A comma is read as a point. Null when the text is not a number.
+ */
+function shiftDecimal(text: string, places: number): string | null {
+  const match = /^([+-]?)(\d*)(?:[.,](\d*))?$/.exec(text.trim());
+  if (!match || (match[2] === '' && !match[3])) {
+    return null;
+  }
+  const [, sign, whole, fraction = ''] = match;
+  const digits = whole + fraction;
+  const point = whole.length + places;
+  const padded = point < 0 ? '0'.repeat(-point) + digits : point > digits.length ? digits + '0'.repeat(point - digits.length) : digits;
+  const at = Math.max(0, point);
+  const left = padded.slice(0, at).replace(/^0+(?=\d)/, '') || '0';
+  const right = padded.slice(at).replace(/0+$/, '');
+  return `${sign === '-' ? '-' : ''}${left}${right ? '.' + right : ''}`;
+}
+
+/** The text of a saved value as the input shows it: a percent is typed as a percent (0.5 shows as 50), any other value as it is. */
+function valueText(value: number, percent: boolean): string {
+  let text = String(value);
+  const exponent = /^([+-]?\d+(?:\.\d+)?)e([+-]\d+)$/i.exec(text);
+  if (exponent) {
+    text = shiftDecimal(exponent[1], Number(exponent[2])) ?? text;
+  }
+  return percent ? (shiftDecimal(text, 2) ?? text) : text;
+}
+
+/**
+ * A text such as 1.500 or 12,345 in a value that is not a percent: a single separator followed by exactly three digits, after a whole
+ * part that does not start with a zero. Some regions write a thousands separator there (1.500 is 1500 in es-CO) and others a decimal
+ * point (1.5), and a wrong guess would save a line a thousand times off, so the form asks for the number without a separator instead.
+ * A zero before the point (0.125), another number of digits (33.3, 1.5000) or a percent (33.333 is a share) is not ambiguous.
+ */
+function isAmbiguousSeparator(typed: string, percent: boolean): boolean {
+  return !percent && /^[+-]?[1-9]\d{0,2}[.,]\d{3}$/.test(typed.trim());
+}
+
+/** The number a typed text means, or null when it is empty, not a number or ambiguous. A percent (50, or 50%) is stored as the fraction (0.5). */
+function textValue(typed: string, percent: boolean): number | null {
+  const text = typed.trim().replace(/%$/, '');
+  if (isAmbiguousSeparator(text, percent)) {
+    return null;
+  }
+  const plain = percent ? shiftDecimal(text, -2) : shiftDecimal(text, 0);
+  const value = plain === null ? NaN : Number(plain);
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * A reference line as the form holds it (add-chart-annotations, design D8). `value` is the number the line saves; `typed` the text in
+ * its input once the member has typed there, so a saved number is shown, and kept as it is, until the input is edited.
+ */
+interface LineRow {
+  kind: ReferenceLineKind;
+  value: number | null;
+  typed: string | null;
+  /** Whether the input was in percent when `typed` was typed: after a change of units the text means something else, so the number is shown. */
+  typedPercent?: boolean;
+  label: string;
+}
+/** What the server refused in one reference line. */
+type LineProblems = Partial<Record<'kind' | 'value' | 'label', string>>;
+
 function sortKeyOf(sort: WidgetSort | null): string {
   return !sort ? '' : sort.by === 'value' ? 'value' : `column:${sort.column ?? ''}`;
 }
@@ -93,6 +184,9 @@ function ownComparison(type: string): 'text' | 'number' | null {
 export const previewDelayMs = 400;
 
 type Mode = 'measure' | 'ratio';
+/** How a widget's caption reads: the line it has (default), an own text, or no line (add-widget-context, design D3). */
+type CaptionMode = 'default' | 'text' | 'hidden';
+const captionModes: readonly CaptionMode[] = ['default', 'text', 'hidden'];
 type Problems = Partial<
   Record<
     | 'title'
@@ -114,7 +208,18 @@ type Problems = Partial<
     | 'scale'
     | 'color'
     | 'ramp'
-    | 'orientation',
+    | 'orientation'
+    | 'labels'
+    | 'subtitle'
+    | 'footnote'
+    | 'caption'
+    | 'captionText'
+    | 'unit'
+    | 'referenceLines'
+    | 'interpolation'
+    | 'dataLabels'
+    | 'groupOrder'
+    | 'seriesOrder',
     string
   >
 >;
@@ -143,9 +248,27 @@ const rampChoices: readonly (ScaleId | null)[] = [null, ...scaleIds];
  * the server refuses shows that refusal where the preview is, never the previous chart. An edited widget can move to another of the
  * project's dashboards (design D9 of add-multiple-dashboards).
  */
+/**
+ * The error state of a control of a reference line's row, which has no `tmz-form-field` around it: marks the control invalid and points
+ * it at the texts that describe it, as the field does (`aria-invalid`, `aria-describedby`).
+ */
+@Directive({ selector: '[tmzLineField]' })
+export class LineField {
+  readonly failed = input(false, { alias: 'tmzLineField' });
+  readonly describedBy = input<string | null>(null, { alias: 'tmzDescribedBy' });
+  private readonly control = inject(Input, { self: true });
+
+  constructor() {
+    effect(() => {
+      this.control.invalid.set(this.failed());
+      this.control.describedBy.set(this.describedBy());
+    });
+  }
+}
+
 @Component({
   selector: 'app-widget-dialog',
-  imports: [TranslocoDirective, Alert, ApiLang, Button, Disclosure, FormField, Input, WidgetView],
+  imports: [TranslocoDirective, Alert, ApiLang, Button, Disclosure, FormField, Input, LineField, ValueOrderEditor, WidgetView],
   template: `
     <form
       class="flex h-dvh w-screen flex-col gap-4 overflow-y-auto bg-neutral-primary-soft p-4 md:h-auto md:max-h-[calc(100dvh-2rem)] md:w-[min(46rem,calc(100vw-2rem))] lg:w-[min(64rem,calc(100vw-2rem))] md:rounded-base md:border md:border-default md:p-6 md:shadow-sm"
@@ -171,6 +294,10 @@ const rampChoices: readonly (ScaleId | null)[] = [null, ...scaleIds];
           <input tmzInput id="widgetTitle" autocomplete="off" [attr.maxlength]="maxTitleLength" [value]="title()" (input)="title.set($any($event.target).value)" data-testid="dialog-title" />
         </tmz-form-field>
       </div>
+
+      <tmz-form-field [label]="t('indicators.dialog.subtitle.label')" fieldId="widgetSubtitle" [error]="shown().subtitle" [hint]="t('indicators.dialog.subtitle.hint')">
+        <input tmzInput id="widgetSubtitle" autocomplete="off" [attr.maxlength]="maxSubtitleLength" [value]="subtitle()" (input)="setText('subtitle', $any($event.target).value)" data-testid="dialog-subtitle" />
+      </tmz-form-field>
 
       @if (offersDashboards()) {
         <div class="grid gap-4 sm:grid-cols-2">
@@ -354,7 +481,7 @@ const rampChoices: readonly (ScaleId | null)[] = [null, ...scaleIds];
                 }
               </div>
               <div class="min-w-0">
-                <input tmzInput [attr.id]="'tooltipLabel' + i" autocomplete="off" [attr.maxlength]="maxTooltipLabel" [attr.aria-label]="t('indicators.dialog.tooltip.label', { n: i + 1 })" [placeholder]="item.column || t('indicators.dialog.tooltip.labelHint')" [value]="item.label ?? ''" (input)="setTooltipLabel(i, $any($event.target).value)" data-testid="tooltip-label" />
+                <input tmzInput [attr.id]="'tooltipLabel' + i" autocomplete="off" [attr.maxlength]="maxTooltipLabel" [attr.aria-label]="t('indicators.dialog.tooltip.label', { n: i + 1 })" [placeholder]="item.column ? labelPlaceholder(item.column) : t('indicators.dialog.tooltip.labelHint')" [value]="item.label ?? ''" (input)="setTooltipLabel(i, $any($event.target).value)" data-testid="tooltip-label" />
                 @if (itemProblems()[i]?.label; as message) {
                   <p class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="tooltip-error">{{ message }}</p>
                 }
@@ -408,7 +535,7 @@ const rampChoices: readonly (ScaleId | null)[] = [null, ...scaleIds];
                   name="widgetLayout"
                   class="size-4 shrink-0"
                   [value]="option"
-                  [checked]="layout() === option"
+                  [checked]="chosenLayout() === option"
                   [disabled]="layoutDisabled(option)"
                   (change)="setLayout(option)"
                   [attr.data-testid]="'dialog-layout-' + option"
@@ -529,6 +656,237 @@ const rampChoices: readonly (ScaleId | null)[] = [null, ...scaleIds];
         </fieldset>
       }
 
+      @if (offersLines()) {
+        <!-- Reference lines (add-chart-annotations, design D8): dashed lines across the chart to compare its marks with. The row's kinds are those the widget takes. -->
+        <fieldset class="flex min-w-0 flex-col gap-3" [attr.aria-describedby]="shown().referenceLines ? 'widgetLines-error' : null" data-testid="dialog-reference-lines">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.referenceLines.legend') }}</legend>
+          <p class="-mt-2 text-sm text-body">{{ t('indicators.dialog.referenceLines.help', { max: maxReferenceLines }) }}</p>
+          @for (row of referenceLines(); track $index; let i = $index) {
+            <div class="grid gap-2 rounded-base border border-default p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" data-testid="reference-line">
+              <div class="min-w-0">
+                <select tmzInput [tmzLineField]="!!lineProblems()[i]?.kind" [tmzDescribedBy]="kindDescribedBy(i)" [attr.id]="'referenceKind' + i" [attr.aria-label]="t('indicators.dialog.referenceLines.kind', { n: i + 1 })" (change)="setLineKind(i, $any($event.target).value)" data-testid="reference-kind">
+                  @for (kind of kindOptions(i); track kind) {
+                    <option [value]="kind" [selected]="kind === row.kind">{{ t('indicators.dialog.referenceLines.kinds.' + kind) }}</option>
+                  }
+                </select>
+                @if (lineProblems()[i]?.kind; as message) {
+                  <p [attr.id]="'referenceKind' + i + '-error'" class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="reference-error">{{ message }}</p>
+                }
+              </div>
+              <div class="min-w-0">
+                @if (row.kind === 'value') {
+                  <div class="flex items-center gap-2">
+                    <input
+                      tmzInput
+                      [tmzLineField]="valueFailed(i)"
+                      [tmzDescribedBy]="valueDescribedBy(i)"
+                      class="min-w-0 flex-1"
+                      [attr.id]="'referenceValue' + i"
+                      inputmode="decimal"
+                      autocomplete="off"
+                      [attr.aria-label]="t('indicators.dialog.referenceLines.value', { n: i + 1 })"
+                      [value]="valueOf(row)"
+                      (input)="setLineValue(i, $any($event.target).value)"
+                      data-testid="reference-value"
+                    />
+                    @if (valueUnit()) {
+                      <span [attr.id]="'referenceValue' + i + '-unit'" class="shrink-0 text-sm text-body" data-testid="reference-unit">{{ valueUnit() }}</span>
+                    }
+                  </div>
+                  @if (lineProblems()[i]?.value; as message) {
+                    <p [attr.id]="'referenceValue' + i + '-error'" class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="reference-error">{{ message }}</p>
+                  }
+                }
+              </div>
+              <div class="flex items-start sm:justify-end">
+                <button type="button" class="inline-flex min-h-10 min-w-10 items-center justify-center rounded-base text-body hover:bg-neutral-tertiary-medium hover:text-heading focus:outline-none focus:ring-4 focus:ring-neutral-tertiary" [attr.aria-label]="t('indicators.dialog.referenceLines.remove', { n: i + 1 })" (click)="removeLine(i)" data-testid="reference-remove">
+                  <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                </button>
+              </div>
+              <div class="min-w-0 sm:col-span-3">
+                <input
+                  tmzInput
+                  [tmzLineField]="!!lineProblems()[i]?.label"
+                  [tmzDescribedBy]="lineProblems()[i]?.label ? 'referenceLabel' + i + '-error' : null"
+                  [attr.id]="'referenceLabel' + i"
+                  autocomplete="off"
+                  [attr.maxlength]="maxReferenceLineLabel"
+                  [attr.aria-label]="t('indicators.dialog.referenceLines.label', { n: i + 1 })"
+                  [placeholder]="t('indicators.referenceLines.kinds.' + row.kind)"
+                  [value]="row.label"
+                  (input)="setLineLabel(i, $any($event.target).value)"
+                  data-testid="reference-label"
+                />
+                @if (lineProblems()[i]?.label; as message) {
+                  <p [attr.id]="'referenceLabel' + i + '-error'" class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="reference-error">{{ message }}</p>
+                }
+                <p [attr.id]="'referenceHelp' + i" class="mt-1 text-sm text-body" data-testid="reference-help">{{ t('indicators.dialog.referenceLines.kindHelp.' + row.kind, { units: valueIsPercent() ? t('indicators.dialog.referenceLines.unitsPercent') : t('indicators.dialog.referenceLines.unitsPlain') }) }}</p>
+                @if (row.kind === 'overall') {
+                  <p [attr.id]="'referenceCaution' + i" class="mt-1 text-sm text-body" data-testid="reference-overall-help">{{ t('indicators.dialog.referenceLines.overallCaution') }}</p>
+                }
+              </div>
+            </div>
+          }
+          @if (shown().referenceLines; as message) {
+            <p id="widgetLines-error" class="text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="reference-list-error">{{ message }}</p>
+          }
+          <div class="flex flex-wrap items-center gap-3">
+            <button tmzButton variant="secondary" type="button" [disabled]="referenceLines().length >= maxReferenceLines" (click)="addLine()" data-testid="reference-add">{{ t('indicators.dialog.referenceLines.add') }}</button>
+            @if (referenceLines().length >= maxReferenceLines) {
+              <span class="text-sm text-body" data-testid="reference-full">{{ t('indicators.dialog.referenceLines.full', { max: maxReferenceLines }) }}</span>
+            }
+          </div>
+        </fieldset>
+      }
+
+      @if (offersSteps()) {
+        <fieldset class="min-w-0" [attr.aria-describedby]="shown().interpolation ? 'widgetInterpolation-error' : null" data-testid="dialog-interpolation">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.interpolation.legend') }}</legend>
+          <div class="flex flex-wrap gap-x-6 gap-y-1">
+            @for (option of interpolations; track option) {
+              <label class="flex min-h-10 cursor-pointer items-center gap-2 text-sm text-heading">
+                <input
+                  type="radio"
+                  name="widgetInterpolation"
+                  class="size-4 shrink-0"
+                  [value]="option"
+                  [checked]="chosenInterpolation() === option"
+                  (change)="setInterpolation(option)"
+                  [attr.data-testid]="'dialog-interpolation-' + option"
+                />
+                {{ t('indicators.dialog.interpolation.' + option) }}
+              </label>
+            }
+          </div>
+          <p class="mt-1 text-sm text-body">{{ t('indicators.dialog.interpolation.help') }}</p>
+          @if (shown().interpolation; as message) {
+            <p id="widgetInterpolation-error" class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
+          }
+        </fieldset>
+      }
+
+      @if (offersDataLabels()) {
+        <div data-testid="dialog-data-labels-group">
+          <label class="flex min-h-10 cursor-pointer items-start gap-3 py-1 text-sm">
+            <input
+              type="checkbox"
+              class="mt-0.5 size-4 shrink-0"
+              [checked]="dataLabels() === true"
+              (change)="setDataLabels($any($event.target).checked)"
+              data-testid="dialog-data-labels"
+            />
+            <span class="min-w-0 flex-1 break-words text-heading">{{ t('indicators.dialog.dataLabels.label') }}</span>
+          </label>
+          <p class="text-sm text-body">{{ t('indicators.dialog.dataLabels.help') }}</p>
+          @if (shown().dataLabels; as message) {
+            <p class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
+          }
+        </div>
+      }
+
+      @if (droppedNote(); as reason) {
+        <!-- What the form holds and the widget does not take: kept here, not saved, back when the choice is undone (design D8). -->
+        <p class="text-sm text-body" role="status" data-testid="dialog-annotations-note">{{ t('indicators.dialog.referenceLines.dropped.' + reason) }}</p>
+      }
+      @if (droppedLabels()) {
+        <p class="text-sm text-body" role="status" data-testid="dialog-data-labels-note">{{ t('indicators.dialog.dataLabels.dropped') }}</p>
+      }
+
+      <!-- The words around the widget (add-widget-context, design D11): its caption, unit and footnote, and the button of the indicator's description. -->
+      <fieldset class="flex min-w-0 flex-col gap-4" data-testid="dialog-context">
+        <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.context.legend') }}</legend>
+        <p class="-mt-2 text-sm text-body">{{ t('indicators.dialog.context.help') }}</p>
+
+        <fieldset class="min-w-0" [attr.aria-describedby]="shown().caption ? 'widgetCaption-error' : null" data-testid="dialog-caption">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.context.caption.legend') }}</legend>
+          <p class="mb-1 text-sm text-body">{{ t('indicators.dialog.context.caption.help') }}</p>
+          <div class="flex flex-wrap gap-x-6 gap-y-1">
+            @for (option of captionModes; track option) {
+              <label class="flex min-h-10 cursor-pointer items-center gap-2 text-sm text-heading">
+                <input
+                  type="radio"
+                  name="widgetCaptionMode"
+                  class="size-4 shrink-0"
+                  [value]="option"
+                  [checked]="captionMode() === option"
+                  (change)="setCaptionMode(option)"
+                  [attr.data-testid]="'dialog-caption-' + option"
+                />
+                {{ t('indicators.dialog.context.caption.' + option) }}
+              </label>
+            }
+          </div>
+          @if (shown().caption; as message) {
+            <p id="widgetCaption-error" class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
+          }
+          @if (captionMode() === 'text') {
+            <tmz-form-field class="mt-2" [label]="t('indicators.dialog.context.caption.textLabel')" fieldId="widgetCaptionText" [error]="shown().captionText" [hint]="captionHint(t)">
+              <input tmzInput id="widgetCaptionText" autocomplete="off" [attr.maxlength]="maxCaptionLength" [value]="captionText()" (input)="setText('captionText', $any($event.target).value)" data-testid="dialog-caption-own" />
+            </tmz-form-field>
+          }
+        </fieldset>
+
+        <tmz-form-field [label]="t('indicators.dialog.context.unit.label')" fieldId="widgetUnit" [error]="shown().unit" [hint]="unitHint(t)">
+          <input tmzInput id="widgetUnit" autocomplete="off" [attr.maxlength]="maxUnitLength" [value]="unit()" (input)="setText('unit', $any($event.target).value)" data-testid="dialog-unit" />
+        </tmz-form-field>
+
+        <tmz-form-field [label]="t('indicators.dialog.context.footnote.label')" fieldId="widgetFootnote" [error]="shown().footnote" [hint]="t('indicators.dialog.context.footnote.hint')">
+          <textarea tmzInput id="widgetFootnote" rows="2" [attr.maxlength]="maxFootnoteLength" [value]="footnote()" (input)="setText('footnote', $any($event.target).value)" data-testid="dialog-footnote"></textarea>
+        </tmz-form-field>
+
+        <div>
+          <label class="flex min-h-10 items-start gap-3 py-1 text-sm" [class.cursor-pointer]="descriptionAvailable()" [class.opacity-60]="!descriptionAvailable()">
+            <input
+              type="checkbox"
+              class="mt-0.5 size-4 shrink-0"
+              [checked]="showDescription()"
+              [disabled]="!descriptionAvailable()"
+              (change)="showDescription.set($any($event.target).checked)"
+              data-testid="dialog-show-description"
+            />
+            <span class="min-w-0 flex-1 break-words text-heading">{{ t('indicators.dialog.context.description.label') }}</span>
+          </label>
+          <p class="text-sm text-body" data-testid="dialog-show-description-help">
+            {{ hasDescription() ? t('indicators.dialog.context.description.help') : t('indicators.dialog.context.description.none') }}
+          </p>
+        </div>
+
+        @if (crowded()) {
+          <!-- A hint, not a refusal: the texts take room from the chart, and the tile keeps its size. -->
+          <tmz-alert tone="warning" data-testid="dialog-context-warning">{{ t(chartType() === 'stat' ? 'indicators.dialog.context.crowdedFigure' : 'indicators.dialog.context.crowded') }}</tmz-alert>
+        }
+      </fieldset>
+
+      @if (labelColumns().length) {
+        <!-- The names this widget gives its columns (add-indicator-column-metadata, design D9); closed until it has some of its own. -->
+        <tmz-disclosure [heading]="t('indicators.dialog.labels.heading')" [open]="startsWithLabels || hasLabelProblems()" data-testid="dialog-labels">
+          <fieldset class="flex min-w-0 flex-col gap-3" [attr.aria-describedby]="shown().labels ? 'widgetLabels-error' : null">
+            <legend class="sr-only">{{ t('indicators.dialog.labels.heading') }}</legend>
+            <p class="text-sm text-body">{{ t('indicators.dialog.labels.help', { max: maxWidgetLabels }) }}</p>
+            <div class="grid gap-4 sm:grid-cols-2">
+              @for (column of labelColumns(); track column) {
+                <tmz-form-field [label]="column" [fieldId]="'widgetLabel-' + column" [error]="labelProblems()[column]">
+                  <input
+                    tmzInput
+                    [id]="'widgetLabel-' + column"
+                    autocomplete="off"
+                    [attr.maxlength]="maxColumnLabel"
+                    [placeholder]="labelPlaceholder(column)"
+                    [value]="labels()[column] ?? ''"
+                    [attr.data-column]="column"
+                    (input)="setLabel(column, $any($event.target).value)"
+                    data-testid="dialog-label"
+                  />
+                </tmz-form-field>
+              }
+            </div>
+            @if (shown().labels; as message) {
+              <p id="widgetLabels-error" class="text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="labels-error">{{ message }}</p>
+            }
+          </fieldset>
+        </tmz-disclosure>
+      }
+
       @if (chartType() === 'pyramid') {
         <fieldset class="flex flex-col gap-3" data-testid="dialog-pyramid">
           <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.pyramid.legend') }}</legend>
@@ -598,6 +956,65 @@ const rampChoices: readonly (ScaleId | null)[] = [null, ...scaleIds];
         </fieldset>
       }
 
+      @if (offersGroupOrder() || offersSeriesOrder()) {
+        <fieldset class="flex min-w-0 flex-col gap-4" data-testid="dialog-order">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.order.legend') }}</legend>
+          <p class="-mt-2 text-sm text-body">{{ t('indicators.dialog.order.help') }}</p>
+          @if (offersGroupOrder()) {
+            <div class="flex min-w-0 flex-col gap-2" data-testid="dialog-order-group">
+              <p class="text-sm font-medium text-heading">{{ t('indicators.dialog.order.group', { column: groupBy() }) }}</p>
+              @if (groupOrderSorted()) {
+                <p class="text-sm text-body" data-testid="order-sorted">{{ t(chartType() === 'boxplot' ? 'indicators.dialog.order.sortedBoxes' : 'indicators.dialog.order.sorted') }}</p>
+              } @else {
+                <div class="flex flex-wrap gap-x-6 gap-y-1">
+                  <label class="flex min-h-10 cursor-pointer items-center gap-2 text-sm text-heading">
+                    <input type="radio" name="widgetGroupOrder" class="size-4 shrink-0" [checked]="groupOrder() === null" (change)="chooseOrder('group', false)" data-testid="dialog-order-group-default" />
+                    {{ t('indicators.dialog.order.default.' + groupOrderDefault()) }}
+                  </label>
+                  <label class="flex min-h-10 cursor-pointer items-center gap-2 text-sm text-heading">
+                    <input type="radio" name="widgetGroupOrder" class="size-4 shrink-0" [checked]="groupOrder() !== null" (change)="chooseOrder('group', true)" data-testid="dialog-order-group-own" />
+                    {{ t('indicators.dialog.order.own') }}
+                  </label>
+                </div>
+                @if (groupOrder(); as values) {
+                  <app-value-order-editor [values]="values" [shown]="valuesNow()?.groups ?? null" [offered]="valuesNow()?.groups ?? []" (changed)="setOrder('group', $event)" testId="order-editor-group" />
+                }
+                @if (shown().groupOrder; as message) {
+                  <p class="text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
+                }
+                @if (groupOrder() !== null && chartType() === 'pie') {
+                  <p class="text-sm text-body" data-testid="order-colors">{{ t('indicators.dialog.order.colors') }}</p>
+                }
+              }
+            </div>
+          }
+          @if (offersSeriesOrder()) {
+            <div class="flex min-w-0 flex-col gap-2" data-testid="dialog-order-series">
+              <p class="text-sm font-medium text-heading">{{ t('indicators.dialog.order.series', { column: seriesBy() }) }}</p>
+              <div class="flex flex-wrap gap-x-6 gap-y-1">
+                <label class="flex min-h-10 cursor-pointer items-center gap-2 text-sm text-heading">
+                  <input type="radio" name="widgetSeriesOrder" class="size-4 shrink-0" [checked]="seriesOrder() === null" (change)="chooseOrder('series', false)" data-testid="dialog-order-series-default" />
+                  {{ t('indicators.dialog.order.default.' + seriesOrderDefault()) }}
+                </label>
+                <label class="flex min-h-10 cursor-pointer items-center gap-2 text-sm text-heading">
+                  <input type="radio" name="widgetSeriesOrder" class="size-4 shrink-0" [checked]="seriesOrder() !== null" (change)="chooseOrder('series', true)" data-testid="dialog-order-series-own" />
+                  {{ t('indicators.dialog.order.own') }}
+                </label>
+              </div>
+              @if (seriesOrder(); as values) {
+                <app-value-order-editor [values]="values" [shown]="valuesNow()?.series ?? null" [offered]="valuesNow()?.series ?? []" (changed)="setOrder('series', $event)" testId="order-editor-series" />
+              }
+              @if (shown().seriesOrder; as message) {
+                <p class="text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
+              }
+              @if (seriesOrder() !== null) {
+                <p class="text-sm text-body" data-testid="order-colors">{{ t('indicators.dialog.order.colors') }}</p>
+              }
+            </div>
+          }
+        </fieldset>
+      }
+
       <tmz-disclosure [heading]="t('indicators.dialog.filtersCount', { count: filters().length })" [open]="startsWithFilters" data-testid="dialog-filters">
         @if (catalog()?.published) {
           @if (filters().length) {
@@ -659,17 +1076,25 @@ const rampChoices: readonly (ScaleId | null)[] = [null, ...scaleIds];
 
       <section aria-labelledby="widgetPreviewTitle" class="lg:sticky lg:top-0 lg:self-start">
         <h3 id="widgetPreviewTitle" class="mb-2 text-sm font-medium text-heading">{{ t('indicators.dialog.preview') }}</h3>
-        <div class="rounded-base border border-default p-3" [class]="chartType() === 'stat' ? 'h-40' : 'h-72'" data-testid="dialog-preview">
-          <app-widget-view
-            [projectId]="data.projectId"
-            [chartType]="chartType()"
-            [config]="previewConfig()"
-            [indicator]="entry()"
-            [debounceMs]="previewDelayMs"
-            [placeholder]="t('indicators.dialog.previewIncomplete')"
-            [dashboardFilters]="previewFilters()"
-            [colors]="data.colors"
-          />
+        <div class="flex flex-col gap-2 rounded-base border border-default p-3" [class]="chartType() === 'stat' ? 'h-40' : 'h-72'" data-testid="dialog-preview">
+          <!-- The subtitle sits in a tile's header, which the preview does not draw; the footnote is the widget's own. -->
+          @if (draftSubtitle(); as subtitle) {
+            <p class="shrink-0 text-xs text-body" [class.line-clamp-1]="tileRows() <= 2" [class.line-clamp-2]="tileRows() > 2" [attr.title]="subtitle" data-testid="dialog-preview-subtitle">{{ subtitle }}</p>
+          }
+          <div class="min-h-0 flex-1">
+            <app-widget-view
+              [projectId]="data.projectId"
+              [chartType]="chartType()"
+              [config]="previewConfig()"
+              [indicator]="entry()"
+              [debounceMs]="previewDelayMs"
+              [placeholder]="t('indicators.dialog.previewIncomplete')"
+              [dashboardFilters]="previewFilters()"
+              [colors]="data.colors"
+              [tileRows]="tileRows()"
+              (valuesShown)="valuesNow.set($event)"
+            />
+          </div>
         </div>
         @if (previewFilteredBy().length) {
           <p class="mt-2 text-xs text-body" data-testid="dialog-preview-filtered">{{ t('indicators.dialog.previewFiltered', { names: previewFilteredBy().join(', ') }) }}</p>
@@ -705,10 +1130,20 @@ export class WidgetDialog {
   protected readonly maxTitleLength = maxTitleLength;
   protected readonly maxTooltipItems = maxTooltipItems;
   protected readonly maxTooltipLabel = maxTooltipLabel;
+  protected readonly maxColumnLabel = maxColumnLabel;
+  protected readonly maxWidgetLabels = maxWidgetLabels;
   protected readonly tooltipFormats = tooltipFormats;
   protected readonly previewDelayMs = previewDelayMs;
   protected readonly layouts = seriesLayouts;
   protected readonly scaleSides = scaleSides;
+  protected readonly maxSubtitleLength = maxSubtitleLength;
+  protected readonly maxFootnoteLength = maxFootnoteLength;
+  protected readonly maxCaptionLength = maxCaptionLength;
+  protected readonly maxUnitLength = maxWidgetUnitLength;
+  protected readonly captionModes = captionModes;
+  protected readonly maxReferenceLines = maxReferenceLines;
+  protected readonly maxReferenceLineLabel = maxReferenceLineLabel;
+  protected readonly interpolations = lineInterpolations;
 
   private readonly start = this.data.widget?.config ?? emptyConfig();
   /** The filters start open only for a widget that already has some; adding the first one never closes or reopens it. */
@@ -756,8 +1191,16 @@ export class WidgetDialog {
   protected readonly basemap = signal<BasemapKind | null>(this.start.basemap ?? null);
   /** The series column, '' for none (design D7). Changing the indicator or the series column resets what depends on it. */
   protected readonly seriesBy = signal(this.start.seriesBy ?? '');
-  /** The layout of a bar or column chart with a series; grouped is the default. */
-  protected readonly layout = signal<SeriesLayout>(this.start.layout ?? 'grouped');
+  /**
+   * A widget saved with no layout and a series (the API allows it) keeps it that way: it is read as grouped, but the form saves what it
+   * read until the member picks a layout, as `setOrientation` keeps a box plot's missing orientation, so a form saved unchanged sends the
+   * config it was opened with and makes no version. A new widget, or one saved with a layout, saves the layout shown.
+   */
+  private readonly layoutUnset = !!this.data.widget && this.start.layout == null;
+  /** The layout of a bar or column chart with a series: null for one saved with none, which is drawn as grouped. */
+  protected readonly layout = signal<SeriesLayout | null>(this.layoutUnset ? null : (this.start.layout ?? 'grouped'));
+  /** The layout the radios show as chosen. */
+  protected readonly chosenLayout = computed<SeriesLayout>(() => this.layout() ?? 'grouped');
   /** The two sides of a population pyramid, as typed or chosen. */
   protected readonly pyramidLeft = signal(this.start.pyramid?.left ?? '');
   protected readonly pyramidRight = signal(this.start.pyramid?.right ?? '');
@@ -784,6 +1227,69 @@ export class WidgetDialog {
   protected readonly orientation = signal<BoxOrientation | null>(this.start.display?.orientation ?? null);
   protected readonly orientations = boxOrientations;
   protected readonly chosenOrientation = computed(() => this.orientation() ?? 'vertical');
+  /**
+   * The names the widget gives its columns, keyed by the column, as the form holds them: the saved ones to start with, then what is
+   * typed. A column the widget does not show keeps its name here, so changing the chart type or the plot back and forth loses none.
+   */
+  protected readonly labels = signal<Record<string, string>>({ ...(this.start.display?.labels ?? {}) });
+  /** The group starts open only for a widget that already has names of its own. */
+  protected readonly startsWithLabels = Object.values(this.start.display?.labels ?? {}).some((label) => label.trim());
+  /** A label field was typed in: from then on the draft holds only the labels of the columns the widget shows (design D9). */
+  private readonly labelsTyped = signal(false);
+  /** The server's refusals of a label, by column. */
+  protected readonly labelProblems = signal<Record<string, string>>({});
+  protected readonly hasLabelProblems = computed(() => Object.keys(this.labelProblems()).length > 0 || !!this.serverFieldErrors().labels);
+  /**
+   * The widget's texts as the form holds them (add-widget-context, design D11): seeded from the saved display, so a widget that already
+   * has them (set through the API or MCP) saves them again when the form is saved unchanged. Unset is an empty text, the default
+   * caption and no description button.
+   */
+  protected readonly subtitle = signal(this.start.display?.subtitle ?? '');
+  protected readonly footnote = signal(this.start.display?.footnote ?? '');
+  protected readonly captionMode = signal<CaptionMode>(
+    this.start.display?.caption?.hidden ? 'hidden' : this.start.display?.caption?.text ? 'text' : 'default',
+  );
+  protected readonly captionText = signal(this.start.display?.caption?.text ?? '');
+  protected readonly unit = signal(this.start.display?.unit ?? '');
+  protected readonly showDescription = signal(this.start.display?.showDescription === true);
+  /**
+   * The chart annotations (add-chart-annotations, design D8): the reference lines as rows, seeded from the saved display, and the two
+   * settings with their default stored only when the widget already had it saved (`setInterpolation`, `setDataLabels`), so a form
+   * saved unchanged sends what it read. `savedConfig` keeps what the kind, the series and the layout take; the rest stays here while the
+   * member changes them back and forth, as a color does.
+   */
+  protected readonly referenceLines = signal<LineRow[]>(
+    (this.start.display?.referenceLines ?? []).filter((line) => !!line).map((line) => ({ kind: line.kind, value: line.value ?? null, typed: null, label: line.label ?? '' })),
+  );
+  protected readonly interpolation = signal<LineInterpolation | null>(this.start.display?.interpolation ?? null);
+  protected readonly dataLabels = signal<boolean | null>(this.start.display?.dataLabels ?? null);
+  /**
+   * The widget's own order of its groups and of its series (add-declared-category-order, design D9), or null for the default: its
+   * indicator's order, else the chart's. Kept while the member changes the kind or the sort, as a color is: `savedConfig` keeps them only
+   * where the kind, the columns and the sort take them.
+   */
+  protected readonly groupOrder = signal<string[] | null>(this.start.display?.order?.group ? [...this.start.display.order.group] : null);
+  protected readonly seriesOrder = signal<string[] | null>(this.start.display?.order?.series ? [...this.start.display.order.series] : null);
+  /** The values the preview draws, in the order it draws them: what an own order is seeded from and what the editors offer. */
+  protected readonly valuesNow = signal<ShownValues | null>(null);
+  /** What the server refused in each reference line, by its row. */
+  protected readonly lineProblems = signal<Record<number, LineProblems>>({});
+  protected readonly chosenInterpolation = computed<LineInterpolation>(() => this.interpolation() ?? 'linear');
+  /** The indicator has a description the button could open. */
+  protected readonly hasDescription = computed(() => !!this.entry()?.description?.trim());
+  /**
+   * The option is unavailable while the indicator has no description. A widget saved with the option on for an indicator that has none
+   * (the description was removed since) can still turn it off.
+   */
+  protected readonly descriptionAvailable = computed(() => this.hasDescription() || this.showDescription());
+  /** The tile's size: the widget's own, or what its kind starts with when it is new (design D5). */
+  private readonly tile = computed(() => this.data.widget?.layout ?? defaultSize(this.chartType()));
+  /** The rows of that tile, which the texts of the preview are cut by as they are on the dashboard. */
+  protected readonly tileRows = computed(() => this.tile().h);
+  /** The subtitle as the draft saves it, or null: the preview shows it above the widget. */
+  protected readonly draftSubtitle = computed(() => singleLine(this.subtitle()) || null);
+  /** Whether the subtitle and footnote are likely to crowd the tile (design D5): a hint, never a refusal. */
+  protected readonly crowded = computed(() => textsCrowd(this.tile(), singleLine(this.subtitle()), singleLine(this.footnote())));
   /** A bar, column or line chart with no series, a histogram and a box plot take a color; any other chart takes its colors from its values. */
   protected readonly offersColor = computed(
     () => this.chartType() === 'histogram' || this.chartType() === 'boxplot' || (takesSeries(this.chartType()) && !this.seriesBy()),
@@ -854,8 +1360,38 @@ export class WidgetDialog {
   /** Bar, column and line widgets may have a series column; heat map, pyramid, Likert and cross table widgets need one. */
   protected readonly offersSeries = computed(() => hasSeries(this.chartType()));
   protected readonly requiresSeries = computed(() => needsSeries(this.chartType()));
+  /** Every kind with groups takes an order of them, once there is a group column (a stat tile, a histogram and a map list none). */
+  protected readonly offersGroupOrder = computed(() => !['stat', 'histogram', 'map'].includes(this.chartType()) && !!this.groupBy());
+  /** A sort, or an order by median, decides the order of the groups: an own order of them is off. */
+  protected readonly groupOrderSorted = computed(() => {
+    const type = this.chartType();
+    return ((type === 'bar' || type === 'column') && this.sortKey() !== '') || (type === 'boxplot' && this.sortKey() === 'value');
+  });
+  /** A pyramid's sides and a Likert scale set the order of their series, and the other kinds have none. */
+  protected readonly offersSeriesOrder = computed(() => ['bar', 'column', 'line', 'heatmap', 'crosstab'].includes(this.chartType()) && !!this.seriesBy());
+  /** What the default order is called: the indicator's, when it declares one for the column, else the chart's own. */
+  protected readonly groupOrderDefault = computed(() => this.defaultOrderOf(this.groupBy()));
+  protected readonly seriesOrderDefault = computed(() => this.defaultOrderOf(this.seriesBy()));
+  /** Values with no color kept take the palette's colors in the order of the series, and of a pie's slices (design D10). */
+  protected readonly orderRecolors = computed(() => this.chartType() === 'pie' || this.offersSeriesOrder());
   /** The layout is the choice of a bar or column chart that has a series. */
   protected readonly offersLayout = computed(() => (this.chartType() === 'bar' || this.chartType() === 'column') && !!this.seriesBy());
+  /** What the rules of the annotations read of the form: the series, the layout and whether it plots a ratio. */
+  private readonly annotationRules = computed(() => ({
+    seriesBy: this.seriesBy() || null,
+    layout: this.offersLayout() ? this.layout() : null,
+    ratio: this.mode() === 'ratio' ? { numerator: this.numerator(), denominator: this.denominator() } : null,
+  }));
+  /** The kinds of reference line the widget takes now (design D2, D8); a bar, column or line only. */
+  protected readonly lineKinds = computed(() => referenceKindsFor(this.chartType(), this.annotationRules()));
+  protected readonly offersLines = computed(() => this.lineKinds().length > 0);
+  /** Steps are the choice of a line chart. */
+  protected readonly offersSteps = computed(() => this.chartType() === 'line');
+  protected readonly offersDataLabels = computed(() => offersDataLabels(this.chartType(), this.annotationRules()));
+  /** A percent indicator, and the share of a 100% layout, take a value typed as a percent (50 for 0.5). */
+  protected readonly valueIsPercent = computed(() => this.entry()?.format === 'percent' || (this.offersLayout() && this.layout() === 'percent'));
+  /** The unit written beside a value: % for a percent, otherwise the widget's own unit, else the indicator's. */
+  protected readonly valueUnit = computed(() => (this.valueIsPercent() ? '%' : singleLine(this.unit()) || (this.entry()?.unit ?? '')));
 
   /** The table's columns, with any the widget names that the table no longer has kept so the form shows what is saved. */
   private columnsWith(names: readonly string[], current: readonly string[]): string[] {
@@ -900,6 +1436,45 @@ export class WidgetDialog {
     this.columnsWith(this.catalog()?.columns.filter((c) => c.type === 'text').map((c) => c.name) ?? [], [this.geometryColumn()]),
   );
 
+  /** The columns the widget shows and so offers a name for: its measure (when it names one) or its ratio's columns, its group column (not a stat tile's) and its series column. */
+  protected readonly labelColumns = computed<string[]>(() => {
+    const type = this.chartType();
+    const [first, second, group, series] = this.mode() === 'ratio' ? [this.numerator(), this.denominator(), this.groupBy(), this.seriesBy()] : [this.measure(), '', this.groupBy(), this.seriesBy()];
+    const shown = [first, second, type === 'stat' ? '' : group, hasSeries(type) ? series : ''];
+    return shown.filter((column, i) => column && shown.indexOf(column) === i);
+  });
+
+  /** The columns the widget named when it was opened, to tell that the member changed one (the chart type alone is not such a change). */
+  private readonly startColumns = JSON.stringify([
+    ...(this.start.ratio ? [this.start.ratio.numerator, this.start.ratio.denominator] : [this.start.measure ?? '']),
+    this.start.groupBy ?? '',
+    this.start.seriesBy ?? '',
+  ]);
+
+  /**
+   * The labels the draft holds. While the member has typed in no label field and has changed no column of the plot, they are the saved
+   * ones as they were, so a widget saved by an AI client with labels for columns it does not show saves its stored text again. From
+   * the first such change they are those of the columns the widget shows, so a replaced column loses its label and the form never passes
+   * the limit of labels (design D9). A blank label is none.
+   */
+  private draftLabels(): Record<string, string> | undefined {
+    const moved = this.labelsTyped() || JSON.stringify(this.queryColumnsForStart()) !== this.startColumns;
+    const shown = new Set(this.labelColumns());
+    const kept = Object.entries(this.labels()).filter(([column, label]) => label.trim() && (!moved || shown.has(column)));
+    return kept.length ? Object.fromEntries(kept) : undefined;
+  }
+
+  /** The columns of the plot in the order `startColumns` holds them. */
+  private queryColumnsForStart(): string[] {
+    const ratio = this.mode() === 'ratio';
+    return [...(ratio ? [this.numerator(), this.denominator()] : [this.measure()]), this.groupBy(), this.seriesBy()];
+  }
+
+  /** The name a field proposes for a column: its indicator's, else the column's own. */
+  protected labelPlaceholder(column: string): string {
+    return columnLabels(this.entry(), null)(column);
+  }
+
   /** What the form holds, whole: the tooltip items with their labels and formats, and the basemap. */
   private readonly formConfig = computed<WidgetConfig>(() => {
     const buckets = this.buckets().trim();
@@ -932,9 +1507,71 @@ export class WidgetDialog {
     const color = this.color();
     const ramp = this.ramp();
     const orientation = this.orientation();
-    return color === null && ramp === null && orientation === null
+    const labels = this.draftLabels();
+    const subtitle = singleLine(this.subtitle());
+    const footnote = singleLine(this.footnote());
+    const unit = singleLine(this.unit());
+    const captionText = singleLine(this.captionText());
+    const caption: WidgetCaption | null =
+      this.captionMode() === 'hidden' ? { hidden: true } : this.captionMode() === 'text' && captionText ? { text: captionText } : null;
+    const description = this.showDescription();
+    const lines = this.draftLines();
+    const interpolation = this.interpolation();
+    const dataLabels = this.dataLabels();
+    const groups = this.groupOrder();
+    const series = this.seriesOrder();
+    const order = groups?.length || series?.length ? { ...(groups?.length ? { group: [...groups] } : {}), ...(series?.length ? { series: [...series] } : {}) } : null;
+    return color === null &&
+      ramp === null &&
+      orientation === null &&
+      !labels &&
+      !subtitle &&
+      !footnote &&
+      !unit &&
+      !caption &&
+      !description &&
+      !lines.length &&
+      interpolation === null &&
+      dataLabels === null &&
+      !order
       ? {}
-      : { display: { ...(color !== null ? { color } : {}), ...(ramp !== null ? { ramp } : {}), ...(orientation !== null ? { orientation } : {}) } };
+      : {
+          display: {
+            ...(color !== null ? { color } : {}),
+            ...(ramp !== null ? { ramp } : {}),
+            ...(orientation !== null ? { orientation } : {}),
+            ...(labels ? { labels } : {}),
+            ...(subtitle ? { subtitle } : {}),
+            ...(footnote ? { footnote } : {}),
+            ...(caption ? { caption } : {}),
+            ...(unit ? { unit } : {}),
+            ...(description ? { showDescription: true as const } : {}),
+            ...(lines.length ? { referenceLines: lines } : {}),
+            ...(interpolation !== null ? { interpolation } : {}),
+            ...(dataLabels !== null ? { dataLabels } : {}),
+            ...(order ? { order } : {}),
+          },
+        };
+  }
+
+  /**
+   * The reference lines the draft holds (design D8): every row with a number where it needs one, in the member's order. `savedConfig`
+   * then keeps the kinds the widget takes. A fixed value with no valid number is not drawn or saved, and blocks saving (see `problems`).
+   */
+  private draftLines(): WidgetReferenceLine[] {
+    return this.referenceLines().flatMap((row): WidgetReferenceLine[] => {
+      if (row.kind === 'value' && row.value === null) {
+        return [];
+      }
+      const label = singleLine(row.label);
+      return [{ kind: row.kind, ...(row.kind === 'value' ? { value: row.value as number } : {}), ...(label ? { label } : {}) }];
+    });
+  }
+
+  /** The rows `savedConfig` keeps, by place in the form: the kinds the widget takes, with a number where a fixed value needs one. */
+  private keptRows(): number[] {
+    const kinds = this.lineKinds();
+    return this.referenceLines().flatMap((row, i) => (kinds.includes(row.kind) && !(row.kind === 'value' && row.value === null) ? [i] : []));
   }
 
   /** The scale to save: the values that are in it, in order. */
@@ -1054,6 +1691,13 @@ export class WidgetDialog {
         problems.scale = scale;
       }
     }
+    // A fixed value needs its number. The preview leaves the line out meanwhile (see `previewConfig`).
+    const kinds = this.lineKinds();
+    const unreadable = this.referenceLines().filter((row) => row.kind === 'value' && row.value === null && kinds.includes('value'));
+    if (unreadable.length) {
+      const ambiguous = unreadable.find((row) => !!row.typed && isAmbiguousSeparator(row.typed.trim().replace(/%$/, ''), this.valueIsPercent()));
+      problems.referenceLines = ambiguous ? t('indicators.dialog.referenceLines.errors.separator', { text: ambiguous.typed!.trim() }) : t('indicators.dialog.referenceLines.errors.value');
+    }
     return problems;
   });
 
@@ -1062,7 +1706,7 @@ export class WidgetDialog {
 
   /** The query to preview; null while the query part of the draft is incomplete. */
   protected readonly previewConfig = computed<WidgetConfig | null>(() => {
-    const { title: _title, ...query } = this.problems();
+    const { title: _title, referenceLines: _lines, ...query } = this.problems();
     return Object.keys(query).length ? null : this.draft();
   });
 
@@ -1221,7 +1865,7 @@ export class WidgetDialog {
     this.mode.set(value as Mode);
     // Stacked bars add their values, so a ratio goes with the grouped layout only.
     if (value === 'ratio') {
-      this.layout.set('grouped');
+      this.layout.set(this.layoutUnset ? null : 'grouped');
     }
     this.serverFieldErrors.set({});
   }
@@ -1241,7 +1885,7 @@ export class WidgetDialog {
   }
 
   protected setLayout(option: SeriesLayout): void {
-    this.layout.set(option);
+    this.layout.set(option === 'grouped' && this.layoutUnset ? null : option);
     this.serverFieldErrors.update(({ layout: _layout, ...others }) => others);
   }
 
@@ -1261,6 +1905,171 @@ export class WidgetDialog {
   protected setOrientation(orientation: BoxOrientation): void {
     this.orientation.set(orientation === 'vertical' && this.start.display?.orientation == null ? null : orientation);
     this.serverFieldErrors.update(({ orientation: _orientation, ...others }) => others);
+  }
+
+  /**
+   * Steps or straight segments. Straight is the default: picking it on a widget saved without a choice leaves it without one, as color 1
+   * does, so a form saved unchanged sends what it read. A display setting, so the preview redraws and nothing is asked again.
+   */
+  protected setInterpolation(value: LineInterpolation): void {
+    this.interpolation.set(value === 'linear' && this.start.display?.interpolation == null ? null : value);
+    this.serverFieldErrors.update(({ interpolation: _interpolation, ...others }) => others);
+  }
+
+  private defaultOrderOf(column: string): 'indicator' | 'chart' {
+    const meta = column ? this.entry()?.columns?.[column] : undefined;
+    return meta?.order?.length ? 'indicator' : 'chart';
+  }
+
+  /** Chooses the default order again (null) or an order of the widget's own, which starts as the order the preview draws now. */
+  protected chooseOrder(place: 'group' | 'series', own: boolean): void {
+    const current = (place === 'group' ? this.valuesNow()?.groups : this.valuesNow()?.series) ?? [];
+    this.setOrder(place, own ? [...current] : null);
+  }
+
+  protected setOrder(place: 'group' | 'series', values: string[] | null): void {
+    this.edited = true;
+    (place === 'group' ? this.groupOrder : this.seriesOrder).set(values);
+    this.serverFieldErrors.update(({ groupOrder, seriesOrder, ...others }) => (place === 'group' ? { ...others, ...(seriesOrder ? { seriesOrder } : {}) } : { ...others, ...(groupOrder ? { groupOrder } : {}) }));
+  }
+
+  /** Data labels. Off is the default: unchecking on a widget saved without the setting leaves it without one. */
+  protected setDataLabels(on: boolean): void {
+    this.dataLabels.set(on ? true : this.start.display?.dataLabels == null ? null : false);
+    this.serverFieldErrors.update(({ dataLabels: _dataLabels, ...others }) => others);
+  }
+
+  /** The kinds row `index` offers: those the widget takes (each of mean, median and overall once), and the row's own kind so its select shows it. */
+  protected kindOptions(index: number): ReferenceLineKind[] {
+    const rows = this.referenceLines();
+    const taken = new Set(rows.filter((_, i) => i !== index).map((row) => row.kind));
+    const own = rows[index]?.kind;
+    const offered = this.lineKinds().filter((kind) => kind === 'value' || !taken.has(kind));
+    return own && !offered.includes(own) ? [own, ...offered] : offered;
+  }
+
+  /** Adds a line of the first kind the widget takes that no line has, else a fixed value. At most `maxReferenceLines`. */
+  protected addLine(): void {
+    if (this.referenceLines().length >= maxReferenceLines) {
+      return;
+    }
+    this.edited = true;
+    const used = new Set(this.referenceLines().map((row) => row.kind));
+    const kind = this.lineKinds().find((candidate) => candidate !== 'value' && !used.has(candidate)) ?? 'value';
+    this.referenceLines.update((rows) => [...rows, { kind, value: null, typed: null, label: '' }]);
+    this.clearLineProblems();
+    // The new row is drawn after this: the keyboard goes to its kind select.
+    this.focusLine(this.referenceLines().length - 1);
+  }
+
+  protected removeLine(index: number): void {
+    this.edited = true;
+    this.referenceLines.update((rows) => rows.filter((_, i) => i !== index));
+    this.clearLineProblems();
+    // The button that was pressed is gone with its row: the keyboard goes to the kind select of the line that took its place, or of the one
+    // before it, and with no line left to the button that adds one.
+    this.focusLine(Math.min(index, this.referenceLines().length - 1));
+  }
+
+  /** Once the lines are drawn again, puts the keyboard on the kind select of row `index`, or on the button that adds a line when there is none. */
+  private focusLine(index: number): void {
+    afterNextRender(
+      () => {
+        const select = index >= 0 ? this.host.nativeElement.querySelector<HTMLElement>(`#referenceKind${index}`) : null;
+        (select ?? this.host.nativeElement.querySelector<HTMLElement>('[data-testid="reference-add"]'))?.focus();
+      },
+      { injector: this.injector },
+    );
+  }
+
+  protected setLineKind(index: number, kind: string): void {
+    this.updateLine(index, { kind: kind as ReferenceLineKind });
+  }
+
+  protected setLineLabel(index: number, label: string): void {
+    this.updateLine(index, { label });
+  }
+
+  /** The number typed for a fixed value; read in the units of the indicator, so a percent typed as 50 is saved as 0.5. */
+  protected setLineValue(index: number, typed: string): void {
+    const percent = this.valueIsPercent();
+    this.updateLine(index, { typed, typedPercent: percent, value: textValue(typed, percent) });
+  }
+
+  private updateLine(index: number, change: Partial<LineRow>): void {
+    this.referenceLines.update((rows) => rows.map((row, i) => (i === index ? { ...row, ...change } : row)));
+    this.lineProblems.update(({ [index]: _own, ...others }) => others);
+    this.serverFieldErrors.update(({ referenceLines: _lines, ...others }) => others);
+  }
+
+  private clearLineProblems(): void {
+    this.lineProblems.set({});
+    this.serverFieldErrors.update(({ referenceLines: _lines, ...others }) => others);
+  }
+
+  /** The text of a row's value input: what was typed, else the saved number in the units the input takes. */
+  protected valueOf(row: LineRow): string {
+    const percent = this.valueIsPercent();
+    // What was typed, while the input still has the units it was typed in; else the number it came to, in the units now in force. A text that
+    // came to no number (value null) has nothing to convert, so it stays.
+    return row.typed !== null && (row.typedPercent === percent || row.value === null) ? row.typed : row.value === null ? '' : valueText(row.value, percent);
+  }
+
+  /** Whether row `index` is a fixed value with no usable number, once Save was tried: the preview leaves it out and the form does not save. */
+  protected valueInvalid(index: number): boolean {
+    const row = this.referenceLines()[index];
+    return !!row && row.kind === 'value' && row.value === null && this.lineKinds().includes('value') && !!this.shown().referenceLines;
+  }
+
+  /** The ids of the texts that describe a row's kind select: the help of its kind, the caution for an overall line and the server's refusal. */
+  protected kindDescribedBy(index: number): string {
+    const row = this.referenceLines()[index];
+    const ids = [`referenceHelp${index}`, ...(row?.kind === 'overall' ? [`referenceCaution${index}`] : []), ...(this.lineProblems()[index]?.kind ? [`referenceKind${index}-error`] : [])];
+    return ids.join(' ');
+  }
+
+  /** The ids of the texts that describe a row's value input: its unit, then the refusal of the server or of the form. */
+  protected valueDescribedBy(index: number): string | null {
+    const ids = [
+      ...(this.valueUnit() ? [`referenceValue${index}-unit`] : []),
+      ...(this.lineProblems()[index]?.value ? [`referenceValue${index}-error`] : []),
+      ...(this.valueInvalid(index) ? ['widgetLines-error'] : []),
+    ];
+    return ids.length ? ids.join(' ') : null;
+  }
+
+  /** Whether the server refused part of row `index`, or the form can tell its value is wrong. */
+  protected valueFailed(index: number): boolean {
+    return !!this.lineProblems()[index]?.value || this.valueInvalid(index);
+  }
+
+  /**
+   * Why the form holds lines the widget does not take (design D8): they stay here, and come back when the chart type, the series, the
+   * layout or the plot changes back, but they are not saved. Null while nothing is dropped.
+   */
+  protected readonly droppedNote = computed<'type' | 'layout' | 'measure' | 'series' | null>(() => {
+    const dropped = this.referenceLines().filter((row) => !this.lineKinds().includes(row.kind));
+    if (!dropped.length) {
+      return null;
+    }
+    if (!this.offersLines()) {
+      return 'type';
+    }
+    const rules = this.annotationRules();
+    if (rules.layout === 'stacked' || rules.layout === 'percent') {
+      return 'layout';
+    }
+    return dropped.every((row) => row.kind === 'overall') ? 'measure' : 'series';
+  });
+  /** A data labels setting turned on that the widget no longer takes: stacked and 100% bars have none. */
+  protected readonly droppedLabels = computed(() => this.dataLabels() === true && !this.offersDataLabels() && (this.chartType() === 'bar' || this.chartType() === 'column'));
+
+  /** The name the member types for a column. An emptied field is no name. */
+  protected setLabel(column: string, label: string): void {
+    this.labelsTyped.set(true);
+    this.labels.update((labels) => ({ ...labels, [column]: label }));
+    this.labelProblems.update(({ [column]: _own, ...others }) => others);
+    this.serverFieldErrors.update(({ labels: _labels, ...others }) => others);
   }
 
   /** The widget's scale; null is the palette's own. */
@@ -1382,7 +2191,7 @@ export class WidgetDialog {
     this.sortCompareAs.set(null);
     this.tooltip.set([]);
     this.seriesBy.set('');
-    this.layout.set('grouped');
+    this.layout.set(this.layoutUnset ? null : 'grouped');
     this.pyramidLeft.set('');
     this.pyramidRight.set('');
     this.scaleItems.set([]);
@@ -1507,6 +2316,49 @@ export class WidgetDialog {
     });
   }
 
+  /** Types into one of the widget's texts. The refusal of that field goes with the change. */
+  protected setText(field: 'subtitle' | 'footnote' | 'unit' | 'captionText', value: string): void {
+    (field === 'subtitle' ? this.subtitle : field === 'footnote' ? this.footnote : field === 'unit' ? this.unit : this.captionText).set(value);
+    this.serverFieldErrors.update(({ [field]: _own, ...others }) => others);
+  }
+
+  /** The caption's mode: the default line, an own text or none. The text typed is kept while the mode is another. */
+  protected setCaptionMode(mode: CaptionMode): void {
+    this.captionMode.set(mode);
+    this.serverFieldErrors.update(({ caption: _caption, captionText: _text, ...others }) => others);
+  }
+
+  /** What the unit field says about the indicator's unit, which a widget's own replaces. */
+  protected unitHint(t: (key: string, params?: Record<string, unknown>) => string): string {
+    const unit = this.entry()?.unit?.trim();
+    return unit ? t('indicators.dialog.context.unit.hint', { unit }) : t('indicators.dialog.context.unit.hintNone');
+  }
+
+  /**
+   * The line an own caption text makes (design D11), in the words of the chart that draws it: "{text} by {group}". A chart with a series
+   * names it in its legend and a pyramid, Likert or box plot draws no line, so those have none to show.
+   */
+  protected captionHint(t: (key: string, params?: Record<string, unknown>) => string): string | null {
+    const what = singleLine(this.captionText());
+    if (!what) {
+      return null;
+    }
+    const type = this.chartType();
+    const names = columnLabels(this.entry(), this.draft().display);
+    const group = this.groupBy() ? names(this.groupBy()) : t('indicators.chart.noGroup');
+    let line: string | null = null;
+    if (type === 'stat') {
+      line = what;
+    } else if (type === 'histogram') {
+      line = t('indicators.chart.captionHistogram', { what, buckets: this.buckets().trim() || defaultBuckets });
+    } else if (type === 'pie' || type === 'map' || ((type === 'bar' || type === 'column' || type === 'line') && !this.seriesBy())) {
+      line = t(type === 'map' ? 'indicators.map.caption' : 'indicators.chart.caption', { what, group });
+    } else if ((type === 'heatmap' || type === 'crosstab') && this.seriesBy()) {
+      line = t('indicators.series.caption', { what, group, series: names(this.seriesBy()) });
+    }
+    return line ? t('indicators.dialog.context.caption.line', { line }) : null;
+  }
+
   /** The server's verdict on a filter, asked with the rest of the draft as it stands; there is nothing to ask until an indicator is chosen. */
   private check(filter: DataFilter): Observable<unknown> {
     const config = this.draft();
@@ -1525,6 +2377,8 @@ export class WidgetDialog {
     this.serverFieldErrors.set({});
     this.itemProblems.set({});
     this.scaleItemProblems.set({});
+    this.labelProblems.set({});
+    this.lineProblems.set({});
     this.error.set(null);
     const { projectId, dashboardId, widget } = this.data;
     const target = widget && this.destination() !== dashboardId ? this.destination() : null;
@@ -1552,13 +2406,28 @@ export class WidgetDialog {
         const fields: Problems = {};
         const items: Record<number, ItemProblems> = {};
         const steps: Record<number, string> = {};
+        const named: Record<string, string> = {};
+        const lines: Record<number, LineProblems> = {};
         // The scale the server read holds only the values that are in it; its `scale[2]` is the third of those, not of the editor.
         const inScale = this.scaleItems().flatMap((item, i) => (item.side === 'out' ? [] : [i]));
+        // Likewise the lines: the server read the rows the widget takes, so `referenceLines[1]` is the second of those.
+        const keptRows = this.keptRows();
         for (const [path, message] of Object.entries(parsed.fieldErrors)) {
           const step = this.stepFor(path);
           if (step !== null) {
             const at = inScale[step] ?? step;
             steps[at] = steps[at] ?? message;
+            continue;
+          }
+          const label = this.labelFor(path);
+          if (label) {
+            named[label] = named[label] ?? message;
+            continue;
+          }
+          const line = this.lineFor(path);
+          if (line) {
+            const at = keptRows[line.index] ?? line.index;
+            lines[at] = { ...lines[at], [line.part]: lines[at]?.[line.part] ?? message };
             continue;
           }
           const item = this.itemFor(path);
@@ -1574,8 +2443,10 @@ export class WidgetDialog {
         this.serverFieldErrors.set(fields);
         this.itemProblems.set(items);
         this.scaleItemProblems.set(steps);
-        const others = Object.entries(parsed.fieldErrors).filter(([path]) => this.stepFor(path) === null && !this.itemFor(path) && !this.fieldFor(path));
-        const shownOnFields = Object.keys(fields).length > 0 || Object.keys(steps).length > 0;
+        this.labelProblems.set(named);
+        this.lineProblems.set(lines);
+        const others = Object.entries(parsed.fieldErrors).filter(([path]) => this.stepFor(path) === null && !this.labelFor(path) && !this.lineFor(path) && !this.itemFor(path) && !this.fieldFor(path));
+        const shownOnFields = Object.keys(fields).length > 0 || Object.keys(steps).length > 0 || Object.keys(named).length > 0 || Object.keys(lines).length > 0;
         this.error.set(shownOnFields && !others.length ? null : others.length ? markApiText(others.map(([, message]) => message).join(' ')) : parsed.message);
         if (fields.dashboardId) {
           // The dashboard chosen was removed meanwhile, or is full: the project is read again, so a removed one leaves the select
@@ -1596,6 +2467,22 @@ export class WidgetDialog {
     return { index: Number(match[1]), part: part === 'label' || part === 'format' ? part : 'column' };
   }
 
+  /** `config.display.referenceLines[1].label`: the line and the part of it the server refused. A line with no part is refused as a whole (a null one). */
+  private lineFor(path: string): { index: number; part: keyof LineProblems } | null {
+    const match = /display\.referencelines\[(\d+)\](?:\.(\w+))?$/i.exec(path);
+    if (!match) {
+      return null;
+    }
+    const part = match[2]?.toLowerCase();
+    return { index: Number(match[1]), part: part === 'label' || part === 'value' ? part : 'kind' };
+  }
+
+  /** `config.display.labels.numerator`: the column whose name the server refused. The refusal of the labels as a whole has none. */
+  private labelFor(path: string): string | null {
+    const match = /display\.labels\.(.+)$/i.exec(path);
+    return match ? match[1] : null;
+  }
+
   /** `config.scale[2]`: the place of the value of the scale the server refused. A refusal of the scale as a whole has none. */
   private stepFor(path: string): number | null {
     const match = /scale\[(\d+)\]/i.exec(path);
@@ -1605,9 +2492,22 @@ export class WidgetDialog {
   private fieldFor(path: string): keyof Problems | null {
     const name = path.toLowerCase();
     if (name === 'dashboardid') return 'dashboardId';
+    // First, because the name of a column in the path can hold any of the words below.
+    if (name.includes('display.order.group')) return 'groupOrder';
+    if (name.includes('display.order.series')) return 'seriesOrder';
+    if (name.includes('display.labels')) return 'labels';
+    if (name.includes('display.referencelines')) return 'referenceLines';
+    if (name.includes('display.interpolation')) return 'interpolation';
+    if (name.includes('display.datalabels')) return 'dataLabels';
     if (name.includes('display.orientation')) return 'orientation';
     if (name.includes('display.color')) return 'color';
     if (name.includes('display.ramp')) return 'ramp';
+    // Before the title: `display.subtitle` holds `title`.
+    if (name.includes('display.subtitle')) return 'subtitle';
+    if (name.includes('display.footnote')) return 'footnote';
+    if (name.includes('display.caption.text')) return 'captionText';
+    if (name.includes('display.caption')) return 'caption';
+    if (name.includes('display.unit')) return 'unit';
     if (name.includes('seriesby')) return 'seriesBy';
     if (name.includes('layout')) return 'layout';
     if (name.includes('pyramid.left')) return 'pyramidLeft';

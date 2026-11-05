@@ -374,4 +374,29 @@ public sealed class McpDashboardVersionToolsTests(PostgresFixture postgres)
         Assert.Equal(stored, await StoredAsync(h, health));
         Assert.Equal(versions, await VersionsAsync(h, health));
     }
+
+    [Fact]
+    public async Task A_version_gives_the_source_it_held_and_none_when_it_held_none_and_a_restore_brings_it_back()
+    {
+        await using var h = await CreateAsync();
+        var teatro = await AddDashboardInTamizaAsync(h, "Teatro");
+        const string source = "Encuesta de mercado del Centro Bicentenario de Duitama, 478 encuestas";
+        Assert.Null((await h.CallAsync("analyst", "update_dashboard", new { dashboardId = teatro, source, change = "Name the source" })).Code());
+        Assert.Null((await h.CallAsync("analyst", "update_dashboard", new { dashboardId = teatro, source = "", change = "Remove the source" })).Code());
+
+        var list = Body(await h.CallAsync("analyst", "list_dashboard_versions", new { dashboardId = teatro }));
+        var named = Body(await h.CallAsync("analyst", "get_dashboard_version", new { dashboardId = teatro, version = 2 }));
+        var created = Body(await h.CallAsync("analyst", "get_dashboard_version", new { dashboardId = teatro, version = 1 }));
+        var removed = Body(await h.CallAsync("analyst", "get_dashboard_version", new { dashboardId = teatro, version = 3 }));
+
+        Assert.Equal(source, named.GetProperty("source").GetString());
+        Assert.False(created.TryGetProperty("source", out _));
+        Assert.False(removed.TryGetProperty("source", out _));
+        Assert.Contains(list.GetProperty("versions").EnumerateArray(), v => v.GetProperty("changes").EnumerateArray().Any(c => c.GetProperty("kind").GetString() == "sourceChanged"));
+
+        var restored = Body(await RestoreAsync(h, teatro, 2, 3, "Bring the source back"));
+
+        Assert.True(restored.GetProperty("restored").GetBoolean());
+        Assert.Equal(source, await TestData.ScalarAsync<string>(h.Db, "SELECT source FROM tamiza.dashboards WHERE id = @d", ("d", teatro)));
+    }
 }

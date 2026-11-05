@@ -340,4 +340,42 @@ public sealed class ScriptConventionTests
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"ADD CONSTRAINT (?:pk|fk|ck)_\w+ CHECK\b"));
         Assert.Empty(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|INDEX|CREATE TABLE)\b"));
     }
+
+    [Fact]
+    public void The_widget_context_script_adds_one_optional_column_and_one_named_check()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0022_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0022_add_widget_context.sql", resource);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"\bADD COLUMN\b"));
+        Assert.Contains("ADD COLUMN source text NULL,", sql);
+        Assert.Contains("ADD CONSTRAINT ck_dashboards_source CHECK (source IS NULL OR char_length(source) BETWEEN 1 AND 300)", sql);
+
+        // The one check is introduced by a CONSTRAINT name, so nothing can be left unnamed; no key, foreign key or index is added, the
+        // column is not required and no row is rewritten.
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"\bCHECK\b"));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"ADD CONSTRAINT (?:pk|fk|ck)_\w+ CHECK\b"));
+        Assert.Empty(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|INDEX|CREATE TABLE|NOT NULL|DEFAULT|UPDATE)\b"));
+    }
+
+    [Fact]
+    public void The_indicator_column_metadata_script_adds_one_optional_column_and_one_named_check()
+    {
+        var resource = Resources.Single(name => name.StartsWith("0021_", StringComparison.Ordinal));
+        using var reader = new StreamReader(typeof(SchemaMigrator).Assembly.GetManifestResourceStream(resource)!);
+        var sql = reader.ReadToEnd();
+
+        Assert.Equal("0021_add_indicator_column_metadata.sql", resource);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"\bADD COLUMN\b"));
+        Assert.Contains("ADD COLUMN columns jsonb,", sql);
+        Assert.Contains("ADD CONSTRAINT ck_script_versions_columns", sql);
+        Assert.Contains("CHECK (columns IS NULL OR (kind = 'indicator' AND jsonb_typeof(columns) = 'object'))", sql);
+
+        // The one check is introduced by a CONSTRAINT name; no key, foreign key or index is added, and the column is not required.
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"\bCHECK\b"));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(sql, @"ADD CONSTRAINT (?:pk|fk|ck)_\w+\s+CHECK\b"));
+        Assert.Empty(System.Text.RegularExpressions.Regex.Matches(sql, @"\b(?:PRIMARY KEY|FOREIGN KEY|INDEX|CREATE TABLE|NOT NULL|DEFAULT)\b"));
+    }
 }

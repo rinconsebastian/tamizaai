@@ -30,7 +30,7 @@ const cellScript = [
 ].join('\n');
 const noCellScript = 'def compute(cleaned, ctx):\n    return None\n';
 
-const details: IndicatorMetadata = { label: 'Households with piped water', description: '', unit: 'households', format: 'percent' };
+const details: IndicatorMetadata = { label: 'Households with piped water', description: '', unit: 'households', format: 'percent', columns: {} };
 
 interface Setup {
   kind?: ScriptKind;
@@ -206,7 +206,7 @@ describe('AssistantPanel', () => {
 
   describe('Draft from the details', () => {
     it('fills the box from the details and lets the analyst edit it', async () => {
-      await open({ details: { label: 'Households with piped water', description: 'Share with a tap', unit: 'households', format: 'percent' } });
+      await open({ details: { label: 'Households with piped water', description: 'Share with a tap', unit: 'households', format: 'percent', columns: {} } });
 
       byTestId<HTMLButtonElement>(root, 'assistant-draft-details')!.click();
       await settle();
@@ -221,7 +221,7 @@ describe('AssistantPanel', () => {
     });
 
     it('leaves out the description and the unit when they are blank, and keeps what was typed above it', async () => {
-      await open({ details: { label: 'Rate', description: '', unit: '  ', format: 'count' } });
+      await open({ details: { label: 'Rate', description: '', unit: '  ', format: 'count', columns: {} } });
       await type('Only completed interviews.');
 
       byTestId<HTMLButtonElement>(root, 'assistant-draft-details')!.click();

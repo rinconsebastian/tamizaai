@@ -1,7 +1,8 @@
 import { LOCALE_ID, Component, computed, inject, input } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ChartType, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
-import { ValueFormatter, plotted } from './format';
+import { CategoryOrders, arrangeColumns, groupTexts, seriesTexts, shown } from './category-order';
+import { ColumnNamer, ValueFormatter, captionShown, named, plotted, rawNames } from './format';
 import { registerExportParts } from './export-parts';
 import { SeriesNotes, seriesName, seriesNoteTexts } from './series-legend';
 import { SeriesTable, buildSeriesTable, chartOrder, hasShares } from './series-table';
@@ -16,6 +17,10 @@ export interface CrossTableContext {
   format: ValueFormatter;
   locale: string;
   t: Translate;
+  /** The name shown for the group column (the header of its column). */
+  names: ColumnNamer;
+  /** What the widget declares for its values (add-declared-category-order): their order, and whether their numbers are hidden. */
+  orders?: CategoryOrders | null;
 }
 
 /**
@@ -26,7 +31,10 @@ export interface CrossTableContext {
  * widget itself.
  */
 export function crossTableModel(table: SeriesTable, context: CrossTableContext): TableModel {
-  const { type, config, format, locale, t } = context;
+  const { type, config, format, locale, t, names } = context;
+  const orders = context.orders ?? null;
+  const groupText = groupTexts(table, orders);
+  const seriesText = seriesTexts(table, orders);
   const shares = hasShares(type, config.layout);
   const percent = new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 1 });
   const value = (cell: number | null) => (cell === null ? null : format(cell));
@@ -38,9 +46,9 @@ export function crossTableModel(table: SeriesTable, context: CrossTableContext):
     const share = row.shares?.[i];
     return share === null || share === undefined ? null : percent.format(share);
   };
-  const rows = chartOrder(table, type).map((row) => [row.group ?? t('indicators.chart.noGroup'), ...table.columns.map((_, i) => cellText(row, i)), value(row.total)]);
+  const rows = chartOrder(table, type, orders).map((row) => [shown(groupText, row.group) ?? t('indicators.chart.noGroup'), ...table.columns.map((_, i) => cellText(row, i)), value(row.total)]);
   return {
-    headers: [config.groupBy ?? '', ...table.columns.map((column) => seriesName(column, t)), total],
+    headers: [names(config.groupBy ?? ''), ...table.columns.map((column) => seriesName(column, t, seriesText)), total],
     align: ['start', ...table.columns.map(() => 'end' as const), 'end'],
     rows: shares ? rows : [...rows, [total, ...table.columns.map((column) => value(column.total)), value(table.grandTotal)]],
     totals: { row: !shares, column: true },
@@ -57,7 +65,7 @@ export function crossTableModel(table: SeriesTable, context: CrossTableContext):
   imports: [TranslocoDirective, SeriesNotes, WidgetTable],
   template: `
     <ng-container *transloco="let t">
-      <p class="shrink-0 text-xs text-body" data-testid="chart-caption">{{ t('indicators.series.caption', { what: what(), group: config().groupBy, series: config().seriesBy }) }}</p>
+      <p class="shrink-0 text-xs text-body" [class.sr-only]="!captionShown(config())" data-testid="chart-caption">{{ t('indicators.series.caption', { what: what(), group: groupShown(), series: seriesShown() }) }}</p>
       <app-widget-table class="min-h-0 flex-1" [model]="model(t)" />
       <app-series-notes [negativeLeftOut]="table().negativeLeftOut" [leftOut]="table().leftOut" [kind]="notesKind()" />
     </ng-container>
@@ -70,14 +78,22 @@ export class CrosstabWidget {
 
   readonly answer = input.required<QueryResult>();
   readonly config = input.required<WidgetConfig>();
+  /** Whether the line that names what the widget plots is seen: a hidden one stays for screen readers (add-widget-context, design D3). */
+  protected readonly captionShown = captionShown;
   /** The indicator's label and the formatter of its values. */
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
+  /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
+  readonly names = input<ColumnNamer>(rawNames);
+  /** What the widget declares for the order of its values and the text they are shown with (add-declared-category-order). */
+  readonly orders = input<CategoryOrders | null>(null);
   /** The kind of widget the table is the view of: it decides the layout of the cells (shares or values) and the order of the groups. */
   readonly chartType = input.required<ChartType>();
 
-  protected readonly what = computed(() => plotted(this.config(), this.label()));
-  protected readonly table = computed(() => buildSeriesTable(this.answer(), this.chartType(), this.config().layout));
+  protected readonly what = computed(() => plotted(this.config(), this.label(), this.names()));
+  protected readonly groupShown = computed(() => named(this.names(), this.config().groupBy));
+  protected readonly seriesShown = computed(() => named(this.names(), this.config().seriesBy));
+  protected readonly table = computed(() => arrangeColumns(buildSeriesTable(this.answer(), this.chartType(), this.config().layout), this.orders()));
   protected readonly notesKind = computed(() => (this.chartType() === 'pyramid' ? 'pyramid' : this.chartType() === 'likert' ? 'likert' : null));
 
   // The cross table is the whole of a cross table widget and the table view of every widget with a series (add-widget-export).
@@ -89,7 +105,7 @@ export class CrosstabWidget {
         const t: Translate = (key, params) => this.transloco.translate(key, params);
         const table = this.table();
         return {
-          caption: t('indicators.series.caption', { what: this.what(), group: this.config().groupBy, series: this.config().seriesBy }),
+          caption: t('indicators.series.caption', { what: this.what(), group: this.groupShown(), series: this.seriesShown() }),
           legend: null,
           notes: seriesNoteTexts({ negativeLeftOut: table.negativeLeftOut, leftOut: table.leftOut, kind: this.notesKind() }, t, this.transloco.getActiveLang()),
           stat: null,
@@ -100,6 +116,6 @@ export class CrosstabWidget {
   }
 
   protected model(t: Translate): TableModel {
-    return crossTableModel(this.table(), { type: this.chartType(), config: this.config(), format: this.format(), locale: this.locale, t });
+    return crossTableModel(this.table(), { type: this.chartType(), config: this.config(), format: this.format(), locale: this.locale, t, names: this.names(), orders: this.orders() });
   }
 }

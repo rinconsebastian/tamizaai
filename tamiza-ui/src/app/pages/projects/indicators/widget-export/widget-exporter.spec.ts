@@ -54,12 +54,15 @@ function job(overrides: Partial<ImageJob> = {}, parts: Partial<ExportParts> = {}
   const value: ImageJob = {
     format: 'svg',
     title: 'Coverage by municipality',
+    subtitle: null,
+    footnote: null,
+    captionHidden: false,
     bodyWidth: 368,
     registration,
     notesAbove: [],
     mapPicture: null,
     basemapNote: null,
-    facts: { project: 'Census 2026', dashboard: 'Housing', version: null, filters: ['Municipality: Cali', 'Round: All'], published: 'Data published Nov 2, 2026, 5:12 AM', exported: 'Exported Nov 2, 2026, 10:30 AM (America/Bogota)' },
+    facts: { project: 'Census 2026', dashboard: 'Housing', version: null, source: null, filters: ['Municipality: Cali', 'Round: All'], published: 'Data published Nov 2, 2026, 5:12 AM', exported: 'Exported Nov 2, 2026, 10:30 AM (America/Bogota)' },
     tableLabels: { rowsNotShown: (n) => `${n} rows not shown in the image.`, columnsNotShown: (n) => `${n} columns not shown in the image.`, inWorkbook: 'The Excel workbook has them all.' },
     closeTooltips: () => calls.push('closeTooltips'),
     ...overrides,
@@ -145,6 +148,29 @@ describe('makeImage', () => {
     expect(stat).toContain('>1,234<');
     expect(table).toContain('>Cali<');
     expect(table).toContain('>v<');
+  });
+
+  it('leaves out the caption line and the description of a stat tile when the widget hides its caption (Caption hidden)', async () => {
+    const withCaption = await read((await makeImage(job({}, { caption: 'Coverage: value' }).value, environment())).blob);
+    const hidden = await read((await makeImage(job({ captionHidden: true }, { caption: 'Coverage: value' }).value, environment())).blob);
+    const stat = await read((await makeImage(job({ captionHidden: true }, { caption: null, stat: { value: '1,234', description: 'Households' } }, null).value, environment())).blob);
+
+    expect(withCaption).toContain('>Coverage: value<');
+    expect(hidden).not.toContain('Coverage: value');
+    expect(hidden).toContain('>Coverage by municipality<');
+    expect(stat).toContain('>1,234<');
+    expect(stat).not.toContain('Households');
+  });
+
+  it('draws the subtitle, the footnote and the source of the dashboard the job carries', async () => {
+    const { value } = job({ subtitle: 'Where have you seen theatre?', footnote: 'Does not add up to 100 %.' });
+    value.facts = { ...value.facts, source: 'Source: Market survey, 478 responses' };
+
+    const svg = await read((await makeImage(value, environment())).blob);
+
+    expect(svg).toContain('>Where have you seen theatre?<');
+    expect(svg).toContain('>Does not add up to 100 %.<');
+    expect(svg).toContain('>Source: Market survey, 478 responses<');
   });
 
   it('takes its probe away even when the picture fails', async () => {

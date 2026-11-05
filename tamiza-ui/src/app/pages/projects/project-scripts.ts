@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ApiErrors } from '../../core/api-error';
 import { SystemConfigService } from '../../core/system-config';
+import { IndicatorsService } from '../../core/projects/indicators.service';
 import {
   FixedScriptKind,
   IndicatorMetadata,
@@ -27,6 +28,7 @@ import {
 import { Alert, ApiLang, Badge, Button, Card, ConfirmDialog, DropdownMenu, FormField, Input, MenuItem, Skeleton, ToastService, Tone, DateTimePipe, numberText } from '../../shared/ui';
 import { CodeEditor } from '../../shared/ui/code-editor';
 import { AddIndicatorData, AddIndicatorDialog, NewIndicator } from './add-indicator-dialog';
+import { columnsOf, draftsOf, sameColumns } from './column-names';
 import { IndicatorMetadataFields } from './indicator-metadata-fields';
 import { PipelineRuns } from './pipeline-runs';
 import { valueFormatter } from './indicators/format';
@@ -46,7 +48,7 @@ import { newIndicatorTemplate, scriptTemplates } from './script-templates/templa
 
 const maxCodeBytes = 200 * 1024;
 
-const emptyMetadata: IndicatorMetadata = { label: '', description: '', unit: '', format: 'decimal' };
+const emptyMetadata: IndicatorMetadata = { label: '', description: '', unit: '', format: 'decimal', columns: {} };
 
 const runTones: Record<RunStatus, Tone> = { queued: 'neutral', running: 'brand', succeeded: 'success', failed: 'danger' };
 
@@ -56,11 +58,17 @@ function sameScript(a: ScriptRef, b: ScriptRef): boolean {
 
 /** The metadata a version was saved with; blank for script 1 and script 2 and for a removal. */
 function metadataOf(version: ScriptVersionDetails): IndicatorMetadata {
-  return { label: version.label ?? '', description: version.description ?? '', unit: version.unit ?? '', format: version.format ?? 'decimal' };
+  return {
+    label: version.label ?? '',
+    description: version.description ?? '',
+    unit: version.unit ?? '',
+    format: version.format ?? 'decimal',
+    columns: draftsOf(version.columns),
+  };
 }
 
 function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
-  return a.label === b.label && a.description === b.description && a.unit === b.unit && a.format === b.format;
+  return a.label === b.label && a.description === b.description && a.unit === b.unit && a.format === b.format && sameColumns(a.columns, b.columns);
 }
 
 @Component({
@@ -182,6 +190,8 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
                         id="indicatorMetaFields"
                         class="mt-3 block"
                         [value]="shownMetadata()"
+                        [columns]="columnNames()"
+                        [offered]="valuesOffered()"
                         [errors]="fieldErrors()"
                         (valueChange)="editMetadata($event)"
                       />
@@ -193,6 +203,27 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
                       <div><dt class="text-body">{{ t('scripts.fields.format') }}</dt><dd class="text-heading">{{ t('scripts.formats.' + shownMetadata().format) }}{{ shownMetadata().unit ? ' · ' + shownMetadata().unit : '' }}</dd></div>
                       @if (shownMetadata().description) {
                         <div class="sm:col-span-2"><dt class="text-body">{{ t('scripts.fields.description') }}</dt><dd class="break-words text-heading">{{ shownMetadata().description }}</dd></div>
+                      }
+                      @if (shownColumns().length) {
+                        <div class="sm:col-span-2" data-testid="indicator-meta-columns">
+                          <dt class="text-body">{{ t('scripts.columns.title') }}</dt>
+                          <dd class="text-heading">
+                            <ul>
+                              @for (entry of shownColumns(); track entry.column) {
+                                <li class="break-words" data-testid="indicator-meta-column">
+                                  <code>{{ entry.column }}</code>{{ entry.label ? ': ' + entry.label : '' }}
+                                  @if (entry.order || entry.last || entry.strip) {
+                                    <span class="text-body" data-testid="indicator-meta-column-order">
+                                      @if (entry.order) { · {{ t('scripts.columns.order.summaryOrdered', { count: entry.order }) }} }
+                                      @if (entry.last) { · {{ t('scripts.columns.order.summaryLast', { count: entry.last }) }} }
+                                      @if (entry.strip) { · {{ t('scripts.columns.order.summaryStrip') }} }
+                                    </span>
+                                  }
+                                </li>
+                              }
+                            </ul>
+                          </dd>
+                        </div>
                       }
                     </dl>
                   }
@@ -337,6 +368,7 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
 })
 export class ProjectScripts {
   private readonly service = inject(PipelineService);
+  private readonly indicatorTables = inject(IndicatorsService);
   private readonly errors = inject(ApiErrors);
   private readonly toasts = inject(ToastService);
   private readonly transloco = inject(TranslocoService);
@@ -472,6 +504,39 @@ export class ProjectScripts {
     this.viewing() ? (this.viewing()!.code ?? '') : this.newIndicator() ? newIndicatorTemplate.source : this.savedCode(),
   );
   protected readonly shownMetadata = computed(() => (this.viewing() ? metadataOf(this.viewing()!) : this.meta()));
+  /** The columns of the selected indicator's published table, in the table's order; empty while it has not published. */
+  private readonly publishedColumns = signal<string[]>([]);
+  /**
+   * The columns the Column names section offers (design D8): those of the latest test of the draft, or without one those of the
+   * published table. A column with a saved label that this list lacks follows them in the section itself.
+   */
+  protected readonly columnNames = computed(() => this.testedColumns() ?? this.publishedColumns());
+  /**
+   * The columns of the version on view or of the indicator that say anything (a name, an order, values kept at the end or hidden
+   * prefixes), as text for whoever cannot edit them.
+   */
+  protected readonly shownColumns = computed(() =>
+    Object.entries(this.shownMetadata().columns)
+      .filter(([, draft]) => draft.label.trim() || draft.order.length || draft.last.length || draft.stripPrefix)
+      .map(([column, draft]) => ({ column, label: draft.label.trim(), order: draft.order.length, last: draft.last.length, strip: draft.stripPrefix })),
+  );
+  /**
+   * The values the latest test of the draft saw in each column of up to 50 values (the dashboard view of the test lists them), offered when
+   * an order is typed in the Column names section. Nothing before a test, or for a column with more values: any value can be typed.
+   */
+  protected readonly valuesOffered = computed<Record<string, readonly string[]>>(() => {
+    const test = this.latestTest();
+    const name = this.indicatorName();
+    if (!test || !name || test.kind !== 'indicator' || test.name !== name) {
+      return {};
+    }
+    const charts = [...test.steps].reverse().find((s) => s.step === 'indicator')?.dashboard?.charts ?? {};
+    return Object.fromEntries(
+      Object.entries(charts)
+        .filter(([, chart]) => chart.groups)
+        .map(([column, chart]) => [column, chart.groups!.map((entry) => entry.group).filter((group): group is string => group !== null)]),
+    );
+  });
 
   constructor() {
     this.assistant.connect({
@@ -521,10 +586,37 @@ export class ProjectScripts {
     this.resetDraft();
     this.loadVersions();
     this.loadInputs();
+    this.loadPublishedColumns();
   }
 
   protected runTone(status: RunStatus): Tone {
     return runTones[status];
+  }
+
+  /** The columns of the table the latest test of the selected indicator returned, or null when it returned none. */
+  private testedColumns(): string[] | null {
+    const test = this.latestTest();
+    const name = this.indicatorName();
+    if (!test || !name || test.kind !== 'indicator' || test.name !== name) {
+      return null;
+    }
+    const step = [...test.steps].reverse().find((s) => s.step === 'indicator');
+    const table = step?.tables.find((t) => t.name === name && t.columns) ?? step?.tables.find((t) => t.columns);
+    return table?.columns?.map((column) => column.name) ?? null;
+  }
+
+  /** Reads the columns of the selected indicator's published table, for its Column names. */
+  private loadPublishedColumns(): void {
+    const name = this.indicatorName();
+    if (!name || this.newIndicator()) {
+      this.publishedColumns.set([]);
+      return;
+    }
+    const keep = (columns: string[]) => this.indicatorName() === name && this.publishedColumns.set(columns);
+    this.indicatorTables.columns(this.projectId(), name).subscribe({
+      next: (result) => keep(result.published ? result.columns.map((column) => column.name) : []),
+      error: () => keep([]),
+    });
   }
 
   protected onLatestRun(run: RunSummary | null): void {
@@ -589,6 +681,7 @@ export class ProjectScripts {
     this.saveError.set(null);
     this.fieldErrors.set({});
     this.meta.set(metadata);
+    this.publishedColumns.set([]);
     this.draft.set(newIndicatorTemplate.source);
     // Explicit, because the editor's value input does not change when the previous script had the template as its code.
     this.editor()?.replace(newIndicatorTemplate.source);
@@ -606,7 +699,7 @@ export class ProjectScripts {
     const meta = this.meta();
     const body =
       script.kind === 'indicator'
-        ? { code, ...meta, label: meta.label.trim(), description: meta.description.trim(), unit: meta.unit.trim() }
+        ? { code, ...meta, label: meta.label.trim(), description: meta.description.trim(), unit: meta.unit.trim(), columns: columnsOf(meta.columns) }
         : { code };
     this.busy.set(true);
     this.service.save(this.projectId(), script, body).subscribe({
@@ -755,6 +848,7 @@ export class ProjectScripts {
   protected reloadInputs(): void {
     this.inputsBySource.set({});
     this.loadInputs(true);
+    this.loadPublishedColumns();
   }
 
   /** Puts a table, column or question name in the editor as a quoted string, or copies it when the editor is read-only. */
@@ -944,6 +1038,7 @@ export class ProjectScripts {
       description: version.description,
       unit: version.unit,
       format: version.format!,
+      columns: version.columns,
       current: version,
     };
     return { ...scripts, indicators: [...others, entry].sort((a, b) => (a.name < b.name ? -1 : 1)) };

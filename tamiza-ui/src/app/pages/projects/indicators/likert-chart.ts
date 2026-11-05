@@ -5,9 +5,10 @@ import { LikertSide, QueryResult, WidgetConfig } from '../../../core/projects/in
 import { observeSize } from './chart-data';
 import { bandScale, charWidth, linearScale, niceAxis, truncate } from './chart-scales';
 import { CrosstabWidget } from './crosstab-widget';
-import { ValueFormatter, plotted } from './format';
+import { ColumnNamer, ValueFormatter, named, plotted, rawNames } from './format';
 import { MarkPoint, markTooltips } from './mark-tooltips';
 import { registerExportParts } from './export-parts';
+import { CategoryOrders, groupTexts, seriesTexts, shown } from './category-order';
 import { LegendEntry, SeriesLegend, SeriesNotes, seriesName, seriesNoteTexts } from './series-legend';
 import { Hit, Label, Line, Rect } from './series-plot';
 import { SeriesTable, buildSeriesTable, orderedSeriesTable } from './series-table';
@@ -187,7 +188,7 @@ export function likertPlot(input: LikertPlotInput): LikertPlot {
     <ng-container *transloco="let t">
       <app-series-legend [entries]="legend()" />
       @if (asTable()) {
-        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" chartType="likert" />
+        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [orders]="orders()" chartType="likert" />
       } @else {
         <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
           <svg
@@ -275,14 +276,23 @@ export class LikertChart {
   /** The indicator's label and the formatter of its values. */
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
+  /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
+  readonly names = input<ColumnNamer>(rawNames);
+  /** What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D8). */
+  readonly orders = input<CategoryOrders | null>(null);
   readonly asTable = input(false);
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private readonly svg = viewChild<ElementRef<SVGElement>>('chartSvg');
   protected readonly size = observeSize(() => this.box());
 
-  protected readonly what = computed(() => plotted(this.config(), this.label()));
-  protected readonly table = computed(() => orderedSeriesTable(this.answer(), 'likert', null));
+  protected readonly what = computed(() => plotted(this.config(), this.label(), this.names()));
+  /** The group column under its name shown. */
+  protected readonly groupShown = computed(() => named(this.names(), this.config().groupBy));
+  protected readonly table = computed(() => orderedSeriesTable(this.answer(), 'likert', null, this.orders()));
+  /** The text each group and each answer is shown with when its column hides numbered prefixes (design D5); the scale keeps its order. */
+  private readonly groupText = computed(() => groupTexts(this.table(), this.orders()));
+  private readonly seriesText = computed(() => seriesTexts(this.table(), this.orders()));
   private readonly tr = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
 
   /** The side of each value of the scale, in the answer's order: the scale of the widget says it, by value. */
@@ -291,8 +301,8 @@ export class LikertChart {
     return this.table().columns.map((column, i) => scale.find((step) => step.value === column.series)?.side ?? scale[i]?.side ?? 'neutral');
   });
   private readonly colors = computed(() => scaleColors(this.sides()));
-  private readonly names = computed(() => this.table().columns.map((column) => seriesName(column, this.tr)));
-  protected readonly legend = computed<LegendEntry[]>(() => this.names().map((name, i) => ({ name, color: this.colors()[i], outlined: this.sides()[i] === 'neutral' })));
+  private readonly seriesNames = computed(() => this.table().columns.map((column) => seriesName(column, this.tr, this.seriesText())));
+  protected readonly legend = computed<LegendEntry[]>(() => this.seriesNames().map((name, i) => ({ name, color: this.colors()[i], outlined: this.sides()[i] === 'neutral' })));
   private readonly percent = computed(() => new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }));
 
   protected readonly plot = computed(() =>
@@ -300,10 +310,10 @@ export class LikertChart {
       table: this.table(),
       sides: this.sides(),
       colors: this.colors(),
-      names: this.names(),
+      names: this.seriesNames(),
       width: Math.max(160, this.size().width),
       height: Math.max(120, this.size().height),
-      groupLabel: (group) => group ?? this.tr('indicators.chart.noGroup'),
+      groupLabel: (group) => shown(this.groupText(), group) ?? this.tr('indicators.chart.noGroup'),
       value: this.format(),
       share: (share) => this.percent().format(share),
       what: this.what(),
@@ -346,10 +356,10 @@ export class LikertChart {
     const lang = this.transloco.getActiveLang();
     return t('indicators.likert.summary', {
       what: this.what(),
-      group: this.config().groupBy,
+      group: this.groupShown(),
       groups: t(countKey('indicators.series.groupsCount', table.rows.length, lang), { count: table.rows.length }),
       seriesCount: t(countKey('indicators.series.seriesCount', table.columns.length, lang), { count: table.columns.length }),
-      top: best.group ?? t('indicators.chart.noGroup'),
+      top: shown(this.groupText(), best.group) ?? t('indicators.chart.noGroup'),
       share: this.percent().format(positive(best)),
     });
   }

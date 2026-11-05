@@ -23,7 +23,7 @@ public sealed class ReportDataBuilder(
     {
         var dashboard = await db.Dashboards.AsNoTracking()
             .Where(d => d.Id == dashboardId)
-            .Select(d => new { d.ProjectId, d.Name, d.Filters })
+            .Select(d => new { d.ProjectId, d.Name, d.Filters, d.Source })
             .SingleOrDefaultAsync(ct);
         if (dashboard is null)
         {
@@ -64,17 +64,20 @@ public sealed class ReportDataBuilder(
             built,
             $"{tamiza.Value.PublicUrl.TrimEnd('/')}/projects/{dashboard.ProjectId}/dashboards/{dashboardId}",
             format,
-            text);
+            text,
+            dashboard.Source);
     }
 
-    private sealed record IndicatorMeta(string Label, string Format, string? Unit);
+    /// <param name="Columns">What the indicator's current version says about its columns (their labels); null when it says nothing or the indicator is gone.</param>
+    private sealed record IndicatorMeta(string Label, string Format, string? Unit, IReadOnlyDictionary<string, IndicatorColumnMetadata>? Columns = null);
 
     /// <summary>
     /// How a widget writes its indicator. One the project no longer lists, such as a removed script whose table is still published, is
-    /// written as the dashboard writes it (tamiza-ui plainIndicator): two decimals, no unit, and its name as its label.
+    /// written as the dashboard writes it (tamiza-ui plainIndicator): two decimals, no unit, and its name as its label. A widget's own unit
+    /// replaces the indicator's, also when the indicator is gone (design D4 of the widget context).
     /// </summary>
     private static IndicatorMeta MetaOf(Widget widget, ScriptVersionDetails? indicator) =>
-        new(indicator?.Label ?? widget.Config.Indicator, indicator?.Format ?? ReportFormat.Decimal, indicator?.Unit);
+        new(indicator?.Label ?? widget.Config.Indicator, indicator?.Format ?? ReportFormat.Decimal, widget.Config.Display?.Unit ?? indicator?.Unit, indicator?.Columns);
 
     /// <summary>
     /// One widget's table as its workbook lists it (design D12 of add-widget-export): the same table, notes and reasons as the same widget
@@ -109,18 +112,36 @@ public sealed class ReportDataBuilder(
         }
     }
 
+    /// <summary>The widget's table or value, with the texts it carries whatever became of it: its subtitle, its footnote and whether it hides its caption.</summary>
     private async Task<ReportWidget> BuildWidgetAsync(
         Guid projectId, int position, Widget widget, IReadOnlyList<AppliedDashboardFilter> applied,
         Func<IReadOnlyList<string>?, IReadOnlyList<string>> notNarrowedBy, IndicatorMeta meta, ReportFormat format, ReportText text, CancellationToken ct)
     {
-        var caption = Plotted(widget.Config, meta.Label);
+        var built = await ReadWidgetAsync(projectId, position, widget, applied, notNarrowedBy, meta, format, text, ct);
+        var display = widget.Config.Display;
+        return display is null
+            ? built
+            : built with { Subtitle = display.Subtitle, Footnote = display.Footnote, CaptionHidden = display.Caption?.Hidden is true };
+    }
+
+    private async Task<ReportWidget> ReadWidgetAsync(
+        Guid projectId, int position, Widget widget, IReadOnlyList<AppliedDashboardFilter> applied,
+        Func<IReadOnlyList<string>?, IReadOnlyList<string>> notNarrowedBy, IndicatorMeta meta, ReportFormat format, ReportText text, CancellationToken ct)
+    {
+        // The name shown for each column, once for the widget: its own labels, else its indicator's current ones (design D10).
+        var names = ColumnLabels.For(meta.Columns, widget.Config.Display?.Labels);
+        // What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D11):
+        // its own order, else its indicator's current one. Null when it declares nothing, and every table is then built as it always was.
+        var orders = CategoryOrder.For(widget.ChartType, widget.Config, meta.Columns);
+        var caption = Plotted(widget.Config, meta.Label, names);
         ReportWidget Without(WidgetOutcome outcome, string reason, IReadOnlyList<string>? notes = null) =>
             new(position, widget.Title, widget.ChartType, caption, outcome, [], [], null, reason, notes ?? []);
 
         IndicatorQueryOutcome outcome;
         try
         {
-            outcome = await indicators.QueryAsync(projectId, WidgetQuery.For(widget.ChartType, widget.Config), widget.ChartType, ct, applied);
+            outcome = await indicators.QueryAsync(
+                projectId, WidgetQuery.For(widget.ChartType, widget.Config), widget.ChartType, ct, applied, WidgetQuery.Overall(widget.ChartType, widget.Config));
         }
         catch (DataTimeoutException)
         {
@@ -168,8 +189,12 @@ public sealed class ReportDataBuilder(
 
         if (response.Series is not null)
         {
-            var (seriesColumns, seriesRows, seriesCount, seriesNotes) = SeriesReportTable(response, widget, caption, meta, format, text);
-            return new(position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, seriesColumns, seriesRows, null, null, [.. notes, .. seriesNotes], seriesCount);
+            var (seriesColumns, seriesRows, seriesCount, seriesNotes) = SeriesReportTable(response, widget, caption, meta, format, text, names, orders);
+            return new ReportWidget(
+                position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, seriesColumns, seriesRows, null, null, [.. notes, .. seriesNotes], seriesCount)
+            {
+                ReferenceLines = ReferenceLinesOf(widget, response, meta, format, text),
+            };
         }
 
         if (widget.ChartType == ChartTypes.Stat)
@@ -188,15 +213,45 @@ public sealed class ReportDataBuilder(
         var (columns, rows) = widget.ChartType switch
         {
             ChartTypes.Histogram => HistogramTable(response.Rows, widget.Config, caption, meta, format, text),
-            ChartTypes.Pie => PieTable(response.Rows, widget.Config, caption, meta, format, text),
-            ChartTypes.Map => MapTable(response, widget.Config, caption, meta, format, text),
+            ChartTypes.Pie => PieTable(response.Rows, widget.Config, caption, meta, format, text, names, orders),
+            ChartTypes.Map => MapTable(response, widget.Config, caption, meta, format, text, names, orders),
             ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line =>
-                AxisTable(response.Rows, widget.Config, caption, meta, format, text, natural: widget.ChartType == ChartTypes.Line),
-            ChartTypes.Boxplot => BoxplotTable(response.Boxes ?? [], widget.Config, meta, format, text),
+                AxisTable(response.Rows, widget.Config, caption, meta, format, text, names, natural: widget.ChartType == ChartTypes.Line, orders),
+            ChartTypes.Boxplot => BoxplotTable(response.Boxes ?? [], widget.Config, meta, format, text, names, orders),
             _ => throw new InvalidOperationException($"A {widget.ChartType} widget has no table."),
         };
-        return new(position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, columns, rows, null, null, notes);
+        return new ReportWidget(position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, columns, rows, null, null, notes)
+        {
+            ReferenceLines = ReferenceLinesOf(widget, response, meta, format, text),
+        };
     }
+
+    /// <summary>
+    /// The reference lines of a bar, column or line that is shown (design D10 of add-chart-annotations): the values of
+    /// <see cref="ReferenceLines.Of"/>, each with its own label or the default of its kind in the email's language, and its value written
+    /// as the widget's values are (the indicator's format and the widget's own unit); a <c>value</c> line of a layout stacked to 100% is a
+    /// share, as that layout's cells are. Any other kind of widget has none.
+    /// </summary>
+    private static IReadOnlyList<ReportReferenceLine> ReferenceLinesOf(
+        Widget widget, IndicatorQueryResponse response, IndicatorMeta meta, ReportFormat format, ReportText text)
+    {
+        var lines = ReferenceLines.Of(widget.ChartType, widget.Config, response);
+        if (lines.Count == 0)
+        {
+            return [];
+        }
+
+        // A layout means something only with a series (IndicatorValidation.CheckDisplay reads it the same way).
+        var shares = widget.Config.SeriesBy is not null && SeriesTable.ShowsShares(widget.ChartType, widget.Config.Layout);
+        return [.. lines.Select(line => new ReportReferenceLine(
+            line.Kind,
+            line.Label ?? text[ReportText.ReferenceLabelKey(line.Kind)],
+            line.Value,
+            shares ? format.Share(line.Value) : format.Value(line.Value, meta.Format, meta.Unit)))];
+    }
+
+    /// <summary>The header of a table's group column: the name shown for it, or none when the widget has no group column.</summary>
+    private static string GroupHeader(string? groupBy, Func<string, string> names) => groupBy is null ? "" : names(groupBy);
 
     private static ReportColumn ValueColumn(string caption, IndicatorMeta meta) =>
         new(caption, ExcelFormat(meta.Format), meta.Format == ReportFormat.Percent && meta.Unit?.Trim() == "%" ? null : meta.Unit);
@@ -213,33 +268,48 @@ public sealed class ReportDataBuilder(
 
     private static ReportCell GroupCell(string? group, ReportText text) => new(group ?? text["noGroup"], group ?? text["noGroup"]);
 
-    /// <summary>Bar, column and line: the group and the plotted value, as <c>axis-chart.ts</c> lists them. A line goes in natural order.</summary>
+    /// <summary>
+    /// Bar, column and line: the group and the plotted value, as <c>axis-chart.ts</c> lists them. A line goes in natural order; the groups
+    /// then follow the order the widget declares, and are written without their numbers when the column hides them.
+    /// </summary>
     private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>) AxisTable(
-        IReadOnlyList<IndicatorRow> rows, WidgetConfig config, string caption, IndicatorMeta meta, ReportFormat format, ReportText text, bool natural)
+        IReadOnlyList<IndicatorRow> rows, WidgetConfig config, string caption, IndicatorMeta meta, ReportFormat format, ReportText text,
+        Func<string, string> names, bool natural, CategoryOrders? orders)
     {
-        IEnumerable<IndicatorRow> ordered = natural ? rows.Order(NaturalOrder.ByGroup.Instance) : rows;
-        return ([new(config.GroupBy ?? ""), ValueColumn(caption, meta)],
-            ordered.Select(r => (IReadOnlyList<ReportCell>)[GroupCell(r.Group, text), ValueCell(r.Value, meta, format)]).ToList());
+        IReadOnlyList<IndicatorRow> ordered = natural ? rows.Order(NaturalOrder.ByGroup.Instance).ToList() : rows;
+        ordered = CategoryOrder.Arrange(ordered, r => OrderEntry.OfValue(r.Group), orders?.Groups);
+        var shown = GroupTexts(rows.Select(r => r.Group), orders);
+        return ([new(GroupHeader(config.GroupBy, names)), ValueColumn(caption, meta)],
+            ordered.Select(r => (IReadOnlyList<ReportCell>)[GroupCell(CategoryOrder.Shown(shown, r.Group), text), ValueCell(r.Value, meta, format)]).ToList());
     }
+
+    /// <summary>The text each group is written with when its column hides numbered prefixes (design D5); null writes a group as it is.</summary>
+    private static IReadOnlyDictionary<string, string>? GroupTexts(IEnumerable<string?> groups, CategoryOrders? orders) =>
+        orders?.HideGroupPrefixes == true ? CategoryOrder.ShownValues(groups, true) : null;
 
     /// <summary>
     /// A widget with a series, as its cross table (design D8): the group, one column per series and a "Total" column, then a "Total" row.
     /// A 100% layout and a Likert widget show shares in the series columns and have no "Total" row.
     /// </summary>
     private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>, int, IReadOnlyList<string>) SeriesReportTable(
-        IndicatorQueryResponse response, Widget widget, string caption, IndicatorMeta meta, ReportFormat format, ReportText text)
+        IndicatorQueryResponse response, Widget widget, string caption, IndicatorMeta meta, ReportFormat format, ReportText text, Func<string, string> names,
+        CategoryOrders? orders)
     {
-        var table = SeriesTable.From(response, widget.ChartType, widget.Config.Layout);
+        var table = CategoryOrder.ArrangeTable(SeriesTable.From(response, widget.ChartType, widget.Config.Layout), orders);
         var shares = SeriesTable.ShowsShares(widget.ChartType, widget.Config.Layout);
         var valueColumn = ValueColumn(caption, meta);
+        var groupText = GroupTexts(table.Rows.Select(r => r.Group), orders);
+        var seriesText = orders?.HideSeriesPrefixes == true
+            ? CategoryOrder.ShownValues(table.Columns.Where(c => c.Kind == SeriesKinds.Value).Select(c => c.Series), true)
+            : null;
         string Label(SeriesTableColumn column) => column.Kind switch
         {
             SeriesKinds.None => text["noGroup"],
             SeriesKinds.Other => text["other"],
-            _ => column.Series ?? "",
+            _ => CategoryOrder.Shown(seriesText, column.Series) ?? "",
         };
 
-        var columns = new List<ReportColumn> { new(widget.Config.GroupBy ?? "") };
+        var columns = new List<ReportColumn> { new(GroupHeader(widget.Config.GroupBy, names)) };
         columns.AddRange(table.Columns.Select(c => shares ? new ReportColumn(Label(c), "0.0%") : valueColumn with { Header = Label(c) }));
         columns.Add(valueColumn with { Header = text["total"] });
 
@@ -249,7 +319,7 @@ public sealed class ReportDataBuilder(
         var rows = new List<IReadOnlyList<ReportCell>>();
         foreach (var row in table.Rows)
         {
-            var cells = new List<ReportCell> { GroupCell(row.Group, text) };
+            var cells = new List<ReportCell> { GroupCell(CategoryOrder.Shown(groupText, row.Group), text) };
             cells.AddRange(row.Cells.Select((value, i) => shares ? Share(row.Shares?[i]) : Value(value)));
             cells.Add(Value(row.Total));
             rows.Add(cells);
@@ -280,22 +350,26 @@ public sealed class ReportDataBuilder(
     /// widget with no group column "All rows".
     /// </summary>
     private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>) BoxplotTable(
-        IReadOnlyList<IndicatorBox> boxes, WidgetConfig config, IndicatorMeta meta, ReportFormat format, ReportText text)
+        IReadOnlyList<IndicatorBox> boxes, WidgetConfig config, IndicatorMeta meta, ReportFormat format, ReportText text, Func<string, string> names,
+        CategoryOrders? orders)
     {
+        // In the order the widget declares for its boxes; as the query sent them (natural, or by median) without a declaration.
+        boxes = CategoryOrder.Arrange(boxes, box => OrderEntry.OfValue(box.Group), orders?.Groups);
+        var shown = GroupTexts(boxes.Select(box => box.Group), orders);
         var boxMeta = meta with { Format = BoxFormat(meta.Format) ?? ReportFormat.Decimal };
         ReportColumn Figure(string key) => ValueColumn(text[key], boxMeta);
         ReportCell Number(double value) => ValueCell(value, boxMeta, format);
         ReportCell Whole(long value) => new((double)value, format.Whole(value));
         var columns = new List<ReportColumn>
         {
-            new(config.GroupBy ?? text["group"]),
+            new(config.GroupBy is null ? text["group"] : names(config.GroupBy)),
             new(text["values"], "#,##0"),
             Figure("minimum"), Figure("q1"), Figure("median"), Figure("q3"), Figure("maximum"), Figure("mean"),
             new(text["outliers"], "#,##0"),
         };
         var rows = boxes.Select(box =>
         {
-            var label = box.Group ?? text[config.GroupBy is null ? "allRows" : "noGroup"];
+            var label = CategoryOrder.Shown(shown, box.Group) ?? text[config.GroupBy is null ? "allRows" : "noGroup"];
             return (IReadOnlyList<ReportCell>)
             [
                 new(label, label), Whole(box.Values),
@@ -319,35 +393,39 @@ public sealed class ReportDataBuilder(
             }).ToList());
     }
 
-    /// <summary>A pie chart: every group value, in the order the rows list them, with its share of the positive total.</summary>
+    /// <summary>A pie chart: every group value, in the order the rows list them (or the order the widget declares), with its share of the positive total.</summary>
     private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>) PieTable(
-        IReadOnlyList<IndicatorRow> rows, WidgetConfig config, string caption, IndicatorMeta meta, ReportFormat format, ReportText text)
+        IReadOnlyList<IndicatorRow> rows, WidgetConfig config, string caption, IndicatorMeta meta, ReportFormat format, ReportText text, Func<string, string> names,
+        CategoryOrders? orders)
     {
         var total = rows.Sum(r => Math.Max(0, r.Value));
-        return ([new(config.GroupBy ?? ""), ValueColumn(caption, meta), new(text["share"], "0.0%")],
-            rows.Select(r =>
+        var shown = GroupTexts(rows.Select(r => r.Group), orders);
+        return ([new(GroupHeader(config.GroupBy, names)), ValueColumn(caption, meta), new(text["share"], "0.0%")],
+            CategoryOrder.Arrange(rows, r => OrderEntry.OfValue(r.Group), orders?.Groups).Select(r =>
             {
                 ReportCell share = r.Value > 0 && total > 0 ? new(r.Value / total, format.Share(r.Value / total)) : new(null, "—");
-                return (IReadOnlyList<ReportCell>)[GroupCell(r.Group, text), ValueCell(r.Value, meta, format), share];
+                return (IReadOnlyList<ReportCell>)[GroupCell(CategoryOrder.Shown(shown, r.Group), text), ValueCell(r.Value, meta, format), share];
             }).ToList());
     }
 
     /// <summary>A map: each shape's group, its plotted value and each tooltip column under its label, without the geometry.</summary>
     private static (IReadOnlyList<ReportColumn>, IReadOnlyList<IReadOnlyList<ReportCell>>) MapTable(
-        IndicatorQueryResponse response, WidgetConfig config, string caption, IndicatorMeta meta, ReportFormat format, ReportText text)
+        IndicatorQueryResponse response, WidgetConfig config, string caption, IndicatorMeta meta, ReportFormat format, ReportText text, Func<string, string> names,
+        CategoryOrders? orders)
     {
+        var shown = GroupTexts(response.Rows.Select(r => r.Group), orders);
         var items = config.Tooltip;
         var types = response.TooltipTypes ?? [];
-        var columns = new List<ReportColumn> { new(config.GroupBy ?? ""), ValueColumn(caption, meta) };
+        var columns = new List<ReportColumn> { new(GroupHeader(config.GroupBy, names)), ValueColumn(caption, meta) };
         for (var i = 0; i < items.Count; i++)
         {
             var type = i < types.Count ? types[i] : (DataColumnType?)null;
-            columns.Add(new(items[i].Label?.Trim() is { Length: > 0 } label ? label : items[i].Column, TooltipExcelFormat(items[i], type)));
+            columns.Add(new(items[i].Label?.Trim() is { Length: > 0 } label ? label : names(items[i].Column), TooltipExcelFormat(items[i], type)));
         }
 
         return (columns, response.Rows.Select(r =>
         {
-            var cells = new List<ReportCell> { GroupCell(r.Group, text), ValueCell(r.Value, meta, format) };
+            var cells = new List<ReportCell> { GroupCell(CategoryOrder.Shown(shown, r.Group), text), ValueCell(r.Value, meta, format) };
             for (var i = 0; i < items.Count; i++)
             {
                 cells.Add(TooltipCell(r.Tooltip is { } values && i < values.Count ? values[i] : null, i < types.Count ? types[i] : null, items[i], format, text));
@@ -424,11 +502,24 @@ public sealed class ReportDataBuilder(
         return Enumerable.Range(0, size).Select(i => (min + i * width, i == size - 1 ? max : min + (i + 1) * width, counts[i])).ToList();
     }
 
-    /// <summary>What a widget plots, as <c>plotted</c> in tamiza-ui <c>indicators/format.ts</c> writes it.</summary>
-    public static string Plotted(WidgetConfig config, string label) =>
-        config.Ratio is { } ratio ? $"{label}: {ratio.Numerator} / {ratio.Denominator}"
-        : config.Measure is { } measure ? $"{label}: {measure}"
-        : label;
+    /// <summary>
+    /// What a widget plots, as <c>plotted</c> in tamiza-ui <c>indicators/format.ts</c> writes it: its own caption text when it has one, else
+    /// the indicator's label, with the name shown for the measure, or for the ratio's two columns, when the widget names them (design D6).
+    /// With no <paramref name="names"/>, the columns are written as they are.
+    /// </summary>
+    public static string Plotted(WidgetConfig config, string label, Func<string, string>? names = null)
+    {
+        // The widget's own caption text replaces the whole "what", the label and the column names together (design D3 of the widget context).
+        if (config.Display?.Caption?.Text is { Length: > 0 } own)
+        {
+            return own;
+        }
+
+        names ??= column => column;
+        return config.Ratio is { } ratio ? $"{label}: {names(ratio.Numerator)} / {names(ratio.Denominator)}"
+            : config.Measure is { } measure ? $"{label}: {names(measure)}"
+            : label;
+    }
 
     /// <summary>A filter's default as the filter bar writes it (<c>describeValue</c> in tamiza-ui <c>indicators/dashboard-filters.ts</c>).</summary>
     public static string Describe(DashboardFilter filter, DashboardFilterValue value, ReportText text)

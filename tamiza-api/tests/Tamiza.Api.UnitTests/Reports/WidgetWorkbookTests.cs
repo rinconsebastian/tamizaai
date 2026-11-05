@@ -19,13 +19,13 @@ public sealed class WidgetWorkbookTests : IDisposable
 
     private static WidgetWorkbookModel Model(
         ReportWidget widget, string locale = "en-US", IReadOnlyList<ReportFilterLine>? filters = null, IReadOnlyList<string>? notNarrowed = null,
-        string? version = null)
+        string? version = null, string? source = null)
     {
         var text = ReportText.For(locale);
         return new WidgetWorkbookModel(
             "Census 2026", "Housing", version, widget, "Households visited", "households_visited",
             filters ?? [new ReportFilterLine("Municipality", "Cali"), new ReportFilterLine("Round", text["allValues"])], notNarrowed ?? [],
-            Generated.AddHours(-7), Exported, new ReportFormat(text.Culture, ReportFormat.ZoneOf("America/Bogota")), text);
+            Generated.AddHours(-7), Exported, new ReportFormat(text.Culture, ReportFormat.ZoneOf("America/Bogota")), text, source);
     }
 
     private List<string> Write(WidgetWorkbookModel model)
@@ -155,6 +155,70 @@ public sealed class WidgetWorkbookTests : IDisposable
         Assert.Contains(rows, r => r[0] == "Exported" && r[1].Contains("America/Bogota"));
         Assert.Contains(rows, r => r.SequenceEqual(["Rows", "4"]));
         Assert.DoesNotContain(rows, r => r[0] == "Version");
+    }
+
+    [Fact]
+    public void Widget_texts_in_the_summary()
+    {
+        var widget = Bars(1, "2.4. En qué lugares", 4) with
+        {
+            Caption = "% de quienes asistieron", Subtitle = "¿En qué lugares ha visto teatro?", Footnote = "No suman 100 %: respuesta múltiple.",
+            Notes = ["Only the first 5000 rows are shown: the query matches more."],
+        };
+
+        Write(Model(widget, version: "Version 9, saved by Ana Pérez on Oct 31, 2026, 10:32 AM", source: "Encuesta de mercado, 478 encuestas"));
+
+        var rows = Rows("Summary").Select(Pair).ToList();
+        var names = rows.Select(r => r[0]).ToList();
+        Assert.Equal(["Project", "Dashboard", "Version", "Source", "Widget", "Subtitle", "Indicator", "Plotted"], names.Take(8));
+        Assert.Equal(["Source", "Encuesta de mercado, 478 encuestas"], rows[3]);
+        Assert.Equal(["Subtitle", "¿En qué lugares ha visto teatro?"], rows[5]);
+        Assert.Equal(["Plotted", "% de quienes asistieron"], rows[7]);
+        var rowsLine = names.IndexOf("Rows");
+        Assert.Equal(["Footnote", "No suman 100 %: respuesta múltiple."], rows[rowsLine + 1]);
+        Assert.Equal("Notes", rows[rowsLine + 2][0]);
+    }
+
+    [Fact]
+    public void Reference_lines_are_one_item_after_what_is_plotted()
+    {
+        var widget = Bars(1, "2.1. Asistió, por comuna", 2) with
+        {
+            Footnote = "Sin ponderar.",
+            ReferenceLines = [new ReportReferenceLine("mean", "Mean", 0.3417, "34.17%"), new ReportReferenceLine("value", "Meta", 0.5, "50%")],
+        };
+
+        Write(Model(widget));
+
+        var rows = Rows("Summary").Select(Pair).ToList();
+        var plotted = rows.FindIndex(r => r[0] == "Plotted");
+        Assert.Equal(["Reference lines", "Mean: 34.17% · Meta: 50%"], rows[plotted + 1]);
+        Assert.StartsWith("Filters", rows[plotted + 2][0]);
+        // The data sheet is the widget's table, with no row or column for the lines.
+        Assert.Equal(2, Rows("2.1. Asistió, por comuna").Count);
+
+        Write(Model(widget, locale: "es-CO"));
+        Assert.Contains(Rows("Resumen").Select(Pair), r => r.SequenceEqual(["Líneas de referencia", "Mean: 34.17% · Meta: 50%"]));
+    }
+
+    [Fact]
+    public void No_texts_in_the_summary()
+    {
+        Write(Model(Bars(1, "Coverage", 2)));
+
+        Assert.All(Rows("Summary").Select(Pair), r => Assert.DoesNotContain(r[0], new[] { "Source", "Subtitle", "Footnote", "Reference lines" }));
+        Assert.Equal(["Project", "Dashboard", "Widget", "Indicator", "Plotted"], Rows("Summary").Select(Pair).Take(5).Select(r => r[0]));
+    }
+
+    [Fact]
+    public void The_texts_of_a_spanish_member_use_the_spanish_words()
+    {
+        Write(Model(Bars(1, "Cobertura", 1) with { Subtitle = "s", Footnote = "n" }, locale: "es-CO", source: "f"));
+
+        var names = Rows("Resumen").Select(Pair).Select(r => r[0]).ToList();
+        Assert.Contains("Fuente", names);
+        Assert.Contains("Subtítulo", names);
+        Assert.Contains("Nota al pie", names);
     }
 
     [Fact]

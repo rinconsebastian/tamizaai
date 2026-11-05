@@ -213,11 +213,19 @@ Each email SHALL hold the dashboard's widgets, settings and data as they are whe
 - **THEN** Thursday's email includes the new widget
 
 ### Requirement: Email header
-The email body SHALL open with a header. It SHALL give the project, the dashboard and the time the email was generated, with the project's time zone. It SHALL give the latest time one of the widgets' indicators was published, and the filters in force.
+The email body SHALL open with a header. It SHALL give the project, the dashboard and the time the email was generated, with the project's time zone. It SHALL give the latest time one of the widgets' indicators was published, and the filters in force. It SHALL give the dashboard's source when the dashboard has one.
 
 #### Scenario: Header
 - **WHEN** the "Housing" email of "Census 2026" is generated at 07:00 in `America/Bogota`, and its indicators were last published at 05:12
 - **THEN** its header names "Census 2026" and "Housing", gives 07:00 with the time zone, gives 05:12 as the data's publication time, and lists the filters in force
+
+#### Scenario: Source in the header
+- **WHEN** the English email of "Teatro", whose source is "Encuesta de mercado del Centro Bicentenario de Duitama, 478 encuestas", is generated
+- **THEN** its header gives "Source" with that text, in the HTML body, in the plain text and in the workbook's "Summary" sheet
+
+#### Scenario: Dashboard without a source
+- **WHEN** the email of "Escuelas", which has no source, is generated
+- **THEN** its header has no source line
 
 ### Requirement: Email body
 After the header, the email body SHALL show the value of each stat tile. Then it SHALL show one block per other widget, in the dashboard's reading order: top to bottom, then left to right. Each block SHALL hold the widget's title and the first 10 rows of its "Show as table" view. When a widget has more rows, the block SHALL say how many more it has. A widget with a series SHALL show at most its first 6 series columns and its "Total" column in the block, and SHALL say how many more columns it has. The body SHALL say once where the full tables are: in the attachment, or, when the attachment was left off, that it was too large.
@@ -239,7 +247,7 @@ After the header, the email body SHALL show the value of each stat tile. Then it
 - **THEN** the body shows `42%`
 
 ### Requirement: Widget tables in a scheduled email
-A widget's table in the body and in the workbook SHALL have the same columns and rows as its "Show as table" view, in the same order. The one exception is a map's table, which SHALL NOT include the kind of geometry. A histogram's table SHALL list each range with the number of values in it. A pie chart's table SHALL list every group value with its share. A box plot's table SHALL list each box with its number of values, minimum, first quartile, median, third quartile, maximum, mean and number of outliers. A widget with a series SHALL be shown as its cross table, with its "Total" column and "Total" row; a 100% layout and a Likert widget SHALL show shares in place of values and have the "Total" column but no "Total" row; and a widget that left rows out SHALL say how many in its note.
+A widget's table in the body and in the workbook SHALL have the same columns and rows as its "Show as table" view, in the same order. The one exception is a map's table, which SHALL NOT include the kind of geometry. A histogram's table SHALL list each range with the number of values in it. A pie chart's table SHALL list every group value with its share. A box plot's table SHALL list each box with its number of values, minimum, first quartile, median, third quartile, maximum, mean and number of outliers. A widget with a series SHALL be shown as its cross table, with its "Total" column and "Total" row; a 100% layout and a Likert widget SHALL show shares in place of values and have the "Total" column but no "Total" row; and a widget that left rows out SHALL say how many in its note. The headers SHALL name the widget's columns as its "Show as table" view does (see `dashboard-indicators` "Column labels in widget texts").
 
 #### Scenario: Histogram
 - **WHEN** a histogram of "Housing" has 10 buckets over the values of 80 municipalities
@@ -269,8 +277,12 @@ A widget's table in the body and in the workbook SHALL have the same columns and
 - **WHEN** a box plot of "Housing" is grouped by `municipality`, which has 12 values, and is ordered by median descending
 - **THEN** its table lists the 12 municipalities from the largest median to the smallest, each with its number of values, minimum, first quartile, median, third quartile, maximum, mean and number of outliers
 
+#### Scenario: Headers with column labels
+- **WHEN** a column chart of "Teatro" plots the ratio of `numerator` to `denominator` of `teatro_hoy`, labelled "Teatro hoy", grouped by `comuna`, and the indicator labels the three columns "Hogares que asistieron", "Hogares" and "Comuna"
+- **THEN** its table's headers in the body and in the workbook read "Comuna" and "Teatro hoy: Hogares que asistieron / Hogares"
+
 ### Requirement: Missing values in widget tables
-A missing group value SHALL read as the interface's text for no group, such as "(none)". A missing value SHALL read as "—" in the body and be an empty cell in the workbook. A widget whose indicator the project no longer lists SHALL use the `decimal` format with no unit, and the indicator's name as its label, as the dashboard does.
+A missing group value SHALL read as the interface's text for no group, such as "(none)". A missing value SHALL read as "—" in the body and be an empty cell in the workbook. A widget whose indicator the project no longer lists SHALL use the `decimal` format with no unit, and the indicator's name as its label, as the dashboard does; a widget's own unit and own caption text still take their place there (see `dashboard-indicators` "Widget unit" and "Widget caption text").
 
 #### Scenario: Rows without a group value
 - **WHEN** a bar chart of "Housing" has rows whose `municipality` is empty, in an English email
@@ -279,6 +291,10 @@ A missing group value SHALL read as the interface's text for no group, such as "
 #### Scenario: Removed indicator
 - **WHEN** a widget's indicator script was removed but its table is still published
 - **THEN** the widget's values have two decimals and no unit, and its caption uses the indicator's name
+
+#### Scenario: Removed indicator with a unit of its own
+- **WHEN** the script of `teatro_precio_hogar` was removed but its table is still published, and a box plot over it has the unit "pesos por boleta", in an English email
+- **THEN** its median reads "40,000.00 pesos por boleta"
 
 ### Requirement: Widget notes in a scheduled email
 A widget that cannot be shown SHALL appear with its title and the reason in place of a table. Reasons are: its indicator is not published, its table lacks a column the widget needs, its settings no longer fit its table, it could not be read in time, or no row matches. A widget that reached the row limit, or that a filter in force does not narrow, SHALL show its table with a note. One widget's failure SHALL NOT keep the others out.
@@ -449,3 +465,102 @@ Validation errors SHALL appear next to their field.
 #### Scenario: Phone width
 - **WHEN** an `analyst` opens the dialog in a viewport 360 pixels wide
 - **THEN** every field and action is usable without scrolling the page horizontally
+
+### Requirement: Column labels in a scheduled email
+The caption a scheduled email writes for each widget, in its HTML body and its plain text, SHALL name the widget's columns as the dashboard does. The names SHALL be the widget's own labels, else the labels of the current version of its indicator's script, else the columns' own names, read when the email is built. A dashboard whose widgets and indicators label no column SHALL be sent exactly as before.
+
+#### Scenario: Caption of a stat tile
+- **WHEN** the email of "Teatro" holds a stat tile of the ratio of `numerator`, labelled "Hogares que asistieron", to `denominator`, labelled "Hogares", of `teatro_hoy`, labelled "Teatro hoy"
+- **THEN** the body and the plain text describe the tile as "Teatro hoy: Hogares que asistieron / Hogares"
+
+#### Scenario: Label changed before a send
+- **WHEN** an analyst changes the label of `denominator` of `teatro_hoy` to "Hogares encuestados" on Tuesday, and the email of "Teatro" is sent on Wednesday
+- **THEN** that email names the denominator "Hogares encuestados"
+
+#### Scenario: Dashboard without labels
+- **WHEN** the email of "Escuelas" is sent, and none of its widgets or of their indicators labels a column
+- **THEN** its captions and headers name `numerator`, `denominator` and the group columns as before
+
+### Requirement: Widget context in a scheduled email
+In the HTML body and its plain text, a widget's subtitle SHALL follow its title, its caption line SHALL use its own caption text, or be left out when the widget hides it, and its values and its value column's header SHALL use its own unit. The workbook's widget sheets SHALL use the same headers, and its "Summary" sheet SHALL list each widget's subtitle and footnote. A widget without these settings SHALL be sent as before.
+
+#### Scenario: Subtitle under the title
+- **WHEN** the "Teatro" email holds the bar chart "2.4. En qué lugares" with the subtitle "¿En qué lugares ha visto teatro en el último año? (E4)"
+- **THEN** its block shows the subtitle under the title, in the HTML body and in the plain text
+
+#### Scenario: Caption hidden on a stat tile
+- **WHEN** the stat tile "Fuera de Duitama" hides its caption
+- **THEN** its cell shows its title and its value, with no caption line
+
+#### Scenario: Own caption text
+- **WHEN** a bar chart's caption text is "% de quienes asistieron"
+- **THEN** its block's caption line and its value column's header read "% de quienes asistieron"
+
+#### Scenario: Own unit
+- **WHEN** the column chart "2.2" over `teatro_hoy` has the unit "de quienes asistieron", in an English email
+- **THEN** its values read like "11.21% de quienes asistieron", and its workbook sheet's value header names "de quienes asistieron"
+
+#### Scenario: Texts in the summary sheet
+- **WHEN** that column chart has a subtitle and a footnote
+- **THEN** the workbook's "Summary" sheet lists both, each with the widget's title
+
+#### Scenario: Email of widgets without these settings
+- **WHEN** the email of "Escuelas", none of whose widgets has a subtitle, a footnote, a caption setting or a unit, is sent
+- **THEN** its body, plain text and workbook have the same captions, values, headers and notes as before these settings existed
+
+### Requirement: Widget footnote in a scheduled email
+In the HTML body and its plain text, a widget's footnote SHALL follow its table, its value or the reason it is not shown, after the lines that say how many rows or columns the body leaves out, and apart from the widget's notes.
+
+#### Scenario: Footnote after the table
+- **WHEN** the bar chart "2.4. En qué lugares" of "Teatro" has the footnote "No suman 100 %: respuesta múltiple." and 12 bars
+- **THEN** its block shows its first 10 rows, the line saying it has 2 more rows, and then the footnote
+
+#### Scenario: Footnote of a stat tile
+- **WHEN** the stat tile "Fuera de Duitama" has the footnote "Sin dato aparte (E5)."
+- **THEN** its cell shows the footnote under its value and caption
+
+#### Scenario: Footnote of a widget not shown
+- **WHEN** a widget with a footnote cannot be read in time
+- **THEN** its block shows its title, the note that it could not be read in time, and then its footnote
+
+### Requirement: Reference lines in a scheduled email
+The block of a widget with reference lines SHALL list, under its table in the HTML body and in the plain text, after the lines that say how many more rows or columns it has and before its footnote, each line drawn with its label and value in the email's language and regional format, in the order the widget lists them. The workbook's "Summary" sheet SHALL list them for that widget, after its subtitle and footnote. The widget's table SHALL keep the columns and rows of its "Show as table" view.
+
+#### Scenario: Lines under the table
+- **WHEN** the email of "2. Teatro" holds the column chart "2.1. Asistió, por comuna" over `teatro_hoy`, whose unit is `de los hogares`, with a `mean` line at 0.3417 and an `overall` line at 0.4599, in American English
+- **THEN** the chart's block shows its table and, under it, "Mean: 34.17% de los hogares" and "Overall: 45.99% de los hogares"
+
+#### Scenario: Default labels in Spanish
+- **WHEN** that email is sent in Spanish
+- **THEN** the lines read with the Spanish default labels, "Promedio" and "Valor general"
+
+#### Scenario: Lines before the footnote
+- **WHEN** the block of the bar chart "2.4. En qué lugares" of "Teatro", which has 12 bars, the footnote "No suman 100 %: respuesta múltiple." and a `mean` line, is in the email
+- **THEN** it shows its first 10 rows, the line saying it has 2 more rows, the mean line, and then the footnote
+
+#### Scenario: Lines in the workbook
+- **WHEN** that email attaches its workbook
+- **THEN** the "Summary" sheet lists the chart's two reference lines with their values, and the chart's sheet holds its table as before
+
+#### Scenario: Widget without reference lines
+- **WHEN** a widget of "2. Teatro" has no reference lines
+- **THEN** its block and the workbook's "Summary" sheet are as before
+
+### Requirement: Declared category order in a scheduled email
+A widget's table in a scheduled email's body and in its workbook SHALL list its groups and series in the order of "Declared category order applied", and SHALL write their values with the prefixes hidden as "Numbered category prefixes hidden" says, as the widget's "Show as table" view does. A widget that declares nothing SHALL have the table it had before declared orders existed.
+
+#### Scenario: Answers in order without their numbers
+- **WHEN** a scheduled email holds the 100% bar chart "2.8. Iría al teatro, por comuna", whose indicator hides the prefixes of `respuesta`
+- **THEN** its table's series columns read `Sí`, `Tal vez`, `No`, `No sabe`, in that order, in the body and in the workbook
+
+#### Scenario: Value kept last
+- **WHEN** a scheduled email holds a column chart grouped by `comuna` whose indicator keeps `Sin dato` last
+- **THEN** its table lists `Sin dato` after `SIN NOMBRE`, in the body and in the workbook
+
+#### Scenario: Widget's own order
+- **WHEN** a scheduled email holds a pie chart with its own order of groups
+- **THEN** its table lists the group values in that order
+
+#### Scenario: Nothing declared
+- **WHEN** a scheduled email holds widgets that declare no order, no values kept last and no hidden prefixes
+- **THEN** their tables list the same rows, in the same order and with the same text, as before declared orders existed

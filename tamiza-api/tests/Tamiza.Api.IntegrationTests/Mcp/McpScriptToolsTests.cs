@@ -264,6 +264,125 @@ public sealed class McpScriptToolsTests(PostgresFixture postgres)
         Assert.Equal(1, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
     }
 
+    // Column labels through MCP (mcp-server: Indicator column labels through MCP)
+
+    private static object Labelled(object? columns, int? baseVersion = null, string code = Indicator) =>
+        new { kind = "indicator", name = "teatro_hoy", code, label = "Teatro hoy", format = "percent", baseVersion, columns };
+
+    private static Dictionary<string, string?> LabelsOf(JsonElement element)
+    {
+        Assert.True(element.TryGetProperty("columns", out var columns), element.ToString());
+        return columns.EnumerateObject().ToDictionary(c => c.Name, c => c.Value.GetProperty("label").GetString());
+    }
+
+    [Fact]
+    public async Task Labels_saved_through_mcp_are_returned_by_the_save_the_script_and_the_indicators_list_and_seen_in_the_editor()
+    {
+        await using var h = await CreateAsync();
+
+        using var saved = (await h.CallAsync("analyst", "save_script", Labelled(new
+        {
+            numerator = new { label = "Hogares que asistieron" },
+            denominator = new { label = "Hogares" },
+        }))).Json();
+        using var script = (await h.CallAsync("analyst", "get_script", new { kind = "indicator", name = "teatro_hoy" })).Json();
+        using var listed = (await h.CallAsync("viewer", "list_indicators")).Json();
+        using var rest = JsonDocument.Parse(await Rest(h, "analyst").GetStringAsync($"/api/v1/projects/{h.ProjectId}/scripts/indicators/teatro_hoy/versions/1"));
+
+        var expected = new Dictionary<string, string?> { ["numerator"] = "Hogares que asistieron", ["denominator"] = "Hogares" };
+        Assert.Equal(expected, LabelsOf(saved.RootElement));
+        Assert.Equal(expected, LabelsOf(script.RootElement));
+        Assert.Equal(expected, LabelsOf(Assert.Single(listed.RootElement.GetProperty("indicators").EnumerateArray())));
+        Assert.Equal(expected, LabelsOf(rest.RootElement));
+    }
+
+    [Fact]
+    public async Task An_indicator_without_labels_returns_no_columns_member()
+    {
+        await using var h = await CreateAsync();
+
+        using var saved = (await h.CallAsync("analyst", "save_script", NewIndicator())).Json();
+        using var script = (await h.CallAsync("analyst", "get_script", new { kind = "indicator", name = "school_attendance" })).Json();
+        using var listed = (await h.CallAsync("viewer", "list_indicators")).Json();
+
+        Assert.False(saved.RootElement.TryGetProperty("columns", out _));
+        Assert.False(script.RootElement.TryGetProperty("columns", out _));
+        Assert.False(Assert.Single(listed.RootElement.GetProperty("indicators").EnumerateArray()).TryGetProperty("columns", out _));
+    }
+
+    [Fact]
+    public async Task A_client_that_leaves_the_labels_out_keeps_those_of_the_version_before()
+    {
+        await using var h = await CreateAsync();
+        await h.CallAsync("analyst", "save_script", Labelled(new { numerator = new { label = "Hogares que asistieron" } }));
+
+        using var second = (await h.CallAsync("analyst", "save_script", Labelled(null, baseVersion: 1, code: Indicator + "# 2\n"))).Json();
+        using var third = (await h.CallAsync("analyst", "save_script", new { kind = "indicator", name = "teatro_hoy", code = Indicator + "# 3\n", label = "Teatro hoy", format = "percent", baseVersion = 2 })).Json();
+
+        Assert.Equal(new Dictionary<string, string?> { ["numerator"] = "Hogares que asistieron" }, LabelsOf(second.RootElement));
+        Assert.Equal(new Dictionary<string, string?> { ["numerator"] = "Hogares que asistieron" }, LabelsOf(third.RootElement));
+    }
+
+    [Fact]
+    public async Task Labels_given_replace_all_and_an_empty_set_clears_them()
+    {
+        await using var h = await CreateAsync();
+        await h.CallAsync("analyst", "save_script", Labelled(new { numerator = new { label = "Hogares que asistieron" }, denominator = new { label = "Hogares" } }));
+
+        using var replaced = (await h.CallAsync("analyst", "save_script", Labelled(new { comuna = new { label = "Comuna" } }, baseVersion: 1))).Json();
+        using var cleared = (await h.CallAsync("analyst", "save_script", Labelled(new { }, baseVersion: 2))).Json();
+        using var kept = (await h.CallAsync("analyst", "save_script", Labelled(null, baseVersion: 3))).Json();
+
+        Assert.Equal(new Dictionary<string, string?> { ["comuna"] = "Comuna" }, LabelsOf(replaced.RootElement));
+        Assert.False(cleared.RootElement.TryGetProperty("columns", out _));
+        Assert.False(kept.RootElement.TryGetProperty("columns", out _));
+        Assert.Equal(2, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions WHERE columns IS NULL"));
+    }
+
+    [Fact]
+    public async Task A_label_refused_through_mcp_names_its_key_and_creates_no_version()
+    {
+        await using var h = await CreateAsync();
+
+        var tooLong = await h.CallAsync("analyst", "save_script", Labelled(new { numerator = new { label = new string('a', 81) } }));
+        var lineBreak = await h.CallAsync("analyst", "save_script", Labelled(new { numerator = new { label = "Hogares\nque asistieron" } }));
+        var notAColumn = await h.CallAsync("analyst", "save_script", Labelled(new Dictionary<string, object> { ["Hogar Menores"] = new { label = "Hogares" } }));
+
+        Assert.All(new[] { tooLong, lineBreak, notAColumn }, result => Assert.Equal("mcp.validation", result.Code()));
+        Assert.Contains("columns.numerator.label", tooLong.Text());
+        Assert.Contains("columns.numerator.label", lineBreak.Text());
+        Assert.Contains("columns:", notAColumn.Text());
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
+
+    [Fact]
+    public async Task Columns_sent_for_script_1_or_script_2_are_ignored()
+    {
+        await using var h = await CreateAsync();
+
+        var clean = await h.CallAsync("analyst", "save_script", new { kind = "clean", code = Clean, columns = new { numerator = new { label = "Hogares" } } });
+        var output = await h.CallAsync("analyst", "save_script", new { kind = "output", code = "def prepare_output(cleaned, ctx):\n    return cleaned\n", columns = new { numerator = new { label = "x".PadRight(200, 'x') } } });
+
+        Assert.Null(clean.Code());
+        Assert.Null(output.Code());
+        using var body = clean.Json();
+        Assert.False(body.RootElement.TryGetProperty("columns", out _));
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions WHERE columns IS NOT NULL"));
+    }
+
+    [Fact]
+    public async Task A_restore_through_mcp_brings_the_labels_of_the_version_back()
+    {
+        await using var h = await CreateAsync();
+        await h.CallAsync("analyst", "save_script", Labelled(new { numerator = new { label = "Hogares que asistieron" } }));
+        await h.CallAsync("analyst", "save_script", Labelled(new { }, baseVersion: 1));
+
+        var restored = await h.CallAsync("analyst", "restore_script_version", new { kind = "indicator", name = "teatro_hoy", version = 1, baseVersion = 2 });
+
+        using var body = restored.Json();
+        Assert.Equal(new Dictionary<string, string?> { ["numerator"] = "Hogares que asistieron" }, LabelsOf(body.RootElement));
+    }
+
     [Fact]
     public async Task A_version_or_script_that_does_not_exist_is_not_found_with_what_to_call()
     {
@@ -275,5 +394,60 @@ public sealed class McpScriptToolsTests(PostgresFixture postgres)
         Assert.Equal("mcp.notFound", script.Code());
         Assert.Contains("list_scripts", script.Text());
         Assert.Equal("mcp.notFound", restore.Code());
+    }
+
+    // The declared order of a column through MCP (mcp-server: Declared category order through MCP)
+
+    [Fact]
+    public async Task Order_through_save_script()
+    {
+        await using var h = await CreateAsync();
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "teatro_hoy", "categoria text, value numeric", "('1. Sí', 3), ('2. Tal vez', 2), ('4. No sabe', 1)");
+
+        using var saved = (await h.CallAsync("analyst", "save_script", Labelled(new
+        {
+            categoria = new { label = "Respuesta", order = new[] { "1. Sí", "2. Tal vez", "3. No" }, last = new[] { "4. No sabe" }, stripPrefix = true },
+        }))).Json();
+        using var script = (await h.CallAsync("analyst", "get_script", new { kind = "indicator", name = "teatro_hoy" })).Json();
+        using var listed = (await h.CallAsync("viewer", "list_indicators")).Json();
+        using var catalog = (await h.CallAsync("viewer", "get_indicator_columns", new { name = "teatro_hoy" })).Json();
+
+        void Check(JsonElement facts)
+        {
+            Assert.Equal("Respuesta", facts.GetProperty("label").GetString());
+            Assert.Equal(["1. Sí", "2. Tal vez", "3. No"], facts.GetProperty("order").EnumerateArray().Select(v => v.GetString()));
+            Assert.Equal(["4. No sabe"], facts.GetProperty("last").EnumerateArray().Select(v => v.GetString()));
+            Assert.True(facts.GetProperty("stripPrefix").GetBoolean());
+        }
+
+        Check(saved.RootElement.GetProperty("columns").GetProperty("categoria"));
+        Check(script.RootElement.GetProperty("columns").GetProperty("categoria"));
+        Check(Assert.Single(listed.RootElement.GetProperty("indicators").EnumerateArray()).GetProperty("columns").GetProperty("categoria"));
+        Check(catalog.RootElement.GetProperty("columns").EnumerateArray().Single(c => c.GetProperty("name").GetString() == "categoria"));
+        // A column with nothing declared carries no such members.
+        Assert.False(catalog.RootElement.GetProperty("columns").EnumerateArray().Single(c => c.GetProperty("name").GetString() == "value").TryGetProperty("order", out _));
+    }
+
+    [Fact]
+    public async Task A_save_through_mcp_that_breaks_a_rule_of_the_order_is_refused_and_makes_no_version()
+    {
+        await using var h = await CreateAsync();
+
+        var result = await h.CallAsync("analyst", "save_script", Labelled(new { categoria = new { order = new[] { "No sabe" }, last = new[] { "No sabe" } } }));
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("columns.categoria.last[0]", result.Text());
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.script_versions"));
+    }
+
+    [Fact]
+    public async Task A_save_through_mcp_that_leaves_columns_out_keeps_the_order_of_the_current_version()
+    {
+        await using var h = await CreateAsync();
+        using var first = (await h.CallAsync("analyst", "save_script", Labelled(new { categoria = new { order = new[] { "Sí", "No" } } }))).Json();
+
+        using var second = (await h.CallAsync("analyst", "save_script", Labelled(null, baseVersion: 1, code: "# two\n" + Indicator))).Json();
+
+        Assert.Equal(["Sí", "No"], second.RootElement.GetProperty("columns").GetProperty("categoria").GetProperty("order").EnumerateArray().Select(v => v.GetString()));
     }
 }

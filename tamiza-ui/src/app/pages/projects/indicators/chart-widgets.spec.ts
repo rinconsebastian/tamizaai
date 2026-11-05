@@ -1,3 +1,5 @@
+import en from '../../../../../public/i18n/en.json';
+import es from '../../../../../public/i18n/es.json';
 import { byTestId, settle } from '../../../../testing/project-harness';
 import { pressKey } from '../../../../testing/cdk';
 import { ChartType, DashboardColors, IndicatorEntry, PaletteId, QueryResult, QueryRow, QuerySeries, ValueColor, WidgetConfig } from '../../../core/projects/indicators.service';
@@ -66,6 +68,38 @@ describe('chart widgets', () => {
       expect(menuItem('widget-show-table')).toBeNull(); // a single figure has no plot
       // The server sums the measure over every row; a stat tile never groups.
       expect(query).toEqual({ config: { ...config({ indicator: 'households_visited', measure: 'value' }), groupBy: null }, chartType: 'stat' });
+    });
+
+    it.each([
+      ['a subtitle', { subtitle: '% de quienes asistieron (E4)' }],
+      ['a footnote', { footnote: 'Sin ponderar.' }],
+    ])('centers its column while it fits and starts at the top once it has %s, so its figure stays whole (Stat tile two rows high)', async (_name, display) => {
+      const { root } = await show('stat', { indicator: 'piped_water_rate', display }, [row(null, 0.42)]);
+
+      const column = byTestId(root, 'stat')!;
+      expect(column.classList.contains('justify-center-safe')).toBe(true);
+      expect(column.classList.contains('justify-center')).toBe(false);
+    });
+
+    it.each([
+      ['no texts', undefined],
+      ['a color', { color: 2 }],
+      ['a hidden caption', { caption: { hidden: true as const } }],
+      ['a blank subtitle', { subtitle: '   ' }],
+    ])('keeps its column centered as it was with %s (Widgets saved before)', async (_name, display) => {
+      const { root } = await show('stat', { indicator: 'piped_water_rate', ...(display ? { display } : {}) }, [row(null, 0.42)]);
+
+      const column = byTestId(root, 'stat')!;
+      expect(column.classList.contains('justify-center')).toBe(true);
+      expect(column.classList.contains('justify-center-safe')).toBe(false);
+    });
+
+    it('shows the footnote under the figure and its label', async () => {
+      const { root } = await show('stat', { indicator: 'piped_water_rate', display: { footnote: 'Sin ponderar.' } }, [row(null, 0.42)]);
+
+      expect(text(byTestId(root, 'stat-value'))).toBe('42%');
+      expect(text(byTestId(root, 'widget-footnote'))).toBe('Sin ponderar.');
+      expect(byTestId(root, 'stat-label')!.compareDocumentPosition(byTestId(root, 'widget-footnote')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('shows a rate stored as a fraction as a percentage', async () => {
@@ -1215,3 +1249,885 @@ describe('widget states on paper (dashboard printing)', () => {
     expect(byTestId(context.root, 'view-not-published')!.closest('.paper\:hidden')).toBeNull();
   });
 });
+
+describe('column labels in chart widgets (add-indicator-column-metadata)', () => {
+  afterEach(clearOverlay);
+
+  const ratio = { numerator: 'numerator', denominator: 'denominator' };
+  const groups = [row('Zona 1', 0.5), row('Zona 2', 0.25)];
+  /** `teatro_hoy`, labelled "Teatro hoy", with the names a member typed for the ratio's two columns and its dimension. */
+  const teatro = indicator('teatro_hoy', {
+    label: 'Teatro hoy',
+    format: 'percent',
+    columns: { numerator: { label: 'Hogares que asistieron' }, denominator: { label: 'Hogares' }, zona: { label: 'Zona' } },
+  });
+
+  it('names the columns of a ratio in the caption of a chart (Caption of a ratio)', async () => {
+    const context = await show('column', { indicator: 'teatro_hoy', groupBy: 'zona', ratio }, groups, [teatro]);
+
+    expect(text(byTestId(context.root, 'chart-caption'))).toBe('Teatro hoy: Hogares que asistieron / Hogares by Zona');
+    expect(label(context)).toContain('Teatro hoy: Hogares que asistieron / Hogares');
+    expect(label(context)).toContain('by Zona');
+    // What the page sends names the columns themselves: a label never reaches the query.
+    expect(context.query.config).toMatchObject({ groupBy: 'zona', ratio });
+    expect(context.query.config).not.toHaveProperty('display');
+  });
+
+  it('names the columns in the headers of "Show as table" (Table headers)', async () => {
+    const context = await show('column', { indicator: 'teatro_hoy', groupBy: 'zona', ratio }, groups, [teatro]);
+
+    await toggle(context);
+
+    expect(tableHeaders(context)).toEqual(['Zona', 'Teatro hoy: Hogares que asistieron / Hogares']);
+  });
+
+  it('names the columns of the ratio in the description of a stat tile (Stat tile description)', async () => {
+    const context = await show('stat', { indicator: 'teatro_hoy', groupBy: null, ratio }, [row(null, 0.5)], [teatro]);
+
+    expect(text(byTestId(context.root, 'stat-label'))).toBe('Teatro hoy: Hogares que asistieron / Hogares');
+  });
+
+  it('names a chosen measure under its label (Measure named)', async () => {
+    const counted = indicator('teatro_conteo', { label: 'Teatro conteo', columns: { value: { label: 'Hogares' } } });
+    const context = await show('column', { indicator: 'teatro_conteo', groupBy: 'zona', measure: 'value' }, groups, [counted]);
+
+    expect(text(byTestId(context.root, 'chart-caption'))).toBe('Teatro conteo: Hogares by zona');
+  });
+
+  it('prefers the widget\'s own label to the indicator\'s (Widget label over the indicator\'s)', async () => {
+    const context = await show('column', { indicator: 'teatro_hoy', groupBy: 'zona', ratio, display: { labels: { denominator: 'Hogares de la base E1' } } }, groups, [teatro]);
+
+    expect(text(byTestId(context.root, 'chart-caption'))).toBe('Teatro hoy: Hogares que asistieron / Hogares de la base E1 by Zona');
+    expect(context.query.config).not.toHaveProperty('display');
+  });
+
+  it('names a column by its own name when neither the widget nor the indicator labels it (Column\'s own name)', async () => {
+    const context = await show('column', { indicator: 'teatro_hoy', groupBy: 'estrato', ratio }, groups, [teatro]);
+
+    expect(text(byTestId(context.root, 'chart-caption'))).toBe('Teatro hoy: Hogares que asistieron / Hogares by estrato');
+  });
+
+  it('keeps the indicator\'s label alone for the default measure (Default measure)', async () => {
+    const counted = indicator('teatro_conteo', { label: 'Teatro conteo', columns: { value: { label: 'Personas' }, zona: { label: 'Zona' } } });
+    const context = await show('column', { indicator: 'teatro_conteo', groupBy: 'zona' }, groups, [counted]);
+
+    expect(text(byTestId(context.root, 'chart-caption'))).toBe('Teatro conteo by Zona');
+    await toggle(context);
+    expect(tableHeaders(context)).toEqual(['Zona', 'Teatro conteo']);
+  });
+
+  it('keeps the color kept for a value, whatever the column is called (Colors kept by value)', async () => {
+    const colors = palette('tamiza', [{ column: 'zona', value: 'Zona 2', color: 2 }]);
+    const context = await show('column', { indicator: 'teatro_hoy', groupBy: 'zona', ratio }, groups, [teatro], colors);
+
+    expect(marks(context).map(colorOf)).toEqual([pal('tamiza', 1), pal('tamiza', 2)]);
+  });
+
+  it('names the columns in the caption of a bar chart', async () => {
+    const bar = await show('bar', { indicator: 'teatro_hoy', groupBy: 'zona', ratio }, groups, [teatro]);
+
+    expect(text(byTestId(bar.root, 'chart-caption'))).toBe('Teatro hoy: Hogares que asistieron / Hogares by Zona');
+  });
+
+  it('names the columns in the caption and the table of a pie', async () => {
+    const pie = await show('pie', { indicator: 'teatro_hoy', groupBy: 'zona', ratio }, groups, [teatro]);
+
+    expect(text(byTestId(pie.root, 'chart-caption'))).toBe('Teatro hoy: Hogares que asistieron / Hogares by Zona');
+    await toggle(pie);
+    expect(tableHeaders(pie)).toEqual(['Zona', 'Teatro hoy: Hogares que asistieron / Hogares', 'Share']);
+  });
+
+  it('names the columns in the caption of a histogram', async () => {
+    const context = await show('histogram', { indicator: 'teatro_hoy', groupBy: null, ratio }, [row('Zona 1', 0.5), row('Zona 2', 0.25)], [teatro]);
+
+    expect(text(byTestId(context.root, 'chart-caption'))).toContain('Teatro hoy: Hogares que asistieron / Hogares');
+  });
+});
+
+describe('the unit of a widget (add-widget-context, design D4)', () => {
+  afterEach(clearOverlay);
+
+  const zones = [row('Zona 1', 0.1121), row('Zona 2', 0.25)];
+  /** `teatro_hoy`, a rate of the households, whose widgets over a subgroup name another base. */
+  const teatro = indicator('teatro_hoy', { label: 'Teatro hoy', format: 'percent', unit: 'de los hogares' });
+
+  it('writes the values with the unit of the widget in place of the indicator\'s (Base of a subgroup)', async () => {
+    const context = await show('column', { indicator: 'teatro_hoy', groupBy: 'zona', display: { unit: 'de quienes asistieron' } }, zones, [teatro]);
+
+    expect(titles(marks(context))).toEqual(['Zona 1: 11.21% de quienes asistieron', 'Zona 2: 25% de quienes asistieron']);
+    await toggle(context);
+    expect(tableRows(context)).toEqual([['Zona 1', '11.21% de quienes asistieron'], ['Zona 2', '25% de quienes asistieron']]);
+    // The unit draws, it does not query.
+    expect(context.query.config).not.toHaveProperty('display');
+  });
+
+  it('leaves the unit of the indicator on the other widgets over it (Other widgets keep the indicator\'s unit)', async () => {
+    const context = await show('column', { indicator: 'teatro_hoy', groupBy: 'zona' }, zones, [teatro]);
+
+    expect(titles(marks(context))).toEqual(['Zona 1: 11.21% de los hogares', 'Zona 2: 25% de los hogares']);
+  });
+
+  it('replaces the unit of a count and keeps its format (Widget\'s own unit)', async () => {
+    const context = await show('column', { indicator: 'households_visited', display: { unit: 'households with children' } }, [row('Cali', 12450)], [households]);
+
+    expect(titles(marks(context))).toEqual(['Cali: 12,450 households with children']);
+  });
+
+  it('writes the figure of a stat tile with the unit of the widget (Stat tile with its own unit)', async () => {
+    const context = await show('stat', { indicator: 'teatro_hoy', groupBy: null, display: { unit: 'de quienes asistieron' } }, [row(null, 0.2422)], [teatro]);
+
+    expect(text(byTestId(context.root, 'stat-value'))).toBe('24.22% de quienes asistieron');
+  });
+
+  it('does not repeat a unit of % after the percentage of the widget', async () => {
+    const context = await show('stat', { indicator: 'teatro_hoy', groupBy: null, display: { unit: '%' } }, [row(null, 0.2422)], [teatro]);
+
+    expect(text(byTestId(context.root, 'stat-value'))).toBe('24.22%');
+  });
+
+  it('writes a pie and its table with the unit of the widget too', async () => {
+    const context = await show('pie', { indicator: 'households_visited', groupBy: 'zona', display: { unit: 'viviendas' } }, [row('Zona 1', 30), row('Zona 2', 10)], [households]);
+
+    await toggle(context);
+    expect(tableRows(context).map((r) => r[1])).toEqual(['30 viviendas', '10 viviendas']);
+  });
+
+  it('shows two decimals and its own unit for a widget whose indicator the project no longer lists', async () => {
+    const own = await show('column', { indicator: 'encuesta_hoy', groupBy: 'zona', display: { unit: 'viviendas' } }, [row('Zona 1', 5)], [households]);
+    expect(titles(marks(own))).toEqual(['Zona 1: 5.00 viviendas']);
+  });
+
+  it('shows two decimals and no unit for a widget whose indicator the project no longer lists and which has no unit of its own', async () => {
+    const none = await show('column', { indicator: 'encuesta_hoy', groupBy: 'zona' }, [row('Zona 1', 5)], [households]);
+
+    expect(titles(marks(none))).toEqual(['Zona 1: 5.00']);
+  });
+});
+
+describe('the caption of a widget (add-widget-context, design D3)', () => {
+  afterEach(clearOverlay);
+
+  const ratio = { numerator: 'numerator', denominator: 'denominator' };
+  const categories = [row('Teatro', 0.5), row('Cine', 0.25)];
+  const teatro = indicator('teatro_hoy', { label: 'Teatro hoy', format: 'percent', unit: 'de los hogares' });
+  const bars = { indicator: 'teatro_hoy', groupBy: 'categoria', ratio } as const;
+  const caption = (context: Context) => byTestId(context.root, 'chart-caption')!;
+  const hidden = { caption: { hidden: true as const } };
+
+  describe('own text', () => {
+    it('replaces what is plotted above the bars and keeps the rest of the line (Own text above the bars)', async () => {
+      const context = await show('bar', { ...bars, display: { caption: { text: '% de quienes asistieron' } } }, categories, [teatro]);
+
+      expect(text(caption(context))).toBe('% de quienes asistieron by categoria');
+      expect(label(context)).toContain('% de quienes asistieron');
+      expect(context.query.config).not.toHaveProperty('display');
+    });
+
+    const rounds = [row('1', 60), row('2', 70), row('3', 80)];
+
+    it('names the line of a line chart with no series by the own text (Own text above the bars)', async () => {
+      const context = await show('line', { indicator: 'teatro_hoy', groupBy: 'ronda', display: { caption: { text: '% de quienes asistieron' } } }, rounds, [teatro]);
+
+      expect(titles(all(context.root, 'chart-line'))).toEqual(['% de quienes asistieron']);
+    });
+
+    it('names the line of a line chart with no own text by the indicator\'s label, as it always did', async () => {
+      const context = await show('line', { indicator: 'teatro_hoy', groupBy: 'ronda' }, rounds, [teatro]);
+
+      expect(titles(all(context.root, 'chart-line'))).toEqual(['Teatro hoy']);
+    });
+
+    it('replaces what is plotted in the line of a histogram and keeps "Rows per range of"', async () => {
+      const context = await show('histogram', { indicator: 'teatro_hoy', groupBy: null, buckets: 4, display: { caption: { text: 'Ingreso por hogar' } } }, [row(null, 1), row(null, 5)], [teatro]);
+
+      expect(text(caption(context))).toBe('Rows per range of Ingreso por hogar, in 4 ranges');
+    });
+
+    it('heads the value column of the table with it (Own text in the table)', async () => {
+      const context = await show('bar', { ...bars, display: { caption: { text: '% de quienes asistieron' } } }, categories, [teatro]);
+
+      await toggle(context);
+
+      expect(tableHeaders(context)).toEqual(['categoria', '% de quienes asistieron']);
+    });
+
+    it('replaces the line above a pie, and the header of its table', async () => {
+      const context = await show('pie', { ...bars, display: { caption: { text: 'Proporción de asistentes' } } }, categories, [teatro]);
+
+      expect(text(caption(context))).toBe('Proporción de asistentes by categoria');
+      await toggle(context);
+      expect(tableHeaders(context)).toEqual(['categoria', 'Proporción de asistentes', 'Share']);
+    });
+
+    it('replaces the label under the figure of a stat tile (Own text on a stat tile)', async () => {
+      const context = await show('stat', { indicator: 'teatro_hoy', groupBy: null, ratio, display: { caption: { text: 'de quienes asistieron' } } }, [row(null, 0.2422)], [teatro]);
+
+      expect(text(byTestId(context.root, 'stat-label'))).toBe('de quienes asistieron');
+    });
+
+    it('keeps the legend of a chart with a series and names the value in the tooltip of its marks (Series legend kept)', async () => {
+      const answer = seriesResult([cell('Zona 1', 'Sí', 30, 3), cell('Zona 1', 'No', 10, 2), cell('Zona 2', 'Sí', 20, 1)], ['Sí', 'No']);
+      const context = await showAnswer(
+        'bar',
+        { indicator: 'households_visited', groupBy: 'zona', seriesBy: 'respuesta', layout: 'percent', display: { caption: { text: 'Iría al teatro (I1)' } } },
+        answer,
+        [households],
+      );
+
+      expect(all(context.root, 'legend-name').map(text)).toEqual(['Sí', 'No']);
+      all(context.root, 'chart-hit')[0].dispatchEvent(new MouseEvent('pointerenter', { clientX: 40, clientY: 30 }));
+      await settle(context.harness);
+      expect(Array.from(overlay().querySelectorAll('[data-testid="tooltip-line"]')).map(text).join(' ')).toContain('Iría al teatro (I1): 30 households');
+    });
+
+    it('is none when it holds only spaces', async () => {
+      const context = await show('bar', { ...bars, display: { caption: { text: '   ' } } }, categories, [teatro]);
+
+      expect(text(caption(context))).toBe('Teatro hoy: numerator / denominator by categoria');
+    });
+  });
+
+  describe('hidden', () => {
+    it('keeps the line for screen readers and takes it out of sight, and the chart still names what it plots (Hidden above the columns)', async () => {
+      const context = await show('column', { ...bars, display: hidden }, categories, [teatro]);
+
+      expect(caption(context).classList).toContain('sr-only');
+      expect(text(caption(context))).toBe('Teatro hoy: numerator / denominator by categoria');
+      expect(label(context)).toContain('Teatro hoy: numerator / denominator');
+    });
+
+    it('does the same above a bar chart, a pie and a histogram', async () => {
+      const bar = await show('bar', { ...bars, display: hidden }, categories, [teatro]);
+      expect(caption(bar).classList).toContain('sr-only');
+      expect(text(caption(bar))).toContain('Teatro hoy: numerator / denominator');
+    });
+
+    it('does the same above a pie', async () => {
+      const pie = await show('pie', { ...bars, display: hidden }, categories, [teatro]);
+      expect(caption(pie).classList).toContain('sr-only');
+      expect(text(caption(pie))).toContain('Teatro hoy: numerator / denominator');
+    });
+
+    it('does the same above a histogram', async () => {
+      const histogram = await show('histogram', { ...bars, groupBy: null, display: hidden }, categories, [teatro]);
+      expect(caption(histogram).classList).toContain('sr-only');
+      expect(text(caption(histogram))).toContain('Teatro hoy: numerator / denominator');
+    });
+
+    it('leaves the label of a stat tile for screen readers (Hidden on a stat tile)', async () => {
+      const context = await show('stat', { indicator: 'teatro_hoy', groupBy: null, ratio, display: hidden }, [row(null, 0.2422)], [teatro]);
+
+      const stat = byTestId(context.root, 'stat-label')!;
+      expect(stat.classList).toContain('sr-only');
+      expect(text(stat)).toBe('Teatro hoy: numerator / denominator');
+      expect(text(byTestId(context.root, 'stat-value'))).toBe('24.22% de los hogares');
+    });
+
+    it('still heads the value column of the table with what is plotted (Table header kept)', async () => {
+      const context = await show('column', { ...bars, display: hidden }, categories, [teatro]);
+
+      await toggle(context);
+
+      expect(tableHeaders(context)).toEqual(['categoria', 'Teatro hoy: numerator / denominator']);
+    });
+
+    it('does not hide the legend of a chart with a series (Legend kept)', async () => {
+      const answer = seriesResult([cell('Zona 1', 'Acceso', 30, 3), cell('Zona 1', 'Interés', 10, 2), cell('Zona 1', 'Otra', 5, 1)], ['Acceso', 'Interés', 'Otra']);
+      const context = await showAnswer('bar', { indicator: 'households_visited', groupBy: 'zona', seriesBy: 'barrera_tipo', layout: 'stacked', display: hidden }, answer, [households]);
+
+      expect(all(context.root, 'legend-name').map(text)).toEqual(['Acceso', 'Interés', 'Otra']);
+      expect(all(context.root, 'legend-name').every((name) => !name.closest('.sr-only'))).toBe(true);
+    });
+
+    it('names the value in the tooltips of its marks', async () => {
+      const context = await show('column', { indicator: 'households_visited', groupBy: 'municipality', display: hidden }, [row('Cali', 12450)], [households]);
+
+      expect(titles(marks(context))).toEqual(['Cali: 12,450 households']);
+    });
+  });
+
+  it('shows the line of a widget with no caption setting, with no sr-only on it', async () => {
+    const context = await show('column', { ...bars, display: { caption: {}, subtitle: 'Pregunta' } }, categories, [teatro]);
+
+    expect(caption(context).classList).not.toContain('sr-only');
+    expect(text(caption(context))).toBe('Teatro hoy: numerator / denominator by categoria');
+  });
+
+  it('shows the line of a widget with no display at all, with no sr-only on it', async () => {
+    const context = await show('column', bars, categories, [teatro]);
+
+    expect(caption(context).classList).not.toContain('sr-only');
+  });
+});
+
+describe('chart annotations (add-chart-annotations)', () => {
+  afterEach(clearOverlay);
+
+  const teatro = indicator('teatro_hoy', { label: 'Teatro hoy', format: 'percent', unit: 'de los hogares' });
+  const conteo = indicator('teatro_conteo', { label: 'Teatro conteo', format: 'count', unit: 'hogares' });
+  const zones = [row('Zona 1', 0.4), row('Zona 2', 0.5), row('Zona 3', 0.6), row('Zona 4', 0.2)];
+  const ratio = { numerator: 'numerator', denominator: 'denominator' };
+  const plainColumn = { indicator: 'teatro_hoy', groupBy: 'zona' } as const;
+
+  const svgOf = (context: Context) => byTestId(context.root, 'chart-svg')!;
+  const referenceLines = (context: Context) => all(context.root, 'reference-line');
+  const referenceTexts = (context: Context) => all(context.root, 'reference-label').map(text);
+  const keyTexts = (context: Context) => all(context.root, 'reference-key-text').map(text);
+  const dataLabels = (context: Context) => all(context.root, 'data-label');
+  const dataTexts = (context: Context) => dataLabels(context).map(text);
+  const num = (element: Element, name: string) => Number(element.getAttribute(name));
+  /** The text of the axis tick that reads `tick`. */
+  const tickOf = (context: Context, tick: string) => Array.from(svgOf(context).querySelectorAll('text')).find((t) => text(t) === tick)!;
+  /** The grid lines of the plot: the hairlines of the axis, not the reference lines. */
+  const gridOf = (context: Context) => Array.from(svgOf(context).querySelectorAll('line')).filter((l) => !l.hasAttribute('data-testid'));
+
+  describe('reference lines drawn (design D5)', () => {
+    it('crosses horizontal bars with a vertical line at the mean of the bars, labelled with the mean (Mean line on horizontal bars)', async () => {
+      const context = await show('bar', { ...plainColumn, display: { referenceLines: [{ kind: 'mean' }] } }, [row('Zona 1', 0.2), row('Zona 2', 0.4), row('Zona 3', 0.6)], [teatro]);
+
+      const [line] = referenceLines(context);
+      expect(referenceLines(context)).toHaveLength(1);
+      expect(line.getAttribute('x1')).toBe(line.getAttribute('x2'));
+      // The mean is the second bar's value: the line sits at the end of the second bar.
+      const second = marks(context)[1];
+      expect(num(line, 'x1')).toBeCloseTo(num(second, 'x') + num(second, 'width'), 6);
+      expect(line.getAttribute('stroke-dasharray')).toBe('6 4');
+      expect(line.classList).toContain('stroke-heading');
+      expect(referenceTexts(context)).toEqual(['Mean: 40% de los hogares']);
+      expect(text(line.querySelector('title'))).toBe('Mean: 40% de los hogares');
+      // Not part of the query: the chart's display never travels.
+      expect(context.query.config).not.toHaveProperty('display');
+    });
+
+    it('draws a horizontal line across a column chart, its text at the right edge above the line', async () => {
+      const context = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'median' }] } }, zones, [teatro]);
+
+      const [line] = referenceLines(context);
+      expect(line.getAttribute('y1')).toBe(line.getAttribute('y2'));
+      const [label] = all(context.root, 'reference-label');
+      expect(label.getAttribute('text-anchor')).toBe('end');
+      expect(num(label, 'y')).toBe(num(line, 'y1') - 4);
+      expect(num(label, 'x')).toBe(num(line, 'x2'));
+      expect(text(label)).toBe('Median: 45% de los hogares');
+    });
+
+    it('draws the lines of a line chart over its points', async () => {
+      const context = await show('line', { indicator: 'teatro_hoy', groupBy: 'ronda', display: { referenceLines: [{ kind: 'mean', label: 'Promedio de rondas' }] } }, [row('1', 0.2), row('2', 0.6)], [teatro]);
+
+      expect(referenceLines(context)).toHaveLength(1);
+      expect(referenceTexts(context)).toEqual(['Promedio de rondas: 40% de los hogares']);
+    });
+
+    it('stretches the axis to reach a line above every column (Axis widened)', async () => {
+      const context = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'value', value: 0.5 }] } }, [row('Zona 1', 0.1), row('Zona 2', 0.2), row('Zona 3', 0.25)], [teatro]);
+
+      expect(Array.from(svgOf(context).querySelectorAll('text')).map(text)).toContain('50%');
+      const [line] = referenceLines(context);
+      const columnTops = marks(context).map((mark) => num(mark, 'y'));
+      expect(num(line, 'y1')).toBeLessThan(Math.min(...columnTops));
+      expect(num(line, 'y1')).toBeGreaterThanOrEqual(0);
+      // The line is at the tick that reads 50%.
+      expect(num(line, 'y1')).toBeCloseTo(num(tickOf(context, '50%'), 'y') - 4, 6);
+    });
+
+    it('leaves a chart without lines on the axis it had, and the key and the labels out of it (Widget saved before reference lines)', async () => {
+      const context = await show('column', plainColumn, zones, [teatro]);
+
+      expect(referenceLines(context)).toHaveLength(0);
+      expect(all(context.root, 'reference-key')).toHaveLength(0);
+      expect(dataLabels(context)).toHaveLength(0);
+      // The top of the plot is 8 px from the top of the box, as it was, and the columns stand where they stood.
+      expect(Math.min(...gridOf(context).map((l) => num(l, 'y1')))).toBeCloseTo(8, 6);
+      expect(Array.from(svgOf(context).querySelectorAll('text')).map(text)).toEqual(expect.arrayContaining(['0%', '20%', '60%']));
+      expect(svgOf(context).getAttribute('height')).toBe('280');
+    });
+
+    it('draws a chart with an empty list of lines and a saved default as it draws one without them', async () => {
+      const context = await show('column', { ...plainColumn, display: { color: 2, referenceLines: [], dataLabels: false } }, zones, [teatro]);
+
+      expect(referenceLines(context)).toHaveLength(0);
+      expect(all(context.root, 'reference-key')).toHaveLength(0);
+      expect(Math.min(...gridOf(context).map((l) => num(l, 'y1')))).toBeCloseTo(8, 6);
+    });
+
+    it('grows the top margin of a chart with lines by one text line', async () => {
+      const context = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'mean' }] } }, zones, [teatro]);
+
+      expect(Math.min(...gridOf(context).map((l) => num(l, 'y1')))).toBeCloseTo(20, 6);
+    });
+
+    it('writes only the first of two lines so close that their texts would overlap, and the key lists both (Lines close together)', async () => {
+      const context = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'mean' }, { kind: 'median' }] } }, zones, [teatro]);
+
+      expect(referenceLines(context)).toHaveLength(2);
+      expect(referenceLines(context).map((l) => l.getAttribute('stroke-dasharray'))).toEqual(['6 4', '2 3']);
+      expect(referenceTexts(context)).toEqual(['Mean: 42.5% de los hogares']);
+      expect(keyTexts(context)).toEqual(['Mean: 42.5% de los hogares', 'Median: 45% de los hogares']);
+    });
+
+    it('draws no text at a line whose text is wider than the plot, and the key lists the whole text (Text too wide for the plot)', async () => {
+      const unit = 'de los hogares encuestados en la zona urbana del municipio';
+      const context = await show('column', { ...plainColumn, display: { unit, referenceLines: [{ kind: 'value', value: 0.5, label: 'Meta del plan de desarrollo municipal' }] } }, zones, [teatro]);
+
+      expect(referenceLines(context)).toHaveLength(1);
+      expect(referenceTexts(context)).toEqual([]);
+      expect(keyTexts(context)).toEqual([`Meta del plan de desarrollo municipal: 50% ${unit}`]);
+      expect(all(context.root, 'reference-label').every((label) => text(label).length < 200)).toBe(true);
+    });
+
+    it('draws the overall line of grouped columns at the total of all their rows (Overall line on grouped columns)', async () => {
+      const answer = seriesResult([cell('Cali', 'Piped', 30, 3), cell('Cali', 'Well', 10, 2), cell('Palmira', 'Piped', 20, 1)], ['Piped', 'Well']);
+      const context = await showAnswer('column', { indicator: 'households_visited', groupBy: 'municipality', seriesBy: 'water_source', layout: 'grouped', ratio, display: { referenceLines: [{ kind: 'overall' }] } }, answer, [households]);
+
+      expect(answer.totals!.all.value).toBe(60);
+      const [line] = referenceLines(context);
+      expect(num(line, 'y1')).toBeCloseTo(num(tickOf(context, '60'), 'y') - 4, 6);
+      // A series' marks are keyboard stops with their own tooltips: the line has no title of its own.
+      expect(line.querySelector('title')).toBeNull();
+      expect(referenceTexts(context)).toEqual(['Overall: 60 households']);
+    });
+
+    it('draws the overall line of a widget with no series at the overall value of the answer', async () => {
+      const context = await showAnswer('column', { ...plainColumn, ratio, display: { referenceLines: [{ kind: 'mean' }, { kind: 'overall' }] } }, result(zones, { overall: 0.4599 }), [teatro]);
+
+      expect(context.query).toMatchObject({ chartType: 'column' });
+      expect(keyTexts(context)).toEqual(['Mean: 42.5% de los hogares', 'Overall: 45.99% de los hogares']);
+    });
+
+    it('leaves out an overall line the engine could not give', async () => {
+      const context = await showAnswer('column', { ...plainColumn, ratio, display: { referenceLines: [{ kind: 'overall' }] } }, result(zones), [teatro]);
+
+      expect(referenceLines(context)).toHaveLength(0);
+      expect(all(context.root, 'reference-key')).toHaveLength(0);
+    });
+
+    it('crosses every bar of a 100% layout at half its length (Half of every bar)', async () => {
+      const answer = seriesResult([cell('Cali', 'Piped', 30, 3), cell('Cali', 'Well', 10, 2), cell('Palmira', 'Piped', 20, 1)], ['Piped', 'Well']);
+      const context = await showAnswer('bar', { indicator: 'households_visited', groupBy: 'municipality', seriesBy: 'water_source', layout: 'percent', display: { referenceLines: [{ kind: 'value', value: 0.5 }] } }, answer, [households]);
+
+      const [line] = referenceLines(context);
+      expect(num(line, 'x1')).toBeCloseTo((num(tickOf(context, '0%'), 'x') + num(tickOf(context, '100%'), 'x')) / 2, 6);
+      expect(keyTexts(context)).toEqual(['Reference: 50%']);
+    });
+
+    it('draws the lines of a stacked chart at their own numbers, on an axis that reaches them', async () => {
+      const answer = seriesResult([cell('Cali', 'Piped', 30, 3), cell('Cali', 'Well', 10, 2)], ['Piped', 'Well']);
+      const context = await showAnswer('column', { indicator: 'households_visited', groupBy: 'municipality', seriesBy: 'water_source', layout: 'stacked', display: { referenceLines: [{ kind: 'value', value: 100 }] } }, answer, [households]);
+
+      expect(Array.from(svgOf(context).querySelectorAll('text')).map(text)).toContain('100');
+      expect(referenceLines(context)).toHaveLength(1);
+    });
+
+    it('gives each line the dash of its place in the widget\'s list, whichever lines have a value', async () => {
+      const context = await showAnswer(
+        'column',
+        { ...plainColumn, ratio, display: { referenceLines: [{ kind: 'overall' }, { kind: 'value', value: 0.9 }, { kind: 'mean' }] } },
+        result(zones),
+        [teatro],
+      );
+
+      // The overall line has no value, so only two are drawn; the second and the third keep their own patterns.
+      expect(referenceLines(context).map((l) => l.getAttribute('stroke-dasharray'))).toEqual(['2 3', '8 3 2 3']);
+    });
+  });
+
+  describe('what the lines say (design D3)', () => {
+    it('writes its own label and the value as the widget writes values (Own label)', async () => {
+      const context = await show('column', { indicator: 'piped_water_rate', groupBy: 'zona', display: { referenceLines: [{ kind: 'value', value: 0.5, label: 'Meta' }] } }, [row('Zona 1', 0.3)], [rate]);
+
+      expect(referenceTexts(context)).toEqual(['Meta: 50%']);
+      expect(keyTexts(context)).toEqual(['Meta: 50%']);
+    });
+
+    it('writes a count with its unit (Count with a unit)', async () => {
+      const context = await show('column', { indicator: 'teatro_conteo', groupBy: 'zona', display: { referenceLines: [{ kind: 'value', value: 100 }] } }, [row('Zona 1', 80)], [conteo]);
+
+      expect(referenceTexts(context)).toEqual(['Reference: 100 hogares']);
+      expect(keyTexts(context)).toEqual(['Reference: 100 hogares']);
+    });
+
+    it('writes a target on a percent indicator with its unit (Target on a percent indicator)', async () => {
+      const context = await show('bar', { indicator: 'teatro_hoy', groupBy: 'categoria', display: { referenceLines: [{ kind: 'value', value: 0.25, label: 'Meta' }] } }, [row('Cine', 0.1), row('Teatro', 0.3)], [teatro]);
+
+      expect(referenceTexts(context)).toEqual(['Meta: 25% de los hogares']);
+      expect(keyTexts(context)).toEqual(['Meta: 25% de los hogares']);
+    });
+
+    it('writes the default label in the interface language, with the browser entry that chose it (Default label in Spanish)', async () => {
+      const context = await open('viewer', [widget('w1', { chartType: 'column', config: config({ ...plainColumn, display: { referenceLines: [{ kind: 'mean' }] } }) })], null, { indicators: [teatro] }, { lang: 'es' });
+      context.http.match(isQuery)[0].flush(result([row('Zona 1', 0.3417)]));
+      await settle(context.harness);
+
+      // The percent sign follows the region's own pattern (a space before it or none, by the ICU data of the runtime).
+      expect(keyTexts(context)).toEqual([expect.stringMatching(/^Promedio: 34,17\s?% de los hogares$/)]);
+      expect(referenceTexts(context)).toEqual([expect.stringMatching(/^Promedio: 34,17\s?% de los hogares$/)]);
+    });
+
+    it('has the four default labels in each language', () => {
+      expect(en.indicators.referenceLines.kinds).toEqual({ mean: 'Mean', median: 'Median', overall: 'Overall', value: 'Reference' });
+      expect(es.indicators.referenceLines.kinds).toEqual({ mean: 'Promedio', median: 'Mediana', overall: 'Valor general', value: 'Referencia' });
+    });
+
+    it('names each line and its value after the chart\'s summary for a screen reader (Screen reader)', async () => {
+      const context = await showAnswer('column', { ...plainColumn, ratio, display: { referenceLines: [{ kind: 'overall' }] } }, result(zones, { overall: 0.4599 }), [teatro]);
+
+      expect(label(context)).toMatch(/Highest: Zona 3\. Reference lines: Overall 45\.99% de los hogares\.$/);
+    });
+
+    it('says nothing more to a screen reader about a chart without lines', async () => {
+      const context = await show('column', plainColumn, zones, [teatro]);
+
+      expect(label(context)).not.toContain('Reference lines');
+    });
+  });
+
+  describe('the key (design D5)', () => {
+    it('lists every line under the plot, each with a dashed swatch, and nothing for a chart without lines', async () => {
+      const context = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'mean' }, { kind: 'value', value: 0.5, label: 'Meta' }] } }, zones, [teatro]);
+
+      const key = byTestId(context.root, 'reference-key')!;
+      expect(key.getAttribute('aria-label')).toBe('Reference lines');
+      expect(all(context.root, 'reference-key-item')).toHaveLength(2);
+      expect(all(context.root, 'reference-key-swatch').map((swatch) => swatch.querySelector('line')!.getAttribute('stroke-dasharray'))).toEqual(['6 4', '2 3']);
+      // A sibling of the plot box in the chart's column, after it, that does not shrink: it takes its room before the plot does.
+      const host = key.closest('app-reference-key')!;
+      expect(host.classList).toContain('shrink-0');
+      expect(byTestId(context.root, 'chart-box')!.nextElementSibling).toBe(host);
+    });
+
+    it('cuts the plot at its own box while a key follows (Key above the footnote)', async () => {
+      const withLine = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'mean' }] } }, zones, [teatro]);
+      const box = byTestId(withLine.root, 'chart-box')!;
+      expect(box.style.overflow).toBe('clip');
+      expect(box.style.getPropertyValue('overflow-clip-margin')).not.toBe('');
+    });
+
+    it('leaves the plot box as it was in a chart without lines', async () => {
+      const without = await show('column', plainColumn, zones, [teatro]);
+      const plainBox = byTestId(without.root, 'chart-box')!;
+      expect(plainBox.className).toBe('relative min-h-0 flex-1');
+      expect(plainBox.getAttribute('style')).toBeNull();
+    });
+
+    it('keeps the key above the widget\'s footnote (Key above the footnote)', async () => {
+      const context = await show('column', { ...plainColumn, display: { footnote: 'No suman 100 %: respuesta múltiple.', referenceLines: [{ kind: 'mean' }] } }, zones, [teatro]);
+
+      const key = byTestId(context.root, 'reference-key')!;
+      const footnote = byTestId(context.root, 'widget-footnote')!;
+      expect(key.compareDocumentPosition(footnote) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  });
+
+  describe('"Show as table" (design D9)', () => {
+    it('keeps the table as it is and lists the lines under it (Column chart as a table)', async () => {
+      const before = [['Zona 1', '40% de los hogares'], ['Zona 2', '50% de los hogares'], ['Zona 3', '60% de los hogares'], ['Zona 4', '20% de los hogares']];
+
+      const context = await showAnswer('column', { ...plainColumn, ratio, display: { referenceLines: [{ kind: 'mean' }, { kind: 'overall' }] } }, result(zones, { overall: 0.4599 }), [teatro]);
+      await toggle(context);
+
+      expect(tableRows(context)).toEqual(before);
+      expect(all(context.root, 'reference-list-item').map(text)).toEqual(['Mean: 42.5% de los hogares', 'Overall: 45.99% de los hogares']);
+      expect(all(context.root, 'reference-key')).toHaveLength(0);
+      const table = byTestId(context.root, 'widget-table')!;
+      expect(table.compareDocumentPosition(byTestId(context.root, 'reference-list')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('lists them under the cross table of a chart with a series', async () => {
+      const answer = seriesResult([cell('Cali', 'Piped', 30, 3), cell('Cali', 'Well', 10, 2), cell('Palmira', 'Piped', 20, 1)], ['Piped', 'Well']);
+      const context = await showAnswer('column', { indicator: 'households_visited', groupBy: 'municipality', seriesBy: 'water_source', layout: 'grouped', ratio, display: { referenceLines: [{ kind: 'overall' }] } }, answer, [households]);
+      await toggle(context);
+
+      expect(all(context.root, 'reference-list-item').map(text)).toEqual(['Overall: 60 households']);
+    });
+
+    it('lists nothing for a chart without lines', async () => {
+      const context = await show('column', plainColumn, zones, [teatro]);
+      await toggle(context);
+
+      expect(all(context.root, 'reference-list')).toHaveLength(0);
+    });
+  });
+
+  describe('step lines (design D6)', () => {
+    const rounds = [row('1', 0.9803), row('2', 0.6), row('3', 0.4), row('4', 0.2)];
+    const demand = { indicator: 'teatro_hoy', groupBy: 'precio' } as const;
+    const pathOf = (context: Context) => all(context.root, 'chart-line')[0].getAttribute('d')!;
+
+    it('holds each value until the next point and then moves straight to the next value (Demand curve with steps)', async () => {
+      const context = await show('line', { ...demand, display: { interpolation: 'step' } }, rounds, [teatro]);
+
+      const path = pathOf(context);
+      expect(path.match(/[MLHV]/g)).toEqual(['M', 'H', 'V', 'H', 'V', 'H', 'V']);
+      expect(path).not.toContain('L');
+      // It runs level from the first point to the second before it drops.
+      const [first, level, drop] = [/^M([\d.]+) ([\d.]+)/.exec(path)!, /H([\d.]+)/.exec(path)!, /V([\d.]+)/.exec(path)!];
+      expect(Number(level[1])).toBeGreaterThan(Number(first[1]));
+      expect(Number(drop[1])).toBeGreaterThan(Number(first[2]));
+      // The dots stay on the points, and steps query nothing more.
+      expect(all(context.root, 'chart-dot')).toHaveLength(4);
+      expect(context.query.config).not.toHaveProperty('display');
+    });
+
+    it.each([
+      ['no display', undefined],
+      ['a color', { color: 2 }],
+      ['a saved linear', { interpolation: 'linear' as const }],
+    ])('joins the points by straight segments by default, with %s (Straight segments by default)', async (_name, display) => {
+      const context = await show('line', { ...demand, ...(display ? { display } : {}) }, rounds, [teatro]);
+
+      expect(pathOf(context).match(/[MLHV]/g)).toEqual(['M', 'L', 'L', 'L']);
+    });
+
+    it('draws each series with steps, in its color, and keeps the gaps (Steps per series)', async () => {
+      const answer = seriesResult(
+        [cell('1', 'Cali', 0.9), cell('2', 'Cali', 0.6), cell('3', 'Cali', 0.5), cell('1', 'Buga', 0.8), cell('3', 'Buga', 0.4), cell('4', 'Buga', 0.3)],
+        ['Cali', 'Buga'],
+      );
+      const context = await showAnswer('line', { ...demand, seriesBy: 'comuna', display: { interpolation: 'step' } }, answer, [teatro]);
+
+      const [cali, buga] = all(context.root, 'chart-line');
+      expect(cali.getAttribute('d')!.match(/[MLHV]/g)).toEqual(['M', 'H', 'V', 'H', 'V']);
+      expect(cali.getAttribute('style')).toContain('var(--tmz-pal-tamiza-1)');
+      // Buga has no value for round 2: two runs of one point each have no segment, so only the run of rounds 3 and 4 is drawn.
+      expect(buga.getAttribute('d')!.match(/[MLHV]/g)).toEqual(['M', 'H', 'V']);
+      expect(buga.getAttribute('style')).toContain('var(--tmz-pal-tamiza-2)');
+    });
+
+  });
+
+  describe('data labels (design D7)', () => {
+    const places = [row('Centro cultural o casa de la cultura', 0.2422), row('Teatro', 0.1), row('Cine', 0.05)];
+    const bars = { indicator: 'teatro_hoy', groupBy: 'lugar', display: { dataLabels: true } } as const;
+
+    it('writes the value at the end of each bar, as its tooltip does (Value at the end of a bar)', async () => {
+      const context = await show('bar', bars, places, [teatro]);
+
+      expect(dataTexts(context)).toEqual(['24.22% de los hogares', '10% de los hogares', '5% de los hogares']);
+      const [label] = dataLabels(context);
+      const mark = marks(context)[0];
+      expect(num(label, 'x')).toBeCloseTo(num(mark, 'x') + num(mark, 'width') + 4, 6);
+      expect(label.getAttribute('text-anchor')).toBe('start');
+      expect(titles(marks(context))[0]).toBe('Centro cultural o casa de la cultura: 24.22% de los hogares');
+    });
+
+    it('hides the labels from assistive technology, since the table and the tooltips carry the values', async () => {
+      const context = await show('bar', bars, places, [teatro]);
+
+      expect(dataLabels(context).every((label) => label.getAttribute('aria-hidden') === 'true')).toBe(true);
+    });
+
+    it('keeps the room past the longest bar for its label', async () => {
+      const context = await show('bar', bars, places, [teatro]);
+
+      expect(Math.max(...gridOf(context).map((l) => num(l, 'x1')))).toBe(480 - 14 - 4 - textWidthOf('24.22% de los hogares'));
+    });
+
+    it('keeps the right edge of a bar chart without labels where it was', async () => {
+      const context = await show('bar', { ...bars, display: {} }, places, [teatro]);
+
+      expect(Math.max(...gridOf(context).map((l) => num(l, 'x1')))).toBe(466);
+    });
+
+    it('writes the value above each column, and below a negative one', async () => {
+      const context = await show('column', { ...plainColumn, display: { dataLabels: true } }, [row('Zona 1', 0.4), row('Zona 2', -0.1), row('Zona 3', -0.25)], [teatro]);
+
+      const [up, down] = dataLabels(context);
+      const [first, second] = marks(context);
+      expect(num(up, 'y')).toBe(num(first, 'y') - 4);
+      expect(num(down, 'y')).toBe(num(second, 'y') + num(second, 'height') + 14);
+      expect(dataTexts(context)).toEqual(['40% de los hogares', '-10% de los hogares', '-25% de los hogares']);
+      expect(Math.min(...gridOf(context).map((l) => num(l, 'y1')))).toBeCloseTo(22, 6);
+    });
+
+    it('leaves out the label of a negative column that reaches the axis minimum, since it would cover the category names, and keeps the column (Negative values)', async () => {
+      // The axis runs from -0.2 to 0.4, so the second column ends on its foot and its label would fall on the names of the groups.
+      const context = await show('column', { ...plainColumn, display: { dataLabels: true } }, [row('Zona 1', 0.4), row('Zona 2', -0.2)], [teatro]);
+
+      expect(marks(context)).toHaveLength(2);
+      expect(dataTexts(context)).toEqual(['40% de los hogares']);
+    });
+
+    it('writes the label to the left of a negative bar, and leaves it out when the bar reaches the axis minimum (Negative values)', async () => {
+      const counts = { indicator: 'households_visited', groupBy: 'lugar', display: { dataLabels: true } } as const;
+      // The axis runs from -60 to 50: the bar at -20 has room on its left for its label, and the one at -45 has not.
+      const context = await show('bar', counts, [row('A', 50), row('B', -20), row('C', -45)], [households]);
+
+      expect(marks(context)).toHaveLength(3);
+      expect(dataTexts(context)).toEqual(['50 households', '-20 households']);
+      expect(dataLabels(context)[1].getAttribute('text-anchor')).toBe('end');
+    });
+
+    it('leaves out the label of a negative bar that ends on the axis minimum (Negative values)', async () => {
+      const edge = await show('bar', { indicator: 'households_visited', groupBy: 'lugar', display: { dataLabels: true } }, [row('A', 50), row('B', -40)], [households]);
+
+      expect(marks(edge)).toHaveLength(2);
+      expect(dataTexts(edge)).toEqual(['50 households']);
+    });
+
+    it('leaves out the labels of negative grouped marks that reach the axis minimum (Negative values)', async () => {
+      const answer = seriesResult([cell('Cali', 'A', 35), cell('Cali', 'B', -20)], ['A', 'B']);
+      const column = await showAnswer('column', { indicator: 'attendance', groupBy: 'municipality', seriesBy: 'water_source', layout: 'grouped', display: { dataLabels: true } }, answer, [indicator('attendance')]);
+
+      expect(marks(column)).toHaveLength(2);
+      expect(dataTexts(column)).toEqual(['35']);
+    });
+
+    it('leaves out the label of a negative grouped bar that reaches the axis minimum (Negative values)', async () => {
+      const answer = seriesResult([cell('Cali', 'A', 35), cell('Cali', 'B', -20)], ['A', 'B']);
+      const bar = await showAnswer('bar', { indicator: 'attendance', groupBy: 'municipality', seriesBy: 'water_source', layout: 'grouped', display: { dataLabels: true } }, answer, [indicator('attendance')]);
+
+      expect(marks(bar)).toHaveLength(2);
+      expect(dataTexts(bar)).toEqual(['35']);
+    });
+
+    it.each([
+      ['no display', undefined],
+      ['a saved false', { dataLabels: false }],
+      ['a color', { color: 2 }],
+    ])('draws none and keeps the margins of a chart without them, with %s (Off by default)', async (_name, display) => {
+      const context = await show('column', { ...plainColumn, ...(display ? { display } : {}) }, zones, [teatro]);
+
+      expect(dataLabels(context)).toHaveLength(0);
+      expect(Math.min(...gridOf(context).map((l) => num(l, 'y1')))).toBeCloseTo(8, 6);
+    });
+
+    it('leaves out the labels of columns narrower than their text and keeps the columns (Columns too narrow)', async () => {
+      const many = Array.from({ length: 24 }, (_, i) => row(`Zona ${i + 1}`, 0.1 + i / 100));
+      const context = await show('column', { ...plainColumn, display: { dataLabels: true } }, many, [teatro]);
+
+      expect(marks(context)).toHaveLength(24);
+      expect(dataLabels(context)).toHaveLength(0);
+      expect(titles(marks(context))[0]).toBe('Zona 1: 10% de los hogares');
+    });
+
+    it('leaves out the labels of grouped columns narrower than their text and keeps their marks (Columns too narrow)', async () => {
+      const cells = Array.from({ length: 12 }, (_, i) => [cell(`G${i}`, 'Piped', 35, 3), cell(`G${i}`, 'Well', 15, 2)]).flat();
+      const context = await showAnswer('column', { indicator: 'households_visited', groupBy: 'municipality', seriesBy: 'water_source', layout: 'grouped', display: { dataLabels: true } }, seriesResult(cells, ['Piped', 'Well']), [households]);
+
+      expect(dataLabels(context)).toHaveLength(0);
+      expect(marks(context)).toHaveLength(24);
+      expect(hitsOf(context)).toHaveLength(24);
+      // The top margin grows while data labels are on.
+      expect(Math.min(...gridOf(context).map((l) => num(l, 'y1')))).toBeCloseTo(22, 6);
+    });
+
+    it('writes the labels of grouped columns that fit their slot', async () => {
+      const context = await showAnswer(
+        'column',
+        { indicator: 'attendance', groupBy: 'municipality', seriesBy: 'water_source', layout: 'grouped', display: { dataLabels: true } },
+        seriesResult([cell('Cali', 'A', 35), cell('Cali', 'B', 15)], ['A', 'B']),
+        [indicator('attendance')],
+      );
+
+      expect(dataTexts(context)).toEqual(['35', '15']);
+    });
+
+    it('writes the value at the end of each grouped bar and keeps the room for the longest', async () => {
+      const answer = seriesResult([cell('Cali', 'Piped', 30, 3), cell('Cali', 'Well', 10, 2), cell('Palmira', 'Piped', 20, 1)], ['Piped', 'Well']);
+      const context = await showAnswer('bar', { indicator: 'households_visited', groupBy: 'municipality', seriesBy: 'water_source', layout: 'grouped', display: { dataLabels: true } }, answer, [households]);
+
+      expect(dataTexts(context)).toEqual(['30 households', '10 households', '20 households']);
+      expect(Math.max(...gridOf(context).map((l) => num(l, 'x1')))).toBeLessThan(466 - textWidthOf('30 households'));
+    });
+
+    it.each(['stacked', 'percent'] as const)('writes none on a %s layout, whatever is saved', async (layout) => {
+      const answer = seriesResult([cell('Cali', 'Piped', 30, 3), cell('Cali', 'Well', 10, 2)], ['Piped', 'Well']);
+      const context = await showAnswer('bar', { indicator: 'households_visited', groupBy: 'municipality', seriesBy: 'water_source', layout, display: { dataLabels: true } }, answer, [households]);
+
+      expect(dataLabels(context)).toHaveLength(0);
+    });
+
+    it.each([
+      ['straight segments', { dataLabels: true }],
+      ['steps', { dataLabels: true, interpolation: 'step' as const }],
+    ])('writes the value above each point of a line with %s', async (_name, display) => {
+      const context = await show('line', { indicator: 'teatro_hoy', groupBy: 'precio', display }, [row('1', 0.9), row('2', 0.6), row('3', 0.3)], [teatro]);
+
+      expect(dataTexts(context)).toEqual(['90% de los hogares', '60% de los hogares', '30% de los hogares']);
+      const dots = all(context.root, 'chart-dot');
+      dataLabels(context).forEach((labelEl, i) => expect(num(labelEl, 'y')).toBe(num(dots[i], 'cy') - 8));
+      expect(Math.min(...gridOf(context).map((l) => num(l, 'y1')))).toBeCloseTo(22, 6);
+    });
+
+    it('writes one label where two series have the same point, and each of the others', async () => {
+      const answer = seriesResult(
+        [cell('1', 'Cali', 60), cell('1', 'Buga', 60), cell('2', 'Cali', 70), cell('2', 'Buga', 90)],
+        ['Cali', 'Buga'],
+      );
+      const context = await showAnswer('line', { indicator: 'households_visited', groupBy: 'ronda', seriesBy: 'municipality', display: { dataLabels: true } }, answer, [households]);
+
+      expect(dataTexts(context)).toEqual(['60 households', '70 households', '90 households']);
+    });
+
+    it('writes a label that would cover a reference label nowhere', async () => {
+      const context = await show('column', { ...plainColumn, display: { dataLabels: true, referenceLines: [{ kind: 'value', value: 0.6, label: 'Meta' }] } }, [row('Zona 1', 0.2), row('Zona 2', 0.6)], [teatro]);
+
+      // The second column ends on the line, where the line's text sits; its label is the one left out.
+      expect(referenceTexts(context)).toEqual(['Meta: 60% de los hogares']);
+      expect(dataTexts(context)).toEqual(['20% de los hogares']);
+    });
+  });
+
+  describe('data labels on a pie (design D7)', () => {
+    const settings = { indicator: 'households_visited', display: { dataLabels: true } } as const;
+    const slicesOf = (context: Context) => all(context.root, 'pie-slice');
+
+    it('writes each slice\'s value on it, leaving out a slice too thin for its text (Thin slice)', async () => {
+      const context = await show('pie', settings, [row('Cali', 70), row('Bogotá', 25), row('Pasto', 1)], [households]);
+
+      expect(slicesOf(context)).toHaveLength(3);
+      expect(dataTexts(context)).toEqual(['70 households', '25 households']);
+      expect(dataLabels(context).every((label) => label.getAttribute('aria-hidden') === 'true')).toBe(true);
+    });
+
+    it('writes the label of a pie of a single slice in its center (One slice)', async () => {
+      const context = await show('pie', settings, [row('Cali', 90)], [households]);
+      const svg = svgOf(context);
+
+      const [label] = dataLabels(context);
+      expect(dataTexts(context)).toEqual(['90 households']);
+      expect(num(label, 'x')).toBe(num(svg, 'width') / 2);
+      expect(num(label, 'y')).toBe(num(svg, 'height') / 2 + 4);
+      expect(label.getAttribute('text-anchor')).toBe('middle');
+    });
+
+    it('leaves out a label that would leave the circle, whichever way its slice points (Label wider than its room)', async () => {
+      // Two halves point sideways: their labels sit 0.62 of the radius from the center, and a text this wide would pass the circle's edge
+      // although it is shorter than the chord across the slice.
+      const wide = indicator('households_visited', { unit: 'viviendas en total' });
+      const halves = await show('pie', settings, [row('Cali', 50), row('Bogotá', 50)], [wide]);
+      expect(slicesOf(halves)).toHaveLength(2);
+      expect(dataLabels(halves)).toHaveLength(0);
+    });
+
+    it('writes the label of slices pointing sideways when the text stays inside the circle', async () => {
+      const narrow = await show('pie', settings, [row('Cali', 50), row('Bogotá', 50)], [indicator('households_visited', { unit: 'viviendas' })]);
+
+      expect(dataTexts(narrow)).toEqual(['50 viviendas', '50 viviendas']);
+    });
+
+    it('leaves out the label of a pie of a single slice when its text is wider than the pie', async () => {
+      const long = indicator('households_visited', { unit: 'viviendas visitadas por la encuesta del trimestre pasado' });
+      const context = await show('pie', settings, [row('Cali', 90)], [long]);
+
+      expect(slicesOf(context)).toHaveLength(1);
+      expect(dataLabels(context)).toHaveLength(0);
+    });
+
+    it.each([
+      ['no display', undefined],
+      ['a saved false', { dataLabels: false }],
+    ])('draws none unless it is asked for, with %s', async (_name, display) => {
+      const context = await show('pie', { indicator: 'households_visited', ...(display ? { display } : {}) }, [row('Cali', 90), row('Bogotá', 10)], [households]);
+
+      expect(dataLabels(context)).toHaveLength(0);
+    });
+  });
+});
+
+/** The width the charts reserve for a text. */
+function textWidthOf(text: string): number {
+  return text.length * 6.5;
+}
+
+const hitsOf = (context: Context) => all(context.root, 'chart-hit');

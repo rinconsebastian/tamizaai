@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Tamiza.Api.Auth;
 using Tamiza.Api.Data;
@@ -39,6 +40,7 @@ public sealed record DashboardVersionSummary(
 /// <param name="Palette">The dashboard's palette in the version; <c>tamiza</c> for a version recorded before palettes existed.</param>
 /// <param name="ValueColors">The colors the dashboard kept by value in the version, in the order they were saved; empty for a version recorded before palettes existed.</param>
 /// <param name="Widgets">In reading order: top to bottom, then left to right, then the older first.</param>
+/// <param name="Source">The dashboard's source in the version; left out of the JSON for a version that has none, which every version recorded before sources is.</param>
 public sealed record DashboardVersionDetails(
     int Number,
     bool Current,
@@ -54,7 +56,8 @@ public sealed record DashboardVersionDetails(
     string? Note,
     Person Author,
     DateTimeOffset CreatedAt,
-    DateTimeOffset SavedAt);
+    DateTimeOffset SavedAt,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Source = null);
 
 /// <summary>
 /// A widget as a version holds it. Its config is read as the dashboard's widgets are, so the widget view and an AI client use it as they

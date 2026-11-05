@@ -9,10 +9,11 @@ import { ChartColors } from './chart-colors';
 import { registerExportParts } from './export-parts';
 import { sequentialStep, sequentialSteps } from './chart-scales';
 import { DashboardPrint } from './dashboard-print';
-import { ValueFormatter, plotted } from './format';
+import { ColumnNamer, ValueFormatter, captionShown, named, ownCaption, plotted, rawNames } from './format';
 import { BasemapChoice, MapControls } from './map-controls';
 import { EngineView, MapEngine, MapEvents, MapPicture, MapPoint, ShapeInput, TileHooks } from './map-engine';
 import { kindOf } from './map-geometry';
+import { CategoryOrders, shown, shownValues } from './category-order';
 import { TooltipContext, tooltipContent, tooltipLabel, tooltipSpeech, tooltipValues } from './map-tooltip';
 import { countKey } from '../../../core/i18n/plural';
 import { Geometry, parseWkt, positionsOf } from './wkt';
@@ -74,7 +75,7 @@ let helpIds = 0;
   imports: [TranslocoDirective, WidgetTable, MapControls],
   template: `
     <ng-container *transloco="let t">
-      <p class="shrink-0 text-xs text-body" data-testid="chart-caption">{{ t('indicators.map.caption', { what: what(), group: config().groupBy }) }}</p>
+      <p class="shrink-0 text-xs text-body" [class.sr-only]="!captionShown(config())" data-testid="chart-caption">{{ t('indicators.map.caption', { what: what(), group: groupShown() }) }}</p>
       @if (asTable()) {
         <app-widget-table class="flex-1 overflow-auto" [model]="table(t)" />
       } @else {
@@ -170,9 +171,15 @@ export class MapWidget {
 
   readonly rows = input.required<QueryRow[]>();
   readonly config = input.required<WidgetConfig>();
+  /** Whether the line that names what the widget plots is seen: a hidden one stays for screen readers (add-widget-context, design D3). */
+  protected readonly captionShown = captionShown;
   /** The indicator's label and the formatter of its values. */
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
+  /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
+  readonly names = input<ColumnNamer>(rawNames);
+  /** What the widget declares for the text of its values (add-declared-category-order): a map shows its places without their numbers. */
+  readonly orders = input<CategoryOrders | null>(null);
   /** The type of each tooltip column, from the query's answer. */
   readonly tooltipTypes = input<readonly DataColumnType[] | undefined>(undefined);
   readonly asTable = input(false);
@@ -194,11 +201,14 @@ export class MapWidget {
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private readonly host = viewChild<ElementRef<HTMLElement>>('host');
-  protected readonly what = computed(() => plotted(this.config(), this.label()));
+  protected readonly what = computed(() => plotted(this.config(), this.label(), this.names()));
+  protected readonly groupShown = computed(() => named(this.names(), this.config().groupBy));
 
   // --- The rows ---------------------------------------------------------------------------------------------------------
 
   private readonly parsed = computed(() => this.rows().map((row) => ({ row, geometry: parseWkt(row.geometry) })));
+  /** The text each place is shown with when its column hides numbered prefixes (design D5); null shows the value as it is. */
+  private readonly groupText = computed(() => (this.orders()?.hideGroupPrefixes ? shownValues(this.rows().map((row) => row.group), true) : null));
   protected readonly leftOut = computed(() => this.parsed().filter((entry) => entry.geometry === null).length);
 
   protected readonly range = computed(() => {
@@ -339,7 +349,7 @@ export class MapWidget {
       },
       parts: () => {
         const t: Translate = (key, params) => this.transloco.translate(key, params);
-        const caption = t('indicators.map.caption', { what: this.what(), group: this.config().groupBy });
+        const caption = t('indicators.map.caption', { what: this.what(), group: this.groupShown() });
         if (this.asTable()) {
           return { caption, legend: null, notes: [], stat: null, table: this.table(t) };
         }
@@ -608,10 +618,10 @@ export class MapWidget {
     const types = this.tooltipTypes();
     const context = this.context();
     return {
-      headers: [this.config().groupBy ?? '', this.what(), ...items.map(tooltipLabel), t('indicators.map.geometry')],
+      headers: [this.names()(this.config().groupBy ?? ''), this.what(), ...items.map((item) => tooltipLabel(item, this.names())), t('indicators.map.geometry')],
       align: ['start', 'end', ...items.map((_, i) => (types?.[i] === 'integer' || types?.[i] === 'decimal' ? ('end' as const) : ('start' as const))), 'start'],
       rows: this.parsed().map(({ row, geometry }) => [
-        row.group ?? t('indicators.chart.noGroup'),
+        shown(this.groupText(), row.group) ?? t('indicators.chart.noGroup'),
         this.format()(row.value),
         ...tooltipValues(row, context),
         geometry === null ? t('indicators.map.kind.none') : t(`indicators.map.kind.${geometry.type === 'point' ? 'point' : 'polygon'}`),
@@ -786,10 +796,14 @@ export class MapWidget {
     return {
       items: this.config().tooltip ?? [],
       types: this.tooltipTypes(),
-      label: this.label(),
+      // The tooltip names the plotted value with the widget's own caption text when it has one, else with the indicator's label; a hidden
+      // caption changes nothing here (add-widget-context, design D3).
+      label: ownCaption(this.config()) ?? this.label(),
       format: this.format(),
       locale: this.locale,
       t: (key, params) => this.transloco.translate(key, params),
+      names: this.names(),
+      groupText: this.groupText(),
     };
   }
 

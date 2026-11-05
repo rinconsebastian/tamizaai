@@ -144,6 +144,47 @@ describe('sanitizeSvg', () => {
     expect(serialize(clean)).toContain('text-anchor="middle"');
   });
 
+  describe('the halo of a label (add-chart-annotations, design D9)', () => {
+    // What a browser computes for the labels of a reference line and of a data label: a stroke in the surface color, 3 px wide, round, painted under the fill.
+    const sheetWithHalo: Record<string, Record<string, string>> = { 'stroke-neutral-primary-soft': { stroke: 'rgb(255, 255, 255)' }, 'fill-heading': { fill: 'rgb(15, 23, 42)' } };
+    const haloStyle: StyleReader = (element) => {
+      const base = styleOf(element);
+      const own: Record<string, string> = {};
+      for (const name of Array.from(element.classList)) {
+        Object.assign(own, sheetWithHalo[name]);
+      }
+      return (property) => {
+        if (property === 'paint-order') return element.getAttribute('paint-order') ?? 'normal';
+        if (property === 'stroke-linejoin') return element.getAttribute('stroke-linejoin') ?? 'miter';
+        return own[property] ?? base(property);
+      };
+    };
+    const label = `<text class="fill-heading stroke-neutral-primary-soft" x="296" y="40" font-size="11" stroke-width="3" stroke-linejoin="round" paint-order="stroke" text-anchor="end">Mean: 34.17% de los hogares</text>`;
+
+    it('keeps the stroke, its width and its join, and the paint order, so the text reads over the marks in an image', () => {
+      const markup = serialize(sanitizeSvg(parse(label), { ...options, styleOf: haloStyle }));
+
+      expect(markup).toContain(
+        '<text x="296" y="40" fill="rgb(15, 23, 42)" stroke="rgb(255, 255, 255)" stroke-width="3" stroke-linejoin="round" paint-order="stroke" font-size="11" text-anchor="end">Mean: 34.17% de los hogares</text>',
+      );
+    });
+
+    it('writes no stroke for a text without a paint order, whatever stroke it inherits', () => {
+      const plain = `<text class="fill-heading stroke-neutral-primary-soft" x="4" y="9" font-size="11">Cali</text>`;
+
+      const markup = serialize(sanitizeSvg(parse(plain), { ...options, styleOf: haloStyle }));
+
+      expect(markup).not.toContain('stroke');
+      expect(markup).toContain('<text x="4" y="9" fill="rgb(15, 23, 42)" font-size="11">Cali</text>');
+    });
+
+    it('lets only the allowed words through as a paint order', () => {
+      const hostile = `<text x="1" y="2" font-size="11" paint-order="stroke; url(javascript:alert(1))">x</text>`;
+
+      expect(serialize(sanitizeSvg(parse(hostile), { ...options, styleOf: haloStyle }))).not.toContain('paint-order');
+    });
+  });
+
   it('writes colors through the converter, so a program that does not know oklch still draws them', () => {
     const source = parse(`<rect x="0" y="0" width="5" height="5" style="fill: oklch(0.6 0.2 250)" />`);
 

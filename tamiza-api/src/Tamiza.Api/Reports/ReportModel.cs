@@ -30,6 +30,18 @@ public sealed record ReportColumn(string Header, string? ExcelFormat = null, str
 /// <summary>One cell: the number or text the workbook holds (null for no value), and the text the bodies show.</summary>
 public sealed record ReportCell(object? Value, string Text);
 
+/// <summary>
+/// A reference line a chart draws (design D10 of add-chart-annotations), written as the widget's values are: <paramref name="Label"/> is its
+/// own or the default of its kind in the email's language, <paramref name="Text"/> its value with the unit, and the line reads "Label: Text".
+/// </summary>
+/// <param name="Kind">One of <see cref="ReferenceLineKinds"/>.</param>
+/// <param name="Value">The value in the indicator's units.</param>
+public sealed record ReportReferenceLine(string Kind, string Label, double Value, string Text)
+{
+    /// <summary>The line as every body writes it: "Mean: 34.17% de los hogares".</summary>
+    public string Line => $"{Label}: {Text}";
+}
+
 /// <param name="Position">1 for the first widget in the dashboard's reading order.</param>
 /// <param name="Caption">What the widget plots: the indicator's label, with the measure or the ratio's two columns when it names them.</param>
 /// <param name="StatValue">A stat tile's value as the email shows it.</param>
@@ -38,6 +50,10 @@ public sealed record ReportCell(object? Value, string Text);
 /// <param name="SeriesColumns">A cross table's series columns, which come between the group column and the "Total" column; 0 for any other table.</param>
 /// <param name="StatColumn">A stat tile's header and number format, for a widget's own workbook; the email writes the tile as text.</param>
 /// <param name="StatCell">A stat tile's value as a number, with its text.</param>
+/// <param name="Subtitle">The widget's subtitle, whatever became of the widget; null when it has none.</param>
+/// <param name="Footnote">The widget's footnote, whatever became of the widget; null when it has none.</param>
+/// <param name="CaptionHidden">The widget hides its caption line: the body leaves it out, and the headers and the workbook still name what is plotted.</param>
+/// <remarks>The reference lines are the property <see cref="ReferenceLines"/>.</remarks>
 public sealed record ReportWidget(
     int Position,
     string Title,
@@ -51,8 +67,17 @@ public sealed record ReportWidget(
     IReadOnlyList<string> Notes,
     int SeriesColumns = 0,
     ReportColumn? StatColumn = null,
-    ReportCell? StatCell = null)
+    ReportCell? StatCell = null,
+    string? Subtitle = null,
+    string? Footnote = null,
+    bool CaptionHidden = false)
 {
+    /// <summary>
+    /// The reference lines of a bar, column or line that is shown, in the order the widget lists them; empty for any other widget. Declared
+    /// after <c>CaptionHidden</c>, the last positional member, as an initialized property so every construction stays valid.
+    /// </summary>
+    public IReadOnlyList<ReportReferenceLine> ReferenceLines { get; init; } = [];
+
     /// <summary>The most series columns the body of an email shows for one widget; the workbook shows them all.</summary>
     public const int BodySeriesColumns = 6;
 
@@ -82,6 +107,7 @@ public sealed record ReportFilterLine(string Label, string Value);
 /// </summary>
 /// <param name="DataPublishedAt">The latest time one of the widgets' indicators was published; null when none has.</param>
 /// <param name="DashboardAddress">The dashboard's address in the deployment, for members.</param>
+/// <param name="Source">Where the dashboard's data comes from; null when the dashboard has no source.</param>
 public sealed record ReportModel(
     Guid ProjectId,
     string ProjectName,
@@ -93,7 +119,8 @@ public sealed record ReportModel(
     IReadOnlyList<ReportWidget> Widgets,
     string DashboardAddress,
     ReportFormat Format,
-    ReportText Text)
+    ReportText Text,
+    string? Source = null)
 {
     /// <summary>No widget, or none that could be read: the email is not sent (a widget with no matching rows was read).</summary>
     public bool NothingToSend => Widgets.Count == 0 || Widgets.All(w => w.Unreadable);

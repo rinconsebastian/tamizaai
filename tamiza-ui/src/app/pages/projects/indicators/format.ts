@@ -1,5 +1,6 @@
-import { IndicatorFormat } from '../../../core/projects/pipeline.service';
-import { WidgetConfig } from '../../../core/projects/indicators.service';
+import { ColumnMetadataMap, IndicatorFormat } from '../../../core/projects/pipeline.service';
+import { Layout, WidgetConfig, WidgetDisplay } from '../../../core/projects/indicators.service';
+import { gap, rowHeight } from './grid-layout';
 
 // How an indicator's values are written (design D6): the indicator says what a number is, so a stat tile, an axis, a legend, a
 // tooltip and a "Show as table" cell all use one formatter.
@@ -105,10 +106,101 @@ export function valueFormatter(indicator: IndicatorUnit, locale: string): ValueF
   return Object.assign((value: number) => withUnit(value), { plain, tick });
 }
 
-/** What a widget plots, for captions and descriptions: the indicator's label, with the measure or the ratio's two columns when the widget names them. */
-export function plotted(config: Pick<WidgetConfig, 'measure' | 'ratio'>, label: string): string {
-  if (config.ratio) {
-    return `${label}: ${config.ratio.numerator} / ${config.ratio.denominator}`;
+/** The name shown for a column of a table. */
+export type ColumnNamer = (column: string) => string;
+
+/** Every column under its own name: what a chart shows when nothing gives it labels, and the default of every chart's `names` input. */
+export const rawNames: ColumnNamer = (column) => column;
+
+/**
+ * The name shown for a column (add-indicator-column-metadata, design D6): the widget's own label, else the indicator's, else the
+ * column's own name. A blank label is none. Twin of `ColumnLabels.For` in tamiza-api.
+ */
+export function columnLabels(
+  indicator: { columns?: ColumnMetadataMap | null } | null | undefined,
+  display: Pick<WidgetDisplay, 'labels'> | null | undefined,
+): ColumnNamer {
+  const widget = display?.labels;
+  const own = indicator?.columns;
+  if (!widget && !own) {
+    return rawNames;
   }
-  return config.measure ? `${label}: ${config.measure}` : label;
+  return (column) => {
+    // Own keys only, so a column called `constructor` is not read from the prototype.
+    const named = widget && Object.hasOwn(widget, column) ? widget[column]?.trim() : '';
+    if (named) {
+      return named;
+    }
+    const labelled = own && Object.hasOwn(own, column) ? own[column]?.label?.trim() : '';
+    return labelled || column;
+  };
+}
+
+/** The name shown for a column that may be unset: an unset column stays as it is, so a caption reads as it did. */
+export function named(names: ColumnNamer, column: string | null | undefined): string | null | undefined {
+  return column ? names(column) : column;
+}
+
+/** The widget's own caption text, trimmed, or null while it has none (a blank text is none). */
+export function ownCaption(config: Pick<WidgetConfig, 'display'>): string | null {
+  return config.display?.caption?.text?.trim() || null;
+}
+
+/**
+ * What a widget plots, for captions and descriptions: the widget's own caption text when it has one (add-widget-context, design D3: it
+ * replaces the label and the column names together), else the indicator's label, with the measure or the ratio's two columns when the
+ * widget names them, each under its name shown (`names`; the columns' own names when none is given). A blank own text is none. Twin of
+ * `ReportDataBuilder.Plotted` in tamiza-api.
+ */
+export function plotted(config: Pick<WidgetConfig, 'measure' | 'ratio' | 'display'>, label: string, names: ColumnNamer = rawNames): string {
+  const own = ownCaption(config);
+  if (own) {
+    return own;
+  }
+  if (config.ratio) {
+    return `${label}: ${names(config.ratio.numerator)} / ${names(config.ratio.denominator)}`;
+  }
+  return config.measure ? `${label}: ${names(config.measure)}` : label;
+}
+
+/**
+ * Whether the line that names what a widget plots is seen (add-widget-context, design D3): false only for a caption set to hidden. A
+ * hidden line stays in the page for screen readers, and tooltips, tables and exports keep naming what is plotted.
+ */
+export function captionShown(config: Pick<WidgetConfig, 'display'>): boolean {
+  return config.display?.caption?.hidden !== true;
+}
+
+/**
+ * The indicator as one widget shows it (add-widget-context, design D4): with the widget's own unit when it has one, else its own. The
+ * formatters are built from the result, so the `%` rule (a unit of `%` is not repeated after a number) applies to a widget's unit as to
+ * an indicator's. Twin of the unit chosen in `ReportDataBuilder.MetaOf` (tamiza-api).
+ */
+export function withWidgetUnit<T extends IndicatorUnit>(indicator: T, config: Pick<WidgetConfig, 'display'> | null | undefined): T {
+  const unit = config?.display?.unit?.trim();
+  return unit ? { ...indicator, unit } : indicator;
+}
+
+/** About how many characters of a widget's 12 px text a line holds, per column of its tile (add-widget-context, design D5). */
+const charactersPerColumn = 15;
+/** The height of one line of those texts, and the gap that sets one text off from the next, in pixels. */
+const textLine = 16;
+const textGap = 4;
+
+/**
+ * Whether a widget's subtitle and footnote are likely to crowd its tile (add-widget-context, design D5), for the widget form's hint.
+ * A tile two rows high or less with either text always does; a taller one does when the texts, printed whole (about 15 characters per
+ * grid column per line, 16 px per line and 4 px per text), would take half of its height or more. A blank text is none.
+ */
+export function textsCrowd(layout: Pick<Layout, 'w' | 'h'>, subtitle: string | null | undefined, footnote: string | null | undefined): boolean {
+  const texts = [subtitle, footnote].map((text) => text?.trim() ?? '').filter((text) => text.length > 0);
+  if (!texts.length) {
+    return false;
+  }
+  if (layout.h <= 2) {
+    return true;
+  }
+  const perLine = Math.max(1, layout.w) * charactersPerColumn;
+  const used = texts.reduce((total, text) => total + Math.ceil(text.length / perLine) * textLine + textGap, 0);
+  return used >= (layout.h * rowHeight + (layout.h - 1) * gap) / 2;
 }

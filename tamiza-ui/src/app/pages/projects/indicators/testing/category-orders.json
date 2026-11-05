@@ -1,0 +1,230 @@
+{
+  "_comment": "Shared by the API's CategoryOrderTests and the UI's category-order spec (add-declared-category-order, design D2, D3 and D5). Worked out by hand, so the two implementations are checked against one truth. 'arrange': the entries of one place (a group axis or a series legend) in the order the place has today, the declaration that applies ('order', 'last', and 'sorted' when a sort or an order by median decides the order of groups), and the entries in the order to show them. An entry is a string (a value), null (the missing value, shown as '(none)') or { \"kind\": \"other\" } ('Other'). 'shown': the values of one place and the text each one is shown with when its column hides numbered prefixes ('strip'), null staying null. 'prefixes': what the rule that hides one leading number gives for one text, read alone.",
+  "arrange": [
+    {
+      "name": "no declaration gives back the same list",
+      "entries": ["Zeta", "Alfa", "Sí"],
+      "declared": null,
+      "expected": ["Zeta", "Alfa", "Sí"]
+    },
+    {
+      "name": "a sorted place with only an order gives back the same list",
+      "entries": ["B", "A", "C"],
+      "declared": { "order": ["A", "B", "C"], "last": [], "sorted": true },
+      "expected": ["B", "A", "C"]
+    },
+    {
+      "name": "an empty order and no value kept last give back the same list",
+      "entries": ["B", null, "A", { "kind": "other" }],
+      "declared": { "order": [], "last": [], "sorted": false },
+      "expected": ["B", null, "A", { "kind": "other" }]
+    },
+    {
+      "name": "an indicator order",
+      "entries": ["No", "No sabe", "Sí", "Tal vez"],
+      "declared": { "order": ["Sí", "Tal vez", "No", "No sabe"], "last": [], "sorted": false },
+      "expected": ["Sí", "Tal vez", "No", "No sabe"]
+    },
+    {
+      "name": "a widget order that replaces the indicator's",
+      "entries": ["No", "No sabe", "Sí", "Tal vez"],
+      "declared": { "order": ["No sabe", "No", "Sí", "Tal vez"], "last": [], "sorted": false },
+      "expected": ["No sabe", "No", "Sí", "Tal vez"]
+    },
+    {
+      "name": "values not listed keep the given order",
+      "entries": ["Zeta", "Beta", "Sí", "Alfa", "No"],
+      "declared": { "order": ["Sí", "No"], "last": [], "sorted": false },
+      "expected": ["Sí", "No", "Zeta", "Beta", "Alfa"]
+    },
+    {
+      "name": "values not listed keep a natural order that was given",
+      "entries": ["COMUNA 1", "COMUNA 2", "COMUNA 10", "Sí", "No"],
+      "declared": { "order": ["No", "Sí"], "last": [], "sorted": false },
+      "expected": ["No", "Sí", "COMUNA 1", "COMUNA 2", "COMUNA 10"]
+    },
+    {
+      "name": "a value kept last",
+      "entries": ["Otro", "COMUNA 1", "Sin dato", "COMUNA 2"],
+      "declared": { "order": [], "last": ["Sin dato"], "sorted": false },
+      "expected": ["Otro", "COMUNA 1", "COMUNA 2", "Sin dato"]
+    },
+    {
+      "name": "values kept last follow the order of their own list",
+      "entries": ["Otro", "A", "Sin dato", "B", "No sabe"],
+      "declared": { "order": [], "last": ["No sabe", "Sin dato", "Otro"], "sorted": false },
+      "expected": ["A", "B", "No sabe", "Sin dato", "Otro"]
+    },
+    {
+      "name": "an order and values kept last together",
+      "entries": ["No sabe", "No", "Sí", "Tal vez", "Otro"],
+      "declared": { "order": ["Sí", "Tal vez", "No"], "last": ["Otro", "No sabe"], "sorted": false },
+      "expected": ["Sí", "Tal vez", "No", "Otro", "No sabe"]
+    },
+    {
+      "name": "an own order that lists a value the indicator keeps last",
+      "entries": ["No", "No sabe", "Sí", "Tal vez"],
+      "declared": { "order": ["Sí", "No sabe", "No"], "last": ["No sabe"], "sorted": false },
+      "expected": ["Sí", "No sabe", "No", "Tal vez"]
+    },
+    {
+      "name": "values kept last with a sort",
+      "entries": ["C", "Otro", "A", "B"],
+      "declared": { "order": ["B", "A"], "last": ["Otro"], "sorted": true },
+      "expected": ["C", "A", "B", "Otro"]
+    },
+    {
+      "name": "none goes after the values kept last with a sort",
+      "entries": ["C", null, "Otro", "A"],
+      "declared": { "order": ["A", "C"], "last": ["Otro"], "sorted": true },
+      "expected": ["C", "A", "Otro", null]
+    },
+    {
+      "name": "none and Other after the values kept last, from a list where none was in the middle",
+      "entries": ["Piped", null, "Well", "Otro", { "kind": "other" }],
+      "declared": { "order": [], "last": ["Otro"], "sorted": false },
+      "expected": ["Piped", "Well", "Otro", null, { "kind": "other" }]
+    },
+    {
+      "name": "none and Other after the listed values",
+      "entries": [null, "B", "A", { "kind": "other" }],
+      "declared": { "order": ["A"], "last": [], "sorted": false },
+      "expected": ["A", "B", null, { "kind": "other" }]
+    },
+    {
+      "name": "an order that lists nothing shown still moves none to the end",
+      "entries": [null, "a", { "kind": "other" }],
+      "declared": { "order": ["zzz"], "last": [], "sorted": false },
+      "expected": ["a", null, { "kind": "other" }]
+    },
+    {
+      "name": "Other is last even when it came first",
+      "entries": [{ "kind": "other" }, "B", "A"],
+      "declared": { "order": ["A"], "last": [], "sorted": false },
+      "expected": ["A", "B", { "kind": "other" }]
+    },
+    {
+      "name": "a listed value the entries do not hold is skipped",
+      "entries": ["Sí", "No"],
+      "declared": { "order": ["Quizás", "No", "Sí"], "last": [], "sorted": false },
+      "expected": ["No", "Sí"]
+    },
+    {
+      "name": "exact text: case",
+      "entries": ["Sí", "No"],
+      "declared": { "order": ["sí"], "last": [], "sorted": false },
+      "expected": ["Sí", "No"]
+    },
+    {
+      "name": "exact text: spaces",
+      "entries": ["No  sabe", "No sabe", "A"],
+      "declared": { "order": ["No sabe"], "last": [], "sorted": false },
+      "expected": ["No sabe", "No  sabe", "A"]
+    },
+    {
+      "name": "exact text: accents",
+      "entries": ["Si", "Sí"],
+      "declared": { "order": ["Sí"], "last": [], "sorted": false },
+      "expected": ["Sí", "Si"]
+    },
+    {
+      "name": "the empty text is a value",
+      "entries": ["A", "", "B"],
+      "declared": { "order": [""], "last": [], "sorted": false },
+      "expected": ["", "A", "B"]
+    },
+    {
+      "name": "numbers are texts",
+      "entries": ["10", "2", "1"],
+      "declared": { "order": ["1", "10", "2"], "last": [], "sorted": false },
+      "expected": ["1", "10", "2"]
+    },
+    {
+      "name": "a value kept last that the entries do not hold",
+      "entries": ["A", "B"],
+      "declared": { "order": [], "last": ["Z"], "sorted": false },
+      "expected": ["A", "B"]
+    }
+  ],
+  "shown": [
+    {
+      "name": "numbered answers",
+      "values": ["1. Sí", "2. Tal vez", "3. No", "4. No sabe"],
+      "strip": true,
+      "expected": ["Sí", "Tal vez", "No", "No sabe"]
+    },
+    {
+      "name": "the column does not hide prefixes",
+      "values": ["1. Sí", "2. Tal vez", "3. No", "4. No sabe"],
+      "strip": false,
+      "expected": ["1. Sí", "2. Tal vez", "3. No", "4. No sabe"]
+    },
+    {
+      "name": "values that would read alike keep their text",
+      "values": ["1. Otro", "6. Otro", "2. Sí"],
+      "strip": true,
+      "expected": ["1. Otro", "6. Otro", "Sí"]
+    },
+    {
+      "name": "a numbered value that would read like an unnumbered one keeps its text",
+      "values": ["1. Sí", "Sí", "2. No"],
+      "strip": true,
+      "expected": ["1. Sí", "Sí", "No"]
+    },
+    {
+      "name": "the missing value stays missing",
+      "values": ["1. Sí", null, "2. No"],
+      "strip": true,
+      "expected": ["Sí", null, "No"]
+    },
+    {
+      "name": "the same value twice reads the same",
+      "values": ["1. Sí", "1. Sí"],
+      "strip": true,
+      "expected": ["Sí", "Sí"]
+    },
+    {
+      "name": "ranges and decimals are not prefixes",
+      "values": ["10 - 14", "0 - 4", "1.5 horas"],
+      "strip": true,
+      "expected": ["10 - 14", "0 - 4", "1.5 horas"]
+    },
+    {
+      "name": "some numbered and some not",
+      "values": ["1. A", "B"],
+      "strip": true,
+      "expected": ["A", "B"]
+    }
+  ],
+  "prefixes": [
+    { "value": "1. Sí", "expected": "Sí" },
+    { "value": "2) No", "expected": "No" },
+    { "value": "3 - Tal vez", "expected": "Tal vez" },
+    { "value": "4: Otro", "expected": "Otro" },
+    { "value": "5 – Cinco", "expected": "Cinco" },
+    { "value": "6  . Seis", "expected": "Seis" },
+    { "value": "05: Mañana", "expected": "Mañana" },
+    { "value": "123. Ciento veintitrés", "expected": "Ciento veintitrés" },
+    { "value": "1.   Sí", "expected": "Sí" },
+    { "value": "2 - Tres personas", "expected": "Tres personas" },
+    { "value": "1. Él", "expected": "Él" },
+    { "value": "10 - 14", "expected": "10 - 14" },
+    { "value": "0 - 4", "expected": "0 - 4" },
+    { "value": "1.5 horas", "expected": "1.5 horas" },
+    { "value": "1.Sí", "expected": "1.Sí" },
+    { "value": "100.000", "expected": "100.000" },
+    { "value": "$10.000", "expected": "$10.000" },
+    { "value": "1234. x", "expected": "1234. x" },
+    { "value": "1. ", "expected": "1. " },
+    { "value": "1.", "expected": "1." },
+    { "value": "", "expected": "" },
+    { "value": "12. 3 personas", "expected": "12. 3 personas" },
+    { "value": "7) 8", "expected": "7) 8" },
+    { "value": "1. 2. Sí", "expected": "1. 2. Sí" },
+    { "value": "a) Sí", "expected": "a) Sí" },
+    { "value": "IV. Cuatro", "expected": "IV. Cuatro" },
+    { "value": " 1. Sí", "expected": " 1. Sí" },
+    { "value": "1 .Sí", "expected": "1 .Sí" },
+    { "value": "Sí", "expected": "Sí" }
+  ]
+}

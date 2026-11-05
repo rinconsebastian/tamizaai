@@ -11,7 +11,7 @@ const textOf = (element: Element | null) => element?.textContent?.replace(/\s+/g
 const byTestId = <T extends HTMLElement = HTMLElement>(root: ParentNode, id: string) => root.querySelector<T>(`[data-testid="${id}"]`);
 
 const code = 'def compute(cleaned, ctx):\n    return None\n';
-const percent: IndicatorMetadata = { label: 'Households with piped water', description: '', unit: '', format: 'percent' };
+const percent: IndicatorMetadata = { label: 'Households with piped water', description: '', unit: '', format: 'percent', columns: {} };
 
 const step = (overrides: Partial<TestStep>): TestStep => ({
   step: 'indicator',

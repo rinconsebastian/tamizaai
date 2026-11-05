@@ -447,6 +447,24 @@ public sealed class DashboardVersionTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task New_column_labels_for_an_indicator_the_widgets_plot_make_no_version_of_their_dashboard()
+    {
+        await using var h = await PublishedAsync();
+        await AddWidgetAsync(h, "Coverage", h.DashboardId);
+        var versions = await AllVersionsAsync(h);
+        var widgets = (await h.GetWidgetsAsync()).GetRawText();
+
+        await h.LabelColumnsAsync("coverage", new { numerator = new { label = "Hogares que asistieron" }, municipality = new { label = "Municipio" } });
+        await h.LabelColumnsAsync("coverage", new { numerator = new { label = "Hogares encuestados" } });
+
+        var overview = await h.GetAsync(client: h.Viewer);
+        var coverage = overview.GetProperty("indicators").EnumerateArray().Single(i => i.GetProperty("name").GetString() == "coverage");
+        Assert.Equal("Hogares encuestados", coverage.GetProperty("columns").GetProperty("numerator").GetProperty("label").GetString());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+        Assert.Equal(widgets, (await h.GetWidgetsAsync()).GetRawText());
+    }
+
+    [Fact]
     public async Task Filter_values_picked_by_a_member_make_no_version()
     {
         await using var h = await PublishedAsync();
@@ -1700,6 +1718,301 @@ public sealed class DashboardVersionTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Widget_saved_before_column_labels_sent_back_unchanged_writes_nothing_and_makes_no_version()
+    {
+        await using var h = await PublishedAsync();
+        var id = await AddWidgetAsync(h, "Coverage", h.DashboardId, Layout(0, 0));
+        // As an earlier release stored it: a display with a color and no labels.
+        await h.ExecuteAsync(
+            """UPDATE tamiza.dashboard_widgets SET config = '{"indicator": "coverage", "groupBy": "municipality", "display": {"color": 3}}' WHERE id = @id""", ("id", id));
+        await FlushAsync(h, DashboardVersionOrigin.App, null, (h.DashboardId, new DashboardChange(DashboardChangeKinds.WidgetChanged, Widget: "Coverage")));
+        var widget = (await h.GetWidgetsAsync()).EnumerateArray().Single();
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await AllVersionsAsync(h);
+
+        var form = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new
+        {
+            title = widget.GetProperty("title").GetString(),
+            chartType = widget.GetProperty("chartType").GetString(),
+            config = widget.GetProperty("config"),
+        });
+
+        Assert.Equal(HttpStatusCode.OK, form.StatusCode);
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+    }
+
+    [Fact]
+    public async Task Widget_with_labels_sent_back_unchanged_in_any_key_order_writes_nothing_and_makes_no_version()
+    {
+        await using var h = await PublishedAsync();
+        var created = await h.AddWidgetAsync(new
+        {
+            title = "Coverage", chartType = "column",
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { labels = new { numerator = "Hogares que asistieron", denominator = "Hogares" } } },
+        });
+        var id = created.GetProperty("id").GetGuid();
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await AllVersionsAsync(h);
+
+        // The labels in the order jsonb gives them back, then in the opposite order.
+        var read = (await h.GetWidgetsAsync()).EnumerateArray().Single().GetProperty("config");
+        var same = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { title = "Coverage", chartType = "column", config = read });
+        var reversed = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new
+        {
+            title = "Coverage", chartType = "column",
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { labels = new { denominator = "Hogares", numerator = "Hogares que asistieron" } } },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, same.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, reversed.StatusCode);
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+    }
+
+    [Fact]
+    public async Task Widgets_column_labels_come_back_with_the_version_that_held_them()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var created = await h.AddWidgetAsync(new
+        {
+            title = "Coverage", chartType = "column",
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { labels = new { denominator = "Hogares que asistieron" } } },
+        }, dashboardId: housing);
+        var id = created.GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new
+        {
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { labels = new { denominator = "Otros hogares" } } },
+        })).StatusCode);
+        Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
+
+        var restore = await RestoredAsync(h, housing, 2);
+
+        var labels = restore.GetProperty("dashboard").GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("labels");
+        Assert.Equal("Hogares que asistieron", labels.GetProperty("denominator").GetString());
+        Assert.Equal("Hogares que asistieron", (await h.GetWidgetsAsync(housing))[0].GetProperty("config").GetProperty("display").GetProperty("labels").GetProperty("denominator").GetString());
+        Assert.Equal("Otros hogares", (await ContentAsync(h, housing, 3)).GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("labels").GetProperty("denominator").GetString());
+        Assert.True(await SameContentAsync(h, housing, 2, 4));
+    }
+
+    // The own order of a widget's values and the order of an indicator's column (dashboard-versions: Declared category order in dashboard versions)
+
+    [Fact]
+    public async Task A_widgets_own_order_comes_back_with_the_version_that_held_it()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var created = await h.AddWidgetAsync(new
+        {
+            title = "Coverage", chartType = "column",
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { order = new { group = new[] { "Palmira", "Cali" } } } },
+        }, dashboardId: housing);
+        var id = created.GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new
+        {
+            config = new { indicator = "coverage", groupBy = "municipality" },
+        })).StatusCode);
+        Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
+
+        var restore = await RestoredAsync(h, housing, 2);
+
+        var order = restore.GetProperty("dashboard").GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("order");
+        Assert.Equal(["Palmira", "Cali"], IndicatorsHarness.Strings(order.GetProperty("group")));
+        Assert.Equal(["Palmira", "Cali"], IndicatorsHarness.Strings((await h.GetWidgetsAsync(housing))[0].GetProperty("config").GetProperty("display").GetProperty("order").GetProperty("group")));
+        Assert.False((await ContentAsync(h, housing, 3)).GetProperty("widgets")[0].GetProperty("config").TryGetProperty("display", out _));
+        Assert.True(await SameContentAsync(h, housing, 2, 4));
+    }
+
+    [Fact]
+    public async Task Restoring_the_version_before_an_own_order_leaves_the_widget_without_one_as_a_new_version()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var created = await h.AddWidgetAsync(new
+        {
+            title = "Coverage", chartType = "column",
+            config = new { indicator = "coverage", groupBy = "municipality" },
+        }, dashboardId: housing);
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(created.GetProperty("id").GetGuid(), housing), new
+        {
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { order = new { group = new[] { "Palmira" } } } },
+        })).StatusCode);
+        Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
+
+        var restore = await RestoredAsync(h, housing, 2);
+
+        Assert.False(restore.GetProperty("dashboard").GetProperty("widgets")[0].GetProperty("config").TryGetProperty("display", out _));
+        Assert.Equal(new[] { 1, 2, 3, 4 }, await NumbersAsync(h, housing));
+    }
+
+    [Fact]
+    public async Task A_new_order_for_a_column_the_widgets_plot_makes_no_version_of_their_dashboard()
+    {
+        await using var h = await PublishedAsync();
+        await AddWidgetAsync(h, "Coverage", h.DashboardId);
+        var versions = await AllVersionsAsync(h);
+        var widgets = (await h.GetWidgetsAsync()).GetRawText();
+
+        await h.LabelColumnsAsync("coverage", new { municipality = new { order = new[] { "Palmira", "Cali" }, last = new[] { "Buga" }, stripPrefix = true } });
+        await h.LabelColumnsAsync("coverage", new { municipality = new { order = new[] { "Cali", "Palmira" } } });
+
+        var overview = await h.GetAsync(client: h.Viewer);
+        var coverage = overview.GetProperty("indicators").EnumerateArray().Single(i => i.GetProperty("name").GetString() == "coverage");
+        Assert.Equal(["Cali", "Palmira"], IndicatorsHarness.Strings(coverage.GetProperty("columns").GetProperty("municipality").GetProperty("order")));
+        Assert.Equal(versions, await AllVersionsAsync(h));
+        Assert.Equal(widgets, (await h.GetWidgetsAsync()).GetRawText());
+    }
+
+    // The texts of a widget (dashboard-indicators: Widget context kept with the widget)
+
+    [Fact]
+    public async Task Subtitle_added_to_a_widget_is_restored_away_with_the_version_before_it_and_the_restore_is_a_new_version()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var id = await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+        var withSubtitle = new { indicator = "coverage", groupBy = "municipality", display = new { subtitle = "¿En qué lugares?", footnote = "No suman 100 %" } };
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { config = withSubtitle })).StatusCode);
+        Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
+        Assert.Equal("""3 grace app [{"kind": "widgetChanged", "widget": "Coverage"}]""", (await VersionsAsync(h, housing))[^1]);
+        Assert.Equal("¿En qué lugares?", (await ContentAsync(h, housing, 3)).GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("subtitle").GetString());
+
+        var restore = await RestoredAsync(h, housing, 2);
+
+        Assert.False(restore.GetProperty("dashboard").GetProperty("widgets")[0].GetProperty("config").TryGetProperty("display", out _));
+        Assert.False((await h.GetWidgetsAsync(housing))[0].GetProperty("config").TryGetProperty("display", out _));
+        Assert.Equal(new[] { 1, 2, 3, 4 }, await NumbersAsync(h, housing));
+        Assert.True(await SameContentAsync(h, housing, 2, 4));
+        Assert.Equal("¿En qué lugares?", (await ContentAsync(h, housing, 3)).GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("subtitle").GetString());
+        // And the version that held the texts brings them back whole.
+        await RestoredAsync(h, housing, 3);
+        var display = (await h.GetWidgetsAsync(housing))[0].GetProperty("config").GetProperty("display");
+        Assert.Equal(("¿En qué lugares?", "No suman 100 %"), (display.GetProperty("subtitle").GetString(), display.GetProperty("footnote").GetString()));
+        Assert.True(await SameContentAsync(h, housing, 3, 5));
+    }
+
+    // Reference lines, steps and data labels (dashboard-indicators: Chart annotations kept with the widget)
+
+    [Fact]
+    public async Task A_mean_line_added_to_a_widget_is_restored_away_with_the_version_before_it_and_the_restore_is_a_new_version()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var id = await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+        var withLine = new
+        {
+            indicator = "coverage", groupBy = "municipality",
+            display = new { referenceLines = new object[] { new { kind = "mean" }, new { kind = "value", value = 0.5, label = "Meta" } }, dataLabels = true },
+        };
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { config = withLine })).StatusCode);
+        Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
+        Assert.Equal("""3 grace app [{"kind": "widgetChanged", "widget": "Coverage"}]""", (await VersionsAsync(h, housing))[^1]);
+        Assert.Equal(2, (await ContentAsync(h, housing, 3)).GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("referenceLines").GetArrayLength());
+
+        var restore = await RestoredAsync(h, housing, 2);
+
+        Assert.False(restore.GetProperty("dashboard").GetProperty("widgets")[0].GetProperty("config").TryGetProperty("display", out _));
+        Assert.False((await h.GetWidgetsAsync(housing))[0].GetProperty("config").TryGetProperty("display", out _));
+        Assert.Equal(new[] { 1, 2, 3, 4 }, await NumbersAsync(h, housing));
+        Assert.True(await SameContentAsync(h, housing, 2, 4));
+        Assert.Equal(2, (await ContentAsync(h, housing, 3)).GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("referenceLines").GetArrayLength());
+        // And the version that held the lines brings them back whole, as stored.
+        await RestoredAsync(h, housing, 3);
+        var display = (await h.GetWidgetsAsync(housing))[0].GetProperty("config").GetProperty("display");
+        Assert.Equal("""[{"kind":"mean"},{"kind":"value","value":0.5,"label":"Meta"}]""", display.GetProperty("referenceLines").GetRawText());
+        Assert.True(display.GetProperty("dataLabels").GetBoolean());
+        Assert.True(await SameContentAsync(h, housing, 3, 5));
+    }
+
+    [Fact]
+    public async Task Steps_chosen_alone_make_a_version_that_says_the_widget_changed_and_holds_the_choice()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var id = await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+        var config = (object interpolation) => new { indicator = "coverage", groupBy = "municipality", display = new { interpolation } };
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { chartType = "line", config = config("linear") })).StatusCode);
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { config = config("step") });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("""4 grace app [{"kind": "widgetChanged", "widget": "Coverage"}]""", (await VersionsAsync(h, housing))[^1]);
+        Assert.Equal("step", (await ContentAsync(h, housing, 4)).GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("interpolation").GetString());
+        Assert.Equal("linear", (await ContentAsync(h, housing, 3)).GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("interpolation").GetString());
+    }
+
+    [Fact]
+    public async Task Widget_with_lines_steps_and_data_labels_saved_unchanged_makes_no_version_and_leaves_its_stored_text()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var id = await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+        var display = new { referenceLines = new object[] { new { kind = "median" }, new { kind = "value", value = 0.25 } }, interpolation = "linear", dataLabels = false };
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { chartType = "line", config = new { indicator = "coverage", groupBy = "municipality", display } })).StatusCode);
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await AllVersionsAsync(h);
+        var read = (await h.GetWidgetsAsync(housing)).EnumerateArray().Single();
+
+        var form = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new
+        {
+            title = read.GetProperty("title").GetString(),
+            chartType = read.GetProperty("chartType").GetString(),
+            config = read.GetProperty("config"),
+        });
+
+        Assert.Equal(HttpStatusCode.OK, form.StatusCode);
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+        Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
+    }
+
+    [Fact]
+    public async Task Unit_changed_alone_makes_a_version_that_says_the_widget_changed_and_holds_the_unit()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var id = await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+        var config = (object unit) => new { indicator = "coverage", groupBy = "municipality", display = new { unit } };
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { config = config("de los hogares") })).StatusCode);
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { config = config("de quienes asistieron") });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(new[] { 1, 2, 3, 4 }, await NumbersAsync(h, housing));
+        Assert.Equal("""4 grace app [{"kind": "widgetChanged", "widget": "Coverage"}]""", (await VersionsAsync(h, housing))[^1]);
+        Assert.Equal("de quienes asistieron", (await ContentAsync(h, housing, 4)).GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("unit").GetString());
+        Assert.Equal("de los hogares", (await ContentAsync(h, housing, 3)).GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("unit").GetString());
+    }
+
+    [Fact]
+    public async Task Widget_with_texts_saved_unchanged_makes_no_version_and_leaves_its_stored_text()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var id = await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+        var display = new { subtitle = "¿En qué lugares?", footnote = "No suman 100 %", caption = new { hidden = true }, unit = "de quienes asistieron", showDescription = true };
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { config = new { indicator = "coverage", groupBy = "municipality", display } })).StatusCode);
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await AllVersionsAsync(h);
+        var read = (await h.GetWidgetsAsync(housing)).EnumerateArray().Single();
+
+        var form = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new
+        {
+            title = read.GetProperty("title").GetString(),
+            chartType = read.GetProperty("chartType").GetString(),
+            config = read.GetProperty("config"),
+        });
+        var place = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { layout = read.GetProperty("layout") });
+
+        Assert.Equal(HttpStatusCode.OK, form.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, place.StatusCode);
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+        Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
+    }
+
+    [Fact]
     public async Task Dashboard_saved_before_palettes_keeps_its_newest_version_when_the_default_colors_are_saved_and_when_the_flush_finds_them()
     {
         await using var h = await PublishedAsync();
@@ -1876,5 +2189,245 @@ public sealed class DashboardVersionTests(PostgresFixture postgres)
         var row = await TestData.ScalarAsync<string>(h.Db, "SELECT palette || '|' || value_colors::text FROM tamiza.dashboards WHERE id = @id", ("id", dashboardId));
         var parts = row!.Split('|', 2);
         return (parts[0], parts[1]);
+    }
+
+    // The source (dashboard-versions: Dashboard source in versions)
+
+    private const string FirstSource = "Encuesta de ejemplo, 120 respuestas, primera ronda";
+    private const string SecondSource = "Encuesta de ejemplo, 240 respuestas, segunda ronda";
+
+    private static string? SourceOf(JsonElement dashboardOrVersion) =>
+        dashboardOrVersion.TryGetProperty("source", out var source) ? source.GetString() : null;
+
+    private static async Task<string?> StoredSourceAsync(IndicatorsHarness h, Guid dashboardId) =>
+        await TestData.ScalarAsync<string?>(h.Db, "SELECT source FROM tamiza.dashboards WHERE id = @id", ("id", dashboardId));
+
+    /// <summary>
+    /// Version 1 of a dashboard as a build of script 0021 recorded it: the name, the filters, the palette and the colors kept when they
+    /// are not the defaults, and the widgets, with no key for a source, which did not exist yet.
+    /// </summary>
+    private static Task RecordVersionFrom0021Async(IndicatorsHarness h, Guid dashboardId) =>
+        h.ExecuteAsync(
+            """
+            INSERT INTO tamiza.dashboard_versions (id, project_id, dashboard_id, number, content, changes, origin, author_id, created_at, saved_at)
+            SELECT gen_random_uuid(), d.project_id, d.id, 1,
+                   jsonb_build_object('name', d.name, 'filters', d.filters)
+                       || CASE WHEN d.palette <> 'tamiza' THEN jsonb_build_object('palette', d.palette) ELSE '{}'::jsonb END
+                       || CASE WHEN d.value_colors <> '[]'::jsonb THEN jsonb_build_object('valueColors', d.value_colors) ELSE '{}'::jsonb END
+                       || jsonb_build_object('widgets', COALESCE((
+                           SELECT jsonb_agg(jsonb_build_object(
+                                      'id', w.id, 'title', w.title, 'chartType', w.chart_type, 'config', w.config, 'layout', w.layout)
+                                  ORDER BY (w.layout ->> 'y')::integer, (w.layout ->> 'x')::integer, w.created_at, w.id)
+                           FROM tamiza.dashboard_widgets w
+                           WHERE w.dashboard_id = d.id), '[]'::jsonb)),
+                   '[{"kind": "initial"}]'::jsonb, 'app', d.updated_by, d.updated_at, d.updated_at
+            FROM tamiza.dashboards d
+            WHERE d.id = @id
+            """,
+            ("id", dashboardId));
+
+    [Fact]
+    public async Task Source_changed_makes_a_version_saying_the_source_changed_that_holds_the_source()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+
+        await h.SaveSourceAsync(FirstSource, dashboardId: housing);
+
+        Assert.Equal(new[] { 1, 2 }, await NumbersAsync(h, housing));
+        Assert.Equal("""2 grace app [{"kind": "sourceChanged"}]""", (await VersionsAsync(h, housing))[^1]);
+        Assert.Equal(FirstSource, (await ContentAsync(h, housing, 2)).GetProperty("source").GetString());
+        // The version before it holds none, and the history counts the same widgets and filters.
+        Assert.False((await ContentAsync(h, housing, 1)).TryGetProperty("source", out _));
+        Assert.Equal(FirstSource, SourceOf(await h.Analyst.GetFromJsonAsync<JsonElement>(VersionsUrl(h, housing) + "/2")));
+        var summary = (await HistoryAsync(h, housing)).GetProperty("versions")[0];
+        Assert.Equal((2, 0, 0), (summary.GetProperty("number").GetInt32(), summary.GetProperty("widgetCount").GetInt32(), summary.GetProperty("filterCount").GetInt32()));
+        Assert.Equal("""[{"kind":"sourceChanged"}]""", summary.GetProperty("changes").GetRawText());
+
+        // A different source and then none are versions too.
+        await h.SaveSourceAsync(SecondSource, dashboardId: housing);
+        await h.SaveSourceAsync(null, dashboardId: housing);
+        Assert.Equal(new[] { 1, 2, 3, 4 }, await NumbersAsync(h, housing));
+        Assert.Equal(SecondSource, (await ContentAsync(h, housing, 3)).GetProperty("source").GetString());
+        Assert.False((await ContentAsync(h, housing, 4)).TryGetProperty("source", out _));
+        Assert.True(await SameContentAsync(h, housing, 1, 4));
+    }
+
+    [Fact]
+    public async Task Source_saved_unchanged_makes_no_version_and_leaves_the_dashboard_as_it_was()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        await h.SaveSourceAsync(FirstSource, dashboardId: housing);
+        var dashboards = await h.StoredDashboardsAsync();
+        var versions = await AllVersionsAsync(h);
+
+        await h.SaveSourceAsync(FirstSource, dashboardId: housing);
+        await h.SaveSourceAsync("  " + FirstSource + "  ", dashboardId: housing);
+
+        Assert.Equal(new[] { 1, 2 }, await NumbersAsync(h, housing));
+        Assert.Equal(dashboards, await h.StoredDashboardsAsync());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+    }
+
+    [Fact]
+    public async Task Source_restored_by_restoring_the_version_before_it_changed()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        await h.SaveSourceAsync(FirstSource, dashboardId: housing);
+        await h.SaveSourceAsync(SecondSource, dashboardId: housing);
+        Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
+
+        var restore = await RestoredAsync(h, housing, 2);
+
+        Assert.Equal(FirstSource, SourceOf(restore.GetProperty("dashboard")));
+        Assert.Equal(FirstSource, SourceOf(await h.GetDashboardAsync(housing, h.Viewer)));
+        Assert.Equal(FirstSource, await StoredSourceAsync(h, housing));
+        Assert.Equal(new[] { 1, 2, 3, 4 }, await NumbersAsync(h, housing));
+        Assert.Equal("""4 grace app [{"kind": "restored", "version": 2}]""", (await VersionsAsync(h, housing))[^1]);
+        Assert.True(await SameContentAsync(h, housing, 2, 4));
+        // Restoring it again changes nothing, and the version the restore replaced can be brought back.
+        var again = await RestoreAsync(h, housing, 2);
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        Assert.False((await again.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("restored").GetBoolean());
+        var back = await RestoredAsync(h, housing, 3);
+        Assert.Equal(SecondSource, SourceOf(back.GetProperty("dashboard")));
+        Assert.True(await SameContentAsync(h, housing, 3, 5));
+    }
+
+    [Fact]
+    public async Task Version_recorded_before_sources_restores_a_dashboard_with_no_source()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        await h.SaveSourceAsync(FirstSource, dashboardId: housing);
+
+        var restore = await RestoredAsync(h, housing, 1);
+
+        Assert.False(restore.GetProperty("dashboard").TryGetProperty("source", out _));
+        Assert.Null(await StoredSourceAsync(h, housing));
+        Assert.False((await h.GetDashboardAsync(housing, h.Viewer)).TryGetProperty("source", out _));
+        Assert.Equal("""3 grace app [{"kind": "restored", "version": 1}]""", (await VersionsAsync(h, housing))[^1]);
+        Assert.True(await SameContentAsync(h, housing, 1, 3));
+    }
+
+    [Fact]
+    public async Task A_version_without_a_source_has_no_source_key_and_one_with_it_has_it()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        await h.SaveSourceAsync(FirstSource, dashboardId: housing);
+        await h.SaveSourceAsync(null, dashboardId: housing);
+
+        var withoutSource = await h.Analyst.GetFromJsonAsync<JsonElement>(VersionsUrl(h, housing) + "/1");
+        var withSource = await h.Analyst.GetFromJsonAsync<JsonElement>(VersionsUrl(h, housing) + "/2");
+
+        Assert.False(withoutSource.TryGetProperty("source", out _));
+        Assert.DoesNotContain("source", withoutSource.GetRawText());
+        Assert.Equal(FirstSource, SourceOf(withSource));
+        // It comes after what a version returned before sources, so a version without one returns those members as it did.
+        Assert.Equal("savedAt", withoutSource.EnumerateObject().Last().Name);
+        Assert.Equal("source", withSource.EnumerateObject().Last().Name);
+    }
+
+    [Fact]
+    public async Task A_copy_starts_its_history_with_the_source_of_the_original()
+    {
+        await using var h = await PublishedAsync();
+        await h.SaveSourceAsync(FirstSource);
+
+        var response = await h.Analyst.PostAsJsonAsync(h.DashboardUrl() + "/copies", new { name = "Housing (copy)" });
+        var copyId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(new[] { 1 }, await NumbersAsync(h, copyId));
+        Assert.Equal(FirstSource, (await ContentAsync(h, copyId, 1)).GetProperty("source").GetString());
+    }
+
+    [Fact]
+    public async Task Dashboard_saved_before_sources_keeps_its_newest_version_when_the_flush_or_a_save_finds_the_content_it_holds()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.InsertDashboardAsync("Housing");
+        await h.SaveColorsAsync("earth", FemaleInColor5, dashboardId: housing);
+        await h.SaveFiltersAsync(new[] { new { label = "Municipality", column = "municipality", kind = "text", @default = (object?)null } }, dashboardId: housing);
+        await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+        await h.ExecuteAsync("DELETE FROM tamiza.dashboard_versions WHERE dashboard_id = @id", ("id", housing));
+        await RecordVersionFrom0021Async(h, housing);
+        var versions = await AllVersionsAsync(h);
+        var dashboards = await h.StoredDashboardsAsync();
+
+        // Filters and colors saved as they are, and the flush of a request that noted both, find the dashboard as version 1 holds it.
+        var read = await h.GetDashboardAsync(housing);
+        await h.SaveFiltersAsync(read.GetProperty("filters"), dashboardId: housing);
+        await h.SaveColorsAsync("earth", FemaleInColor5, dashboardId: housing);
+        var numbers = await FlushAsync(h, DashboardVersionOrigin.App, null,
+            (housing, new DashboardChange(DashboardChangeKinds.FiltersChanged)), (housing, new DashboardChange(DashboardChangeKinds.ColorsChanged)));
+
+        Assert.Equal([new DashboardVersionNumber(housing, 1)], numbers);
+        Assert.Equal(new[] { 1 }, await NumbersAsync(h, housing));
+        Assert.Equal(versions, await AllVersionsAsync(h));
+        Assert.Equal(dashboards, await h.StoredDashboardsAsync());
+        // The content built today is the one version 1 holds, key for key: it has a palette and colors, and no source.
+        using var scope = h.Factory.Services.CreateScope();
+        var built = await DashboardVersions.ContentAsync(scope.ServiceProvider.GetRequiredService<TamizaDbContext>(), h.ProjectId, housing, CancellationToken.None);
+        Assert.Equal(["filters", "name", "palette", "valueColors", "widgets"], Keys(JsonDocument.Parse(built!).RootElement));
+        Assert.Equal(
+            await TestData.ScalarAsync<string>(h.Db, "SELECT content::text FROM tamiza.dashboard_versions WHERE dashboard_id = @id", ("id", housing)),
+            await TestData.ScalarAsync<string>(h.Db, "SELECT @built::jsonb::text", ("built", built!)));
+    }
+
+    [Fact]
+    public async Task Restoring_a_version_on_a_dashboard_migrated_from_0021_records_no_unrecorded_state()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.InsertDashboardAsync("Housing");
+        await h.SaveColorsAsync("earth", FemaleInColor5, dashboardId: housing);
+        await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+        await h.ExecuteAsync("DELETE FROM tamiza.dashboard_versions WHERE dashboard_id = @id", ("id", housing));
+        await RecordVersionFrom0021Async(h, housing);
+        var dashboards = await h.StoredDashboardsAsync();
+        var widgets = await h.StoredWidgetsAsync();
+
+        // Step 2 finds the dashboard as version 1 holds it, although it now builds a content that may carry a source: nothing to record.
+        var response = await RestoreAsync(h, housing, 1);
+        var restore = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(restore.GetProperty("restored").GetBoolean());
+        Assert.Equal(["""1 grace app [{"kind": "initial"}]"""], await VersionsAsync(h, housing));
+        Assert.Equal(dashboards, await h.StoredDashboardsAsync());
+        Assert.Equal(widgets, await h.StoredWidgetsAsync());
+
+        // After a change of source, restoring version 1 is version 3, and still no state was found that no version held.
+        await h.SaveSourceAsync(FirstSource, dashboardId: housing);
+        var undone = await RestoredAsync(h, housing, 1);
+
+        Assert.Equal(
+            [
+                """1 grace app [{"kind": "initial"}]""",
+                """2 grace app [{"kind": "sourceChanged"}]""",
+                """3 grace app [{"kind": "restored", "version": 1}]""",
+            ],
+            await VersionsAsync(h, housing));
+        Assert.False(undone.GetProperty("dashboard").TryGetProperty("source", out _));
+        Assert.Equal(("earth", 1), (undone.GetProperty("dashboard").GetProperty("palette").GetString(), undone.GetProperty("dashboard").GetProperty("valueColors").GetArrayLength()));
+        Assert.True(await SameContentAsync(h, housing, 1, 3));
+    }
+
+    [Fact]
+    public async Task A_restore_through_mcp_brings_the_source_back_too()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        await h.SaveSourceAsync(FirstSource, dashboardId: housing);
+        await h.SaveSourceAsync(SecondSource, dashboardId: housing);
+
+        var restored = await RestoreThroughMcpAsync(h, housing, 2, "Back to the first round", 3);
+
+        Assert.True(restored.Restored);
+        Assert.Equal(FirstSource, restored.Dashboard.Source);
+        Assert.Equal(FirstSource, await StoredSourceAsync(h, housing));
     }
 }

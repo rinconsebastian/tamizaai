@@ -30,6 +30,19 @@ public static class WidgetQuery
         chartType == ChartTypes.Likert ? config.Scale : []);
 
     /// <summary>
+    /// Whether a saved widget asks its query for the overall value too (design D4 of add-chart-annotations): a bar, column or line with
+    /// no series and a ratio, whose display has an <c>overall</c> reference line. It is a flag of the query request, derived here and never
+    /// stored in a config. A widget with a series reads its overall line from its totals, and a measure has no overall line. Twin of
+    /// <c>overallFor</c> in <c>widget-view.ts</c>: change both together.
+    /// </summary>
+    public static bool Overall(string chartType, WidgetConfig config) =>
+        chartType is ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line
+        && config.SeriesBy is null
+        && config.Ratio is not null
+        && config.Display?.ReferenceLines is { } lines
+        && lines.Any(line => line?.Kind == ReferenceLineKinds.Overall);
+
+    /// <summary>
     /// A bar or column keeps its order. A box plot keeps only an order by median, and only with a group column: an order the form keeps
     /// while the group is cleared is not sent, so the query is not refused for it. Twin of the sort rule of <c>queryFor</c>.
     /// </summary>

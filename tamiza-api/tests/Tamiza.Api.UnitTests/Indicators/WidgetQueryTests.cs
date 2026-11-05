@@ -221,11 +221,132 @@ public sealed class WidgetQueryTests
         }
     }
 
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void Column_labels_never_change_a_query(string chartType)
+    {
+        var plain = Config();
+        var labelled = plain with
+        {
+            Display = new WidgetDisplay(Labels: new Dictionary<string, string> { ["numerator"] = "Hogares que asistieron", ["municipality"] = "Municipio" }),
+        };
+
+        var query = WidgetQuery.For(chartType, labelled);
+
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, plain), json), System.Text.Json.JsonSerializer.Serialize(query, json));
+        Assert.Null(query.Display);
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void The_texts_of_a_widget_never_change_a_query(string chartType)
+    {
+        var plain = Config();
+        var texts = plain with
+        {
+            Display = new WidgetDisplay(
+                Color: 2, Labels: new Dictionary<string, string> { ["numerator"] = "Hogares que asistieron" }, Subtitle: "¿En qué lugares ha visto teatro?",
+                Footnote: "No suman 100 %: respuesta múltiple.", Caption: new WidgetCaption("% de quienes asistieron"), Unit: "de quienes asistieron",
+                ShowDescription: true),
+        };
+
+        var query = WidgetQuery.For(chartType, texts);
+
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, plain), json), System.Text.Json.JsonSerializer.Serialize(query, json));
+        Assert.Null(query.Display);
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void An_own_order_of_values_never_changes_a_query(string chartType)
+    {
+        var plain = Config();
+        var ordered = plain with
+        {
+            Display = new WidgetDisplay(Color: 2, Order: new WidgetCategoryOrder(["Piped", "Well"], ["Sí", "No", "No sabe"])),
+        };
+
+        var query = WidgetQuery.For(chartType, ordered);
+
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, plain), json), System.Text.Json.JsonSerializer.Serialize(query, json));
+        Assert.Null(query.Display);
+        Assert.DoesNotContain("order", System.Text.Json.JsonSerializer.Serialize(query, json));
+    }
+
+    public static TheoryData<string> EveryKind() => new(ChartTypes.All);
+
     [Fact]
     public void The_new_charts_keep_their_group_column_and_a_stat_tile_still_drops_it()
     {
         Assert.Equal("age_band", WidgetQuery.For(ChartTypes.Heatmap, WithSeries()).GroupBy);
         Assert.Equal("age_band", WidgetQuery.For(ChartTypes.Crosstab, WithSeries()).GroupBy);
         Assert.Null(WidgetQuery.For(ChartTypes.Stat, WithSeries()).GroupBy);
+    }
+
+    // The overall value is a flag of the query request, derived from the saved widget (design D4 of add-chart-annotations).
+
+    private static WidgetConfig Lined(
+        WidgetReferenceLine?[]? lines, WidgetRatio? ratio = null, string? seriesBy = null, string? measure = null, WidgetDisplay? display = null) => new(
+        "coverage", measure, ratio, "municipality", [], null, null, SeriesBy: seriesBy,
+        Display: display ?? (lines is null ? null : new WidgetDisplay(ReferenceLines: lines)));
+
+    private static readonly WidgetRatio Rate = new("numerator", "denominator");
+    private static readonly WidgetReferenceLine[] OverallLine = [new("overall")];
+
+    [Theory]
+    [InlineData(ChartTypes.Bar)]
+    [InlineData(ChartTypes.Column)]
+    [InlineData(ChartTypes.Line)]
+    public void A_bar_a_column_and_a_line_with_no_series_a_ratio_and_an_overall_line_ask_for_the_overall_value(string chartType)
+    {
+        Assert.True(WidgetQuery.Overall(chartType, Lined(OverallLine, Rate)));
+        Assert.True(WidgetQuery.Overall(chartType, Lined([new("mean"), new("value", 0.5, "Meta"), new("overall", Label: "General")], Rate)));
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Bar)]
+    [InlineData(ChartTypes.Column)]
+    [InlineData(ChartTypes.Line)]
+    public void A_measure_a_series_a_mean_line_only_or_no_display_do_not_ask_for_it(string chartType)
+    {
+        Assert.False(WidgetQuery.Overall(chartType, Lined(OverallLine, measure: "value")));
+        Assert.False(WidgetQuery.Overall(chartType, Lined(OverallLine)));
+        Assert.False(WidgetQuery.Overall(chartType, Lined(OverallLine, Rate, seriesBy: "water_source")));
+        Assert.False(WidgetQuery.Overall(chartType, Lined([new("mean"), new("median"), new("value", 0.5)], Rate)));
+        Assert.False(WidgetQuery.Overall(chartType, Lined(null, Rate)));
+        Assert.False(WidgetQuery.Overall(chartType, Lined(null, Rate, display: new WidgetDisplay(Color: 2, DataLabels: true))));
+        Assert.False(WidgetQuery.Overall(chartType, Lined([null, new(null, Label: "Meta")], Rate)));
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Stat)]
+    [InlineData(ChartTypes.Pie)]
+    [InlineData(ChartTypes.Histogram)]
+    [InlineData(ChartTypes.Map)]
+    [InlineData(ChartTypes.Heatmap)]
+    [InlineData(ChartTypes.Pyramid)]
+    [InlineData(ChartTypes.Likert)]
+    [InlineData(ChartTypes.Crosstab)]
+    [InlineData(ChartTypes.Boxplot)]
+    public void Every_other_chart_type_never_asks_for_it(string chartType)
+    {
+        Assert.False(WidgetQuery.Overall(chartType, Lined(OverallLine, Rate)));
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void The_reference_lines_the_steps_and_the_data_labels_never_change_the_query(string chartType)
+    {
+        var plain = Lined(null, Rate, display: new WidgetDisplay(Color: 2));
+        var annotated = Lined(null, Rate, display: new WidgetDisplay(Color: 2, ReferenceLines: [new("mean"), new("overall")], Interpolation: "step", DataLabels: true));
+
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, plain), json),
+            System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, annotated), json));
+        Assert.DoesNotContain("overall", System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, annotated), json));
     }
 }

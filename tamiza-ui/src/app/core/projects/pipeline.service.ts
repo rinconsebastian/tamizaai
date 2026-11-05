@@ -41,13 +41,46 @@ export interface ScriptVersionSummary {
   origin: ScriptVersionOrigin;
 }
 
+/**
+ * The facts an indicator keeps about one column of its table (`IndicatorColumnMetadata` in tamiza-api): the name shown for the column
+ * and, for a column that widgets group or split by (add-declared-category-order, design D1), the order of its values (up to
+ * `maxOrderValues`), the values kept at the end whatever the order or the sort (up to `maxKeptLast`) and whether a leading number such as
+ * "1. " is hidden. A property that is not set is left out; an empty list and `false` are never saved.
+ */
+export interface ColumnMetadata {
+  label?: string;
+  order?: string[];
+  last?: string[];
+  /** Only `true` is stored: an unticked box is left out. */
+  stripPrefix?: boolean;
+}
+
+/** The column facts of an indicator version, keyed by the column's name as its table publishes it. The keys' order means nothing. */
+export type ColumnMetadataMap = Record<string, ColumnMetadata>;
+
+/**
+ * The row of the details form for one column, as it is typed (design D8): the label, and for a column that widgets group or split by the
+ * order of its values, the values kept at the end and whether numbered prefixes are hidden (add-declared-category-order, design D9).
+ */
+export interface ColumnDraft {
+  label: string;
+  order: string[];
+  last: string[];
+  stripPrefix: boolean;
+}
+
 /** An indicator's metadata, saved with each version of its script. */
 export interface IndicatorMetadata {
   label: string;
   description: string;
   unit: string;
   format: IndicatorFormat;
+  /** The facts about the columns, one row per column of the table the form lists. */
+  columns: Record<string, ColumnDraft>;
 }
+
+/** What saving an indicator sends: its code and metadata, with the column names as `{ column: { label } }` (an empty map clears them). */
+export type IndicatorSave = { code: string } & Omit<IndicatorMetadata, 'columns'> & { columns: ColumnMetadataMap };
 
 /** The code of a version and, for an indicator, its metadata; all null for a removal. */
 export interface ScriptVersionDetails extends ScriptVersionSummary {
@@ -55,6 +88,8 @@ export interface ScriptVersionDetails extends ScriptVersionSummary {
   description: string | null;
   unit: string | null;
   format: IndicatorFormat | null;
+  /** The column facts of an indicator version; null when it has none (and for the other scripts). */
+  columns?: ColumnMetadataMap | null;
 }
 
 export interface ProjectScript {
@@ -69,6 +104,7 @@ export interface IndicatorScript {
   description: string | null;
   unit: string | null;
   format: IndicatorFormat;
+  columns?: ColumnMetadataMap | null;
   current: ScriptVersionDetails;
 }
 
@@ -328,7 +364,7 @@ export class PipelineService {
   }
 
   /** Saves script 1 or 2 with `{ code }`, or an indicator with its metadata too; the first save of a name creates the indicator. */
-  save(projectId: string, script: ScriptRef, body: { code: string } | ({ code: string } & IndicatorMetadata)): Observable<ScriptVersionDetails> {
+  save(projectId: string, script: ScriptRef, body: { code: string } | IndicatorSave): Observable<ScriptVersionDetails> {
     return this.http.put<ScriptVersionDetails>(scriptUrl(projectId, script), body);
   }
 

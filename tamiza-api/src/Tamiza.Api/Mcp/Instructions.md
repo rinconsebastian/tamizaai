@@ -17,7 +17,7 @@ When the person asks you to describe a situation (for example "access to water b
 2. `get_form` to read the questions and choice lists, and `get_tables` (source `raw`) and `profile_table` to see what the answers hold: empty values, sentinels such as -99, the labels each select question has.
 3. Propose the indicators you will build and ask the person to confirm them (denominators, exclusions, disaggregations) BEFORE writing scripts.
 4. `get_authoring_guide` for the script contract and templates. Write script 1 only when cleaning is needed. Check every draft with `test_script` (repeat until it passes), then `save_script`.
-5. One indicator script per indicator, each tested and then saved with a label, a unit and a format (`count`, `decimal`, `percent`, `currency`).
+5. One indicator script per indicator, each tested and then saved with a label, a unit, a format (`count`, `decimal`, `percent`, `currency`) and, in `columns`, labels for the columns people read, such as `numerator` and `denominator`.
 6. `start_run` and wait for it. Read `get_run` for errors; fix and run again.
 7. `create_dashboard`, then for each widget `query_indicator` first to see what it would plot, then `create_widget`. Add dashboard filters on columns the indicator tables share. Finish with `get_widget_data` and describe to the person what the dashboard shows.
 
@@ -32,6 +32,8 @@ A widget groups an indicator table by one column (`groupBy`) and may split each 
 - Two groups compared across ordered bands, such as women and men by age band: `pyramid` with `seriesBy` and `pyramid` = `{ left, right }`.
 - An agreement scale (strongly disagree to strongly agree): `likert` with `seriesBy` on the answer column and a `scale` that orders its values and marks each negative, neutral or positive. It shows each group's composition in percent.
 - `stacked`, `percent` and `likert` need a measure (counts), not a ratio: rates do not add up. A rate by two dimensions goes in `grouped`, `line`, `heatmap`, `pyramid` or `crosstab`.
+- A line to compare the bars with: `display.referenceLines` with `mean`, `median`, `overall` or `value`. Use `overall` when the bars are subgroups (comuna, estrato); over the answers of one question it is only their mean. A demand curve: a `line` with `display.interpolation` `step`. `update_widget` replaces the whole `config`, so send `referenceLines`, `interpolation` and `dataLabels` again when you change the query.
+- Answers in the order of the question (Sí, Tal vez, No, No sabe): declare `order`, and `last` for answers such as No sabe, Otro or Sin dato, in `save_script`'s `columns`, instead of numbering labels or publishing an order column; `stripPrefix` hides numbers already in the data, while filters and colors kept by value still use the full text. Declaring an order can recolor series that have no color kept. One chart can have an order of its own in `display.order`. `query_indicator` and `get_widget_data` list rows, series, cells and boxes in that order, each value with its full text.
 - With `seriesBy`, `query_indicator` and `get_widget_data` return `series`, `cells`, `totals` and `notes` instead of `rows`; a `boxplot` returns `boxes` (each with its `values`, `min`, `q1`, `median`, `q3`, `max`, `mean`, whisker ends and `outlierCount`) instead of `rows`. Check them before and after you create the widget.
 
 ## Colors
@@ -40,7 +42,16 @@ A dashboard draws all its widgets in one palette: `tamiza` (the default), `insti
 
 - Keep the default palette unless the person asks for another look. Do not change a dashboard's palette on your own.
 - Keep colors by value, `valueColors` = `[{ column, value, color }]` with `color` 1 to 8, for categories that recur across widgets, such as sex or yes/no, so a value has the same color in every widget that colors by that column. The list you send replaces the current one, so read it with `get_dashboard` and send it whole. A column keeps each value once and each color once.
-- Keep color 1 for a widget unless it should stand out. `display` = `{ color, ramp, orientation }` in the widget's `config` is a `color` (1 to 8) for a `bar`, `column` or `line` with no `seriesBy`, for a `histogram` and for a `boxplot`, or a `ramp` (`blue`, `teal`, `green`, `orange`, `red`, `purple` or `gray`) for a `map` or a `heatmap`; a `boxplot` also takes an `orientation`, `vertical` (the default) or `horizontal`, which suits long group names. A widget with a series takes its colors from its series. `update_widget` replaces the whole `config`, so send the `display` again when you change the query.
+- Keep color 1 for a widget unless it should stand out. `display` = `{ color, ramp, orientation, labels }` in the widget's `config` is a `color` (1 to 8) for a `bar`, `column` or `line` with no `seriesBy`, for a `histogram` and for a `boxplot`, or a `ramp` (`blue`, `teal`, `green`, `orange`, `red`, `purple` or `gray`) for a `map` or a `heatmap`; a `boxplot` also takes an `orientation`, `vertical` (the default) or `horizontal`, which suits long group names. A widget with a series takes its colors from its series. `labels` = `{ column: name }` gives up to 10 of the widget's columns a name for people on any kind; left out, a column takes its indicator's label, else its own name. `update_widget` replaces the whole `config`, so send the `display`, labels included, again when you change the query.
+
+## Words on a widget
+
+A widget's title is one short line. Put the rest in its `display`, in the widget's `config`, on any kind of widget:
+
+- Put the question the chart answers in `subtitle` and notes such as "no suman 100 %" in `footnote`, rather than in the title. A subtitle is 1 to 200 characters and a footnote 1 to 500, with no line break.
+- Use `caption` and `unit` when the indicator's name or unit does not fit the widget's base: `caption` = `{ text }` replaces the indicator's name where the widget names what it plots, or `{ hidden: true }` leaves the line out of sight (not both); `unit` replaces the indicator's unit for this widget only. `showDescription` = `true` adds a button that shows the indicator's description.
+- Set the dashboard's `source`, where its data comes from, once, with `update_dashboard`; an empty text removes it.
+- `update_widget` replaces the whole `config`, so send the `display` again, texts included, when you change the query.
 
 ## Rules
 

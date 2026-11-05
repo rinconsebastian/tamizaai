@@ -103,7 +103,8 @@ public sealed class IndicatorsHarness : IAsyncDisposable
     /// Creates the indicator script <paramref name="name"/> through the API as the analyst, once, so the overview lists it. The label
     /// is the name with its first letter capitalized unless one is given.
     /// </summary>
-    public async Task AddIndicatorAsync(string name, string? label = null, string format = "decimal", string? unit = null, string? description = null)
+    public async Task AddIndicatorAsync(
+        string name, string? label = null, string format = "decimal", string? unit = null, string? description = null, object? columns = null)
     {
         if (!_scripts.Add(name))
         {
@@ -112,7 +113,20 @@ public sealed class IndicatorsHarness : IAsyncDisposable
 
         var response = await Analyst.PutAsJsonAsync(
             $"/api/v1/projects/{ProjectId}/scripts/indicators/{name}",
-            new { code = "def compute(cleaned, ctx):\n    pass\n", label = label ?? char.ToUpperInvariant(name[0]) + name[1..], description, unit, format });
+            new { code = "def compute(cleaned, ctx):\n    pass\n", label = label ?? char.ToUpperInvariant(name[0]) + name[1..], description, unit, format, columns });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    /// <summary>
+    /// Saves a new version of an indicator with these column labels (<c>{ column: { label } }</c>; <c>{}</c> clears them) and its other
+    /// details as they were first given. The indicator is added first when it has no script yet.
+    /// </summary>
+    public async Task LabelColumnsAsync(string name, object columns, string? label = null, string format = "decimal")
+    {
+        _scripts.Add(name);
+        var response = await Analyst.PutAsJsonAsync(
+            $"/api/v1/projects/{ProjectId}/scripts/indicators/{name}",
+            new { code = "def compute(cleaned, ctx):\n    pass\n", label = label ?? char.ToUpperInvariant(name[0]) + name[1..], format, columns });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
@@ -121,11 +135,12 @@ public sealed class IndicatorsHarness : IAsyncDisposable
     /// and records the indicator's step as succeeded. Unless <paramref name="script"/> is false, the indicator script exists too.
     /// </summary>
     public async Task<Guid> PublishAsync(
-        string name, string columns, string rows, string? label = null, string format = "decimal", string? unit = null, string? description = null, bool script = true)
+        string name, string columns, string rows, string? label = null, string format = "decimal", string? unit = null, string? description = null, bool script = true,
+        object? labels = null)
     {
         if (script)
         {
-            await AddIndicatorAsync(name, label, format, unit, description);
+            await AddIndicatorAsync(name, label, format, unit, description, labels);
         }
 
         return await PublishedTables.PublishTableAsync(Db, ProjectId, "indicators", name, columns, rows);
@@ -195,6 +210,21 @@ public sealed class IndicatorsHarness : IAsyncDisposable
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
+    /// <summary>The source of a dashboard of the project, the first one unless given another.</summary>
+    public string SourceUrl(Guid? dashboardId = null) => DashboardUrl(dashboardId) + "/source";
+
+    /// <summary>Asks the API to replace a dashboard's source, as the analyst unless given another client; null or an empty text removes it.</summary>
+    public Task<HttpResponseMessage> PutSourceAsync(string? source, HttpClient? client = null, Guid? dashboardId = null) =>
+        (client ?? Analyst).PutAsJsonAsync(SourceUrl(dashboardId), new { source });
+
+    /// <summary>Replaces a dashboard's source through the API and returns the saved <c>{ source }</c>; fails the test when it is not saved.</summary>
+    public async Task<JsonElement> SaveSourceAsync(string? source, HttpClient? client = null, Guid? dashboardId = null)
+    {
+        var response = await PutSourceAsync(source, client, dashboardId);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
     /// <summary>Adds a dashboard through the API, after the project's others, and returns its id; fails the test when it is not created.</summary>
     public async Task<Guid> AddDashboardAsync(string name, HttpClient? client = null)
     {
@@ -211,14 +241,14 @@ public sealed class IndicatorsHarness : IAsyncDisposable
             .ToArray();
 
     /// <summary>
-    /// The project's dashboards in their order as <c>position|id|name|normalized name|filters|updated_by|updated_at|palette|value colors</c>,
+    /// The project's dashboards in their order as <c>position|id|name|normalized name|filters|updated_by|updated_at|palette|value colors|source</c>,
     /// to check that a refused request changed nothing.
     /// </summary>
     public async Task<string[]> StoredDashboardsAsync()
     {
         var rows = await TestData.ScalarAsync<string>(Db,
             """
-            SELECT coalesce(string_agg(concat_ws('|', position, id, name, normalized_name, filters, updated_by, updated_at, palette, value_colors), E'\n'
+            SELECT coalesce(string_agg(concat_ws('|', position, id, name, normalized_name, filters, updated_by, updated_at, palette, value_colors, source), E'\n'
                                        ORDER BY position, created_at, id), '')
             FROM tamiza.dashboards WHERE project_id = @id
             """,
@@ -264,17 +294,21 @@ public sealed class IndicatorsHarness : IAsyncDisposable
     /// Runs a widget's query (<paramref name="config"/> is the widget's <c>config</c>) and returns the response. <paramref name="dashboardFilters"/>
     /// are the dashboard filter values in force (<c>[{ column, kind, values | min, max }]</c>); left out of the body when null.
     /// </summary>
-    public async Task<JsonElement> QueryAsync(object config, string? chartType = null, HttpClient? client = null, object? dashboardFilters = null)
+    public async Task<JsonElement> QueryAsync(object config, string? chartType = null, HttpClient? client = null, object? dashboardFilters = null, bool overall = false)
     {
-        var response = await PostQueryAsync(config, chartType, client, dashboardFilters);
+        var response = await PostQueryAsync(config, chartType, client, dashboardFilters, overall);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
-    public Task<HttpResponseMessage> PostQueryAsync(object config, string? chartType = null, HttpClient? client = null, object? dashboardFilters = null) =>
-        dashboardFilters is null
-            ? (client ?? Viewer).PostAsJsonAsync(Url + "/query", new { config, chartType })
-            : (client ?? Viewer).PostAsJsonAsync(Url + "/query", new { config, chartType, dashboardFilters });
+    /// <summary>Posts a query; <paramref name="overall"/> adds the request flag of the overall value (add-chart-annotations), left out of the body unless true.</summary>
+    public Task<HttpResponseMessage> PostQueryAsync(
+        object config, string? chartType = null, HttpClient? client = null, object? dashboardFilters = null, bool overall = false) =>
+        overall
+            ? (client ?? Viewer).PostAsJsonAsync(Url + "/query", new { config, chartType, dashboardFilters, overall = true })
+            : dashboardFilters is null
+                ? (client ?? Viewer).PostAsJsonAsync(Url + "/query", new { config, chartType })
+                : (client ?? Viewer).PostAsJsonAsync(Url + "/query", new { config, chartType, dashboardFilters });
 
     /// <summary>Adds a widget to a dashboard of the project, the first one unless given another.</summary>
     public Task<HttpResponseMessage> PostWidgetAsync(object body, HttpClient? client = null, Guid? dashboardId = null) =>

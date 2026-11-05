@@ -1,0 +1,3773 @@
+{
+ "_comment": "Shared by the API's ProductionShapesTests and the UI's production-shapes spec (add-indicator-column-metadata, design D13). One entry per shape of widget that a real project's dashboards use, with invented names and values that keep only the structure. \"stored\" is the config text the API writes (the WidgetConfig serialization), not what PostgreSQL gives back. The goldens were written from the code before the changes of the widget and dashboard program: \"query\" is WidgetQuery.For as JSON, \"plan\" the SQL texts and parameter names of IndicatorQueryBuilder.Plan, \"saved\" and \"uiQuery\" the UI's savedConfig and queryFor, \"formSaved\" what the widget form sends when it is saved without a change. \"dashboard\" holds a dashboard's settings and the golden text of its version content. Later changes add shapes and regenerate no golden.",
+ "shapes": [
+  {
+   "name": "ratio column chart sorted by orden as text",
+   "chartType": "column",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "orden",
+     "type": "text"
+    },
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    },
+    {
+     "name": "numerator",
+     "type": "decimal"
+    },
+    {
+     "name": "denominator",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":{\"numerator\":\"numerator\",\"denominator\":\"denominator\"},\"groupBy\":\"zona\",\"filters\":[{\"column\":\"canal\",\"op\":\"equals\",\"value\":\"Presencial\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"column\",\"column\":\"orden\",\"compareAs\":\"text\",\"direction\":\"asc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"color\":3},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "text",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"zona\"::text, (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL) AND \"canal\"::text = @f0\nGROUP BY \"zona\"\nHAVING (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) IS NOT NULL\nORDER BY min(NULLIF(\"orden\"::text, '')) ASC NULLS LAST, \"p_x_indicators\".\"encuesta_hoy\".\"zona\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "f0",
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "text",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "color": 3
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "text",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial"
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "text",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "color": 3
+    }
+   }
+  },
+  {
+   "name": "measure column chart with a series in percent over counts",
+   "chartType": "column",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"canal\",\"layout\":\"percent\",\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal",
+    "layout": "percent",
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "series": {
+     "maxSeries": 8,
+     "naturalGroups": false,
+     "domain": {
+      "sql": "(SELECT \"canal\"::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"canal\" IS NOT NULL\n GROUP BY \"canal\" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap)\nUNION ALL\n(SELECT NULL::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"canal\" IS NULL\n HAVING count(*) > 0)",
+      "parameters": [
+       "cap"
+      ]
+     },
+     "cells": {
+      "sql": "WITH src AS (\n  SELECT \"p_x_indicators\".\"encuesta_hoy\".*, CASE WHEN \"canal\"::text = ANY(@kept) THEN \"canal\"::text END AS \"__series\", CASE WHEN \"canal\" IS NULL THEN 'none' WHEN \"canal\"::text = ANY(@kept) THEN 'value' ELSE 'other' END AS \"__kind\"\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE \"conteo\" IS NOT NULL\n),\ngrp AS (\n  SELECT \"zona\" AS g, (sum(\"conteo\")::double precision) AS v, count(*) AS n, row_number() OVER (ORDER BY src.\"zona\" NULLS LAST) AS rk\n  FROM src GROUP BY \"zona\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n),\ncell AS (\n  SELECT \"zona\" AS g, \"__kind\" AS k, \"__series\" AS s, (sum(\"conteo\")::double precision) AS v, count(*) AS n\n  FROM src GROUP BY \"zona\", \"__kind\", \"__series\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n)\n(SELECT 0 AS part, g::text, NULL::text, NULL::text, v, n, rk FROM grp ORDER BY rk LIMIT @limit)\nUNION ALL\n(SELECT 1, cell.g::text, cell.k, cell.s, cell.v, cell.n, grp.rk\n FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g\n ORDER BY grp.rk, cell.k, cell.s LIMIT @limit)\nUNION ALL\n(SELECT 2, NULL::text, \"__kind\", \"__series\", (sum(\"conteo\")::double precision), count(*), NULL::bigint\n FROM src GROUP BY \"__kind\", \"__series\")\nUNION ALL\n(SELECT 3, NULL::text, NULL::text, NULL::text, (sum(\"conteo\")::double precision), count(*), NULL::bigint FROM src)",
+      "parameters": [
+       "kept",
+       "limit"
+      ]
+     }
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal",
+    "layout": "percent"
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal",
+    "layout": "percent"
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal",
+    "layout": "percent"
+   }
+  },
+  {
+   "name": "stacked bar over counts sorted by value with an in filter on its series",
+   "chartType": "bar",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[{\"column\":\"canal\",\"op\":\"in\",\"value\":null,\"values\":[\"Presencial\",\"Virtual\"],\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"value\",\"column\":null,\"compareAs\":null,\"direction\":\"desc\"},\"basemap\":null,\"seriesBy\":\"canal\",\"layout\":\"stacked\",\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "in",
+      "value": null,
+      "values": [
+       "Presencial",
+       "Virtual"
+      ],
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal",
+    "layout": "stacked",
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "series": {
+     "maxSeries": 8,
+     "naturalGroups": false,
+     "domain": {
+      "sql": "(SELECT \"canal\"::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"canal\"::text = ANY(@f0) AND \"canal\" IS NOT NULL\n GROUP BY \"canal\" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap)\nUNION ALL\n(SELECT NULL::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"canal\"::text = ANY(@f0) AND \"canal\" IS NULL\n HAVING count(*) > 0)",
+      "parameters": [
+       "f0",
+       "cap"
+      ]
+     },
+     "cells": {
+      "sql": "WITH src AS (\n  SELECT \"p_x_indicators\".\"encuesta_hoy\".*, CASE WHEN \"canal\"::text = ANY(@kept) THEN \"canal\"::text END AS \"__series\", CASE WHEN \"canal\" IS NULL THEN 'none' WHEN \"canal\"::text = ANY(@kept) THEN 'value' ELSE 'other' END AS \"__kind\"\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE \"conteo\" IS NOT NULL AND \"canal\"::text = ANY(@f0)\n),\ngrp AS (\n  SELECT \"zona\" AS g, (sum(\"conteo\")::double precision) AS v, count(*) AS n, row_number() OVER (ORDER BY (sum(\"conteo\")::double precision) DESC NULLS LAST, src.\"zona\" NULLS LAST) AS rk\n  FROM src GROUP BY \"zona\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n),\ncell AS (\n  SELECT \"zona\" AS g, \"__kind\" AS k, \"__series\" AS s, (sum(\"conteo\")::double precision) AS v, count(*) AS n\n  FROM src GROUP BY \"zona\", \"__kind\", \"__series\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n)\n(SELECT 0 AS part, g::text, NULL::text, NULL::text, v, n, rk FROM grp ORDER BY rk LIMIT @limit)\nUNION ALL\n(SELECT 1, cell.g::text, cell.k, cell.s, cell.v, cell.n, grp.rk\n FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g\n ORDER BY grp.rk, cell.k, cell.s LIMIT @limit)\nUNION ALL\n(SELECT 2, NULL::text, \"__kind\", \"__series\", (sum(\"conteo\")::double precision), count(*), NULL::bigint\n FROM src GROUP BY \"__kind\", \"__series\")\nUNION ALL\n(SELECT 3, NULL::text, NULL::text, NULL::text, (sum(\"conteo\")::double precision), count(*), NULL::bigint FROM src)",
+      "parameters": [
+       "f0",
+       "kept",
+       "limit"
+      ]
+     }
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "in",
+      "value": null,
+      "values": [
+       "Presencial",
+       "Virtual"
+      ],
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal",
+    "layout": "stacked"
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "in",
+      "value": null,
+      "values": [
+       "Presencial",
+       "Virtual"
+      ],
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal",
+    "layout": "stacked"
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "in",
+      "values": [
+       "Presencial",
+       "Virtual"
+      ]
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal",
+    "layout": "stacked"
+   }
+  },
+  {
+   "name": "bar with an in filter on its own group column",
+   "chartType": "bar",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[{\"column\":\"zona\",\"op\":\"in\",\"value\":null,\"values\":[\"Zona 1\",\"Zona 2\",\"Zona 3\"],\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "zona",
+      "op": "in",
+      "value": null,
+      "values": [
+       "Zona 1",
+       "Zona 2",
+       "Zona 3"
+      ],
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"zona\"::text, (sum(\"conteo\")::double precision), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"conteo\" IS NOT NULL AND \"zona\"::text = ANY(@f0)\nGROUP BY \"zona\"\nHAVING (sum(\"conteo\")::double precision) IS NOT NULL\nORDER BY \"p_x_indicators\".\"encuesta_hoy\".\"zona\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "f0",
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "zona",
+      "op": "in",
+      "value": null,
+      "values": [
+       "Zona 1",
+       "Zona 2",
+       "Zona 3"
+      ],
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "zona",
+      "op": "in",
+      "value": null,
+      "values": [
+       "Zona 1",
+       "Zona 2",
+       "Zona 3"
+      ],
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "zona",
+      "op": "in",
+      "values": [
+       "Zona 1",
+       "Zona 2",
+       "Zona 3"
+      ]
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   }
+  },
+  {
+   "name": "bar with neither measure nor ratio",
+   "chartType": "bar",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"zona\"::text, (sum(\"value\")::double precision), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"value\" IS NOT NULL\nGROUP BY \"zona\"\nHAVING (sum(\"value\")::double precision) IS NOT NULL\nORDER BY \"p_x_indicators\".\"encuesta_hoy\".\"zona\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   }
+  },
+  {
+   "name": "bar sorted by orden as a number",
+   "chartType": "bar",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "orden",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"column\",\"column\":\"orden\",\"compareAs\":\"number\",\"direction\":\"asc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "number",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"zona\"::text, (sum(\"conteo\")::double precision), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"conteo\" IS NOT NULL\nGROUP BY \"zona\"\nHAVING (sum(\"conteo\")::double precision) IS NOT NULL\nORDER BY min(CASE WHEN \"orden\"::text ~ '^[[:space:]]*[-+]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][-+]?[0-9]+)?[[:space:]]*$' AND pg_input_is_valid(\"orden\"::text, 'numeric') THEN \"orden\"::text::numeric END) ASC NULLS LAST, \"p_x_indicators\".\"encuesta_hoy\".\"zona\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "number",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "number",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "number",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   }
+  },
+  {
+   "name": "stat tile with equals filters on numbered labels and on orden",
+   "chartType": "stat",
+   "columns": [
+    {
+     "name": "pregunta",
+     "type": "text"
+    },
+    {
+     "name": "orden",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":null,\"filters\":[{\"column\":\"pregunta\",\"op\":\"equals\",\"value\":\"1. Opci\\u00F3n A\",\"values\":null,\"min\":null,\"max\":null},{\"column\":\"orden\",\"op\":\"equals\",\"value\":\"07\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "pregunta",
+      "op": "equals",
+      "value": "1. Opción A",
+      "values": null,
+      "min": null,
+      "max": null
+     },
+     {
+      "column": "orden",
+      "op": "equals",
+      "value": "07",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT NULL::text, (sum(\"conteo\")::double precision), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"conteo\" IS NOT NULL AND \"pregunta\"::text = @f0 AND \"orden\"::text = @f1\n\nHAVING (sum(\"conteo\")::double precision) IS NOT NULL\n\nLIMIT @limit",
+     "parameters": [
+      "f0",
+      "f1",
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "pregunta",
+      "op": "equals",
+      "value": "1. Opción A",
+      "values": null,
+      "min": null,
+      "max": null
+     },
+     {
+      "column": "orden",
+      "op": "equals",
+      "value": "07",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "pregunta",
+      "op": "equals",
+      "value": "1. Opción A",
+      "values": null,
+      "min": null,
+      "max": null
+     },
+     {
+      "column": "orden",
+      "op": "equals",
+      "value": "07",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "pregunta",
+      "op": "equals",
+      "value": "1. Opción A"
+     },
+     {
+      "column": "orden",
+      "op": "equals",
+      "value": "07"
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   }
+  },
+  {
+   "name": "stat tile with ignored dashboard filters",
+   "chartType": "stat",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"value\",\"ratio\":null,\"groupBy\":null,\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[\"zona\",\"canal\"],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT NULL::text, (sum(\"value\")::double precision), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"value\" IS NOT NULL\n\nHAVING (sum(\"value\")::double precision) IS NOT NULL\n\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [
+     "zona",
+     "canal"
+    ]
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [
+     "zona",
+     "canal"
+    ]
+   }
+  },
+  {
+   "name": "line over text prices with a series and no sort",
+   "chartType": "line",
+   "columns": [
+    {
+     "name": "precio",
+     "type": "text"
+    },
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "indicatorColumns": {
+    "precio": {
+     "label": "Precio"
+    },
+    "canal": {
+     "label": "Canal"
+    }
+   },
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"precio\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"canal\",\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "precio",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal",
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "series": {
+     "maxSeries": 8,
+     "naturalGroups": true,
+     "domain": {
+      "sql": "(SELECT \"canal\"::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"canal\" IS NOT NULL\n GROUP BY \"canal\" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap)\nUNION ALL\n(SELECT NULL::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"canal\" IS NULL\n HAVING count(*) > 0)",
+      "parameters": [
+       "cap"
+      ]
+     },
+     "cells": {
+      "sql": "WITH src AS (\n  SELECT \"p_x_indicators\".\"encuesta_hoy\".*, CASE WHEN \"canal\"::text = ANY(@kept) THEN \"canal\"::text END AS \"__series\", CASE WHEN \"canal\" IS NULL THEN 'none' WHEN \"canal\"::text = ANY(@kept) THEN 'value' ELSE 'other' END AS \"__kind\"\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE \"conteo\" IS NOT NULL\n),\ngrp AS (\n  SELECT \"precio\" AS g, (sum(\"conteo\")::double precision) AS v, count(*) AS n, row_number() OVER (ORDER BY src.\"precio\" NULLS LAST) AS rk\n  FROM src GROUP BY \"precio\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n),\ncell AS (\n  SELECT \"precio\" AS g, \"__kind\" AS k, \"__series\" AS s, (sum(\"conteo\")::double precision) AS v, count(*) AS n\n  FROM src GROUP BY \"precio\", \"__kind\", \"__series\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n)\n(SELECT 0 AS part, g::text, NULL::text, NULL::text, v, n, rk FROM grp ORDER BY rk LIMIT @limit)\nUNION ALL\n(SELECT 1, cell.g::text, cell.k, cell.s, cell.v, cell.n, grp.rk\n FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g\n ORDER BY grp.rk, cell.k, cell.s LIMIT @limit)\nUNION ALL\n(SELECT 2, NULL::text, \"__kind\", \"__series\", (sum(\"conteo\")::double precision), count(*), NULL::bigint\n FROM src GROUP BY \"__kind\", \"__series\")\nUNION ALL\n(SELECT 3, NULL::text, NULL::text, NULL::text, (sum(\"conteo\")::double precision), count(*), NULL::bigint FROM src)",
+      "parameters": [
+       "kept",
+       "limit"
+      ]
+     }
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "precio",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal"
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "precio",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal"
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "precio",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal"
+   }
+  },
+  {
+   "name": "box plot grouped by a column with kept colors",
+   "chartType": "boxplot",
+   "columns": [
+    {
+     "name": "grupo",
+     "type": "text"
+    },
+    {
+     "name": "puntaje",
+     "type": "decimal"
+    }
+   ],
+   "indicatorColumns": {
+    "grupo": {
+     "label": "Grupo"
+    }
+   },
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"puntaje\",\"ratio\":null,\"groupBy\":\"grupo\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"value\",\"column\":null,\"compareAs\":null,\"direction\":\"asc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"color\":2,\"orientation\":\"horizontal\"},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "puntaje",
+    "ratio": null,
+    "groupBy": "grupo",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "boxes": {
+     "sql": "WITH src AS MATERIALIZED (\n  SELECT \"grupo\" AS g, (\"puntaje\"::double precision) AS x\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE \"puntaje\" IS NOT NULL AND (\"puntaje\"::double precision) > '-Infinity'::double precision AND (\"puntaje\"::double precision) < 'Infinity'::double precision\n),\nbox AS (\n  SELECT g, row_number() OVER () AS b, count(*) AS n, min(x) AS lo, max(x) AS hi, sum(x) / count(*) AS mean,\n         percentile_cont(ARRAY[0.25, 0.5, 0.75]) WITHIN GROUP (ORDER BY x) AS q\n  FROM src GROUP BY g\n),\nfence AS MATERIALIZED (\n  SELECT box.*, q[1] - 1.5 * (q[3] - q[1]) AS lf, q[3] + 1.5 * (q[3] - q[1]) AS uf FROM box\n),\nmarked AS MATERIALIZED (\n  SELECT f.b, s.x, f.q[2] AS med, (s.x < f.lf OR s.x > f.uf) AS is_out\n  FROM src s JOIN fence f ON s.g = f.g\n  UNION ALL\n  SELECT f.b, s.x, f.q[2], (s.x < f.lf OR s.x > f.uf)\n  FROM src s JOIN fence f ON f.g IS NULL WHERE s.g IS NULL\n),\nends AS (\n  SELECT b, min(x) FILTER (WHERE NOT is_out) AS lw, max(x) FILTER (WHERE NOT is_out) AS uw, count(*) FILTER (WHERE is_out) AS outliers\n  FROM marked GROUP BY b\n),\nshown AS (\n  SELECT b, array_agg(x ORDER BY x) AS xs\n  FROM (SELECT b, x, row_number() OVER (PARTITION BY b ORDER BY abs(x - med) DESC, x) AS r FROM marked WHERE is_out) far\n  WHERE r <= @maxoutliers\n  GROUP BY b\n)\nSELECT f.g::text, f.n, f.lo, f.q, f.hi, f.mean, e.lw, e.uw, e.outliers, s.xs\nFROM fence f JOIN ends e USING (b) LEFT JOIN shown s USING (b)\nORDER BY f.q[2] ASC, f.g NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "maxoutliers",
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "puntaje",
+    "ratio": null,
+    "groupBy": "grupo",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "color": 2,
+     "orientation": "horizontal"
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "puntaje",
+    "ratio": null,
+    "groupBy": "grupo",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "puntaje",
+    "ratio": null,
+    "groupBy": "grupo",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "color": 2,
+     "orientation": "horizontal"
+    }
+   }
+  },
+  {
+   "name": "map with four tooltip columns and a basemap",
+   "chartType": "map",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "geometry",
+     "type": "text"
+    },
+    {
+     "name": "direccion",
+     "type": "text"
+    },
+    {
+     "name": "meta",
+     "type": "integer"
+    },
+    {
+     "name": "avance",
+     "type": "decimal"
+    },
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"value\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":\"geometry\",\"buckets\":null,\"sort\":null,\"basemap\":\"satellite\",\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"tooltip\":[{\"column\":\"direccion\",\"label\":\"Direcci\\u00F3n\",\"format\":null},{\"column\":\"meta\",\"label\":null,\"format\":\"count\"},{\"column\":\"avance\",\"label\":\"Avance\",\"format\":null},{\"column\":\"canal\",\"label\":null,\"format\":null}],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": "geometry",
+    "buckets": null,
+    "sort": null,
+    "tooltip": [
+     {
+      "column": "direccion",
+      "label": null,
+      "format": null
+     },
+     {
+      "column": "meta",
+      "label": null,
+      "format": null
+     },
+     {
+      "column": "avance",
+      "label": null,
+      "format": null
+     },
+     {
+      "column": "canal",
+      "label": null,
+      "format": null
+     }
+    ],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"zona\"::text, (sum(\"value\")::double precision), min(\"geometry\"::text), count(*), left(min(NULLIF(\"direccion\"::text, '')), 201), sum(\"meta\")::text, sum(\"avance\")::text, left(min(NULLIF(\"canal\"::text, '')), 201)\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"value\" IS NOT NULL\nGROUP BY \"zona\"\nHAVING (sum(\"value\")::double precision) IS NOT NULL\nORDER BY \"p_x_indicators\".\"encuesta_hoy\".\"zona\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": "geometry",
+    "buckets": null,
+    "sort": null,
+    "tooltip": [
+     {
+      "column": "direccion",
+      "label": "Dirección",
+      "format": null
+     },
+     {
+      "column": "meta",
+      "label": null,
+      "format": "count"
+     },
+     {
+      "column": "avance",
+      "label": "Avance",
+      "format": null
+     },
+     {
+      "column": "canal",
+      "label": null,
+      "format": null
+     }
+    ],
+    "basemap": "satellite",
+    "ignoredDashboardFilters": []
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": "geometry",
+    "buckets": null,
+    "sort": null,
+    "tooltip": [
+     {
+      "column": "direccion",
+      "label": null,
+      "format": null
+     },
+     {
+      "column": "meta",
+      "label": null,
+      "format": null
+     },
+     {
+      "column": "avance",
+      "label": null,
+      "format": null
+     },
+     {
+      "column": "canal",
+      "label": null,
+      "format": null
+     }
+    ],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": "geometry",
+    "buckets": null,
+    "sort": null,
+    "tooltip": [
+     {
+      "column": "direccion",
+      "label": "Dirección",
+      "format": null
+     },
+     {
+      "column": "meta",
+      "label": null,
+      "format": "count"
+     },
+     {
+      "column": "avance",
+      "label": "Avance",
+      "format": null
+     },
+     {
+      "column": "canal",
+      "label": null,
+      "format": null
+     }
+    ],
+    "basemap": "satellite",
+    "ignoredDashboardFilters": []
+   }
+  },
+  {
+   "name": "heat map with a ramp",
+   "chartType": "heatmap",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"canal\",\"layout\":null,\"pyramid\":null,\"display\":{\"ramp\":\"purple\"},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal",
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "series": {
+     "maxSeries": 30,
+     "naturalGroups": true,
+     "domain": {
+      "sql": "(SELECT \"canal\"::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"canal\" IS NOT NULL\n GROUP BY \"canal\" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap)\nUNION ALL\n(SELECT NULL::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"canal\" IS NULL\n HAVING count(*) > 0)",
+      "parameters": [
+       "cap"
+      ]
+     },
+     "cells": {
+      "sql": "WITH src AS (\n  SELECT \"p_x_indicators\".\"encuesta_hoy\".*, CASE WHEN \"canal\"::text = ANY(@kept) THEN \"canal\"::text END AS \"__series\", CASE WHEN \"canal\" IS NULL THEN 'none' WHEN \"canal\"::text = ANY(@kept) THEN 'value' ELSE 'other' END AS \"__kind\"\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE \"conteo\" IS NOT NULL\n),\ngrp AS (\n  SELECT \"zona\" AS g, (sum(\"conteo\")::double precision) AS v, count(*) AS n, row_number() OVER (ORDER BY src.\"zona\" NULLS LAST) AS rk\n  FROM src GROUP BY \"zona\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n),\ncell AS (\n  SELECT \"zona\" AS g, \"__kind\" AS k, \"__series\" AS s, (sum(\"conteo\")::double precision) AS v, count(*) AS n\n  FROM src GROUP BY \"zona\", \"__kind\", \"__series\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n)\n(SELECT 0 AS part, g::text, NULL::text, NULL::text, v, n, rk FROM grp ORDER BY rk LIMIT @limit)\nUNION ALL\n(SELECT 1, cell.g::text, cell.k, cell.s, cell.v, cell.n, grp.rk\n FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g\n ORDER BY grp.rk, cell.k, cell.s LIMIT @limit)\nUNION ALL\n(SELECT 2, NULL::text, \"__kind\", \"__series\", (sum(\"conteo\")::double precision), count(*), NULL::bigint\n FROM src GROUP BY \"__kind\", \"__series\")\nUNION ALL\n(SELECT 3, NULL::text, NULL::text, NULL::text, (sum(\"conteo\")::double precision), count(*), NULL::bigint FROM src)",
+      "parameters": [
+       "kept",
+       "limit"
+      ]
+     }
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal",
+    "display": {
+     "ramp": "purple"
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal"
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal",
+    "display": {
+     "ramp": "purple"
+    }
+   }
+  },
+  {
+   "name": "Likert widget with its scale",
+   "chartType": "likert",
+   "columns": [
+    {
+     "name": "pregunta",
+     "type": "text"
+    },
+    {
+     "name": "respuesta",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "indicatorColumns": {
+    "pregunta": {
+     "label": "Pregunta"
+    },
+    "respuesta": {
+     "label": "Respuesta"
+    }
+   },
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"pregunta\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"respuesta\",\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[{\"value\":\"1. Muy en desacuerdo\",\"side\":\"negative\"},{\"value\":\"2. En desacuerdo\",\"side\":\"negative\"},{\"value\":\"3. Neutral\",\"side\":\"neutral\"},{\"value\":\"4. De acuerdo\",\"side\":\"positive\"},{\"value\":\"5. Muy de acuerdo\",\"side\":\"positive\"}]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": null,
+    "pyramid": null,
+    "scale": [
+     {
+      "value": "1. Muy en desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "2. En desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "3. Neutral",
+      "side": "neutral"
+     },
+     {
+      "value": "4. De acuerdo",
+      "side": "positive"
+     },
+     {
+      "value": "5. Muy de acuerdo",
+      "side": "positive"
+     }
+    ]
+   },
+   "plan": {
+    "series": {
+     "maxSeries": 8,
+     "naturalGroups": true,
+     "fixedDomain": [
+      "1. Muy en desacuerdo",
+      "2. En desacuerdo",
+      "3. Neutral",
+      "4. De acuerdo",
+      "5. Muy de acuerdo"
+     ],
+     "cells": {
+      "sql": "WITH src AS (\n  SELECT \"p_x_indicators\".\"encuesta_hoy\".*, \"respuesta\"::text AS \"__series\", 'value' AS \"__kind\"\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE \"conteo\" IS NOT NULL AND \"pregunta\" IS NOT NULL AND \"respuesta\" IS NOT NULL AND \"respuesta\"::text = ANY(@kept)\n),\ngrp AS (\n  SELECT \"pregunta\" AS g, (sum(\"conteo\")::double precision) AS v, count(*) AS n, row_number() OVER (ORDER BY src.\"pregunta\" NULLS LAST) AS rk\n  FROM src GROUP BY \"pregunta\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n),\ncell AS (\n  SELECT \"pregunta\" AS g, \"__kind\" AS k, \"__series\" AS s, (sum(\"conteo\")::double precision) AS v, count(*) AS n\n  FROM src GROUP BY \"pregunta\", \"__kind\", \"__series\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n)\n(SELECT 0 AS part, g::text, NULL::text, NULL::text, v, n, rk FROM grp ORDER BY rk LIMIT @limit)\nUNION ALL\n(SELECT 1, cell.g::text, cell.k, cell.s, cell.v, cell.n, grp.rk\n FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g\n ORDER BY grp.rk, cell.k, cell.s LIMIT @limit)\nUNION ALL\n(SELECT 2, NULL::text, \"__kind\", \"__series\", (sum(\"conteo\")::double precision), count(*), NULL::bigint\n FROM src GROUP BY \"__kind\", \"__series\")\nUNION ALL\n(SELECT 3, NULL::text, NULL::text, NULL::text, (sum(\"conteo\")::double precision), count(*), NULL::bigint FROM src)\nUNION ALL\n(SELECT 4, NULL::text, NULL::text, NULL::text, NULL::double precision, count(*), NULL::bigint\n FROM \"p_x_indicators\".\"encuesta_hoy\" WHERE \"conteo\" IS NOT NULL AND NOT (\"pregunta\" IS NOT NULL AND \"respuesta\" IS NOT NULL AND \"respuesta\"::text = ANY(@kept)))",
+      "parameters": [
+       "kept",
+       "limit"
+      ]
+     }
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "scale": [
+     {
+      "value": "1. Muy en desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "2. En desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "3. Neutral",
+      "side": "neutral"
+     },
+     {
+      "value": "4. De acuerdo",
+      "side": "positive"
+     },
+     {
+      "value": "5. Muy de acuerdo",
+      "side": "positive"
+     }
+    ]
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "scale": [
+     {
+      "value": "1. Muy en desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "2. En desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "3. Neutral",
+      "side": "neutral"
+     },
+     {
+      "value": "4. De acuerdo",
+      "side": "positive"
+     },
+     {
+      "value": "5. Muy de acuerdo",
+      "side": "positive"
+     }
+    ]
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "scale": [
+     {
+      "value": "1. Muy en desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "2. En desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "3. Neutral",
+      "side": "neutral"
+     },
+     {
+      "value": "4. De acuerdo",
+      "side": "positive"
+     },
+     {
+      "value": "5. Muy de acuerdo",
+      "side": "positive"
+     }
+    ]
+   }
+  },
+  {
+   "name": "cross table",
+   "chartType": "crosstab",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "indicatorColumns": {
+    "zona": {
+     "label": "Zona"
+    },
+    "canal": {
+     "label": "Canal"
+    }
+   },
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"canal\",\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal",
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "series": {
+     "maxSeries": 30,
+     "naturalGroups": true,
+     "domain": {
+      "sql": "(SELECT \"canal\"::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"canal\" IS NOT NULL\n GROUP BY \"canal\" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap)\nUNION ALL\n(SELECT NULL::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"canal\" IS NULL\n HAVING count(*) > 0)",
+      "parameters": [
+       "cap"
+      ]
+     },
+     "cells": {
+      "sql": "WITH src AS (\n  SELECT \"p_x_indicators\".\"encuesta_hoy\".*, CASE WHEN \"canal\"::text = ANY(@kept) THEN \"canal\"::text END AS \"__series\", CASE WHEN \"canal\" IS NULL THEN 'none' WHEN \"canal\"::text = ANY(@kept) THEN 'value' ELSE 'other' END AS \"__kind\"\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE \"conteo\" IS NOT NULL\n),\ngrp AS (\n  SELECT \"zona\" AS g, (sum(\"conteo\")::double precision) AS v, count(*) AS n, row_number() OVER (ORDER BY src.\"zona\" NULLS LAST) AS rk\n  FROM src GROUP BY \"zona\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n),\ncell AS (\n  SELECT \"zona\" AS g, \"__kind\" AS k, \"__series\" AS s, (sum(\"conteo\")::double precision) AS v, count(*) AS n\n  FROM src GROUP BY \"zona\", \"__kind\", \"__series\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n)\n(SELECT 0 AS part, g::text, NULL::text, NULL::text, v, n, rk FROM grp ORDER BY rk LIMIT @limit)\nUNION ALL\n(SELECT 1, cell.g::text, cell.k, cell.s, cell.v, cell.n, grp.rk\n FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g\n ORDER BY grp.rk, cell.k, cell.s LIMIT @limit)\nUNION ALL\n(SELECT 2, NULL::text, \"__kind\", \"__series\", (sum(\"conteo\")::double precision), count(*), NULL::bigint\n FROM src GROUP BY \"__kind\", \"__series\")\nUNION ALL\n(SELECT 3, NULL::text, NULL::text, NULL::text, (sum(\"conteo\")::double precision), count(*), NULL::bigint FROM src)",
+      "parameters": [
+       "kept",
+       "limit"
+      ]
+     }
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal"
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal"
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "canal"
+   }
+  },
+  {
+   "name": "pie",
+   "chartType": "pie",
+   "columns": [
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "indicatorColumns": {
+    "canal": {
+     "label": "Canal"
+    }
+   },
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"canal\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "canal",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"canal\"::text, (sum(\"conteo\")::double precision), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"conteo\" IS NOT NULL\nGROUP BY \"canal\"\nHAVING (sum(\"conteo\")::double precision) IS NOT NULL\nORDER BY \"p_x_indicators\".\"encuesta_hoy\".\"canal\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    },
+    "domain": {
+     "sql": "SELECT \"canal\"::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"conteo\" IS NOT NULL\nGROUP BY \"canal\"\nHAVING (sum(\"conteo\")::double precision) > 0 AND (sum(\"conteo\")::double precision) < 'Infinity'::double precision\nORDER BY 2 DESC, \"p_x_indicators\".\"encuesta_hoy\".\"canal\" NULLS LAST\nLIMIT @cap",
+     "parameters": [
+      "cap"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "canal",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "canal",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "canal",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   }
+  },
+  {
+   "name": "ratio bar with a subtitle, a footnote, a hidden caption and a unit",
+   "chartType": "bar",
+   "columns": [
+    {
+     "name": "categoria",
+     "type": "text"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    },
+    {
+     "name": "numerator",
+     "type": "decimal"
+    },
+    {
+     "name": "denominator",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":{\"numerator\":\"numerator\",\"denominator\":\"denominator\"},\"groupBy\":\"categoria\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"value\",\"column\":null,\"compareAs\":null,\"direction\":\"desc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"subtitle\":\"\\u00BFQu\\u00E9 canal usa para informarse sobre la zona? (P4)\",\"footnote\":\"No suman 100 %: respuesta m\\u00FAltiple.\",\"caption\":{\"hidden\":true},\"unit\":\"de los consultados\"},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "categoria",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"categoria\"::text, (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL)\nGROUP BY \"categoria\"\nHAVING (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) IS NOT NULL\nORDER BY (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) DESC NULLS LAST, \"p_x_indicators\".\"encuesta_hoy\".\"categoria\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "categoria",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "subtitle": "¿Qué canal usa para informarse sobre la zona? (P4)",
+     "footnote": "No suman 100 %: respuesta múltiple.",
+     "caption": {
+      "hidden": true
+     },
+     "unit": "de los consultados"
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "categoria",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "categoria",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "subtitle": "¿Qué canal usa para informarse sobre la zona? (P4)",
+     "footnote": "No suman 100 %: respuesta múltiple.",
+     "caption": {
+      "hidden": true
+     },
+     "unit": "de los consultados"
+    }
+   }
+  },
+  {
+   "name": "column chart in color 2 with an own caption text",
+   "chartType": "column",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"color\":2,\"caption\":{\"text\":\"Total de respuestas\"}},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"zona\"::text, (sum(\"conteo\")::double precision), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"conteo\" IS NOT NULL\nGROUP BY \"zona\"\nHAVING (sum(\"conteo\")::double precision) IS NOT NULL\nORDER BY \"p_x_indicators\".\"encuesta_hoy\".\"zona\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "color": 2,
+     "caption": {
+      "text": "Total de respuestas"
+     }
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "color": 2,
+     "caption": {
+      "text": "Total de respuestas"
+     }
+    }
+   }
+  },
+  {
+   "name": "stat tile with an own caption text, a footnote and a description button",
+   "chartType": "stat",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":null,\"filters\":[{\"column\":\"zona\",\"op\":\"equals\",\"value\":\"Zona 1\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"footnote\":\"Sin ponderar.\",\"caption\":{\"text\":\"Respuestas de la Zona 1\"},\"showDescription\":true},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "zona",
+      "op": "equals",
+      "value": "Zona 1",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT NULL::text, (sum(\"conteo\")::double precision), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"conteo\" IS NOT NULL AND \"zona\"::text = @f0\n\nHAVING (sum(\"conteo\")::double precision) IS NOT NULL\n\nLIMIT @limit",
+     "parameters": [
+      "f0",
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "zona",
+      "op": "equals",
+      "value": "Zona 1",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "footnote": "Sin ponderar.",
+     "caption": {
+      "text": "Respuestas de la Zona 1"
+     },
+     "showDescription": true
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "zona",
+      "op": "equals",
+      "value": "Zona 1",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "zona",
+      "op": "equals",
+      "value": "Zona 1"
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "footnote": "Sin ponderar.",
+     "caption": {
+      "text": "Respuestas de la Zona 1"
+     },
+     "showDescription": true
+    }
+   }
+  },
+  {
+   "name": "map with four tooltip columns, a basemap and a unit",
+   "chartType": "map",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "geometry",
+     "type": "text"
+    },
+    {
+     "name": "direccion",
+     "type": "text"
+    },
+    {
+     "name": "meta",
+     "type": "integer"
+    },
+    {
+     "name": "avance",
+     "type": "decimal"
+    },
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"value\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":\"geometry\",\"buckets\":null,\"sort\":null,\"basemap\":\"satellite\",\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"unit\":\"hogares\"},\"tooltip\":[{\"column\":\"direccion\",\"label\":\"Direcci\\u00F3n\",\"format\":null},{\"column\":\"meta\",\"label\":null,\"format\":\"count\"},{\"column\":\"avance\",\"label\":\"Avance\",\"format\":null},{\"column\":\"canal\",\"label\":null,\"format\":null}],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": "geometry",
+    "buckets": null,
+    "sort": null,
+    "tooltip": [
+     {
+      "column": "direccion",
+      "label": null,
+      "format": null
+     },
+     {
+      "column": "meta",
+      "label": null,
+      "format": null
+     },
+     {
+      "column": "avance",
+      "label": null,
+      "format": null
+     },
+     {
+      "column": "canal",
+      "label": null,
+      "format": null
+     }
+    ],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"zona\"::text, (sum(\"value\")::double precision), min(\"geometry\"::text), count(*), left(min(NULLIF(\"direccion\"::text, '')), 201), sum(\"meta\")::text, sum(\"avance\")::text, left(min(NULLIF(\"canal\"::text, '')), 201)\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"value\" IS NOT NULL\nGROUP BY \"zona\"\nHAVING (sum(\"value\")::double precision) IS NOT NULL\nORDER BY \"p_x_indicators\".\"encuesta_hoy\".\"zona\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": "geometry",
+    "buckets": null,
+    "sort": null,
+    "tooltip": [
+     {
+      "column": "direccion",
+      "label": "Dirección",
+      "format": null
+     },
+     {
+      "column": "meta",
+      "label": null,
+      "format": "count"
+     },
+     {
+      "column": "avance",
+      "label": "Avance",
+      "format": null
+     },
+     {
+      "column": "canal",
+      "label": null,
+      "format": null
+     }
+    ],
+    "basemap": "satellite",
+    "ignoredDashboardFilters": [],
+    "display": {
+     "unit": "hogares"
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": "geometry",
+    "buckets": null,
+    "sort": null,
+    "tooltip": [
+     {
+      "column": "direccion",
+      "label": null,
+      "format": null
+     },
+     {
+      "column": "meta",
+      "label": null,
+      "format": null
+     },
+     {
+      "column": "avance",
+      "label": null,
+      "format": null
+     },
+     {
+      "column": "canal",
+      "label": null,
+      "format": null
+     }
+    ],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": "geometry",
+    "buckets": null,
+    "sort": null,
+    "tooltip": [
+     {
+      "column": "direccion",
+      "label": "Dirección",
+      "format": null
+     },
+     {
+      "column": "meta",
+      "label": null,
+      "format": "count"
+     },
+     {
+      "column": "avance",
+      "label": "Avance",
+      "format": null
+     },
+     {
+      "column": "canal",
+      "label": null,
+      "format": null
+     }
+    ],
+    "basemap": "satellite",
+    "ignoredDashboardFilters": [],
+    "display": {
+     "unit": "hogares"
+    }
+   }
+  },
+  {
+   "name": "Likert widget with a subtitle",
+   "chartType": "likert",
+   "columns": [
+    {
+     "name": "pregunta",
+     "type": "text"
+    },
+    {
+     "name": "respuesta",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "indicatorColumns": {
+    "pregunta": {
+     "label": "Pregunta"
+    },
+    "respuesta": {
+     "label": "Respuesta"
+    }
+   },
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"pregunta\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"respuesta\",\"layout\":null,\"pyramid\":null,\"display\":{\"subtitle\":\"\\u00BFQu\\u00E9 tan de acuerdo est\\u00E1 con cada afirmaci\\u00F3n?\"},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[{\"value\":\"1. Muy en desacuerdo\",\"side\":\"negative\"},{\"value\":\"2. En desacuerdo\",\"side\":\"negative\"},{\"value\":\"3. Neutral\",\"side\":\"neutral\"},{\"value\":\"4. De acuerdo\",\"side\":\"positive\"},{\"value\":\"5. Muy de acuerdo\",\"side\":\"positive\"}]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": null,
+    "pyramid": null,
+    "scale": [
+     {
+      "value": "1. Muy en desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "2. En desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "3. Neutral",
+      "side": "neutral"
+     },
+     {
+      "value": "4. De acuerdo",
+      "side": "positive"
+     },
+     {
+      "value": "5. Muy de acuerdo",
+      "side": "positive"
+     }
+    ]
+   },
+   "plan": {
+    "series": {
+     "maxSeries": 8,
+     "naturalGroups": true,
+     "fixedDomain": [
+      "1. Muy en desacuerdo",
+      "2. En desacuerdo",
+      "3. Neutral",
+      "4. De acuerdo",
+      "5. Muy de acuerdo"
+     ],
+     "cells": {
+      "sql": "WITH src AS (\n  SELECT \"p_x_indicators\".\"encuesta_hoy\".*, \"respuesta\"::text AS \"__series\", 'value' AS \"__kind\"\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE \"conteo\" IS NOT NULL AND \"pregunta\" IS NOT NULL AND \"respuesta\" IS NOT NULL AND \"respuesta\"::text = ANY(@kept)\n),\ngrp AS (\n  SELECT \"pregunta\" AS g, (sum(\"conteo\")::double precision) AS v, count(*) AS n, row_number() OVER (ORDER BY src.\"pregunta\" NULLS LAST) AS rk\n  FROM src GROUP BY \"pregunta\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n),\ncell AS (\n  SELECT \"pregunta\" AS g, \"__kind\" AS k, \"__series\" AS s, (sum(\"conteo\")::double precision) AS v, count(*) AS n\n  FROM src GROUP BY \"pregunta\", \"__kind\", \"__series\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n)\n(SELECT 0 AS part, g::text, NULL::text, NULL::text, v, n, rk FROM grp ORDER BY rk LIMIT @limit)\nUNION ALL\n(SELECT 1, cell.g::text, cell.k, cell.s, cell.v, cell.n, grp.rk\n FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g\n ORDER BY grp.rk, cell.k, cell.s LIMIT @limit)\nUNION ALL\n(SELECT 2, NULL::text, \"__kind\", \"__series\", (sum(\"conteo\")::double precision), count(*), NULL::bigint\n FROM src GROUP BY \"__kind\", \"__series\")\nUNION ALL\n(SELECT 3, NULL::text, NULL::text, NULL::text, (sum(\"conteo\")::double precision), count(*), NULL::bigint FROM src)\nUNION ALL\n(SELECT 4, NULL::text, NULL::text, NULL::text, NULL::double precision, count(*), NULL::bigint\n FROM \"p_x_indicators\".\"encuesta_hoy\" WHERE \"conteo\" IS NOT NULL AND NOT (\"pregunta\" IS NOT NULL AND \"respuesta\" IS NOT NULL AND \"respuesta\"::text = ANY(@kept)))",
+      "parameters": [
+       "kept",
+       "limit"
+      ]
+     }
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "scale": [
+     {
+      "value": "1. Muy en desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "2. En desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "3. Neutral",
+      "side": "neutral"
+     },
+     {
+      "value": "4. De acuerdo",
+      "side": "positive"
+     },
+     {
+      "value": "5. Muy de acuerdo",
+      "side": "positive"
+     }
+    ],
+    "display": {
+     "subtitle": "¿Qué tan de acuerdo está con cada afirmación?"
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "scale": [
+     {
+      "value": "1. Muy en desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "2. En desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "3. Neutral",
+      "side": "neutral"
+     },
+     {
+      "value": "4. De acuerdo",
+      "side": "positive"
+     },
+     {
+      "value": "5. Muy de acuerdo",
+      "side": "positive"
+     }
+    ]
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "scale": [
+     {
+      "value": "1. Muy en desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "2. En desacuerdo",
+      "side": "negative"
+     },
+     {
+      "value": "3. Neutral",
+      "side": "neutral"
+     },
+     {
+      "value": "4. De acuerdo",
+      "side": "positive"
+     },
+     {
+      "value": "5. Muy de acuerdo",
+      "side": "positive"
+     }
+    ],
+    "display": {
+     "subtitle": "¿Qué tan de acuerdo está con cada afirmación?"
+    }
+   }
+  },
+  {
+   "name": "ratio column chart with a mean line and an overall line",
+   "chartType": "column",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "canal",
+     "type": "text"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    },
+    {
+     "name": "numerator",
+     "type": "decimal"
+    },
+    {
+     "name": "denominator",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":{\"numerator\":\"numerator\",\"denominator\":\"denominator\"},\"groupBy\":\"zona\",\"filters\":[{\"column\":\"canal\",\"op\":\"equals\",\"value\":\"Presencial\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"color\":2,\"referenceLines\":[{\"kind\":\"mean\"},{\"kind\":\"overall\",\"label\":\"Participaci\\u00F3n general\"}]},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"zona\"::text, (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL) AND \"canal\"::text = @f0\nGROUP BY \"zona\"\nHAVING (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) IS NOT NULL\nORDER BY \"p_x_indicators\".\"encuesta_hoy\".\"zona\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "f0",
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "color": 2,
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "overall",
+       "label": "Participación general"
+      }
+     ]
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [
+     {
+      "column": "canal",
+      "op": "equals",
+      "value": "Presencial"
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "color": 2,
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "overall",
+       "label": "Participación general"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "bar by a category column with data labels",
+   "chartType": "bar",
+   "columns": [
+    {
+     "name": "categoria",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"categoria\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"value\",\"column\":null,\"compareAs\":null,\"direction\":\"desc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"dataLabels\":true},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "categoria",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"categoria\"::text, (sum(\"conteo\")::double precision), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"conteo\" IS NOT NULL\nGROUP BY \"categoria\"\nHAVING (sum(\"conteo\")::double precision) IS NOT NULL\nORDER BY (sum(\"conteo\")::double precision) DESC NULLS LAST, \"p_x_indicators\".\"encuesta_hoy\".\"categoria\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "categoria",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "dataLabels": true
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "categoria",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "categoria",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "dataLabels": true
+    }
+   }
+  },
+  {
+   "name": "line by a price column with steps",
+   "chartType": "line",
+   "columns": [
+    {
+     "name": "precio",
+     "type": "text"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"value\",\"ratio\":null,\"groupBy\":\"precio\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"interpolation\":\"step\"},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": "precio",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"precio\"::text, (sum(\"value\")::double precision), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"value\" IS NOT NULL\nGROUP BY \"precio\"\nHAVING (sum(\"value\")::double precision) IS NOT NULL\nORDER BY \"p_x_indicators\".\"encuesta_hoy\".\"precio\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": "precio",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "interpolation": "step"
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": "precio",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": "precio",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "interpolation": "step"
+    }
+   }
+  },
+  {
+   "name": "100% bar chart of a count with a value line of 0.5",
+   "chartType": "bar",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "respuesta",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"respuesta\",\"layout\":\"percent\",\"pyramid\":null,\"display\":{\"referenceLines\":[{\"kind\":\"value\",\"value\":0.5}]},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": "percent",
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "series": {
+     "maxSeries": 8,
+     "naturalGroups": false,
+     "domain": {
+      "sql": "(SELECT \"respuesta\"::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"respuesta\" IS NOT NULL\n GROUP BY \"respuesta\" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap)\nUNION ALL\n(SELECT NULL::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"respuesta\" IS NULL\n HAVING count(*) > 0)",
+      "parameters": [
+       "cap"
+      ]
+     },
+     "cells": {
+      "sql": "WITH src AS (\n  SELECT \"p_x_indicators\".\"encuesta_hoy\".*, CASE WHEN \"respuesta\"::text = ANY(@kept) THEN \"respuesta\"::text END AS \"__series\", CASE WHEN \"respuesta\" IS NULL THEN 'none' WHEN \"respuesta\"::text = ANY(@kept) THEN 'value' ELSE 'other' END AS \"__kind\"\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE \"conteo\" IS NOT NULL\n),\ngrp AS (\n  SELECT \"zona\" AS g, (sum(\"conteo\")::double precision) AS v, count(*) AS n, row_number() OVER (ORDER BY src.\"zona\" NULLS LAST) AS rk\n  FROM src GROUP BY \"zona\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n),\ncell AS (\n  SELECT \"zona\" AS g, \"__kind\" AS k, \"__series\" AS s, (sum(\"conteo\")::double precision) AS v, count(*) AS n\n  FROM src GROUP BY \"zona\", \"__kind\", \"__series\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n)\n(SELECT 0 AS part, g::text, NULL::text, NULL::text, v, n, rk FROM grp ORDER BY rk LIMIT @limit)\nUNION ALL\n(SELECT 1, cell.g::text, cell.k, cell.s, cell.v, cell.n, grp.rk\n FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g\n ORDER BY grp.rk, cell.k, cell.s LIMIT @limit)\nUNION ALL\n(SELECT 2, NULL::text, \"__kind\", \"__series\", (sum(\"conteo\")::double precision), count(*), NULL::bigint\n FROM src GROUP BY \"__kind\", \"__series\")\nUNION ALL\n(SELECT 3, NULL::text, NULL::text, NULL::text, (sum(\"conteo\")::double precision), count(*), NULL::bigint FROM src)",
+      "parameters": [
+       "kept",
+       "limit"
+      ]
+     }
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": "percent",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "value",
+       "value": 0.5
+      }
+     ]
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": "percent"
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": "percent",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "value",
+       "value": 0.5
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "grouped column chart with an overall line",
+   "chartType": "column",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "estrato",
+     "type": "text"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    },
+    {
+     "name": "numerator",
+     "type": "decimal"
+    },
+    {
+     "name": "denominator",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":{\"numerator\":\"numerator\",\"denominator\":\"denominator\"},\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"estrato\",\"layout\":null,\"pyramid\":null,\"display\":{\"referenceLines\":[{\"kind\":\"overall\"}]},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "estrato",
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "series": {
+     "maxSeries": 8,
+     "naturalGroups": false,
+     "domain": {
+      "sql": "(SELECT \"estrato\"::text, (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL) AND \"estrato\" IS NOT NULL\n GROUP BY \"estrato\" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap)\nUNION ALL\n(SELECT NULL::text, (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL) AND \"estrato\" IS NULL\n HAVING count(*) > 0)",
+      "parameters": [
+       "cap"
+      ]
+     },
+     "cells": {
+      "sql": "WITH src AS (\n  SELECT \"p_x_indicators\".\"encuesta_hoy\".*, CASE WHEN \"estrato\"::text = ANY(@kept) THEN \"estrato\"::text END AS \"__series\", CASE WHEN \"estrato\" IS NULL THEN 'none' WHEN \"estrato\"::text = ANY(@kept) THEN 'value' ELSE 'other' END AS \"__kind\"\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL)\n),\ngrp AS (\n  SELECT \"zona\" AS g, (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) AS v, count(*) AS n, row_number() OVER (ORDER BY src.\"zona\" NULLS LAST) AS rk\n  FROM src GROUP BY \"zona\" HAVING (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) IS NOT NULL\n),\ncell AS (\n  SELECT \"zona\" AS g, \"__kind\" AS k, \"__series\" AS s, (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) AS v, count(*) AS n\n  FROM src GROUP BY \"zona\", \"__kind\", \"__series\" HAVING (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) IS NOT NULL\n)\n(SELECT 0 AS part, g::text, NULL::text, NULL::text, v, n, rk FROM grp ORDER BY rk LIMIT @limit)\nUNION ALL\n(SELECT 1, cell.g::text, cell.k, cell.s, cell.v, cell.n, grp.rk\n FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g\n ORDER BY grp.rk, cell.k, cell.s LIMIT @limit)\nUNION ALL\n(SELECT 2, NULL::text, \"__kind\", \"__series\", (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)), count(*), NULL::bigint\n FROM src GROUP BY \"__kind\", \"__series\")\nUNION ALL\n(SELECT 3, NULL::text, NULL::text, NULL::text, (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)), count(*), NULL::bigint FROM src)",
+      "parameters": [
+       "kept",
+       "limit"
+      ]
+     }
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "estrato",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "overall"
+      }
+     ]
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "estrato"
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "estrato",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "overall"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "column chart sorted by orden as text over a numbered question column",
+   "chartType": "column",
+   "columns": [
+    {
+     "name": "pregunta",
+     "type": "text"
+    },
+    {
+     "name": "orden",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "indicatorColumns": {
+    "pregunta": {
+     "label": "Pregunta"
+    }
+   },
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"pregunta\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"column\",\"column\":\"orden\",\"compareAs\":\"text\",\"direction\":\"asc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "text",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"pregunta\"::text, (sum(\"conteo\")::double precision), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"conteo\" IS NOT NULL\nGROUP BY \"pregunta\"\nHAVING (sum(\"conteo\")::double precision) IS NOT NULL\nORDER BY min(NULLIF(\"orden\"::text, '')) ASC NULLS LAST, \"p_x_indicators\".\"encuesta_hoy\".\"pregunta\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "text",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "text",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "column",
+     "column": "orden",
+     "compareAs": "text",
+     "direction": "asc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   }
+  },
+  {
+   "name": "100% bar over counts with a numbered series column",
+   "chartType": "bar",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "respuesta",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "indicatorColumns": {
+    "zona": {
+     "label": "Zona"
+    },
+    "respuesta": {
+     "label": "Respuesta"
+    }
+   },
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"respuesta\",\"layout\":\"percent\",\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": "percent",
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "series": {
+     "maxSeries": 8,
+     "naturalGroups": false,
+     "domain": {
+      "sql": "(SELECT \"respuesta\"::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"respuesta\" IS NOT NULL\n GROUP BY \"respuesta\" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap)\nUNION ALL\n(SELECT NULL::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"respuesta\" IS NULL\n HAVING count(*) > 0)",
+      "parameters": [
+       "cap"
+      ]
+     },
+     "cells": {
+      "sql": "WITH src AS (\n  SELECT \"p_x_indicators\".\"encuesta_hoy\".*, CASE WHEN \"respuesta\"::text = ANY(@kept) THEN \"respuesta\"::text END AS \"__series\", CASE WHEN \"respuesta\" IS NULL THEN 'none' WHEN \"respuesta\"::text = ANY(@kept) THEN 'value' ELSE 'other' END AS \"__kind\"\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE \"conteo\" IS NOT NULL\n),\ngrp AS (\n  SELECT \"zona\" AS g, (sum(\"conteo\")::double precision) AS v, count(*) AS n, row_number() OVER (ORDER BY src.\"zona\" NULLS LAST) AS rk\n  FROM src GROUP BY \"zona\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n),\ncell AS (\n  SELECT \"zona\" AS g, \"__kind\" AS k, \"__series\" AS s, (sum(\"conteo\")::double precision) AS v, count(*) AS n\n  FROM src GROUP BY \"zona\", \"__kind\", \"__series\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n)\n(SELECT 0 AS part, g::text, NULL::text, NULL::text, v, n, rk FROM grp ORDER BY rk LIMIT @limit)\nUNION ALL\n(SELECT 1, cell.g::text, cell.k, cell.s, cell.v, cell.n, grp.rk\n FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g\n ORDER BY grp.rk, cell.k, cell.s LIMIT @limit)\nUNION ALL\n(SELECT 2, NULL::text, \"__kind\", \"__series\", (sum(\"conteo\")::double precision), count(*), NULL::bigint\n FROM src GROUP BY \"__kind\", \"__series\")\nUNION ALL\n(SELECT 3, NULL::text, NULL::text, NULL::text, (sum(\"conteo\")::double precision), count(*), NULL::bigint FROM src)",
+      "parameters": [
+       "kept",
+       "limit"
+      ]
+     }
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": "percent"
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": "percent"
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": "percent"
+   }
+  },
+  {
+   "name": "heat map of two numbered columns",
+   "chartType": "heatmap",
+   "columns": [
+    {
+     "name": "pregunta",
+     "type": "text"
+    },
+    {
+     "name": "respuesta",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "indicatorColumns": {
+    "pregunta": {
+     "label": "Pregunta"
+    },
+    "respuesta": {
+     "label": "Respuesta"
+    }
+   },
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"pregunta\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":\"respuesta\",\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta",
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "series": {
+     "maxSeries": 30,
+     "naturalGroups": true,
+     "domain": {
+      "sql": "(SELECT \"respuesta\"::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"respuesta\" IS NOT NULL\n GROUP BY \"respuesta\" ORDER BY 2 DESC NULLS LAST, 1 LIMIT @cap)\nUNION ALL\n(SELECT NULL::text, (sum(\"conteo\")::double precision) FROM \"p_x_indicators\".\"encuesta_hoy\"\n WHERE \"conteo\" IS NOT NULL AND \"respuesta\" IS NULL\n HAVING count(*) > 0)",
+      "parameters": [
+       "cap"
+      ]
+     },
+     "cells": {
+      "sql": "WITH src AS (\n  SELECT \"p_x_indicators\".\"encuesta_hoy\".*, CASE WHEN \"respuesta\"::text = ANY(@kept) THEN \"respuesta\"::text END AS \"__series\", CASE WHEN \"respuesta\" IS NULL THEN 'none' WHEN \"respuesta\"::text = ANY(@kept) THEN 'value' ELSE 'other' END AS \"__kind\"\n  FROM \"p_x_indicators\".\"encuesta_hoy\"\n  WHERE \"conteo\" IS NOT NULL\n),\ngrp AS (\n  SELECT \"pregunta\" AS g, (sum(\"conteo\")::double precision) AS v, count(*) AS n, row_number() OVER (ORDER BY src.\"pregunta\" NULLS LAST) AS rk\n  FROM src GROUP BY \"pregunta\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n),\ncell AS (\n  SELECT \"pregunta\" AS g, \"__kind\" AS k, \"__series\" AS s, (sum(\"conteo\")::double precision) AS v, count(*) AS n\n  FROM src GROUP BY \"pregunta\", \"__kind\", \"__series\" HAVING (sum(\"conteo\")::double precision) IS NOT NULL\n)\n(SELECT 0 AS part, g::text, NULL::text, NULL::text, v, n, rk FROM grp ORDER BY rk LIMIT @limit)\nUNION ALL\n(SELECT 1, cell.g::text, cell.k, cell.s, cell.v, cell.n, grp.rk\n FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g\n ORDER BY grp.rk, cell.k, cell.s LIMIT @limit)\nUNION ALL\n(SELECT 2, NULL::text, \"__kind\", \"__series\", (sum(\"conteo\")::double precision), count(*), NULL::bigint\n FROM src GROUP BY \"__kind\", \"__series\")\nUNION ALL\n(SELECT 3, NULL::text, NULL::text, NULL::text, (sum(\"conteo\")::double precision), count(*), NULL::bigint FROM src)",
+      "parameters": [
+       "kept",
+       "limit"
+      ]
+     }
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta"
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta"
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "pregunta",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": "respuesta"
+   }
+  }
+ ],
+ "dashboard": {
+  "name": "Encuesta de hoy",
+  "palette": "earth",
+  "filters": [
+   {
+    "column": "zona",
+    "label": "Zona",
+    "kind": "text",
+    "default": null
+   },
+   {
+    "column": "canal",
+    "label": "Canal",
+    "kind": "text",
+    "default": null
+   },
+   {
+    "column": "grupo",
+    "label": "Grupo",
+    "kind": "text",
+    "default": null
+   },
+   {
+    "column": "pregunta",
+    "label": "Pregunta",
+    "kind": "text",
+    "default": null
+   },
+   {
+    "column": "respuesta",
+    "label": "Respuesta",
+    "kind": "text",
+    "default": null
+   },
+   {
+    "column": "orden",
+    "label": "Orden",
+    "kind": "text",
+    "default": null
+   }
+  ],
+  "valueColors": [
+   {
+    "column": "pregunta",
+    "value": "1. Opción A",
+    "color": 1
+   },
+   {
+    "column": "pregunta",
+    "value": "2. Opción B",
+    "color": 2
+   },
+   {
+    "column": "pregunta",
+    "value": "3. Opción C",
+    "color": 3
+   },
+   {
+    "column": "grupo",
+    "value": "1. Grupo A",
+    "color": 4
+   },
+   {
+    "column": "grupo",
+    "value": "2. Grupo B",
+    "color": 5
+   },
+   {
+    "column": "grupo",
+    "value": "3. Grupo C",
+    "color": 6
+   }
+  ],
+  "widgets": [
+   {
+    "shape": "ratio column chart sorted by orden as text",
+    "id": "00000000-0000-0000-0000-000000000001",
+    "title": "Asistencia por zona",
+    "layout": {
+     "x": 0,
+     "y": 0,
+     "w": 6,
+     "h": 4
+    },
+    "createdAt": "2026-11-01T10:00:00Z"
+   },
+   {
+    "shape": "stat tile with equals filters on numbered labels and on orden",
+    "id": "00000000-0000-0000-0000-000000000002",
+    "title": "Respuestas de la opción A",
+    "layout": {
+     "x": 6,
+     "y": 0,
+     "w": 3,
+     "h": 2
+    },
+    "createdAt": "2026-11-01T10:01:00Z"
+   },
+   {
+    "shape": "map with four tooltip columns and a basemap",
+    "id": "00000000-0000-0000-0000-000000000003",
+    "title": "Mapa de zonas",
+    "layout": {
+     "x": 0,
+     "y": 4,
+     "w": 12,
+     "h": 6
+    },
+    "createdAt": "2026-11-01T10:02:00Z"
+   }
+  ],
+  "content": "{\"name\":\"Encuesta de hoy\",\"filters\":[{\"column\":\"zona\",\"label\":\"Zona\",\"kind\":\"text\",\"default\":null},{\"column\":\"canal\",\"label\":\"Canal\",\"kind\":\"text\",\"default\":null},{\"column\":\"grupo\",\"label\":\"Grupo\",\"kind\":\"text\",\"default\":null},{\"column\":\"pregunta\",\"label\":\"Pregunta\",\"kind\":\"text\",\"default\":null},{\"column\":\"respuesta\",\"label\":\"Respuesta\",\"kind\":\"text\",\"default\":null},{\"column\":\"orden\",\"label\":\"Orden\",\"kind\":\"text\",\"default\":null}],\"palette\":\"earth\",\"valueColors\":[{\"column\":\"pregunta\",\"value\":\"1. Opci\\u00F3n A\",\"color\":1},{\"column\":\"pregunta\",\"value\":\"2. Opci\\u00F3n B\",\"color\":2},{\"column\":\"pregunta\",\"value\":\"3. Opci\\u00F3n C\",\"color\":3},{\"column\":\"grupo\",\"value\":\"1. Grupo A\",\"color\":4},{\"column\":\"grupo\",\"value\":\"2. Grupo B\",\"color\":5},{\"column\":\"grupo\",\"value\":\"3. Grupo C\",\"color\":6}],\"widgets\":[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"title\":\"Asistencia por zona\",\"chartType\":\"column\",\"config\":{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":{\"numerator\":\"numerator\",\"denominator\":\"denominator\"},\"groupBy\":\"zona\",\"filters\":[{\"column\":\"canal\",\"op\":\"equals\",\"value\":\"Presencial\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"column\",\"column\":\"orden\",\"compareAs\":\"text\",\"direction\":\"asc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"color\":3},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]},\"layout\":{\"x\":0,\"y\":0,\"w\":6,\"h\":4}},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"title\":\"Respuestas de la opci\\u00F3n A\",\"chartType\":\"stat\",\"config\":{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":null,\"filters\":[{\"column\":\"pregunta\",\"op\":\"equals\",\"value\":\"1. Opci\\u00F3n A\",\"values\":null,\"min\":null,\"max\":null},{\"column\":\"orden\",\"op\":\"equals\",\"value\":\"07\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]},\"layout\":{\"x\":6,\"y\":0,\"w\":3,\"h\":2}},{\"id\":\"00000000-0000-0000-0000-000000000003\",\"title\":\"Mapa de zonas\",\"chartType\":\"map\",\"config\":{\"indicator\":\"encuesta_hoy\",\"measure\":\"value\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":\"geometry\",\"buckets\":null,\"sort\":null,\"basemap\":\"satellite\",\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"tooltip\":[{\"column\":\"direccion\",\"label\":\"Direcci\\u00F3n\",\"format\":null},{\"column\":\"meta\",\"label\":null,\"format\":\"count\"},{\"column\":\"avance\",\"label\":\"Avance\",\"format\":null},{\"column\":\"canal\",\"label\":null,\"format\":null}],\"ignoredDashboardFilters\":[],\"scale\":[]},\"layout\":{\"x\":0,\"y\":4,\"w\":12,\"h\":6}}]}"
+ },
+ "dashboardWithSource": {
+  "name": "Encuesta de hoy con fuente",
+  "palette": "earth",
+  "filters": [
+   {
+    "column": "zona",
+    "label": "Zona",
+    "kind": "text",
+    "default": null
+   },
+   {
+    "column": "canal",
+    "label": "Canal",
+    "kind": "text",
+    "default": null
+   },
+   {
+    "column": "grupo",
+    "label": "Grupo",
+    "kind": "text",
+    "default": null
+   },
+   {
+    "column": "pregunta",
+    "label": "Pregunta",
+    "kind": "text",
+    "default": null
+   },
+   {
+    "column": "respuesta",
+    "label": "Respuesta",
+    "kind": "text",
+    "default": null
+   },
+   {
+    "column": "orden",
+    "label": "Orden",
+    "kind": "text",
+    "default": null
+   }
+  ],
+  "valueColors": [
+   {
+    "column": "pregunta",
+    "value": "1. Opción A",
+    "color": 1
+   },
+   {
+    "column": "pregunta",
+    "value": "2. Opción B",
+    "color": 2
+   },
+   {
+    "column": "pregunta",
+    "value": "3. Opción C",
+    "color": 3
+   },
+   {
+    "column": "grupo",
+    "value": "1. Grupo A",
+    "color": 4
+   },
+   {
+    "column": "grupo",
+    "value": "2. Grupo B",
+    "color": 5
+   },
+   {
+    "column": "grupo",
+    "value": "3. Grupo C",
+    "color": 6
+   }
+  ],
+  "source": "Encuesta de ejemplo, 120 respuestas, primera ronda",
+  "widgets": [
+   {
+    "shape": "ratio column chart sorted by orden as text",
+    "id": "00000000-0000-0000-0000-000000000001",
+    "title": "Asistencia por zona",
+    "layout": {
+     "x": 0,
+     "y": 0,
+     "w": 6,
+     "h": 4
+    },
+    "createdAt": "2026-11-01T10:00:00Z"
+   },
+   {
+    "shape": "ratio bar with a subtitle, a footnote, a hidden caption and a unit",
+    "id": "00000000-0000-0000-0000-000000000002",
+    "title": "Canales de información",
+    "layout": {
+     "x": 6,
+     "y": 0,
+     "w": 6,
+     "h": 4
+    },
+    "createdAt": "2026-11-01T10:01:00Z"
+   },
+   {
+    "shape": "stat tile with an own caption text, a footnote and a description button",
+    "id": "00000000-0000-0000-0000-000000000003",
+    "title": "Respuestas de la Zona 1",
+    "layout": {
+     "x": 0,
+     "y": 4,
+     "w": 3,
+     "h": 2
+    },
+    "createdAt": "2026-11-01T10:02:00Z"
+   }
+  ],
+  "content": "{\"name\":\"Encuesta de hoy con fuente\",\"filters\":[{\"column\":\"zona\",\"label\":\"Zona\",\"kind\":\"text\",\"default\":null},{\"column\":\"canal\",\"label\":\"Canal\",\"kind\":\"text\",\"default\":null},{\"column\":\"grupo\",\"label\":\"Grupo\",\"kind\":\"text\",\"default\":null},{\"column\":\"pregunta\",\"label\":\"Pregunta\",\"kind\":\"text\",\"default\":null},{\"column\":\"respuesta\",\"label\":\"Respuesta\",\"kind\":\"text\",\"default\":null},{\"column\":\"orden\",\"label\":\"Orden\",\"kind\":\"text\",\"default\":null}],\"palette\":\"earth\",\"valueColors\":[{\"column\":\"pregunta\",\"value\":\"1. Opci\\u00F3n A\",\"color\":1},{\"column\":\"pregunta\",\"value\":\"2. Opci\\u00F3n B\",\"color\":2},{\"column\":\"pregunta\",\"value\":\"3. Opci\\u00F3n C\",\"color\":3},{\"column\":\"grupo\",\"value\":\"1. Grupo A\",\"color\":4},{\"column\":\"grupo\",\"value\":\"2. Grupo B\",\"color\":5},{\"column\":\"grupo\",\"value\":\"3. Grupo C\",\"color\":6}],\"source\":\"Encuesta de ejemplo, 120 respuestas, primera ronda\",\"widgets\":[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"title\":\"Asistencia por zona\",\"chartType\":\"column\",\"config\":{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":{\"numerator\":\"numerator\",\"denominator\":\"denominator\"},\"groupBy\":\"zona\",\"filters\":[{\"column\":\"canal\",\"op\":\"equals\",\"value\":\"Presencial\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"column\",\"column\":\"orden\",\"compareAs\":\"text\",\"direction\":\"asc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"color\":3},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]},\"layout\":{\"x\":0,\"y\":0,\"w\":6,\"h\":4}},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"title\":\"Canales de informaci\\u00F3n\",\"chartType\":\"bar\",\"config\":{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":{\"numerator\":\"numerator\",\"denominator\":\"denominator\"},\"groupBy\":\"categoria\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"value\",\"column\":null,\"compareAs\":null,\"direction\":\"desc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"subtitle\":\"\\u00BFQu\\u00E9 canal usa para informarse sobre la zona? (P4)\",\"footnote\":\"No suman 100 %: respuesta m\\u00FAltiple.\",\"caption\":{\"hidden\":true},\"unit\":\"de los consultados\"},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]},\"layout\":{\"x\":6,\"y\":0,\"w\":6,\"h\":4}},{\"id\":\"00000000-0000-0000-0000-000000000003\",\"title\":\"Respuestas de la Zona 1\",\"chartType\":\"stat\",\"config\":{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":null,\"filters\":[{\"column\":\"zona\",\"op\":\"equals\",\"value\":\"Zona 1\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"footnote\":\"Sin ponderar.\",\"caption\":{\"text\":\"Respuestas de la Zona 1\"},\"showDescription\":true},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]},\"layout\":{\"x\":0,\"y\":4,\"w\":3,\"h\":2}}]}"
+ }
+}

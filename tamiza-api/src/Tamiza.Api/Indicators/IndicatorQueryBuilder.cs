@@ -23,9 +23,13 @@ public sealed record IndicatorSql(string Sql, IReadOnlyList<SqlParam> Parameters
 /// one included, by total over the widget's own filters, at most <see cref="WidgetConfig.MaxSlices"/> + 1 of them. Null for every other kind.
 /// </param>
 /// <param name="Boxes">A box plot only (design D3 of add-boxplot-widget): the one statement that returns a row per box, set instead of <paramref name="Sql"/>.</param>
+/// <param name="Overall">
+/// A plain grouped query that was asked for it only (design D4 of add-chart-annotations): next to <paramref name="Sql"/>, the statement a
+/// stat tile over the same config and filters runs, so the widget's overall value is the tile's figure. Null for every other query.
+/// </param>
 public sealed record IndicatorQueryPlan(
     IndicatorSql? Sql, IReadOnlyList<string> MissingColumns, IDictionary<string, string[]>? Errors, IReadOnlyList<string>? NotFiltered = null,
-    SeriesQueryPlan? Series = null, IndicatorSql? Domain = null, IndicatorSql? Boxes = null);
+    SeriesQueryPlan? Series = null, IndicatorSql? Domain = null, IndicatorSql? Boxes = null, IndicatorSql? Overall = null);
 
 /// <summary>Validates a widget query against the indicator table's columns and turns it into SQL.</summary>
 public static class IndicatorQueryBuilder
@@ -150,9 +154,13 @@ public static class IndicatorQueryBuilder
     /// a column of the right kind for narrow the rows as a second set of filters, so a widget filter and a dashboard filter on the same
     /// column both hold; the others are <see cref="IndicatorQueryPlan.NotFiltered"/>, never missing.
     /// </param>
+    /// <param name="overall">
+    /// Also plan the overall value (<see cref="IndicatorQueryPlan.Overall"/>) of a plain grouped bar, column or line query (so none with no
+    /// chart type): not of a pie, a map, a box plot, a series, a histogram or a stat tile. The request flag of design D4 of add-chart-annotations; no widget stores it.
+    /// </param>
     public static IndicatorQueryPlan Plan(
         WidgetConfig config, IReadOnlyList<TableColumn> columns, string timeZone, string from, int maxRows, bool perRow = false,
-        IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null, string? chartType = null)
+        IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null, string? chartType = null, bool overall = false)
     {
         var byName = columns.ToDictionary(c => c.Name, StringComparer.Ordinal);
 
@@ -317,10 +325,21 @@ public static class IndicatorQueryBuilder
         var domain = chartType == ChartTypes.Pie && grouped
             ? PieDomain(Q(config.GroupBy!), from, aggregate, rowFilter, query, WidgetConfig.MaxSlices + 1)
             : null;
+        var overallSql = overall && grouped && chartType is (ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line) ? PlanOverall(config, columns, timeZone, from, maxRows, dashboardFilters) : null;
         return new IndicatorQueryPlan(
             new IndicatorSql(sql, parameters, isMap ? tooltip.Select(item => byName[item.Column].Type).ToList() : null), missing, null, notFiltered,
-            Domain: domain);
+            Domain: domain, Overall: overallSql);
     }
+
+    /// <summary>
+    /// The overall value of a plain grouped query (design D4 of add-chart-annotations): the statement of the stat tile that the same config
+    /// would be, planned by the same code and given the same dashboard filters, so a line at the overall value and a tile with the same
+    /// indicator and filters show one figure. Its row limit parameter is bound as the main statement's is.
+    /// </summary>
+    private static IndicatorSql? PlanOverall(
+        WidgetConfig config, IReadOnlyList<TableColumn> columns, string timeZone, string from, int maxRows,
+        IReadOnlyList<AppliedDashboardFilter>? dashboardFilters) =>
+        Plan(WidgetQuery.For(ChartTypes.Stat, config).Normalize(), columns, timeZone, from, maxRows, dashboardFilters: dashboardFilters, chartType: ChartTypes.Stat).Sql;
 
     /// <summary>
     /// The dashboard filters the table can take, as a second set of filters with parameters <c>d0</c>, <c>d1min</c>…, and the columns of

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Tamiza.Api.Data;
+using Tamiza.Api.Indicators;
 using Tamiza.Api.Projects;
 
 namespace Tamiza.Api.Pipeline;
@@ -10,7 +11,10 @@ public sealed record Person(Guid Id, string Name);
 public sealed record ScriptVersionSummary(
     Guid VersionId, ScriptKind Kind, string? Name, string? Label, int Number, bool Removed, Person Author, DateTimeOffset CreatedAt, ScriptOrigin Origin);
 
-/// <summary>A version with its code and, for an indicator, its metadata (null when the script was removed).</summary>
+/// <summary>
+/// A version with its code and, for an indicator, its metadata (null when the script was removed).
+/// <c>Columns</c> is what the indicator says about the columns of its table, by column name; null when it says nothing.
+/// </summary>
 public sealed record ScriptVersionDetails(
     Guid VersionId,
     ScriptKind Kind,
@@ -22,6 +26,7 @@ public sealed record ScriptVersionDetails(
     string? Description,
     string? Unit,
     string? Format,
+    IReadOnlyDictionary<string, IndicatorColumnMetadata>? Columns,
     Person Author,
     DateTimeOffset CreatedAt,
     ScriptOrigin Origin);
@@ -30,14 +35,21 @@ public sealed record ScriptVersionDetails(
 public sealed record ProjectScript(ScriptKind Kind, ScriptVersionDetails? Current);
 
 /// <summary>An indicator with the metadata and code of its current version.</summary>
-public sealed record IndicatorScript(string Name, string Label, string? Description, string? Unit, string Format, ScriptVersionDetails Current);
+public sealed record IndicatorScript(
+    string Name, string Label, string? Description, string? Unit, string Format, IReadOnlyDictionary<string, IndicatorColumnMetadata>? Columns,
+    ScriptVersionDetails Current);
 
 /// <summary>The scripts of a project: the two fixed ones and its current indicators, ordered by name.</summary>
 public sealed record ScriptList(ProjectScript Clean, ProjectScript Output, IReadOnlyList<IndicatorScript> Indicators);
 
 public sealed record SaveScriptRequest(string? Code);
 
-public sealed record SaveIndicatorRequest(string? Code, string? Label, string? Description, string? Unit, string? Format);
+/// <param name="Columns">
+/// What the indicator says about the columns of its table, by column name. Left out (null), the current version's are kept; given, they
+/// replace all of them, and an empty map clears them (design D3 of the indicator column metadata).
+/// </param>
+public sealed record SaveIndicatorRequest(
+    string? Code, string? Label, string? Description, string? Unit, string? Format, IReadOnlyDictionary<string, IndicatorColumnMetadata?>? Columns = null);
 
 /// <summary><c>Name</c> is the indicator's name for an indicator step and empty for the three fixed steps.</summary>
 public sealed record StepSummary(RunStepName Step, string Name, RunStepStatus Status, long? InputRows, long? OutputRows);

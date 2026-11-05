@@ -3,11 +3,12 @@ import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { BoxOrientation, QueryBox, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartTooltip, ChartTooltipContent, ChartTooltips } from '../../../shared/ui';
+import { CategoryOrders, arrange, entryOf, shown, shownValues } from './category-order';
 import { ChartColors } from './chart-colors';
 import { registerExportParts } from './export-parts';
 import { observeSize } from './chart-data';
 import { NiceAxis, bandScale, charWidth, linearScale, niceAxis, truncate } from './chart-scales';
-import { ValueFormatter, plotted } from './format';
+import { ColumnNamer, ValueFormatter, named, plotted, rawNames } from './format';
 import { MarkPoint, markTooltips } from './mark-tooltips';
 import { Hit, Label, Line } from './series-plot';
 import { TableModel, WidgetTable } from './widget-table';
@@ -463,6 +464,10 @@ export class BoxplotChart {
   /** The indicator's label, and the formatter of its figures as a box plot writes them (see `boxFormat`). */
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
+  /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
+  readonly names = input<ColumnNamer>(rawNames);
+  /** What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D8). */
+  readonly orders = input<CategoryOrders | null>(null);
   readonly asTable = input(false);
   /** Whether the indicator is a percent: it decides how far a flat scale is padded at 0. */
   readonly percent = input(false);
@@ -479,11 +484,15 @@ export class BoxplotChart {
     return (value: number) => format.format(value);
   })();
 
-  protected readonly what = computed(() => plotted(this.config(), this.label()));
-  protected readonly boxes = computed(() => this.answer().boxes ?? []);
+  protected readonly what = computed(() => plotted(this.config(), this.label(), this.names()));
+  /** The group column under its name shown; the colors kept by value stay keyed by the column itself. */
+  protected readonly groupShown = computed(() => named(this.names(), this.config().groupBy));
+  /** The boxes in the order the widget declares for its groups (design D4); as the server sends them, without a declaration. */
+  protected readonly boxes = computed(() => arrange(this.answer().boxes ?? [], (box) => entryOf(box.group), this.orders()?.groups ?? null));
+  private readonly groupText = computed(() => (this.orders()?.hideGroupPrefixes ? shownValues(this.boxes().map((box) => box.group), true) : null));
   protected readonly orientation = computed<BoxOrientation>(() => (this.config().display?.orientation === 'horizontal' ? 'horizontal' : 'vertical'));
   private readonly groupLabel = (group: string | null): string =>
-    group ?? this.tr(this.config().groupBy ? 'indicators.chart.noGroup' : 'indicators.boxplot.allRows');
+    shown(this.groupText(), group) ?? this.tr(this.config().groupBy ? 'indicators.chart.noGroup' : 'indicators.boxplot.allRows');
   protected notDrawnText = (count: number): string => this.tr(countKey('indicators.boxplot.notDrawn', count, this.transloco.getActiveLang()), { count });
 
   private words(): BoxplotWords {
@@ -616,7 +625,7 @@ export class BoxplotChart {
 
   protected table(t: Translate): TableModel {
     const words = this.words();
-    return boxTableModel(this.boxes(), this.config().groupBy ?? t('indicators.boxplot.group'), words, this.groupLabel, this.format(), this.whole);
+    return boxTableModel(this.boxes(), this.groupShown() ?? t('indicators.boxplot.group'), words, this.groupLabel, this.format(), this.whole);
   }
 
   protected summary(t: Translate): string {
@@ -628,14 +637,14 @@ export class BoxplotChart {
     const low = Math.min(...medians);
     const high = Math.max(...medians);
     if (boxes.length > 1 && low === high && this.config().groupBy) {
-      return t('indicators.boxplot.summarySame', { what: this.what(), group: this.config().groupBy, count: boxes.length, median: this.format()(low) });
+      return t('indicators.boxplot.summarySame', { what: this.what(), group: this.groupShown(), count: boxes.length, median: this.format()(low) });
     }
     if (!this.config().groupBy) {
       return t('indicators.boxplot.summaryAll', { what: this.what(), median: this.format()(boxes[0].median), min: this.format()(boxes[0].min), max: this.format()(boxes[0].max) });
     }
     return t(countKey('indicators.boxplot.summary', boxes.length, this.transloco.getActiveLang()), {
       what: this.what(),
-      group: this.config().groupBy,
+      group: this.groupShown(),
       count: boxes.length,
       min: this.format()(low),
       max: this.format()(high),

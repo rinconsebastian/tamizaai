@@ -70,6 +70,19 @@ public sealed class ReportTextTests
     }
 
     [Fact]
+    public void The_default_labels_of_the_reference_lines_are_the_words_of_the_pages_two_languages()
+    {
+        // As indicators.referenceLines.kinds in tamiza-ui's en.json and es.json.
+        var english = ReportText.For("en-US");
+        var spanish = ReportText.For("es-CO");
+
+        Assert.Equal(["Mean", "Median", "Overall", "Reference"], new[] { "referenceMean", "referenceMedian", "referenceOverall", "referenceValue" }.Select(k => english[k]));
+        Assert.Equal(["Promedio", "Mediana", "Valor general", "Referencia"], new[] { "referenceMean", "referenceMedian", "referenceOverall", "referenceValue" }.Select(k => spanish[k]));
+        Assert.Equal("Reference lines", english["referenceLines"]);
+        Assert.Equal("Líneas de referencia", spanish["referenceLines"]);
+    }
+
+    [Fact]
     public void More_rows_has_a_singular_and_a_plural()
     {
         Assert.Equal("1 more row", ReportText.For("en-US").MoreRows(1));

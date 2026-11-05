@@ -1,7 +1,8 @@
 import { DataColumnType, DataValue } from '../../../core/projects/data.service';
 import { QueryRow, WidgetTooltipItem } from '../../../core/projects/indicators.service';
 import { ChartTooltipContent, dateText, timestampText } from '../../../shared/ui';
-import { ValueFormatter, valueFormatter } from './format';
+import { shown } from './category-order';
+import { ColumnNamer, ValueFormatter, rawNames, valueFormatter } from './format';
 
 // What a map's tooltip says (design D6, D9): the group as its heading, the plotted value with the indicator's format and unit, the
 // widget's tooltip columns each under its label, and how many rows the group combines. Pure, so "Show as table" writes the same
@@ -19,13 +20,17 @@ export interface TooltipContext {
   format: ValueFormatter;
   locale: string;
   t: Translate;
+  /** The name shown for a column that has no label of its own (add-indicator-column-metadata); the column's name when left out. */
+  names?: ColumnNamer;
+  /** The text each group value is shown with when its column hides numbered prefixes (add-declared-category-order, design D5). */
+  groupText?: ReadonlyMap<string, string> | null;
 }
 
 const numeric = (type: DataColumnType | undefined) => type === 'integer' || type === 'decimal';
 
-/** What a tooltip column is called: its label, or the column's name. */
-export function tooltipLabel(item: WidgetTooltipItem): string {
-  return item.label?.trim() || item.column;
+/** What a tooltip column is called: its own label, else the name shown for the column (the indicator's label, else the column's name). */
+export function tooltipLabel(item: WidgetTooltipItem, names: ColumnNamer = rawNames): string {
+  return item.label?.trim() || names(item.column);
 }
 
 /**
@@ -63,10 +68,10 @@ export function tooltipContent(row: QueryRow, context: TooltipContext): ChartToo
   const { items, types, t } = context;
   const values = tooltipValues(row, context);
   return {
-    heading: row.group ?? t('indicators.chart.noGroup'),
+    heading: shown(context.groupText, row.group) ?? t('indicators.chart.noGroup'),
     lines: [
       { label: context.label, value: context.format(row.value), align: 'end' },
-      ...items.map((item, i) => ({ label: tooltipLabel(item), value: values[i], align: numeric(types?.[i]) || typeof row.tooltip?.[i] === 'number' ? ('end' as const) : ('start' as const) })),
+      ...items.map((item, i) => ({ label: tooltipLabel(item, context.names), value: values[i], align: numeric(types?.[i]) || typeof row.tooltip?.[i] === 'number' ? ('end' as const) : ('start' as const) })),
     ],
     footer: (row.rows ?? 1) > 1 ? t('indicators.map.combines', { count: row.rows }) : null,
   };

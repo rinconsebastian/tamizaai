@@ -55,7 +55,7 @@ export class AddIndicatorDialog {
   private readonly transloco = inject(TranslocoService);
 
   protected readonly name = signal('');
-  protected readonly metadata = signal<IndicatorMetadata>({ label: '', description: '', unit: '', format: 'decimal' });
+  protected readonly metadata = signal<IndicatorMetadata>({ label: '', description: '', unit: '', format: 'decimal', columns: {} });
   protected readonly errors = signal<Record<string, string>>({});
   private readonly submitted = signal(false);
 
@@ -80,6 +80,6 @@ export class AddIndicatorDialog {
       return;
     }
     const { description, unit, format } = this.metadata();
-    this.ref.close({ name: this.name(), label, description: description.trim(), unit: unit.trim(), format });
+    this.ref.close({ name: this.name(), label, description: description.trim(), unit: unit.trim(), format, columns: {} });
   }
 }

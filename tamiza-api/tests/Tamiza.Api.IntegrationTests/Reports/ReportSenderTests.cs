@@ -126,6 +126,75 @@ public sealed class ReportSenderTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Sends_the_column_labels_in_the_body_the_text_and_the_workbook()
+    {
+        await using var h = await ReportsHarness.CreateAsync(postgres);
+        await h.Indicators.PublishAsync("teatro_hoy", "comuna text, value numeric, numerator numeric, denominator numeric",
+            "('Zona 1', 0.5, 5, 10), ('Zona 2', 0.25, 5, 20)", label: "Teatro hoy",
+            labels: new { numerator = new { label = "Hogares que asistieron" }, denominator = new { label = "Hogares" }, comuna = new { label = "Comuna" } });
+        await h.Indicators.AddWidgetAsync(new
+        {
+            title = "Asistencia", chartType = "stat", config = new { indicator = "teatro_hoy", ratio = new { numerator = "numerator", denominator = "denominator" } },
+            layout = new { x = 0, y = 0, w = 3, h = 2 },
+        });
+        await h.Indicators.AddWidgetAsync(new
+        {
+            title = "Por comuna", chartType = "column",
+            config = new { indicator = "teatro_hoy", ratio = new { numerator = "numerator", denominator = "denominator" }, groupBy = "comuna" },
+            layout = new { x = 0, y = 2, w = 12, h = 4 },
+        });
+        await h.SaveReportAsync();
+
+        await SendAsync(h);
+
+        var sent = Assert.Single(h.Email.Sent);
+        Assert.Null(await FailureAsync(h));
+        Assert.Contains("Teatro hoy: Hogares que asistieron / Hogares", sent.Message.HtmlBody);
+        Assert.Contains(">Comuna</th>", sent.Message.HtmlBody);
+        Assert.DoesNotContain("numerator", sent.Message.HtmlBody);
+        Assert.Contains("Teatro hoy: Hogares que asistieron / Hogares", sent.Message.TextBody);
+        Assert.DoesNotContain("numerator", sent.Message.TextBody);
+        var attachment = Assert.IsType<MimePart>(Assert.Single(sent.Message.Attachments));
+        using var content = new MemoryStream();
+        await attachment.Content.DecodeToAsync(content);
+        content.Position = 0;
+        var sheet = MiniExcelLibs.MiniExcel.Query(content, useHeaderRow: true, sheetName: "2. Por comuna").Cast<IDictionary<string, object?>>().ToList();
+        Assert.Equal(["Comuna", "Teatro hoy: Hogares que asistieron / Hogares"], sheet[0].Keys);
+    }
+
+    [Fact]
+    public async Task A_label_that_looks_like_a_formula_is_written_to_the_workbook_header_as_text()
+    {
+        await using var h = await ReportsHarness.CreateAsync(postgres);
+        await h.Indicators.PublishAsync("teatro_hoy", "comuna text, value numeric", "('Zona 1', 5), ('Zona 2', 7)", label: "Teatro hoy",
+            labels: new { comuna = new { label = "=Hogares" } });
+        await h.Indicators.AddWidgetAsync(new
+        {
+            title = "Por comuna", chartType = "column", config = new { indicator = "teatro_hoy", measure = "value", groupBy = "comuna" },
+            layout = new { x = 0, y = 0, w = 12, h = 4 },
+        });
+        await h.SaveReportAsync();
+
+        await SendAsync(h);
+
+        var sent = Assert.Single(h.Email.Sent);
+        var attachment = Assert.IsType<MimePart>(Assert.Single(sent.Message.Attachments));
+        using var content = new MemoryStream();
+        await attachment.Content.DecodeToAsync(content);
+        content.Position = 0;
+        var rows = MiniExcelLibs.MiniExcel.Query(content, useHeaderRow: false, sheetName: "1. Por comuna").Cast<IDictionary<string, object?>>().ToList();
+        Assert.Equal("=Hogares", rows[0].Values.First());
+        Assert.IsType<string>(rows[0].Values.First());
+        content.Position = 0;
+        using var package = new System.IO.Compression.ZipArchive(content);
+        foreach (var entry in package.Entries.Where(e => e.FullName.StartsWith("xl/worksheets/", StringComparison.Ordinal)))
+        {
+            using var reader = new StreamReader(entry.Open());
+            Assert.DoesNotContain("<f>", await reader.ReadToEndAsync());
+        }
+    }
+
+    [Fact]
     public async Task Empty_dashboard()
     {
         await using var h = await ReportsHarness.CreateAsync(postgres);

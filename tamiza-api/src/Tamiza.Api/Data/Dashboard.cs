@@ -28,6 +28,9 @@ public sealed class Dashboard
     /// <summary>The colors kept for values of columns, in the order they were saved, as JSON text in a <c>jsonb</c> column: the indicators module validates and reads them.</summary>
     public string ValueColors { get; set; } = "[]";
 
+    /// <summary>Where the dashboard's data comes from, 1 to 300 characters as the <c>ck_dashboards_source</c> check allows, or null for none; the indicators module validates and reads it.</summary>
+    public string? Source { get; set; }
+
     public Guid CreatedBy { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }

@@ -8,6 +8,7 @@ using ModelContextProtocol.Server;
 using Tamiza.Api.Http;
 using Tamiza.Api.Indicators;
 using Tamiza.Api.Mcp;
+using Tamiza.Api.Pipeline;
 using Tamiza.Api.UnitTests.Assistant;
 
 namespace Tamiza.Api.UnitTests.Indicators;
@@ -109,9 +110,166 @@ public sealed class IndicatorDocsTests
 
         var text = File.ReadAllText(mcp);
 
-        Assert.Contains("Changing the `chartType` of a widget that has a color, a scale or an orientation also needs a `config` without the `display` fields the new type does not take", text, StringComparison.Ordinal);
+        Assert.Contains("Changing the `chartType` of a widget that has a color, a scale, an orientation, reference lines, steps, data labels or an order also needs a `config` without the `display` fields the new type does not take", text, StringComparison.Ordinal);
         Assert.Contains("a new `chartType` alone keeps the old `config`", text, StringComparison.Ordinal);
-        Assert.Contains("`config.display.color`, `config.display.ramp` or `config.display.orientation`", text, StringComparison.Ordinal);
+        Assert.Contains("`config.display.color`, `config.display.ramp`, `config.display.orientation`, `config.display.referenceLines`, `config.display.interpolation`, `config.display.dataLabels` or `config.display.order`", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_mcp_documentation_explains_the_chart_annotations_their_refusal_keys_and_the_lines_of_widget_data()
+    {
+        if (PromptKitChecks.FindUp("docs/mcp.md") is not { } mcp)
+        {
+            return;
+        }
+
+        var text = File.ReadAllText(mcp);
+
+        // The limits written are the ones the API checks.
+        Assert.Equal((4, 40), (WidgetDisplay.MaxReferenceLines, WidgetDisplay.MaxReferenceLineLabel));
+        Assert.Contains("`display.referenceLines` is up to 4 lines on a bar, column or line, `[{ kind, value, label }]`", text, StringComparison.Ordinal);
+        Assert.Contains("`label` is optional, 1 to 40 characters", text, StringComparison.Ordinal);
+        foreach (var kind in ReferenceLineKinds.All.Concat(LineInterpolations.All))
+        {
+            Assert.Contains($"`{kind}`", text, StringComparison.Ordinal);
+        }
+
+        foreach (var key in new[] { "referenceLines", "referenceLines[i].kind", "referenceLines[i].value", "referenceLines[i].label", "interpolation", "dataLabels" })
+        {
+            Assert.Contains($"`config.display.{key}`", text, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("`display.dataLabels: true`", text, StringComparison.Ordinal);
+        Assert.Contains("over the answers of one question it is only the mean of the bars, not a total", text, StringComparison.Ordinal);
+        Assert.Contains("return `referenceLines` for a widget that has lines: `[{ kind, label, value, formatted }]`", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_dashboard_documentation_explains_the_reference_lines_with_their_four_kinds_the_caution_about_the_overall_line_and_the_limits()
+    {
+        if (PromptKitChecks.FindUp("docs/indicators-dashboard.md") is not { } dashboard)
+        {
+            return;
+        }
+
+        var text = File.ReadAllText(dashboard);
+        var section = AnnotationsSection(text);
+
+        // One name for each kind the API takes, so a kind added to the code and left out of the documentation fails here.
+        var names = new Dictionary<string, string>
+        {
+            [ReferenceLineKinds.Mean] = "Mean",
+            [ReferenceLineKinds.Median] = "Median",
+            [ReferenceLineKinds.Overall] = "Overall",
+            [ReferenceLineKinds.Value] = "Fixed value",
+        };
+        Assert.Equal(ReferenceLineKinds.All.Order(), names.Keys.Order());
+        foreach (var name in names.Values)
+        {
+            Assert.Contains($"| **{name}** |", section, StringComparison.Ordinal);
+        }
+
+        // The overall line is the figure of a stat tile, needs a ratio, and is only the mean of the bars over the answers of one question.
+        Assert.Contains("the figure a stat tile with the same indicator, ratio and filters shows", section, StringComparison.Ordinal);
+        Assert.Contains("It needs a ratio because over a measure", section, StringComparison.Ordinal);
+        Assert.Contains("**Over the answers of one question, the overall line is not a total.**", section, StringComparison.Ordinal);
+        Assert.Contains("they share one base", section, StringComparison.Ordinal);
+        Assert.Contains("is only the mean of the bars, and it reads like a total but is not", section, StringComparison.Ordinal);
+
+        // The limits written are the ones the API checks, in the text and in the table of limits.
+        Assert.Equal((4, 40), (WidgetDisplay.MaxReferenceLines, WidgetDisplay.MaxReferenceLineLabel));
+        Assert.Contains("A widget takes up to 4 lines, each with an optional **label** of up to 40 characters.", section, StringComparison.Ordinal);
+        Assert.Contains("| Reference lines in a widget | 4 |", text, StringComparison.Ordinal);
+        Assert.Contains("| Length of a reference line's label | 40 characters |", text, StringComparison.Ordinal);
+
+        // The widget types say what a widget can be given, and the section is the one the other documents link to.
+        Assert.Contains("(see [Reference lines, steps and data labels](#reference-lines-steps-and-data-labels))", text, StringComparison.Ordinal);
+        if (PromptKitChecks.FindUp("docs/mcp.md") is { } mcp)
+        {
+            Assert.Contains("indicators-dashboard.md#reference-lines-steps-and-data-labels", File.ReadAllText(mcp), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void The_dashboard_documentation_explains_steps_and_the_data_labels_with_the_kinds_that_take_them_and_the_stacked_refusal()
+    {
+        if (PromptKitChecks.FindUp("docs/indicators-dashboard.md") is not { } dashboard)
+        {
+            return;
+        }
+
+        var text = File.ReadAllText(dashboard);
+        var section = AnnotationsSection(text);
+
+        // Steps: both values the API takes, why a value holds until the next point, and the line chart's row links to the section.
+        Assert.Equal(new[] { "linear", "step" }, LineInterpolations.All.Order());
+        Assert.Contains("**Steps.**", section, StringComparison.Ordinal);
+        Assert.Contains("saved as the widget's `interpolation`, `linear` or `step`", section, StringComparison.Ordinal);
+        Assert.Contains("That share holds until the next price on the list", section, StringComparison.Ordinal);
+        var lineRow = Assert.Single(text.Split('\n'), row => row.StartsWith("| **Line chart** |", StringComparison.Ordinal));
+        Assert.Contains("[steps](#reference-lines-steps-and-data-labels)", lineRow, StringComparison.Ordinal);
+
+        // Data labels: the four kinds, when each is left out, why horizontal bars suit them, and the refusal of a stacked layout.
+        foreach (var kind in new[] { "Bar chart", "Column chart", "Line chart", "Pie chart" })
+        {
+            Assert.Contains($"| **{kind}**", section, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("Horizontal bars suit data labels better than grouped columns", section, StringComparison.Ordinal);
+        Assert.Contains("is refused (400, with an error on `config.display.dataLabels`); data labels turned off are always accepted", section, StringComparison.Ordinal);
+        Assert.Contains("**Not offered** on bars stacked or stacked to 100 %", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_dashboard_documentation_says_where_the_reference_lines_and_the_data_labels_appear_and_that_they_move_with_the_widget()
+    {
+        if (PromptKitChecks.FindUp("docs/indicators-dashboard.md") is not { } dashboard)
+        {
+            return;
+        }
+
+        var text = File.ReadAllText(dashboard);
+        const string link = "(#reference-lines-steps-and-data-labels)";
+
+        // The key takes room from the plot as the texts do.
+        Assert.Contains($"The key of a chart's [reference lines]{link} takes its room from the plot in the same way, above the footnote.", text, StringComparison.Ordinal);
+        // Show as table, images, workbook and paper.
+        Assert.Contains($"A bar, column or line chart with [reference lines]{link} lists them under its table", text, StringComparison.Ordinal);
+        Assert.Contains($"The legend lists each [reference line]{link} with a dashed sample of its pattern", text, StringComparison.Ordinal);
+        Assert.Contains($"what is plotted, its [reference lines]{link} when it has some", text, StringComparison.Ordinal);
+        Assert.Contains("The data sheet holds the widget's table, with no row or column for the lines.", text, StringComparison.Ordinal);
+        Assert.Contains("The key of the lines prints whole and takes its room from the plot like the subtitle and the footnote", text, StringComparison.Ordinal);
+        // A copy, a move and a version keep them.
+        Assert.Contains($"and so are its [reference lines, steps and data labels]{link}", text, StringComparison.Ordinal);
+        Assert.Contains($"and its [reference lines, steps and data labels]{link}, and goes to the left edge", text, StringComparison.Ordinal);
+        Assert.Contains($"its [reference lines, steps and data labels]{link} and its own [column names](#column-names)", text, StringComparison.Ordinal);
+        Assert.Contains("(with their words, reference lines, steps and data labels) become those of the version", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_mcp_documentation_explains_the_column_labels_the_tools_take_and_return()
+    {
+        if (PromptKitChecks.FindUp("docs/mcp.md") is not { } mcp)
+        {
+            return;
+        }
+
+        var text = File.ReadAllText(mcp);
+
+        // The limits written are the ones the API checks.
+        Assert.Equal((80, 10, 100), (ColumnLabels.MaxLength, ColumnLabels.MaxWidgetLabels, ColumnMetadata.MaxColumns));
+        Assert.Contains("each label of 1 to 80 characters with no line break, for at most 100 columns", text, StringComparison.Ordinal);
+        Assert.Contains("**Left out, the current version's labels are kept**", text, StringComparison.Ordinal);
+        Assert.Contains("`{}` clears them, and given, it replaces them all", text, StringComparison.Ordinal);
+        Assert.Contains("`columns.numerator.label`", text, StringComparison.Ordinal);
+        Assert.Contains("`display.labels`", text, StringComparison.Ordinal);
+        Assert.Contains("`{ column: name }` for up to 10 columns, each of 1 to 80 characters, on every kind of widget", text, StringComparison.Ordinal);
+        Assert.Contains("a `config` without `display.labels` removes the widget's own labels", text, StringComparison.Ordinal);
+        Assert.Contains("`get_widget_data` and `query_indicator` return `labels` for each widget", text, StringComparison.Ordinal);
+        Assert.Contains("`get_indicator_columns` gives each column its `label`", text, StringComparison.Ordinal);
+        Assert.Contains("A widget whose columns have none has no `labels`", text, StringComparison.Ordinal);
+        Assert.Contains("a column given `{ \"label\": \"Hogares\", \"colour\": \"red\" }` is saved with its label only", text, StringComparison.Ordinal);
+        Assert.Contains("(color, scale or column labels) changed", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -193,7 +351,7 @@ public sealed class IndicatorDocsTests
 
         // A widget that is created has no earlier config to keep, so only the change of one carries the sentence.
         Assert.DoesNotContain("To change the chart type", Description("create_widget"), StringComparison.Ordinal);
-        Assert.Contains("To change the chart type of a widget that has a color, a scale or an orientation", Description("update_widget"), StringComparison.Ordinal);
+        Assert.Contains("To change the chart type of a widget that has a color, a scale, an orientation, reference lines, steps, data labels or an order", Description("update_widget"), StringComparison.Ordinal);
         Assert.Contains("Only `update_widget` changes the `chartType` of a widget.", text, StringComparison.Ordinal);
         Assert.DoesNotContain("`create_widget` changes the `chartType`", text, StringComparison.Ordinal);
     }
@@ -256,6 +414,52 @@ public sealed class IndicatorDocsTests
     public void The_dashboard_tools_say_the_most_dashboards_a_project_can_have(string tool, string phrase)
     {
         Assert.Contains(string.Format(phrase, IndicatorDashboardOptions.MaxDashboards), Description(tool), StringComparison.Ordinal);
+    }
+
+    // The same for the widget's texts and the dashboard's source: attribute strings cannot read the constants.
+    [Theory]
+    [InlineData("create_widget")]
+    [InlineData("update_widget")]
+    public void The_widget_tools_say_the_lengths_of_the_texts_of_a_widget_that_the_api_enforces(string tool)
+    {
+        var description = Description(tool);
+
+        Assert.Contains($"subtitle (1 to {WidgetDisplay.MaxSubtitleLength} characters)", description, StringComparison.Ordinal);
+        Assert.Contains($"footnote (1 to {WidgetDisplay.MaxFootnoteLength})", description, StringComparison.Ordinal);
+        Assert.Contains($"caption = {{ text }} (1 to {WidgetDisplay.MaxCaptionLength};", description, StringComparison.Ordinal);
+        Assert.Contains($"unit (1 to {ScriptEndpoints.MaxUnitLength};", description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_dashboard_tools_say_the_length_of_a_source_that_the_api_enforces()
+    {
+        var method = Tools()["update_dashboard"];
+        var parameter = method.GetParameters().Single(p => p.Name == "source");
+        var description = parameter.GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        Assert.Contains($"1 to {DashboardValidation.MaxSourceLength} characters", description, StringComparison.Ordinal);
+        Assert.Contains($"1 to {DashboardValidation.MaxSourceLength} characters", Description("update_dashboard"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_dashboard_documentation_quotes_the_words_the_source_form_and_the_widget_form_show()
+    {
+        if (PromptKitChecks.FindUp("docs/indicators-dashboard.md") is not { } dashboard || PageSource(EnglishTexts) is not { } english)
+        {
+            return;
+        }
+
+        var text = File.ReadAllText(dashboard);
+        var texts = JsonDocument.Parse(english).RootElement;
+        var tooLong = texts.GetProperty("dashboardSource").GetProperty("errors").GetProperty("long").GetString()!
+            .Replace("{{ max }}", DashboardValidation.MaxSourceLength.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+
+        Assert.Contains($"(\"{tooLong}\")", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("The form shows the line the default makes", text, StringComparison.Ordinal);
+        // The crowded-tile hint is in the "Text on the widget" group, not in the preview.
+        Assert.DoesNotContain("The warning for crowded tiles shows here too", text, StringComparison.Ordinal);
+        Assert.Contains("the **Text on the widget** group shows a hint under its fields", text, StringComparison.Ordinal);
+        Assert.Contains("texts that need more room than the whole tile has are cut by the tile", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -392,12 +596,25 @@ public sealed class IndicatorDocsTests
 
         var text = File.ReadAllText(dashboard);
 
-        Assert.Contains("with the same title, type, query, ignored filters, color or scale, position and size", text, StringComparison.Ordinal);
-        Assert.Contains("and it has the same palette and colors kept by value (see [Colors](#colors))", text, StringComparison.Ordinal);
+        Assert.Contains("with every setting the widget is saved with (its title, chart type, query, display settings, the dashboard filters it ignores, position and size", text, StringComparison.Ordinal);
+        Assert.Contains("(its filters, in the same order with the same defaults, its palette, its colors kept by value and its other display settings; see [Colors](#colors))", text, StringComparison.Ordinal);
         Assert.Contains("or changing its colors, leaves the other as it is", text, StringComparison.Ordinal);
         Assert.Contains("choose their palette and the colors kept by value (and, in the widget form, a widget's color or scale)", text, StringComparison.Ordinal);
         Assert.Contains("in the colors chosen, but none of these actions, and the API refuses their requests (403)", text, StringComparison.Ordinal);
         Assert.Contains("(renaming, moving, duplicating or removing it, or saving its colors)", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>The section of the dashboard documentation on reference lines, steps and data labels: from its heading to the next section.</summary>
+    private static string AnnotationsSection(string text)
+    {
+        const string heading = "### Reference lines, steps and data labels\n";
+        var start = text.IndexOf(heading, StringComparison.Ordinal);
+        Assert.True(start >= 0, "docs/indicators-dashboard.md has no section 'Reference lines, steps and data labels'.");
+        var end = text.IndexOf("\n## ", start, StringComparison.Ordinal);
+        Assert.True(end > start, "The section on reference lines is not followed by another section.");
+        // It stays under "Widget types", before the section on series.
+        Assert.True(text.LastIndexOf("\n## ", start, StringComparison.Ordinal) == text.IndexOf("\n## Widget types", StringComparison.Ordinal), "The section on reference lines is not under 'Widget types'.");
+        return text[start..end];
     }
 
     /// <summary>The text of a source file of the page, or null when the page is not next to the API (a build of the API alone).</summary>

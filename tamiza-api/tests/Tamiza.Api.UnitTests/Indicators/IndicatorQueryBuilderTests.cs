@@ -925,4 +925,132 @@ public sealed class IndicatorQueryBuilderTests
         Assert.NotNull(plan.Sql);
         Assert.Null(plan.Boxes);
     }
+
+    // The overall value (design D4 of add-chart-annotations)
+
+    private static readonly WidgetRatio CoverageRatio = new("numerator", "denominator");
+
+    private static IndicatorQueryPlan Overall(
+        WidgetConfigInput input, string? chartType, IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null, bool overall = true, bool perRow = false) =>
+        IndicatorQueryBuilder.Plan(input.Normalize(), Columns, "UTC", From, 5000, perRow, dashboardFilters, chartType, overall);
+
+    /// <summary>A statement as text can be compared: its SQL and each parameter's name, type and value.</summary>
+    private static string Statement(IndicatorSql sql) =>
+        sql.Sql + "\n" + string.Join("\n", sql.Parameters.Select(p => $"{p.Name}|{p.Type}|{System.Text.Json.JsonSerializer.Serialize(p.Value)}"));
+
+    public static TheoryData<string> OverallChartTypes() => new() { ChartTypes.Bar, ChartTypes.Column, ChartTypes.Line };
+
+    [Theory]
+    [MemberData(nameof(OverallChartTypes))]
+    public void The_overall_statement_is_the_statement_of_a_stat_tile_over_the_same_config_and_filters(string chartType)
+    {
+        var input = new WidgetConfigInput(
+            "coverage", Ratio: CoverageRatio, GroupBy: "municipality", Filters: [new DataFilter("year", "range", Min: "2025", Max: "2026"), new DataFilter("municipality", "in", Values: ["Cali", "Palmira"])],
+            Sort: new WidgetSort(SortValues.ByValue, null, null, SortValues.Desc));
+        AppliedDashboardFilter[] dashboard =
+        [
+            new("municipality", DashboardFilterKinds.Text, Values: ["Cali"]),
+            new("year", DashboardFilterKinds.Number, Min: "2025", Max: "2025"),
+        ];
+
+        var plan = Overall(input, chartType, dashboard);
+        var tile = IndicatorQueryBuilder.Plan(WidgetQuery.For(ChartTypes.Stat, input.Normalize()).Normalize(), Columns, "UTC", From, 5000, dashboardFilters: dashboard, chartType: ChartTypes.Stat);
+
+        Assert.NotNull(plan.Overall);
+        Assert.Equal(Statement(tile.Sql!), Statement(plan.Overall));
+        Assert.DoesNotContain("GROUP BY", plan.Overall.Sql);
+        Assert.DoesNotContain("ORDER BY", plan.Overall.Sql);
+        Assert.Contains("HAVING", plan.Overall.Sql);
+        Assert.Contains("sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)", plan.Overall.Sql);
+        // The rows of the widget are planned as they are without the flag.
+        Assert.Equal(Statement(Overall(input, chartType, dashboard, overall: false).Sql!), Statement(plan.Sql!));
+    }
+
+    [Fact]
+    public void The_overall_statement_of_a_widget_without_filters_has_only_the_row_limit_parameter()
+    {
+        var plan = Overall(new WidgetConfigInput("coverage", Ratio: CoverageRatio, GroupBy: "municipality"), ChartTypes.Column);
+
+        Assert.Equal(["limit"], plan.Overall!.Parameters.Select(p => p.Name));
+    }
+
+    [Fact]
+    public void Without_the_flag_there_is_no_overall_statement()
+    {
+        var plan = Overall(new WidgetConfigInput("coverage", Ratio: CoverageRatio, GroupBy: "municipality"), ChartTypes.Column, overall: false);
+
+        Assert.Null(plan.Overall);
+        Assert.NotNull(plan.Sql);
+    }
+
+    [Fact]
+    public void A_widget_with_a_series_a_box_plot_a_histogram_per_row_and_a_stat_tile_have_no_overall_statement()
+    {
+        var series = Overall(new WidgetConfigInput("coverage", Ratio: CoverageRatio, GroupBy: "municipality", SeriesBy: "Odd \"name\""), ChartTypes.Column);
+        var box = Overall(new WidgetConfigInput("coverage", Measure: "value", GroupBy: "municipality"), ChartTypes.Boxplot);
+        var histogram = Overall(new WidgetConfigInput("coverage", Measure: "value"), ChartTypes.Histogram, perRow: true);
+        var tile = Overall(new WidgetConfigInput("coverage", Ratio: CoverageRatio), ChartTypes.Stat);
+        var tileWithAGroup = Overall(new WidgetConfigInput("coverage", Ratio: CoverageRatio, GroupBy: "municipality"), ChartTypes.Stat);
+
+        Assert.NotNull(series.Series);
+        Assert.Null(series.Overall);
+        Assert.NotNull(box.Boxes);
+        Assert.Null(box.Overall);
+        Assert.NotNull(histogram.Sql);
+        Assert.Null(histogram.Overall);
+        Assert.NotNull(tile.Sql);
+        Assert.Null(tile.Overall);
+        Assert.Null(tileWithAGroup.Overall);
+    }
+
+    [Fact]
+    public void A_pie_a_map_and_a_query_with_no_chart_type_answer_with_no_overall_whatever_the_request_asks()
+    {
+        var grouped = new WidgetConfigInput("coverage", Ratio: CoverageRatio, GroupBy: "municipality");
+        var pie = Overall(grouped, ChartTypes.Pie);
+        var map = Overall(grouped with { GeometryColumn = "geometry" }, ChartTypes.Map);
+        var untyped = Overall(grouped, null);
+        var bar = Overall(grouped, ChartTypes.Bar);
+
+        Assert.NotNull(pie.Sql);
+        Assert.Null(pie.Overall);
+        Assert.NotNull(map.Sql);
+        Assert.Null(map.Overall);
+        Assert.NotNull(untyped.Sql);
+        Assert.Null(untyped.Overall);
+        // The three kinds that draw a line still get it.
+        Assert.NotNull(bar.Overall);
+    }
+
+    [Fact]
+    public void An_overall_statement_does_not_change_the_rows_statement_or_the_pie_domain()
+    {
+        var input = new WidgetConfigInput("coverage", Ratio: CoverageRatio, GroupBy: "municipality");
+
+        var pie = Overall(input, ChartTypes.Pie);
+
+        Assert.NotNull(pie.Domain);
+        Assert.Equal(Statement(Overall(input, ChartTypes.Pie, overall: false).Domain!), Statement(pie.Domain));
+        Assert.Equal(Statement(Overall(input, ChartTypes.Pie, overall: false).Sql!), Statement(pie.Sql!));
+    }
+
+    [Fact]
+    public void The_overall_statement_of_a_measure_is_the_sum_of_every_row()
+    {
+        var plan = Overall(new WidgetConfigInput("coverage", Measure: "value", GroupBy: "municipality"), ChartTypes.Bar);
+
+        Assert.Contains("sum(\"value\")::double precision", plan.Overall!.Sql);
+        Assert.DoesNotContain("GROUP BY", plan.Overall.Sql);
+    }
+
+    [Fact]
+    public void A_widget_that_names_a_missing_column_has_no_overall_statement()
+    {
+        var plan = IndicatorQueryBuilder.Plan(
+            new WidgetConfigInput("coverage", Ratio: CoverageRatio, GroupBy: "gone").Normalize(), Columns, "UTC", From, 5000, chartType: ChartTypes.Column, overall: true);
+
+        Assert.Null(plan.Sql);
+        Assert.Null(plan.Overall);
+        Assert.Equal(["gone"], plan.MissingColumns);
+    }
 }

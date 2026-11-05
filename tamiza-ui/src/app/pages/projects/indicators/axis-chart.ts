@@ -2,15 +2,18 @@ import { LOCALE_ID, Component, ElementRef, computed, inject, input, viewChild } 
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { QueryResult, QueryRow, WidgetConfig, defaultBuckets } from '../../../core/projects/indicators.service';
 
+import { CategoryOrders, arrangeColumns, groupTexts, seriesTexts, shown } from './category-order';
 import { histogram, observeSize, pivot } from './chart-data';
-import { bandScale, charWidth, compactNumber, linePath, linearScale, niceAxis, truncate, Point } from './chart-scales';
+import { bandScale, charWidth, compactNumber, linePath, linearScale, niceAxis, stepPath, truncate, Point } from './chart-scales';
+import { Box, ReferenceMark, dashOf, dataLabelMargin, labelGap, minLabelBar, placeReferences, pointGap, referenceMargin, textWidth, boxOf } from './chart-annotations';
 import { ChartColors } from './chart-colors';
 import { CrosstabWidget, crossTableModel } from './crosstab-widget';
 import { registerExportParts } from './export-parts';
-import { ValueFormatter, plotted } from './format';
+import { ColumnNamer, ValueFormatter, captionShown, named, ownCaption, plotted, rawNames } from './format';
 import { MarkGrid, markTooltips } from './mark-tooltips';
-import { LegendEntry, SeriesLegend, SeriesNotes, seriesName, seriesNoteTexts } from './series-legend';
-import { Dot, Hit, Label, Line, Path, Rect, SeriesPlot, seriesPlot } from './series-plot';
+import { referenceLineValues } from './reference-lines';
+import { LegendEntry, ReferenceEntry, ReferenceKey, ReferenceList, SeriesLegend, SeriesNotes, seriesName, seriesNoteTexts } from './series-legend';
+import { Dot, Hit, Label, Line, Path, Rect, SeriesPlot, seriesPlot, writeDataLabel } from './series-plot';
 import { SeriesTable, buildSeriesTable, isSeriesAnswer } from './series-table';
 import { TableModel, WidgetTable } from './widget-table';
 import { countKey, isSingular } from '../../../core/i18n/plural';
@@ -35,26 +38,33 @@ const noMarks: MarkGrid = [];
  *
  * Its colors are never chosen here (add-dashboard-palettes, design D7): a series takes the color `colors` gives its value, a chart
  * with no series draws in the widget's own color, and a bar or column with a color kept for its group value in that one.
+ *
+ * The chart annotations of the widget's display (add-chart-annotations): its reference lines, dashed across the plot with their text at
+ * their end and listed in a key under it (design D5), steps for a line (D6) and data labels (D7). None of them is part of the query.
  */
 @Component({
   selector: 'app-axis-chart',
-  imports: [TranslocoDirective, CrosstabWidget, SeriesLegend, SeriesNotes, WidgetTable],
+  imports: [TranslocoDirective, CrosstabWidget, ReferenceKey, ReferenceList, SeriesLegend, SeriesNotes, WidgetTable],
   template: `
     <ng-container *transloco="let t">
       @if (legend().length > 1) {
         <!-- With a series the legend takes the caption's place: it names what the colors mean. -->
         <app-series-legend [entries]="legend()" [shape]="kind() === 'line' ? 'line' : 'square'" />
       } @else {
-        <p class="shrink-0 text-xs text-body" data-testid="chart-caption">{{ caption(t) }}</p>
+        <p class="shrink-0 text-xs text-body" [class.sr-only]="!captionShown(config())" data-testid="chart-caption">{{ caption(t) }}</p>
       }
       @if (asTable()) {
         @if (seriesTable()) {
-          <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()!" [config]="config()" [label]="label()" [format]="format()" [chartType]="kind()" />
+          <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()!" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [orders]="orders()" [chartType]="kind()" />
         } @else {
           <app-widget-table class="flex-1 overflow-auto" [model]="table(t)" />
         }
+        @if (referenceEntries().length) {
+          <app-reference-list [entries]="referenceEntries()" />
+        }
       } @else {
-        <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
+        <!-- With a key under it the plot is cut at its own box, never the key (design D5): the clip margin keeps the focus ring and stays inside the gap. -->
+        <div #box class="relative min-h-0 flex-1" [style.overflow]="referenceEntries().length > 0 ? 'clip' : null" [style.overflow-clip-margin]="referenceEntries().length > 0 ? '4px' : null" data-testid="chart-box">
           <svg
             #chartSvg
             [attr.role]="seriesTable() ? 'application' : 'img'"
@@ -115,6 +125,29 @@ const noMarks: MarkGrid = [];
                 }
               </circle>
             }
+            <!-- The reference lines, the values written on the marks and the texts at the lines' ends: over the marks and under the hit areas. -->
+            @for (line of layout().references; track $index) {
+              <line
+                class="stroke-heading"
+                stroke-width="1.5"
+                [attr.stroke-dasharray]="line.dash"
+                [attr.x1]="line.x1"
+                [attr.y1]="line.y1"
+                [attr.x2]="line.x2"
+                [attr.y2]="line.y2"
+                data-testid="reference-line"
+              >
+                @if (!seriesTable()) {
+                  <title>{{ line.text }}</title>
+                }
+              </line>
+            }
+            @for (label of layout().dataLabels; track $index) {
+              <text class="fill-heading stroke-neutral-primary-soft" font-size="11" stroke-width="3" stroke-linejoin="round" paint-order="stroke" aria-hidden="true" [attr.x]="label.x" [attr.y]="label.y" [attr.text-anchor]="label.anchor" data-testid="data-label">{{ label.text }}</text>
+            }
+            @for (label of layout().referenceLabels; track $index) {
+              <text class="fill-heading stroke-neutral-primary-soft" font-size="11" stroke-width="3" stroke-linejoin="round" paint-order="stroke" [attr.x]="label.x" [attr.y]="label.y" [attr.text-anchor]="label.anchor" data-testid="reference-label">{{ label.text }}</text>
+            }
             <!-- The areas that answer the pointer are larger than the marks (the gap between them included) and sit on top of them. -->
             @for (hit of layout().hits; track $index) {
               @if (hit.guide && marks.isLifted(hit.at.g, hit.at.s)) {
@@ -139,6 +172,10 @@ const noMarks: MarkGrid = [];
             <p class="sr-only" role="status" aria-live="polite" data-testid="marks-announcement">{{ marks.announcement() }}</p>
           }
         </div>
+        <!-- The key belongs to the chart: it takes its room from the plot as the caption does, above the widget's footnote (design D5). -->
+        @if (referenceEntries().length) {
+          <app-reference-key [entries]="referenceEntries()" />
+        }
         @if (seriesTable(); as table) {
           <app-series-notes [negativeLeftOut]="table.negativeLeftOut" />
         }
@@ -156,9 +193,15 @@ export class AxisChart {
   /** The whole answer of the widget's query. A widget with a series is drawn from its series, totals and cells; without it, from `rows`. */
   readonly answer = input<QueryResult | null>(null);
   readonly config = input.required<WidgetConfig>();
+  /** Whether the line that names what the widget plots is seen: a hidden one stays for screen readers (add-widget-context, design D3). */
+  protected readonly captionShown = captionShown;
   /** The indicator's label and the formatter of its values. */
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
+  /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
+  readonly names = input<ColumnNamer>(rawNames);
+  /** What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D8). */
+  readonly orders = input<CategoryOrders | null>(null);
   readonly asTable = input(false);
   /** The colors of the widget, from the dashboard's palette and the widget's own color. */
   readonly colors = input.required<ChartColors>();
@@ -170,8 +213,11 @@ export class AxisChart {
   /** The grid of a widget with a series (design D4), null for a chart without one and for a histogram. */
   protected readonly seriesTable = computed<SeriesTable | null>(() => {
     const kind = this.kind();
-    return kind !== 'histogram' && isSeriesAnswer(this.answer()) ? buildSeriesTable(this.answer()!, kind, this.config().layout) : null;
+    return kind !== 'histogram' && isSeriesAnswer(this.answer()) ? arrangeColumns(buildSeriesTable(this.answer()!, kind, this.config().layout), this.orders()) : null;
   });
+  /** The text each group and each series is shown with when its column hides numbered prefixes (design D5); null shows the value as it is. */
+  private readonly groupText = computed(() => (this.seriesTable() ? groupTexts(this.seriesTable()!, this.orders()) : null));
+  private readonly seriesText = computed(() => (this.seriesTable() ? seriesTexts(this.seriesTable()!, this.orders()) : null));
   /**
    * The series in their order with the names and colors the legend, the tooltips and the marks share. The color follows the series'
    * value (a color kept for it, else the next free color of the palette), and "Other" is the neutral.
@@ -186,8 +232,38 @@ export class AxisChart {
       this.config().seriesBy ?? '',
       table.columns.map((column) => ({ value: column.series, kind: column.kind })),
     );
-    return table.columns.map((column, i) => ({ name: seriesName(column, t), color: colors[i] }));
+    const texts = this.seriesText();
+    return table.columns.map((column, i) => ({ name: seriesName(column, t, texts), color: colors[i] }));
   });
+  /**
+   * The reference lines the chart draws, with the text each is written with (add-chart-annotations, design D3): `{label}: {value}`, the
+   * label being the widget's own or the kind's default, and the value written as the widget writes values, with the indicator's unit
+   * (a share, as the axis of that layout writes it, in a 100% layout). A line with no value is not here.
+   */
+  protected readonly references = computed<ReferenceMark[]>(() => {
+    const kind = this.kind();
+    const config = this.config();
+    if (kind === 'histogram' || !config.display?.referenceLines?.length) {
+      return [];
+    }
+    const answer = this.answer();
+    const lines = referenceLineValues(kind, config, { rows: this.rows(), overall: answer?.overall, totals: answer?.totals });
+    const format = this.format();
+    const asShare = kind !== 'line' && !!this.seriesTable() && (config.layout ?? 'grouped') === 'percent';
+    const share = new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 });
+    return lines.map((line) => {
+      const label: string = line.label ?? this.transloco.translate<string>(`indicators.referenceLines.kinds.${line.kind}`);
+      const figure = asShare ? share.format(line.value) : format(line.value);
+      return { value: line.value, place: line.place, label, figure, text: `${label}: ${figure}` };
+    });
+  });
+  /** The key under the plot and the list under the table: every line drawn, with its text and the dash it is drawn in. */
+  protected readonly referenceEntries = computed<ReferenceEntry[]>(() => this.references().map((mark) => ({ text: mark.text, dash: dashOf(mark.place) })));
+  /** Whether the line chart joins its points by steps (design D6). */
+  private readonly steps = computed(() => this.kind() === 'line' && this.config().display?.interpolation === 'step');
+  /** Whether the chart writes each value on its marks (design D7). */
+  private readonly dataLabels = computed(() => this.kind() !== 'histogram' && this.config().display?.dataLabels === true);
+
   private readonly seriesMarks = computed<SeriesPlot | null>(() => {
     const table = this.seriesTable();
     const kind = this.kind();
@@ -204,10 +280,14 @@ export class AxisChart {
       height: Math.max(120, this.size().height),
       names: entries.map((entry) => entry.name),
       colors: entries.map((entry) => entry.color),
-      groupLabel: (group) => group ?? this.transloco.translate('indicators.chart.noGroup'),
+      groupLabel: (group) => shown(this.groupText(), group) ?? this.transloco.translate('indicators.chart.noGroup'),
+      orders: this.orders(),
       value: this.format(),
       share: (value) => share.format(value),
-      what: plotted(this.config(), this.label()),
+      what: plotted(this.config(), this.label(), this.names()),
+      references: this.references(),
+      steps: this.steps(),
+      dataLabels: this.dataLabels(),
     });
   });
   /** The tooltips and the keyboard of the marks of a chart with a series. */
@@ -227,18 +307,23 @@ export class AxisChart {
         const legend = this.legend();
         const series = this.seriesTable();
         const withLegend = legend.length > 1;
+        // The reference lines (add-chart-annotations, design D9): in the legend, after the series, while the chart is drawn, and in the notes,
+        // after the table's own, while it is shown as a table. A chart without lines registers what it always did.
+        const lines = this.references();
+        const entries = [
+          ...(withLegend ? legend.map((entry) => ({ label: entry.name, color: entry.color, swatch: this.kind() === 'line' ? ('line' as const) : ('square' as const) })) : []),
+          ...(this.asTable() ? [] : lines.map((mark) => ({ label: mark.text, color: 'var(--color-heading, #111827)', swatch: 'dashed' as const, dash: mark.place }))),
+        ];
         const shared = {
           caption: withLegend ? null : this.caption(t),
-          legend: withLegend
-            ? { kind: 'entries' as const, entries: legend.map((entry) => ({ label: entry.name, color: entry.color, swatch: this.kind() === 'line' ? ('line' as const) : ('square' as const) })) }
-            : null,
+          legend: entries.length ? { kind: 'entries' as const, entries } : null,
           stat: null,
         };
         if (this.asTable()) {
           const table = series
-            ? crossTableModel(series, { type: this.kind(), config: this.config(), format: this.format(), locale: this.locale, t })
+            ? crossTableModel(series, { type: this.kind(), config: this.config(), format: this.format(), locale: this.locale, t, names: this.names(), orders: this.orders() })
             : this.table(t);
-          return { ...shared, notes: [], table };
+          return { ...shared, notes: lines.map((mark) => mark.text), table };
         }
         const notes = series ? seriesNoteTexts({ negativeLeftOut: series.negativeLeftOut, leftOut: 0, kind: null }, t, this.transloco.getActiveLang()) : [];
         return { ...shared, notes, table: null };
@@ -265,7 +350,7 @@ export class AxisChart {
       };
     }
     const empty = this.transloco.translate('indicators.chart.noGroup');
-    return { ranges: false, ...pivot(this.rows(), empty, kind === 'line' ? 'natural' : 'listed') };
+    return { ranges: false, ...pivot(this.rows(), empty, kind === 'line' ? 'natural' : 'listed', this.orders()) };
   });
 
   /** What the chart draws, one series or many: the plot of a widget with a series, else the plain layout, which has no hit areas. */
@@ -283,8 +368,12 @@ export class AxisChart {
     const w = Math.max(160, this.size().width);
     const h = Math.max(120, this.size().height);
     const count = categories.length;
-    const low = Math.min(0, ...values);
-    const high = Math.max(0, ...values);
+    // The value axis reaches every reference line (design D5), and the top margin grows for their texts and for the data labels.
+    const references = this.references();
+    const labelsOn = this.dataLabels();
+    const referenceValues = references.map((reference) => reference.value);
+    const low = Math.min(0, ...values, ...referenceValues);
+    const high = Math.max(0, ...values, ...referenceValues);
     const axis = low === 0 && high === 0 ? niceAxis(0, 1) : niceAxis(low, high);
     const grid: Line[] = [];
     const ticks: Label[] = [];
@@ -292,6 +381,9 @@ export class AxisChart {
     const rects: Rect[] = [];
     const lines: Path[] = [];
     const dots: Dot[] = [];
+    const dataLabels: Label[] = [];
+    /** The boxes of the texts already placed, which no later text may cover: the reference labels first, then the data labels. */
+    const taken: Box[] = [];
     // The widget's own color; a bar or a column whose group value has a color kept for it is drawn in that one (spec "One bar
     // highlighted"). A line and a histogram always use the widget's color.
     const colors = this.colors();
@@ -299,7 +391,7 @@ export class AxisChart {
     const groupBy = this.config().groupBy ?? '';
     const markColor = (i: number) => (kind === 'bar' || kind === 'column' ? (colors.kept(groupBy, groups[i]) ?? color) : color);
     const titleOf = (category: string, value: number) => `${category}: ${valueText(value)}`;
-    const top = 8;
+    const top = 8 + (references.length ? referenceMargin : 0) + (labelsOn && kind !== 'bar' ? dataLabelMargin : 0);
     const right = 14;
 
     if (kind === 'bar') {
@@ -307,14 +399,18 @@ export class AxisChart {
       const labelChars = Math.max(3, Math.min(Math.floor((w * 0.35) / charWidth), longest));
       const left = labelChars * charWidth + 14;
       const bottom = 24;
-      const x = linearScale([axis.min, axis.max], [left, w - right]);
       const bands = bandScale(count, [top, h - bottom], 0.25);
+      const thickness = Math.min(maxThickness, Math.max(1, bands.bandwidth));
+      // A bar thinner than a text line has no label, and the others keep the room past their end for the longest.
+      const barLabels = labelsOn && thickness >= minLabelBar;
+      const edge = right + (barLabels ? Math.max(0, ...values.map((value) => textWidth(valueText(value)))) + labelGap : 0);
+      const x = linearScale([axis.min, axis.max], [left, w - edge]);
+      const placed = placeReferences(references, true, x, { left, right: w - edge, top, bottom: h - bottom }, taken);
       const stride = Math.max(1, Math.ceil(minSlot / (bands.step || 1)));
       for (const tick of axis.ticks) {
         grid.push({ x1: x(tick), y1: top, x2: x(tick), y2: h - bottom, zero: tick === 0 });
         ticks.push({ x: x(tick), y: h - 8, text: tickText(tick), anchor: 'middle' });
       }
-      const thickness = Math.min(maxThickness, Math.max(1, bands.bandwidth));
       categories.forEach((category, i) => {
         if (i % stride === 0) {
           labels.push({ x: left - 6, y: bands.start(i) + bands.bandwidth / 2 + 4, text: truncate(category, labelChars), anchor: 'end', title: truncate(category, labelChars) === category ? undefined : category });
@@ -329,8 +425,15 @@ export class AxisChart {
           color: markColor(i),
           title: titleOf(category, values[i]),
         });
+        if (barLabels) {
+          const at = { x: values[i] >= 0 ? Math.max(zero, end) + labelGap : Math.min(zero, end) - labelGap, y: bands.start(i) + bands.bandwidth / 2 + 4, text: valueText(values[i]), anchor: values[i] >= 0 ? ('start' as const) : ('end' as const) };
+          // A negative bar that reaches the axis minimum has no room on its left: its label would cover the category names.
+          if (boxOf(at).x0 >= left) {
+            writeDataLabel(at, taken, dataLabels);
+          }
+        }
       });
-      return { width: w, height: h, grid, ticks, labels, rects, lines, dots };
+      return { width: w, height: h, grid, ticks, labels, rects, lines, dots, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
     }
 
     const tickTexts = axis.ticks.map((tick) => tickText(tick));
@@ -338,6 +441,7 @@ export class AxisChart {
     const bottom = 26;
     const y = linearScale([axis.min, axis.max], [h - bottom, top]);
     const bands = bandScale(count, [left, w - right], kind === 'line' ? 0 : kind === 'histogram' ? 0.06 : 0.3);
+    const placed = placeReferences(references, false, y, { left, right: w - right, top, bottom: h - bottom }, taken);
     axis.ticks.forEach((tick, i) => {
       grid.push({ x1: left, y1: y(tick), x2: w - right, y2: y(tick), zero: tick === 0 });
       ticks.push({ x: left - 6, y: y(tick) + 4, text: tickTexts[i], anchor: 'end' });
@@ -357,9 +461,18 @@ export class AxisChart {
         if (count <= 40) {
           dots.push({ cx: point.x, cy: point.y, color, title: titleOf(categories[i], values[i]) });
         }
+        if (labelsOn) {
+          // Above each point, left to right: a label off the plot or covering one already placed is left out.
+          const at = { x: point.x, y: point.y - pointGap, text: valueText(values[i]), anchor: 'middle' as const };
+          const box = boxOf(at);
+          if (box.x0 >= left && box.x1 <= w - labelGap) {
+            writeDataLabel(at, taken, dataLabels);
+          }
+        }
       });
-      lines.push({ d: points.length > 1 ? linePath(points) : '', color, name: this.label() });
-      return { width: w, height: h, grid, ticks, labels, rects, lines, dots };
+      const path = this.steps() ? stepPath : linePath;
+      lines.push({ d: points.length > 1 ? path(points) : '', color, name: ownCaption(this.config()) ?? this.label() });
+      return { width: w, height: h, grid, ticks, labels, rects, lines, dots, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
     }
 
     const thickness = Math.min(maxThickness, Math.max(1, bands.bandwidth));
@@ -374,16 +487,24 @@ export class AxisChart {
         color: markColor(i),
         title: titleOf(category, values[i]),
       });
+      // A column label sits above its end, or below a negative column, and is left out when it is wider than the column slot.
+      if (labelsOn && textWidth(valueText(values[i])) <= bands.step) {
+        const at = { x: bands.start(i) + bands.bandwidth / 2, y: values[i] >= 0 ? Math.min(zero, end) - labelGap : Math.max(zero, end) + labelGap + 10, text: valueText(values[i]), anchor: 'middle' as const };
+        // A negative column that reaches the axis minimum has no room below it: its label would cover the category names.
+        if (boxOf(at).y1 <= h - bottom + 2) {
+          writeDataLabel(at, taken, dataLabels);
+        }
+      }
     });
-    return { width: w, height: h, grid, ticks, labels, rects, lines, dots };
+    return { width: w, height: h, grid, ticks, labels, rects, lines, dots, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
   });
 
   protected caption(t: Translate): string {
     const config = this.config();
-    const what = plotted(config, this.label());
+    const what = plotted(config, this.label(), this.names());
     return this.kind() === 'histogram'
       ? t('indicators.chart.captionHistogram', { what, buckets: config.buckets ?? defaultBuckets })
-      : t('indicators.chart.caption', { what, group: config.groupBy });
+      : t('indicators.chart.caption', { what, group: named(this.names(), config.groupBy) });
   }
 
   protected keyHelp(): string {
@@ -393,7 +514,7 @@ export class AxisChart {
   /** The words for a chart with a series: its kind and layout, what it plots by what, how many groups and series, its range and highest cell. */
   private seriesSummary(t: Translate, table: SeriesTable): string {
     const config = this.config();
-    const what = plotted(config, this.label());
+    const what = plotted(config, this.label(), this.names());
     const cells = table.rows.flatMap((row) => row.cells.flatMap((cell, i) => (cell === null ? [] : [{ cell, group: row.group, column: table.columns[i] }])));
     if (!cells.length) {
       return t('indicators.chart.summaryEmpty', { what });
@@ -405,24 +526,31 @@ export class AxisChart {
     return t('indicators.series.summary', {
       kind: t(`indicators.series.kinds.${kind === 'line' ? 'line' : `${kind}${(config.layout ?? 'grouped')[0].toUpperCase()}${(config.layout ?? 'grouped').slice(1)}`}`),
       what,
-      group: config.groupBy,
-      series: config.seriesBy,
+      group: named(this.names(), config.groupBy),
+      series: named(this.names(), config.seriesBy),
       groups: t(countKey('indicators.series.groupsCount', table.rows.length, lang), { count: table.rows.length }),
       seriesCount: t(countKey('indicators.series.seriesCount', table.columns.length, lang), { count: table.columns.length }),
       min: format(Math.min(...cells.map((entry) => entry.cell))),
       max: format(Math.max(...cells.map((entry) => entry.cell))),
-      top: `${top.group ?? t('indicators.chart.noGroup')}, ${seriesName(top.column, t)}`,
+      top: `${shown(this.groupText(), top.group) ?? t('indicators.chart.noGroup')}, ${seriesName(top.column, t, this.seriesText())}`,
     });
   }
 
+  /** The chart's words for assistive technology, then the reference lines it draws with their values (design D5). */
   protected summary(t: Translate): string {
+    const words = this.chartSummary(t);
+    const references = this.references();
+    return references.length ? `${words} ${t('indicators.referenceLines.summary', { lines: references.map((reference) => `${reference.label} ${reference.figure}`).join(', ') })}` : words;
+  }
+
+  private chartSummary(t: Translate): string {
     const table = this.seriesTable();
     if (table) {
       return this.seriesSummary(t, table);
     }
     const { categories, values } = this.data();
     const config = this.config();
-    const what = plotted(config, this.label());
+    const what = plotted(config, this.label(), this.names());
     if (!values.length) {
       return t('indicators.chart.summaryEmpty', { what });
     }
@@ -430,7 +558,7 @@ export class AxisChart {
     const top = values.indexOf(Math.max(...values));
     return t(countKey(`indicators.chart.summary.${this.kind()}`, categories.length, this.transloco.getActiveLang()), {
       what,
-      group: config.groupBy,
+      group: named(this.names(), config.groupBy),
       count: categories.length,
       min: this.data().ranges ? this.whole.format(Math.min(...values)) : format(Math.min(...values)),
       max: this.data().ranges ? this.whole.format(Math.max(...values)) : format(Math.max(...values)),
@@ -440,10 +568,10 @@ export class AxisChart {
 
   protected table(t: Translate): TableModel {
     const { categories, values, ranges } = this.data();
-    const what = plotted(this.config(), this.label());
+    const what = plotted(this.config(), this.label(), this.names());
     const format = this.format();
     return {
-      headers: [ranges ? t('indicators.chart.range') : (this.config().groupBy ?? ''), ranges ? t('indicators.chart.rowsOf', { what }) : what],
+      headers: [ranges ? t('indicators.chart.range') : this.names()(this.config().groupBy ?? ''), ranges ? t('indicators.chart.rowsOf', { what }) : what],
       rows: categories.map((category, i) => [category, ranges ? this.whole.format(values[i]) : format(values[i])]),
     };
   }

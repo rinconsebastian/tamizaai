@@ -16,6 +16,11 @@ export type ImageFormat = 'png' | 'svg';
 export interface ImageJob {
   format: ImageFormat;
   title: string;
+  /** The widget's subtitle and footnote, whole; null when it has none (add-widget-context, design D8). */
+  subtitle: string | null;
+  footnote: string | null;
+  /** The widget hides its caption: the picture leaves out the line that names what is plotted, and a stat tile's description. */
+  captionHidden: boolean;
   /** The width of the widget's body on screen, to which the picture adds its margins. */
   bodyWidth: number;
   registration: ExportRegistration;
@@ -114,7 +119,9 @@ export async function makeImage(job: ImageJob, environment: ImageEnvironment, ra
     job.registration.settle();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    const parts = job.registration.parts();
+    const shown = job.registration.parts();
+    // An image holds no text meant only for screen readers, so a hidden caption is left out of it (design D3, D8).
+    const parts = job.captionHidden ? { ...shown, caption: null, stat: shown.stat ? { ...shown.stat, description: null } : null } : shown;
     const prefix = newPrefix();
     const source = job.registration.plot();
     let plot: SVGSVGElement | null = null;
@@ -127,6 +134,8 @@ export async function makeImage(job: ImageJob, environment: ImageEnvironment, ra
     const layout = composeImage({
       width: Math.max(minWidth, job.bodyWidth + 32),
       title: job.title,
+      subtitle: job.subtitle,
+      footnote: job.footnote,
       notesAbove: job.notesAbove,
       parts,
       plot,

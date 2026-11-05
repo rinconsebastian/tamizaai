@@ -88,6 +88,11 @@ public static class ReportHtml
             (text["dataPublished"], model.DataPublishedAt is { } at ? format.Moment(at) : text["dataNotPublished"]),
             (text["filters"], model.Filters.Count == 0 ? text["noFilters"] : string.Join("; ", model.Filters.Select(f => $"{f.Label}: {f.Value}"))),
         };
+        if (model.Source is { } source)
+        {
+            lines.Add((text["source"], source));
+        }
+
         html.Append(Row(
             "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"font-size:13px;color:#374151;\">"
             + string.Concat(lines.Select(l => $"<tr><td style=\"padding:2px 12px 2px 0;{Muted}vertical-align:top;\">{E(l.Label)}</td><td style=\"padding:2px 0;\">{E(l.Value)}</td></tr>"))
@@ -114,9 +119,15 @@ public static class ReportHtml
                     : $"<p style=\"margin:4px 0;font-size:13px;{Muted}\">{E(stat.Reason)}</p>";
                 cells.Append("<td width=\"33%\" style=\"padding:8px;vertical-align:top;border:1px solid #e5e7eb;\">")
                     .Append($"<p style=\"margin:0;font-size:13px;color:#374151;\">{E(stat.Title)}</p>")
-                    .Append(value)
-                    .Append($"<p style=\"margin:0;font-size:12px;{Muted}\">{E(stat.Caption)}</p>")
-                    .Append(Notes(stat.Notes))
+                    .Append(Subtitle(stat, "2px 0 0"))
+                    .Append(value);
+                if (!stat.CaptionHidden)
+                {
+                    cells.Append($"<p style=\"margin:0;font-size:12px;{Muted}\">{E(stat.Caption)}</p>");
+                }
+
+                cells.Append(Notes(stat.Notes))
+                    .Append(Footnote(stat))
                     .Append("</td>");
             }
 
@@ -126,6 +137,14 @@ public static class ReportHtml
         html.Append(Row(cells.Append("</table>").ToString()));
     }
 
+    /// <summary>A widget's subtitle, under its title; nothing when it has none.</summary>
+    private static string Subtitle(ReportWidget widget, string margin) =>
+        widget.Subtitle is { } subtitle ? $"<p style=\"margin:{margin};font-size:12px;{Muted}\">{E(subtitle)}</p>" : "";
+
+    /// <summary>A widget's footnote, after everything else it shows; nothing when it has none.</summary>
+    private static string Footnote(ReportWidget widget) =>
+        widget.Footnote is { } footnote ? $"<p style=\"margin:6px 0 0;font-size:12px;{Muted}\">{E(footnote)}</p>" : "";
+
     private static string Notes(IReadOnlyList<string> notes) =>
         string.Concat(notes.Select(n => $"<p style=\"margin:4px 0 0;font-size:12px;color:#92400e;\">{E(n)}</p>"));
 
@@ -134,11 +153,16 @@ public static class ReportHtml
     {
         var html = new StringBuilder();
         html.Append($"<h2 style=\"margin:16px 0 2px;font-size:16px;color:#111827;\">{E(widget.Title)}</h2>")
-            .Append($"<p style=\"margin:0 0 6px;font-size:12px;{Muted}\">{E(widget.Caption)}</p>")
-            .Append(Notes(widget.Notes));
+            .Append(Subtitle(widget, "0 0 4px"));
+        if (!widget.CaptionHidden)
+        {
+            html.Append($"<p style=\"margin:0 0 6px;font-size:12px;{Muted}\">{E(widget.Caption)}</p>");
+        }
+
+        html.Append(Notes(widget.Notes));
         if (widget.Reason is { } reason)
         {
-            html.Append($"<p style=\"margin:4px 0;font-size:13px;color:#374151;\">{E(reason)}</p>");
+            html.Append($"<p style=\"margin:4px 0;font-size:13px;color:#374151;\">{E(reason)}</p>").Append(Footnote(widget));
             return Row(html.ToString(), "0 24px");
         }
 
@@ -172,8 +196,13 @@ public static class ReportHtml
             html.Append($"<p style=\"margin:4px 0 0;font-size:12px;{Muted}\">{E(model.Text.MoreColumns(widget.HiddenSeriesColumns))}</p>");
         }
 
+        html.Append(ReferenceLines(widget)).Append(Footnote(widget));
         return Row(html.ToString(), "0 24px");
     }
+
+    /// <summary>The reference lines of a chart, one muted paragraph each in the widget's order, after the table and before the footnote; nothing when it has none.</summary>
+    private static string ReferenceLines(ReportWidget widget) =>
+        string.Concat(widget.ReferenceLines.Select(line => $"<p style=\"margin:4px 0 0;font-size:12px;{Muted}\">{E(line.Line)}</p>"));
 
     private static string NotShown(ReportModel model, IReadOnlyList<ReportWidget> left) =>
         left.Count == 0
@@ -206,6 +235,10 @@ public static class ReportPlainText
             .AppendLine($"{text["generated"]}: {format.Moment(model.GeneratedAt)}")
             .AppendLine($"{text["dataPublished"]}: {(model.DataPublishedAt is { } at ? format.Moment(at) : text["dataNotPublished"])}")
             .AppendLine($"{text["filters"]}: {(model.Filters.Count == 0 ? text["noFilters"] : string.Join("; ", model.Filters.Select(f => $"{f.Label}: {f.Value}")))}");
+        if (model.Source is { } source)
+        {
+            body.AppendLine($"{text["source"]}: {source}");
+        }
 
         var stats = model.Stats.ToList();
         if (stats.Count > 0)
@@ -213,10 +246,20 @@ public static class ReportPlainText
             body.AppendLine().AppendLine(text["indicators"]);
             foreach (var stat in stats)
             {
-                body.AppendLine($"- {stat.Title}: {stat.StatValue ?? stat.Reason} ({stat.Caption})");
+                body.AppendLine($"- {stat.Title}: {stat.StatValue ?? stat.Reason}{(stat.CaptionHidden ? "" : $" ({stat.Caption})")}");
+                if (stat.Subtitle is { } subtitle)
+                {
+                    body.AppendLine($"  {subtitle}");
+                }
+
                 foreach (var note in stat.Notes)
                 {
                     body.AppendLine($"  {note}");
+                }
+
+                if (stat.Footnote is { } footnote)
+                {
+                    body.AppendLine($"  {footnote}");
                 }
             }
         }
@@ -231,7 +274,17 @@ public static class ReportPlainText
                 continue;
             }
 
-            body.AppendLine().AppendLine(widget.Title).AppendLine(widget.Caption);
+            body.AppendLine().AppendLine(widget.Title);
+            if (widget.Subtitle is { } blockSubtitle)
+            {
+                body.AppendLine(blockSubtitle);
+            }
+
+            if (!widget.CaptionHidden)
+            {
+                body.AppendLine(widget.Caption);
+            }
+
             foreach (var note in widget.Notes)
             {
                 body.AppendLine(note);
@@ -240,6 +293,11 @@ public static class ReportPlainText
             if (widget.Reason is { } reason)
             {
                 body.AppendLine(reason);
+                if (widget.Footnote is { } reasonFootnote)
+                {
+                    body.AppendLine(reasonFootnote);
+                }
+
                 continue;
             }
 
@@ -258,6 +316,16 @@ public static class ReportPlainText
             if (widget.HiddenSeriesColumns > 0)
             {
                 body.AppendLine(text.MoreColumns(widget.HiddenSeriesColumns));
+            }
+
+            foreach (var line in widget.ReferenceLines)
+            {
+                body.AppendLine(line.Line);
+            }
+
+            if (widget.Footnote is { } blockFootnote)
+            {
+                body.AppendLine(blockFootnote);
             }
         }
 

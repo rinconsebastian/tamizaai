@@ -48,16 +48,41 @@ public sealed class McpDashboardTools(
         "and value is matched as exact text, case and spaces included, so female does not color Female.";
 
     private const string DisplayHelp =
-        "config.display = { color, ramp, orientation } sets how the widget is drawn, all optional. color is a place in the dashboard's palette, 1 to 8 (not a color code; 1 when left out), " +
+        "config.display = { color, ramp, orientation, labels } sets how the widget is drawn, all optional. color is a place in the dashboard's palette, 1 to 8 (not a color code; 1 when left out), " +
         "for a bar, column or line chart with no seriesBy, for a histogram and for a boxplot. ramp is a sequential scale, one of blue, teal, green, orange, red, purple or gray, " +
         "for a map or heatmap only; left out, the palette's own scale. The scale is matched exactly, in lower case: Green is refused. " +
         "orientation is vertical (the default) or horizontal, matched exactly in lower case, for a boxplot only. " +
+        "labels = { column: name } gives up to 10 of the widget's columns a name of 1 to 80 characters, on every kind; left out, a column takes its indicator's label (save_script columns), else its own name. " +
         "A widget with a series takes its colors from its series, and no other kind has a color of its own.";
+
+    /// <summary>The widget's texts (design D12 of the widget context): said once, after <see cref="DisplayHelp"/>, whose pinned sentence stays as it is.</summary>
+    private const string ContextHelp =
+        "config.display also takes the widget's texts, on every chart type: subtitle (1 to 200 characters), footnote (1 to 500), " +
+        "caption = { text } (1 to 200; it replaces the indicator's name wherever the widget names what it plots) or { hidden: true } (no caption line; tooltips and tables still name what is plotted), " +
+        "unit (1 to 32; it replaces the indicator's unit for this widget) and showDescription: true (a button that shows the indicator's description). None of them may hold a line break.";
+
+    /// <summary>The widget's chart annotations (design D11 of add-chart-annotations): said once, after <see cref="ContextHelp"/>; <see cref="DisplayHelp"/>'s pinned sentence stays as it is.</summary>
+    private const string AnnotationsHelp =
+        "config.display also takes referenceLines, interpolation and dataLabels. " +
+        "referenceLines is up to 4 lines on a bar, column or line: [{ kind, value, label }] with kind mean or median (of the bars drawn; not with a seriesBy), " +
+        "overall (the ratio's value over all the widget's rows, as a stat tile with the same filters shows; needs a ratio; over the answers of one question it is only the mean of the bars, not a total) " +
+        "or value (a number in the indicator's units, 0.5 for 50%; the only kind with a value; in a percent layout a share from 0 to 1); label is optional, 1 to 40 characters. " +
+        "interpolation is linear (the default) or step, for a line only. " +
+        "dataLabels true writes each value on a bar, column (no seriesBy or layout grouped), line or pie.";
+
+    /// <summary>A widget's own order of values (design D12 of add-declared-category-order): said once, after <see cref="AnnotationsHelp"/>.</summary>
+    private const string OrderHelp =
+        "config.display.order = { group, series } lists values, as full text, in the order to draw them (up to 100 each); the others follow in the chart's order. " +
+        "group is refused with a sort (a boxplot's median order included), series without a series column and on a pyramid or likert.";
+
+    private const string SourceHelp =
+        "A dashboard's source says where its data comes from, such as the survey (1 to 300 characters, no line break); an empty text removes it.";
 
     /// <summary>What only a change of an existing widget needs: a new chart type alone keeps the old config, display included.</summary>
     private const string ChartTypeChangeHelp =
-        "To change the chart type of a widget that has a color, a scale or an orientation, also send a config without the display fields the new type does not take: " +
-        "a new chartType alone keeps the old config, so it is refused, with an error on config.display.color, config.display.ramp or config.display.orientation, when the new type does not take them.";
+        "To change the chart type of a widget that has a color, a scale, an orientation, reference lines, steps, data labels or an order, also send a config without the display fields the new type does not take: " +
+        "a new chartType alone keeps the old config, so it is refused, with an error on config.display.color, config.display.ramp, config.display.orientation, " +
+        "config.display.referenceLines, config.display.interpolation, config.display.dataLabels or config.display.order, when the new type does not take them.";
 
     /// <summary>The most characters of a request's <c>change</c>, as <c>dashboard_versions.note</c> keeps it (design D1, D10 of dashboard versions).</summary>
     internal const int MaxChangeLength = 120;
@@ -70,7 +95,7 @@ public sealed class McpDashboardTools(
     // Indicators
 
     [McpServerTool(Name = "list_indicators", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "List the indicators"),
-     Description("The project's indicators with their label, description, unit, format, whether each has published a table, how many rows it has and when, and the limits of dashboards (widgets per dashboard, rows per widget, dashboards per project).")]
+     Description("The project's indicators with their label, description, unit, format, the labels of their columns (columns), whether each has published a table, how many rows it has and when, and the limits of dashboards (widgets per dashboard, rows per widget, dashboards per project).")]
     public Task<CallToolResult> ListIndicators([Description(ProjectHelp)] Guid projectId, CancellationToken ct = default) =>
         RunAsync(async () =>
         {
@@ -79,18 +104,20 @@ public sealed class McpDashboardTools(
         });
 
     [McpServerTool(Name = "get_indicator_columns", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Get the columns of an indicator's table"),
-     Description("Every column of one indicator's published table, the numeric columns a widget can plot as a measure, and the defaults a new widget would use (measure and group column). Needs the indicator to have published.")]
+     Description("Every column of one indicator's published table, with its label when its indicator gives it one (and its order, last and stripPrefix when it declares them), the numeric columns a widget can plot as a measure, and the defaults a new widget would use (measure and group column). Needs the indicator to have published.")]
     public Task<CallToolResult> GetIndicatorColumns(
         [Description(ProjectHelp)] Guid projectId, [Description("The indicator's name, from list_indicators.")] string name, CancellationToken ct = default) =>
         RunAsync(async () =>
         {
             await Gate.RequireAsync(projectId, ProjectRole.Viewer, McpNeeds.Summaries, ct);
-            return McpResults.Unwrap<IndicatorColumns>(await IndicatorEndpoints.GetColumnsAsync(projectId, name, indicators, ct));
+            return McpResults.Unwrap<IndicatorColumns>(await IndicatorEndpoints.GetColumnsAsync(projectId, name, indicators, db, ct));
         });
 
     [McpServerTool(Name = "query_indicator", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Preview what a widget would plot"),
      Description("Runs a widget query without saving anything and returns what the widget would plot: the measure summed (or the ratio of two columns' sums) per group, or for a boxplot the spread of the rows of each group, formatted with the indicator's format and unit. " +
-                 "Use it before create_widget. config = { indicator, measure | ratio: { numerator, denominator }, groupBy, seriesBy, layout, pyramid: { left, right }, scale: [{ value, side }], filters: [{ column, op, value | values | min | max }], geometryColumn, buckets, sort: { by: \"value\", direction } for a boxplot }. " +
+                 "Use it before create_widget. config = { indicator, measure | ratio: { numerator, denominator }, groupBy, seriesBy, layout, pyramid: { left, right }, scale: [{ value, side }], filters: [{ column, op, value | values | min | max }], geometryColumn, buckets, sort: { by: \"value\", direction } for a boxplot, display: { labels, referenceLines, order } }. " +
+                 "The result's labels name the columns the widget would show (display.labels over the indicator's labels), for those that have a name other than their own. " +
+                 "With a chartType and display.referenceLines, the result's referenceLines gives each line drawn: { kind, label, value, formatted } (an overall line is the figure a stat tile with the same filters shows). " +
                  "A bar, column, line, pie, map, heatmap, pyramid, likert or crosstab needs groupBy; a stat tile, a histogram and a boxplot do not. " + SeriesHelp + " " + BoxplotHelp + " " +
                  "At most the widget row limit of rows come back and the result says when it is reached.")]
     public Task<CallToolResult> QueryIndicator(
@@ -101,22 +128,31 @@ public sealed class McpDashboardTools(
         RunAsync(async () =>
         {
             await Gate.RequireAsync(projectId, ProjectRole.Viewer, McpNeeds.Summaries, ct);
+            // A preview of a config with an overall line asks for the overall value, as a saved widget does (design D11); no tool argument sets it.
+            var normalized = config.Normalize();
+            var overall = chartType is not null && WidgetQuery.Overall(chartType, normalized);
             var response = McpResults.Unwrap<IndicatorQueryResponse>(
-                await IndicatorEndpoints.QueryAsync(projectId, new IndicatorQueryRequest(config, chartType), indicators, ct));
+                await IndicatorEndpoints.QueryAsync(projectId, new IndicatorQueryRequest(config, chartType, Overall: overall ? true : null), indicators, ct));
             var meta = await MetaAsync(projectId, ct);
             var info = meta.GetValueOrDefault(config.Indicator ?? "");
-            var series = response.Series is null ? null : SeriesPayload.From(response, chartType ?? ChartTypes.Bar, config.Layout, info);
-            var boxes = response.Boxes is null ? null : BoxPayload.From(response.Boxes, info);
+            // What the widget would declare for the order of its values (add-declared-category-order, design D12): its own order over the
+            // indicator's. Null when it declares nothing, and the result is then built as it always was.
+            var orders = CategoryOrder.For(chartType ?? ChartTypes.Bar, normalized, info?.Columns);
+            var series = response.Series is null ? null : SeriesPayload.From(response, chartType ?? ChartTypes.Bar, config.Layout, info, orders);
+            var boxes = response.Boxes is null ? null : BoxPayload.From(response.Boxes, info, orders);
             return new
             {
                 indicator = config.Indicator,
                 label = info?.Label ?? config.Indicator,
                 format = info?.Format,
                 unit = info?.Unit,
+                labels = LabelsOf(chartType ?? ChartTypes.Bar, normalized, info),
+                // A preview that plots nothing draws no line: no rows, no key, as the widget data and the email do.
+                referenceLines = chartType is null || response.Rows.Count == 0 ? null : ReferenceLinesOf(chartType, normalized, response, info),
                 response.Published,
                 missing = response.Missing.Any ? response.Missing : null,
                 response.RowLimitReached,
-                rows = series is null && boxes is null ? response.Rows.Select(r => Row(r, info)).ToList() : null,
+                rows = series is null && boxes is null ? RowsOf(response.Rows, chartType ?? ChartTypes.Bar, orders).Select(r => Row(r, info)).ToList() : null,
                 boxes,
                 series = series?.Series,
                 cells = series?.Cells,
@@ -156,7 +192,7 @@ public sealed class McpDashboardTools(
         });
 
     [McpServerTool(Name = "get_dashboard", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Get a dashboard"),
-     Description("One dashboard with its filters, its palette and the colors it keeps by value (palette, valueColors), its widgets in reading order (each widget's id, title, chart type, query and display (config) and layout on the 12-column grid) and the number of its current version, which restore_dashboard_version needs as baseVersion. Use get_widget_data for what the widgets show.")]
+     Description("One dashboard with its filters, its palette and the colors it keeps by value (palette, valueColors), its source when it has one, its widgets in reading order (each widget's id, title, chart type, query and display (config) and layout on the 12-column grid) and the number of its current version, which restore_dashboard_version needs as baseVersion. Use get_widget_data for what the widgets show.")]
     public Task<CallToolResult> GetDashboard(
         [Description(ProjectHelp)] Guid projectId, [Description(DashboardHelp)] Guid dashboardId, CancellationToken ct = default) =>
         RunAsync(async () =>
@@ -168,6 +204,9 @@ public sealed class McpDashboardTools(
     [McpServerTool(Name = "get_widget_data", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Get what the widgets show"),
      Description("What the widgets of a dashboard (or one widget) show, as a member opening the dashboard sees it: for each widget its rows (group and value, with the value formatted as the dashboard formats it), " +
                  "or the message the widget shows when its indicator has not published, a column is gone or there are no rows. A widget with a series (seriesBy) returns series, cells ({ group, series, value, formatted, share? }), totals and notes instead of rows, and a boxplot returns boxes instead of rows. " +
+                 "Each widget's labels gives the name shown for each column it names (its measure or ratio, group, series and map tooltip columns) that has a label, its own or its indicator's; a widget whose columns have none has no labels. " +
+                 "Each widget's result also gives its subtitle, footnote and own caption text when it has them, and its values are formatted with the widget's own unit when it has one. " +
+                 "A bar, column or line with reference lines also gives referenceLines: { kind, label, value, formatted } for each line drawn. " +
                  "Dashboard filters are at their defaults unless you pass filterValues: [{ column, values | min | max }].")]
     public Task<CallToolResult> GetWidgetData(
         [Description(ProjectHelp)] Guid projectId,
@@ -235,11 +274,11 @@ public sealed class McpDashboardTools(
             };
         });
 
-    [McpServerTool(Name = "update_dashboard", Title = "Rename, move or set the filters or colors of a dashboard", Idempotent = true, OpenWorld = false, Destructive = false),
-     Description("Renames a dashboard, moves it to a position (1 = first), replaces its filters (up to 8; each { column, label, kind: text | boolean | number | date, default? }) or sets its colors: its palette and the colors it keeps by value (up to 64). " +
-                 "Give any of name, position, filters, palette and valueColors; what you leave out keeps its value. " +
-                 "A filter narrows every widget whose indicator table has its column with a type of its kind. " + ColorsHelp + " " +
-                 "A color change is one more commit of the same request, so a call that renames and sets colors makes one version.")]
+    [McpServerTool(Name = "update_dashboard", Title = "Rename, move or set the filters, colors or source of a dashboard", Idempotent = true, OpenWorld = false, Destructive = false),
+     Description("Renames a dashboard, moves it to a position (1 = first), replaces its filters (up to 8; each { column, label, kind: text | boolean | number | date, default? }), sets its colors: its palette and the colors it keeps by value (up to 64), or sets its source. " +
+                 "Give any of name, position, filters, palette, valueColors and source; what you leave out keeps its value. " +
+                 "A filter narrows every widget whose indicator table has its column with a type of its kind. " + ColorsHelp + " " + SourceHelp + " " +
+                 "A color or source change is one more commit of the same request, so a call that renames and sets colors or a source makes one version.")]
     public Task<CallToolResult> UpdateDashboard(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
@@ -249,17 +288,18 @@ public sealed class McpDashboardTools(
         [Description("Optional. The whole list of filters, replacing the current one; an empty list removes them all.")] DashboardFilterInput[]? filters = null,
         [Description("Optional. The dashboard's palette: tamiza, institutional, earth or vivid, in lower case exactly as written (Vivid is refused). The colors kept by value stay as they are unless you also give valueColors.")] string? palette = null,
         [Description("Optional. The whole list of colors kept by value, [{ column, value, color }] with color 1 to 8, replacing the current one; an empty list removes them all. The palette stays as it is unless you also give palette.")] ValueColorInput[]? valueColors = null,
+        [Description("Optional. Where the dashboard's data comes from, such as the survey: 1 to 300 characters with no line break. Left out, the source stays as it is; an empty text removes it.")] string? source = null,
         CancellationToken ct = default) =>
         RunAsync(async () =>
         {
             var request = RequireChange(change);
             await Gate.RequireAsync(projectId, ProjectRole.Analyst, McpNeeds.Summaries, ct);
-            if (name is null && position is null && filters is null && palette is null && valueColors is null)
+            if (name is null && position is null && filters is null && palette is null && valueColors is null && source is null)
             {
-                throw McpRefusal.Validation(new Dictionary<string, string[]> { ["name"] = ["Give a name, a position, filters, a palette or colors kept by value to change."] });
+                throw McpRefusal.Validation(new Dictionary<string, string[]> { ["name"] = ["Give a name, a position, filters, a palette, colors kept by value or a source to change."] });
             }
 
-            // Up to four commits: a rename that is saved before the filters or the colors are refused is still recorded (design D3).
+            // Up to five commits: a rename that is saved before the filters, the colors or the source are refused is still recorded (design D3).
             var recorded = await RecordAsync(request, async () =>
             {
                 if (name is not null)
@@ -277,13 +317,18 @@ public sealed class McpDashboardTools(
                     await SaveColorsAsync(projectId, dashboardId, palette, valueColors, ct);
                 }
 
+                if (source is not null)
+                {
+                    McpResults.Unwrap(await DashboardEndpoints.SaveSourceAsync(projectId, dashboardId, new DashboardSourceRequest(source), db, versions, user, time, ct));
+                }
+
                 if (position is { } place)
                 {
                     await MoveAsync(projectId, dashboardId, place, ct);
                 }
             });
 
-            var current = await db.Dashboards.AsNoTracking().Where(d => d.Id == dashboardId && d.ProjectId == projectId).Select(d => new { d.Name, d.Filters, d.Palette, d.ValueColors }).SingleOrDefaultAsync(ct);
+            var current = await db.Dashboards.AsNoTracking().Where(d => d.Id == dashboardId && d.ProjectId == projectId).Select(d => new { d.Name, d.Filters, d.Palette, d.ValueColors, d.Source }).SingleOrDefaultAsync(ct);
             return new
             {
                 id = dashboardId,
@@ -292,12 +337,13 @@ public sealed class McpDashboardTools(
                 filters = current is null ? null : DashboardEndpoints.ReadFilters(current.Filters),
                 palette = current?.Palette,
                 valueColors = current is null ? null : DashboardEndpoints.ReadValueColors(current.ValueColors),
+                source = current?.Source,
                 dashboardVersions = await VersionsOfAsync(projectId, recorded, [dashboardId], ct),
             };
         });
 
     [McpServerTool(Name = "duplicate_dashboard", Title = "Duplicate a dashboard", Idempotent = false, OpenWorld = false, Destructive = false),
-     Description("Copies a dashboard with all its widgets, filters, palette and colors kept by value right after the original, under a new name. Fails at 10 dashboards.")]
+     Description("Copies a dashboard with all its widgets, filters, palette, colors kept by value and source right after the original, under a new name. Fails at 10 dashboards.")]
     public Task<CallToolResult> DuplicateDashboard(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
@@ -343,15 +389,15 @@ public sealed class McpDashboardTools(
 
     [McpServerTool(Name = "create_widget", Title = "Add a widget to a dashboard", Idempotent = false, OpenWorld = false, Destructive = false),
      Description("Adds a widget: a stat tile, bar, column, line, histogram, pie chart, map, heat map, population pyramid, diverging Likert chart, cross table or box plot, with a title and a query over one indicator's table. Check the query with query_indicator first. " +
-                 "config = { indicator, measure | ratio: { numerator, denominator }, groupBy, seriesBy, layout, pyramid: { left, right }, scale: [{ value, side }], filters, geometryColumn, buckets, sort, tooltip, display: { color, ramp, orientation } }. " +
-                 "Every kind but stat tile, histogram and box plot needs groupBy; a map also needs geometryColumn (WKT in degrees). sort orders a bar or column, and a boxplot by value (its median) only. " + SeriesHelp + " " + BoxplotHelp + " " + DisplayHelp + " " +
+                 "config = { indicator, measure | ratio: { numerator, denominator }, groupBy, seriesBy, layout, pyramid: { left, right }, scale: [{ value, side }], filters, geometryColumn, buckets, sort, tooltip, display: { color, ramp, orientation, labels, subtitle, footnote, caption, unit, showDescription, referenceLines, interpolation, dataLabels, order } }. " +
+                 "Every kind but stat tile, histogram and box plot needs groupBy; a map also needs geometryColumn (WKT in degrees). sort orders a bar or column, and a boxplot by value (its median) only. " + SeriesHelp + " " + BoxplotHelp + " " + DisplayHelp + " " + ContextHelp + " " + AnnotationsHelp + " " + OrderHelp + " " +
                  "It goes under the dashboard's widgets unless you give layout = { x, y, w, h } on the 12-column grid. A dashboard holds a limited number of widgets.")]
     public Task<CallToolResult> CreateWidget(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
         [Description("The widget's title, up to 200 characters.")] string title,
         [Description(ChartTypeHelp)] string chartType,
-        [Description("The widget's query, and optionally its display (color, scale or orientation).")] WidgetConfigInput config,
+        [Description("The widget's query, and optionally its display (color, scale, orientation, column labels, texts, reference lines, steps, data labels or the order of its values).")] WidgetConfigInput config,
         [Description(ChangeHelp)] string change,
         [Description("Optional. Position and size on the grid.")] WidgetLayout? layout = null,
         CancellationToken ct = default) =>
@@ -365,7 +411,7 @@ public sealed class McpDashboardTools(
         });
 
     [McpServerTool(Name = "update_widget", Title = "Change or move a widget", Idempotent = true, OpenWorld = false, Destructive = false),
-     Description("Changes a widget's title, chart type, query or layout, or moves it to another dashboard of the project with moveToDashboardId (it lands under that dashboard's widgets). What you leave out keeps its value; a new config replaces the old one whole, including its series settings and its display. " + DisplayHelp + " " + ChartTypeChangeHelp)]
+     Description("Changes a widget's title, chart type, query or layout, or moves it to another dashboard of the project with moveToDashboardId (it lands under that dashboard's widgets). What you leave out keeps its value; a new config replaces the old one whole, including its series settings and its display. " + DisplayHelp + " " + ContextHelp + " " + AnnotationsHelp + " " + OrderHelp + " " + ChartTypeChangeHelp)]
     public Task<CallToolResult> UpdateWidget(
         [Description(ProjectHelp)] Guid projectId,
         [Description(DashboardHelp)] Guid dashboardId,
@@ -373,7 +419,7 @@ public sealed class McpDashboardTools(
         [Description(ChangeHelp)] string change,
         [Description("Optional. The new title.")] string? title = null,
         [Description("Optional. The new chart type: " + ChartTypeHelp)] string? chartType = null,
-        [Description("Optional. The new query and display (color, scale or orientation), replacing the old ones.")] WidgetConfigInput? config = null,
+        [Description("Optional. The new query and display (color, scale, orientation, column labels, texts, reference lines, steps, data labels or the order of its values), replacing the old ones.")] WidgetConfigInput? config = null,
         [Description("Optional. The new position and size on the grid.")] WidgetLayout? layout = null,
         [Description("Optional. Another dashboard of the project to move the widget to.")] Guid? moveToDashboardId = null,
         CancellationToken ct = default) =>
@@ -571,14 +617,71 @@ public sealed class McpDashboardTools(
         return index < 0 ? null : index + 1;
     }
 
-    internal sealed record IndicatorInfo(string Label, string? Unit, string Format);
+    /// <param name="Columns">What the indicator's current version says about its columns (their labels); null when it says nothing.</param>
+    internal sealed record IndicatorInfo(string Label, string? Unit, string Format, IReadOnlyDictionary<string, IndicatorColumnMetadata>? Columns = null);
 
     private async Task<Dictionary<string, IndicatorInfo>> MetaAsync(Guid projectId, CancellationToken ct) =>
         (await ScriptEndpoints.CurrentIndicatorsAsync(db, projectId, ct))
             .Where(v => v.Name is not null)
-            .ToDictionary(v => v.Name!, v => new IndicatorInfo(v.Label ?? v.Name!, v.Unit, v.Format ?? ReportFormat.Decimal), StringComparer.Ordinal);
+            .ToDictionary(v => v.Name!, v => new IndicatorInfo(v.Label ?? v.Name!, v.Unit, v.Format ?? ReportFormat.Decimal, v.Columns), StringComparer.Ordinal);
+
+    /// <summary>
+    /// The name shown for each column a widget names, for those whose name shown differs from the column (design D11): its measure or its
+    /// ratio's two columns, the group and series columns its query uses, and the tooltip columns of a map that have no label of their own.
+    /// Null when no column has a label, so a widget that labels nothing returns what it returned before.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>? LabelsOf(string chartType, WidgetConfig config, IndicatorInfo? info)
+    {
+        var names = ColumnLabels.For(info?.Columns, config.Display?.Labels);
+        var query = WidgetQuery.For(chartType, config);
+        var columns = new List<string?>();
+        if (config.Ratio is { } ratio)
+        {
+            columns.Add(ratio.Numerator);
+            columns.Add(ratio.Denominator);
+        }
+        else
+        {
+            columns.Add(config.Measure);
+        }
+
+        columns.Add(query.GroupBy);
+        columns.Add(query.SeriesBy);
+        if (chartType == ChartTypes.Map)
+        {
+            columns.AddRange(config.Tooltip.Where(item => string.IsNullOrWhiteSpace(item.Label)).Select(item => item.Column));
+        }
+
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var column in columns.Where(c => !string.IsNullOrEmpty(c)).Distinct(StringComparer.Ordinal))
+        {
+            var shown = names(column!);
+            if (!string.Equals(shown, column, StringComparison.Ordinal))
+            {
+                labels[column!] = shown;
+            }
+        }
+
+        return labels.Count == 0 ? null : labels;
+    }
 
     private static readonly ReportFormat English = new(CultureInfo.GetCultureInfo("en-US"), TimeZoneInfo.Utc);
+
+    /// <summary>
+    /// The plain rows of a result in the order the widget declares for its groups (design D12 of add-declared-category-order): a line's
+    /// rows go in natural order first, as the page draws them. A widget that declares no order of groups gets the rows exactly as the
+    /// response has them, a line's included. Values stay full text, since a client writes filters from them.
+    /// </summary>
+    private static IReadOnlyList<IndicatorRow> RowsOf(IReadOnlyList<IndicatorRow> rows, string chartType, CategoryOrders? orders)
+    {
+        if (orders?.Groups is not { } groups)
+        {
+            return rows;
+        }
+
+        IReadOnlyList<IndicatorRow> basis = chartType == ChartTypes.Line ? rows.Order(NaturalOrder.ByGroup.Instance).ToList() : rows;
+        return CategoryOrder.Arrange(basis, row => OrderEntry.OfValue(row.Group), groups);
+    }
 
     private static object Row(IndicatorRow row, IndicatorInfo? info) => new
     {
@@ -588,18 +691,63 @@ public sealed class McpDashboardTools(
         row.Rows,
     };
 
+    /// <summary>
+    /// The reference lines a bar, column or line draws, as { kind, label, value, formatted } (design D11 of add-chart-annotations): the English
+    /// default label when a line has none, and the value formatted as the result's own values are, a share for a layout stacked to 100%.
+    /// Null when there are none, so a widget without lines returns what it always did.
+    /// </summary>
+    internal static IReadOnlyList<object>? ReferenceLinesOf(string chartType, WidgetConfig config, IndicatorQueryResponse response, IndicatorInfo? info)
+    {
+        var lines = ReferenceLines.Of(chartType, config, response);
+        if (lines.Count == 0)
+        {
+            return null;
+        }
+
+        var text = ReportText.For("en-US");
+        var shares = config.SeriesBy is not null && SeriesTable.ShowsShares(chartType, config.Layout);
+        return [.. lines.Select(line => (object)new
+        {
+            kind = line.Kind,
+            label = line.Label ?? text[ReportText.ReferenceLabelKey(line.Kind)],
+            value = line.Value,
+            formatted = shares ? English.Share(line.Value) : English.Value(line.Value, info?.Format, info?.Unit),
+        })];
+    }
+
     /// <summary>One widget's data as the dashboard page asks for it: its own query, with the dashboard filters in force and the widget's defaults.</summary>
     private async Task<object> WidgetDataAsync(
         Guid projectId, Widget widget, IReadOnlyList<DashboardFilter> filters, AppliedDashboardFilter[]? given, IndicatorInfo? info, CancellationToken ct)
     {
         var applied = Applied(filters, widget.Config, given);
-        object Header(string status, string? message = null, object? rows = null) =>
-            new { widgetId = widget.Id, widget.Title, widget.ChartType, indicator = widget.Config.Indicator, label = info?.Label ?? widget.Config.Indicator, status, message, rows };
+        // The widget's own unit replaces its indicator's for the values, the series cells and the boxes (design D4 of the widget context).
+        if (widget.Config.Display?.Unit is { } unit)
+        {
+            info = info is null ? new IndicatorInfo(widget.Config.Indicator, unit, ReportFormat.Decimal) : info with { Unit = unit };
+        }
+
+        // Left out of the result while the widget has none, as every null is, so a widget without these texts returns what it always did.
+        var display = widget.Config.Display;
+        object Header(string status, string? message = null, object? rows = null) => new
+        {
+            widgetId = widget.Id,
+            widget.Title,
+            widget.ChartType,
+            indicator = widget.Config.Indicator,
+            label = info?.Label ?? widget.Config.Indicator,
+            status,
+            message,
+            subtitle = display?.Subtitle,
+            footnote = display?.Footnote,
+            caption = display?.Caption?.Text,
+            rows,
+        };
 
         IndicatorQueryOutcome outcome;
         try
         {
-            outcome = await indicators.QueryAsync(projectId, WidgetQuery.For(widget.ChartType, widget.Config), widget.ChartType, ct, applied);
+            outcome = await indicators.QueryAsync(
+                projectId, WidgetQuery.For(widget.ChartType, widget.Config), widget.ChartType, ct, applied, WidgetQuery.Overall(widget.ChartType, widget.Config));
         }
         catch (DataTimeoutException)
         {
@@ -638,8 +786,9 @@ public sealed class McpDashboardTools(
             return Header("noRows", "No rows to show.");
         }
 
-        var series = response.Series is null ? null : SeriesPayload.From(response, widget.ChartType, widget.Config.Layout, info);
-        var boxes = response.Boxes is null ? null : BoxPayload.From(response.Boxes, info);
+        var orders = CategoryOrder.For(widget.ChartType, widget.Config, info?.Columns);
+        var series = response.Series is null ? null : SeriesPayload.From(response, widget.ChartType, widget.Config.Layout, info, orders);
+        var boxes = response.Boxes is null ? null : BoxPayload.From(response.Boxes, info, orders);
         notes.AddRange(series?.Notes ?? []);
         return new
         {
@@ -650,8 +799,13 @@ public sealed class McpDashboardTools(
             label = info?.Label ?? widget.Config.Indicator,
             status = "shown",
             message = (string?)null,
+            labels = LabelsOf(widget.ChartType, widget.Config, info),
+            subtitle = display?.Subtitle,
+            footnote = display?.Footnote,
+            caption = display?.Caption?.Text,
+            referenceLines = ReferenceLinesOf(widget.ChartType, widget.Config, response, info),
             notes = notes.Count > 0 ? notes : null,
-            rows = series is null && boxes is null ? response.Rows.Select(r => Row(r, info)).ToList() : null,
+            rows = series is null && boxes is null ? RowsOf(response.Rows, widget.ChartType, orders).Select(r => Row(r, info)).ToList() : null,
             boxes,
             series = series?.Series,
             cells = series?.Cells,
@@ -685,9 +839,10 @@ internal sealed record SeriesPayload(IReadOnlyList<object> Series, IReadOnlyList
 {
     private static readonly ReportFormat English = new(CultureInfo.GetCultureInfo("en-US"), TimeZoneInfo.Utc);
 
-    public static SeriesPayload From(IndicatorQueryResponse response, string chartType, string? layout, McpDashboardTools.IndicatorInfo? info)
+    public static SeriesPayload From(IndicatorQueryResponse response, string chartType, string? layout, McpDashboardTools.IndicatorInfo? info, CategoryOrders? orders = null)
     {
-        var table = SeriesTable.From(response, chartType, layout);
+        // The groups and the series in the order the widget declares, with their full text (a client writes filters from them).
+        var table = CategoryOrder.ArrangeTable(SeriesTable.From(response, chartType, layout), orders);
         string? Shown(double? value) => value is { } number ? English.Value(number, info?.Format, info?.Unit) : null;
         string? KindOf(string kind) => kind == SeriesKinds.Value ? null : kind;
 
@@ -744,8 +899,9 @@ internal static class BoxPayload
 {
     private static readonly ReportFormat English = new(CultureInfo.GetCultureInfo("en-US"), TimeZoneInfo.Utc);
 
-    public static List<object> From(IReadOnlyList<IndicatorBox> boxes, McpDashboardTools.IndicatorInfo? info)
+    public static List<object> From(IReadOnlyList<IndicatorBox> boxes, McpDashboardTools.IndicatorInfo? info, CategoryOrders? orders = null)
     {
+        boxes = CategoryOrder.Arrange(boxes, box => OrderEntry.OfValue(box.Group), orders?.Groups);
         // A count's figures have two decimals, as on the dashboard: quartiles and means fall between whole numbers.
         var format = ReportDataBuilder.BoxFormat(info?.Format);
         string Shown(double value) => English.Value(value, format, info?.Unit);

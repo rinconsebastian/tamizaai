@@ -2,7 +2,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
 import { DataColumn, DataColumnType, DataExport, DataFilter, DataValue, DataValueCount, ExportFormat } from './data.service';
-import { IndicatorFormat, Person } from './pipeline.service';
+import { ColumnMetadataMap, IndicatorFormat, Person } from './pipeline.service';
 import { DashboardEntry } from './projects.service';
 
 // Mirrors Tamiza.Api/Indicators/*. A widget is one row of tamiza.dashboard_widgets: a title, a chart type, a query over the
@@ -89,6 +89,30 @@ export const maxTooltipLabel = 80;
 export const maxDashboardFilters = 8;
 /** A dashboard filter's label, once trimmed (`DashboardFilterRules.MaxLabelLength`). */
 export const maxDashboardFilterLabelLength = 40;
+/** A column label, once trimmed, of an indicator or a widget (`ColumnLabels.MaxLength`). */
+export const maxColumnLabel = 80;
+/** The most columns a widget gives a label of its own (`ColumnLabels.MaxWidgetLabels`). */
+export const maxWidgetLabels = 10;
+/** The most columns an indicator gives a label (`ColumnMetadata.MaxColumns`). */
+export const maxIndicatorColumns = 100;
+/** A widget's subtitle, once trimmed (`WidgetDisplay.MaxSubtitleLength`). */
+export const maxSubtitleLength = 200;
+/** A widget's footnote, once trimmed (`WidgetDisplay.MaxFootnoteLength`). */
+export const maxFootnoteLength = 500;
+/** The own text of a widget's caption, once trimmed (`WidgetDisplay.MaxCaptionLength`). */
+export const maxCaptionLength = 200;
+/** A widget's own unit, once trimmed (`ScriptEndpoints.MaxUnitLength`, the indicator's own limit). */
+export const maxWidgetUnitLength = 32;
+/** A dashboard's source, once trimmed (`DashboardValidation.MaxSourceLength`). */
+export const maxSourceLength = 300;
+/** The most reference lines a widget has (`WidgetDisplay.MaxReferenceLines`). */
+export const maxReferenceLines = 4;
+/** A reference line's label, once trimmed (`WidgetDisplay.MaxReferenceLineLabel`). */
+export const maxReferenceLineLabel = 40;
+/** The most values an order lists, for a widget and for an indicator's column (`CategoryOrder.MaxValues`). */
+export const maxOrderValues = 100;
+/** The most values an indicator's column keeps at the end (`CategoryOrder.MaxLast`). */
+export const maxKeptLast = 20;
 
 /**
  * The kinds of dashboard filter (`DashboardFilterKinds`). Each narrows a family of column types: text, true/false, integer or decimal
@@ -133,7 +157,7 @@ export interface WidgetExportRequest {
   format: 'xlsx';
   title: string;
   chartType: ChartType;
-  /** The widget's query, as `queryFor` builds it. */
+  /** The widget's settings, as `savedConfig` builds it: its query and the display it is saved with. */
   config: WidgetConfig;
   filters: WidgetExportFilter[];
   /** The interface's language and region, such as `es-CO`: the workbook's own words and formats follow it. */
@@ -228,12 +252,77 @@ export interface DashboardColors {
  * A widget's own color setting (design D3), kept apart from its query so that changing it never queries again. `color` is the place in
  * the dashboard's palette (1 to 8; 1 when unset) of a bar, column or line chart with no series, of a histogram and of a box plot;
  * `ramp` the sequential scale of a map or a heat map (the palette's own scale when unset); `orientation` the direction of a box plot
- * (vertical when unset; a saved `vertical` is kept as it is). A key with no value is left out.
+ * (vertical when unset; a saved `vertical` is kept as it is); `labels` the widget's own names for up to `maxWidgetLabels` columns
+ * (1 to `maxColumnLabel` characters each, any kind of widget, keyed by the column's name). A key with no value is left out.
+ *
+ * The widget's texts (add-widget-context, design D1), all on every kind of widget and none of them in its query: `subtitle` (1 to
+ * `maxSubtitleLength` characters, under the title), `footnote` (1 to `maxFootnoteLength`, at the widget's foot), `caption` (the line that
+ * names what the widget plots: its own `text`, or `hidden`), `unit` (1 to 32 characters, replaces the indicator's unit) and
+ * `showDescription` (a button that opens the indicator's description). Only `true` is stored for a flag; a text has no line break.
+ *
+ * The chart annotations (add-chart-annotations, design D1), none of them in its query: `referenceLines` (up to `maxReferenceLines`, on a
+ * bar, column or line), `interpolation` (a line chart only; a saved `linear` is kept as it is) and `dataLabels` (bar, column, line and
+ * pie; a saved `false` is kept as it is).
+ *
+ * `order` (add-declared-category-order, design D1) is the widget's own order of its groups and of its series, which replaces the order its
+ * indicator declares for the column; it is a display setting, so changing it never queries again.
  */
 export interface WidgetDisplay {
   color?: number;
   ramp?: ScaleId;
   orientation?: BoxOrientation;
+  labels?: Record<string, string>;
+  subtitle?: string;
+  footnote?: string;
+  caption?: WidgetCaption;
+  unit?: string;
+  showDescription?: true;
+  referenceLines?: WidgetReferenceLine[];
+  interpolation?: LineInterpolation;
+  dataLabels?: boolean;
+  order?: WidgetCategoryOrder;
+}
+
+/**
+ * A widget's own order of values (add-declared-category-order, design D1): the groups and the series it lists, as full text, in the order
+ * to draw them (up to `maxOrderValues` each). The values it does not list follow in the chart's order. It is never part of a query.
+ */
+export interface WidgetCategoryOrder {
+  group?: string[];
+  series?: string[];
+}
+
+/**
+ * What a reference line is drawn at (add-chart-annotations, design D1): `mean` and `median` of the bars or points drawn, `overall` the
+ * indicator's value over all the widget's rows (needs a ratio), or `value`, a fixed number.
+ */
+export type ReferenceLineKind = 'mean' | 'median' | 'overall' | 'value';
+
+export const referenceLineKinds: readonly ReferenceLineKind[] = ['mean', 'median', 'overall', 'value'];
+
+/**
+ * A line across a bar, column or line chart, to compare its marks with. `value` is only for the `value` kind, in the indicator's units
+ * (a fraction for a percent indicator, a share from 0 to 1 in a 100% layout); `label` is up to `maxReferenceLineLabel` characters and, left
+ * out, is the kind's default label.
+ */
+export interface WidgetReferenceLine {
+  kind: ReferenceLineKind;
+  value?: number;
+  label?: string;
+}
+
+/** How a line chart joins its points: straight segments (the default) or steps, each value holding until the next point (`LineInterpolations`). */
+export type LineInterpolation = 'linear' | 'step';
+
+export const lineInterpolations: readonly LineInterpolation[] = ['linear', 'step'];
+
+/**
+ * The line that names what a widget plots (add-widget-context, design D1): its own `text` in place of the indicator's name, or `hidden`
+ * to take the line out of sight (tooltips, tables and screen readers still name what is plotted). Never both; neither is the default line.
+ */
+export interface WidgetCaption {
+  text?: string;
+  hidden?: true;
 }
 
 /** A widget's query. At most one of `measure` and `ratio` is set; with neither, the table's default measure is plotted. */
@@ -296,6 +385,8 @@ export interface IndicatorEntry {
   description: string | null;
   unit: string | null;
   format: IndicatorFormat;
+  /** The names shown for the columns of its table (a response without it reads as none). */
+  columns?: ColumnMetadataMap | null;
   published: boolean;
   publishedAt: string | null;
   runId: string | null;
@@ -315,6 +406,8 @@ export interface IndicatorsOverview {
 export interface Dashboard extends DashboardEntry, Partial<DashboardColors> {
   filters: DashboardFilter[];
   widgets: Widget[];
+  /** Where its data comes from, 1 to `maxSourceLength` characters (add-widget-context, design D7); absent while it has none. */
+  source?: string | null;
   /** The number of its newest version, null while it has none (add-dashboard-versions, design D9). */
   version: number | null;
 }
@@ -334,6 +427,7 @@ export type DashboardChangeKind =
   | 'renamed'
   | 'filtersChanged'
   | 'colorsChanged'
+  | 'sourceChanged'
   | 'widgetAdded'
   | 'widgetChanged'
   | 'widgetRemoved'
@@ -350,6 +444,7 @@ export const dashboardChangeKinds: readonly DashboardChangeKind[] = [
   'renamed',
   'filtersChanged',
   'colorsChanged',
+  'sourceChanged',
   'widgetAdded',
   'widgetChanged',
   'widgetRemoved',
@@ -421,6 +516,8 @@ export interface VersionWidget {
 export interface DashboardVersionDetails extends Omit<DashboardVersionSummary, 'widgetCount' | 'filterCount'>, Partial<DashboardColors> {
   filters: DashboardFilter[];
   widgets: VersionWidget[];
+  /** The dashboard's source at the time, absent when it had none (add-widget-context, design D7). */
+  source?: string | null;
 }
 
 /** A widget of the version restored that was on another dashboard by then: it came back as a copy, and that dashboard keeps it. */
@@ -533,6 +630,11 @@ export interface QueryResult {
    */
   domain?: QuerySeries[];
   totals?: QueryTotals;
+  /**
+   * A bar, column or line with no series that asked for it (`query`'s `overall` argument) only: the widget's value over every row its query
+   * matches, as a stat tile with the same indicator and filters shows it (add-chart-annotations, design D4). Absent when there is no row.
+   */
+  overall?: number;
   leftOut?: number;
   /**
    * The columns of the dashboard filters sent that did not narrow the rows: the table has no such column, or has it with another kind
@@ -625,13 +727,15 @@ export class IndicatorsService {
 
   /**
    * Renders a saved widget, or previews a draft: the same query either way. The chart type lets a histogram plot a value per row. The
-   * dashboard filters in force that the widget does not ignore narrow the rows too; they are sent only when there are some.
+   * dashboard filters in force that the widget does not ignore narrow the rows too; they are sent only when there are some. `overall`
+   * (derived from the widget by `overallFor`, never saved) asks for its overall value too, and is sent only when true.
    */
-  query(projectId: string, config: WidgetConfig, chartType?: ChartType, dashboardFilters: AppliedDashboardFilter[] = []): Observable<QueryResult> {
+  query(projectId: string, config: WidgetConfig, chartType?: ChartType, dashboardFilters: AppliedDashboardFilter[] = [], overall = false): Observable<QueryResult> {
     return this.http.post<QueryResult>(`${this.url(projectId)}/query`, {
       config,
       ...(chartType ? { chartType } : {}),
       ...(dashboardFilters.length ? { dashboardFilters } : {}),
+      ...(overall ? { overall: true } : {}),
     });
   }
 
@@ -694,6 +798,14 @@ export class IndicatorsService {
    */
   saveColors(projectId: string, dashboardId: string, colors: DashboardColors): Observable<DashboardColors> {
     return this.http.put<DashboardColors>(`${this.dashboardUrl(projectId, dashboardId)}/colors`, { palette: colors.palette, valueColors: colors.valueColors });
+  }
+
+  /**
+   * Sets the dashboard's source, or removes it with null or a blank text (add-widget-context, design D7), and answers it as saved
+   * (trimmed; null when it has none). Saving what is stored changes nothing and makes no version.
+   */
+  saveSource(projectId: string, dashboardId: string, source: string | null): Observable<{ source: string | null }> {
+    return this.http.put<{ source: string | null }>(`${this.dashboardUrl(projectId, dashboardId)}/source`, { source });
   }
 
   /**

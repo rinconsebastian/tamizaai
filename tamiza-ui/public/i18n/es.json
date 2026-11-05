@@ -615,6 +615,24 @@
       "unitHint": "Se muestra después del valor, como hogares. Para el formato de moneda, el código de la moneda, como COP.",
       "format": "Formato"
     },
+    "columns": {
+      "title": "Nombres de columnas",
+      "hint": "El nombre que se muestra para la columna en títulos, tablas, correos y libros de Excel. Vacío: el nombre propio de la columna.",
+      "notInTable": "No está en la tabla",
+      "afterTest": "Las columnas se listan después de una prueba.",
+      "order": {
+        "title": "Orden",
+        "values": "Orden de los valores",
+        "last": "Dejar al final",
+        "lastHelp": "Valores como «Otro», «No sabe» o «Sin dato» que quedan al final sin importar el orden ni el ordenamiento.",
+        "strip": "Ocultar los números del inicio («1. », «2) », «3 - »)",
+        "note": "El orden se aplica a todos los widgets de este indicador que no tienen un orden propio, en todos los tableros, y puede dar otros colores a los valores sin color fijado por valor.",
+        "summaryOrdered": "Ordenados: {{ count }}",
+        "summaryLast": "Al final: {{ count }}",
+        "summaryStrip": "Números ocultos",
+        "summaryNone": "Sin definir"
+      }
+    },
     "nameErrors": {
       "required": "Escribe un nombre.",
       "invalid": "Usa solo letras minúsculas, dígitos y guiones bajos, empezando con una letra, hasta 63 caracteres.",
@@ -1556,7 +1574,8 @@
       "shownAsTable": "“{{ title }}” se muestra como tabla",
       "shownAsChart": "“{{ title }}” se muestra como gráfico",
       "editItem": "Editar widget",
-      "removeItem": "Eliminar widget"
+      "removeItem": "Eliminar widget",
+      "about": "Acerca de {{ label }}"
     },
     "widget": {
       "notPublished": "{{ label }} aún no se ha publicado.",
@@ -1571,6 +1590,16 @@
       "title": "Este widget no se puede dibujar",
       "columns": "La tabla publicada ya no tiene las columnas: {{ names }}.",
       "help": "Un cambio en el script las eliminó. Edita el widget para elegir otras, o restáuralas en el script."
+    },
+    "referenceLines": {
+      "key": "Líneas de referencia",
+      "kinds": {
+        "mean": "Promedio",
+        "median": "Mediana",
+        "overall": "Valor general",
+        "value": "Referencia"
+      },
+      "summary": "Líneas de referencia: {{ lines }}."
     },
     "chart": {
       "noGroup": "(ninguno)",
@@ -1758,6 +1787,43 @@
         "legend": "Color",
         "help": "Uno de los ocho colores de la paleta del tablero. El gráfico conserva su número si la paleta cambia."
       },
+      "labels": {
+        "heading": "Nombres de columnas",
+        "help": "Los nombres que este widget da a sus columnas en su título, sus tablas, sus imágenes y sus correos; hasta {{ max }} columnas. Vacío: el nombre que el indicador da a la columna, o el nombre propio de la columna."
+      },
+      "subtitle": {
+        "label": "Subtítulo",
+        "hint": "Opcional. La pregunta que responde el gráfico, debajo del título."
+      },
+      "context": {
+        "legend": "Textos del widget",
+        "help": "Palabras que acompañan al gráfico. Se muestran tal como se escribieron, en el widget, sus imágenes, sus correos y sus libros de Excel.",
+        "caption": {
+          "legend": "Epígrafe",
+          "help": "La línea que nombra lo que el widget grafica. Oculta, lo sigue nombrando para los lectores de pantalla, las ayudas emergentes y las tablas.",
+          "default": "Predeterminado",
+          "text": "Texto propio",
+          "hidden": "Oculto",
+          "textLabel": "Texto del epígrafe",
+          "line": "Se lee: {{ line }}"
+        },
+        "unit": {
+          "label": "Unidad",
+          "hint": "La unidad del indicador es «{{ unit }}». Déjala vacía para usarla.",
+          "hintNone": "El indicador no tiene unidad. Déjala vacía para no mostrar ninguna."
+        },
+        "footnote": {
+          "label": "Nota al pie",
+          "hint": "Opcional. Una nota al pie del widget."
+        },
+        "description": {
+          "label": "Mostrar la descripción del indicador",
+          "help": "Agrega al encabezado del widget un botón que abre la descripción del indicador.",
+          "none": "El indicador no tiene descripción."
+        },
+        "crowded": "Los textos le quitan espacio al gráfico. Un widget más alto muestra más de ellos.",
+        "crowdedFigure": "Los textos le quitan espacio a la cifra. Un widget más alto muestra más de ellos."
+      },
       "ramp": {
         "legend": "Escala",
         "help": "La escala secuencial en la que se sombrean los valores.",
@@ -1797,6 +1863,66 @@
         "vertical": "Vertical",
         "horizontal": "Horizontal",
         "help": "Vertical pone la primera caja a la izquierda; horizontal la pone arriba y sirve para nombres largos."
+      },
+      "referenceLines": {
+        "legend": "Líneas de referencia",
+        "help": "Líneas discontinuas (de trazos) a lo ancho del gráfico para comparar sus barras o puntos. Hasta {{ max }}.",
+        "kind": "Tipo de la línea de referencia {{ n }}",
+        "kinds": {
+          "mean": "Promedio de las barras",
+          "median": "Mediana de las barras",
+          "overall": "Valor general",
+          "value": "Valor fijo"
+        },
+        "kindHelp": {
+          "mean": "El promedio de los valores que dibuja el gráfico, después de todos los filtros. Deja la etiqueta vacía para que diga «Promedio».",
+          "median": "La mediana de los valores que dibuja el gráfico. Con una cantidad par de valores es el promedio de los dos del medio.",
+          "overall": "El valor del indicador sobre todas las filas del widget, la cifra que muestra un widget de cifra destacada con los mismos filtros. Necesita una razón.",
+          "value": "Un número con el que comparar, como una meta. {{ units }}"
+        },
+        "unitsPercent": "Escríbelo como porcentaje: 50 para 50 %.",
+        "unitsPlain": "Escríbelo en las unidades del indicador, sin separador de miles.",
+        "overallCaution": "Cuando las barras son las respuestas de una misma pregunta, como lugares o motivos, comparten una sola base, y esta línea es solo su promedio, no un total. Úsala cuando las barras sean grupos de hogares, como comunas o estratos.",
+        "value": "Valor de la línea de referencia {{ n }}",
+        "label": "Etiqueta de la línea de referencia {{ n }}",
+        "remove": "Quitar la línea de referencia {{ n }}",
+        "add": "Agregar una línea de referencia",
+        "full": "Un widget tiene como máximo {{ max }} líneas de referencia.",
+        "errors": {
+          "value": "Escribe un número para cada valor fijo.",
+          "separator": "«{{ text }}» puede leerse como decimal o como miles. Escribe el número sin separador de miles: 1500, o 1.5 si es decimal."
+        },
+        "dropped": {
+          "type": "Este gráfico no dibuja líneas de referencia, así que no se guardan. Vuelven si cambias de nuevo el tipo de gráfico.",
+          "series": "Una línea de promedio o de mediana necesita un gráfico sin series, así que no se guarda. Vuelve si quitas la serie.",
+          "measure": "Una línea de valor general necesita una razón, así que no se guarda. Vuelve si graficas una razón.",
+          "layout": "Las barras apiladas solo admiten valores fijos, así que las demás líneas no se guardan. Vuelven con la disposición agrupada."
+        }
+      },
+      "interpolation": {
+        "legend": "Segmentos de la línea",
+        "linear": "Rectos",
+        "step": "Escalones",
+        "help": "Los escalones mantienen cada valor hasta el punto siguiente, como se lee una curva de demanda."
+      },
+      "dataLabels": {
+        "label": "Mostrar los valores en el gráfico",
+        "help": "Escribe cada valor al final de su barra, sobre su punto o en su porción. Una etiqueta que no cabe se omite.",
+        "dropped": "Las barras apiladas no tienen etiquetas de datos, así que no se guardan. Vuelven con la disposición agrupada."
+      },
+      "order": {
+        "legend": "Orden de los valores",
+        "help": "Elija el orden en que el gráfico lista sus valores. Los valores que no liste siguen en el orden del gráfico.",
+        "group": "Grupos ({{ column }})",
+        "series": "Series ({{ column }})",
+        "own": "Orden propio",
+        "sorted": "El orden de las barras lo decide su ordenamiento.",
+        "sortedBoxes": "El orden de las cajas lo decide el orden por mediana.",
+        "colors": "Los valores sin color fijado por valor toman los colores de la paleta en este orden. Use Colores para fijar el color de un valor.",
+        "default": {
+          "indicator": "Orden predeterminado (el del indicador)",
+          "chart": "Orden predeterminado (el del gráfico)"
+        }
       }
     },
     "series": {
@@ -1906,6 +2032,16 @@
       "columnsNotShown": "{{ count }} columnas no se muestran en la imagen.",
       "columnsNotShownOne": "1 columna no se muestra en la imagen.",
       "inWorkbook": "El libro de Excel las tiene todas."
+    },
+    "valueOrder": {
+      "up": "Subir {{ value }}",
+      "down": "Bajar {{ value }}",
+      "remove": "Quitar {{ value }}",
+      "notShown": "En la lista, pero ahora no están en el gráfico:",
+      "addLabel": "Agregar un valor",
+      "addPlaceholder": "Otro valor",
+      "add": "Agregar",
+      "full": "Un orden lista como máximo {{ count }} valores."
     }
   },
   "dashboards": {
@@ -1922,6 +2058,7 @@
       "remove": "Eliminar",
       "filters": "Filtros",
       "colors": "Colores",
+      "source": "Fuente",
       "report": "Envío programado…",
       "versions": "Historial de versiones"
     },
@@ -1931,6 +2068,9 @@
       "first": "Ya es el primer tablero.",
       "last": "Ya es el último tablero.",
       "moving": "Se está guardando el nuevo orden."
+    },
+    "source": {
+      "line": "Fuente: {{ source }}"
     },
     "nameDialog": {
       "title": {
@@ -2043,6 +2183,7 @@
         "renamed": "Se cambió el nombre a “{{ dashboard }}”",
         "filtersChanged": "Se cambiaron los filtros",
         "colorsChanged": "Se cambiaron los colores",
+        "sourceChanged": "Se cambió la fuente",
         "widgetAdded": "Se agregó el widget “{{ widget }}”",
         "widgetChanged": "Se modificó el widget “{{ widget }}”",
         "widgetRemoved": "Se eliminó el widget “{{ widget }}”",
@@ -2158,6 +2299,19 @@
     "save": "Guardar colores",
     "saving": "Guardando…",
     "saved": "Colores guardados."
+  },
+  "dashboardSource": {
+    "title": "Fuente de {{ name }}",
+    "intro": "De dónde vienen los datos de este tablero, por ejemplo la encuesta y su ronda. Quien abra el tablero la verá bajo los widgets, y va en las imágenes, los libros de Excel y los correos programados del tablero.",
+    "label": "Fuente",
+    "hint": "Hasta {{ max }} caracteres, en una sola línea. Déjala vacía para quitar la fuente.",
+    "save": "Guardar fuente",
+    "saving": "Guardando…",
+    "saved": "Fuente guardada.",
+    "removed": "Fuente quitada.",
+    "errors": {
+      "long": "La fuente puede tener como máximo {{ max }} caracteres."
+    }
   },
   "colors": {
     "palettes": {

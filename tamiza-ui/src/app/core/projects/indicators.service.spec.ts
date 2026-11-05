@@ -90,6 +90,20 @@ describe('IndicatorsService', () => {
     expect(none.request.body).toEqual({ config });
   });
 
+  it('asks for the overall value only when told to, and then adds only `overall: true` to the body', () => {
+    const filters = [{ column: 'municipality', kind: 'text' as const, values: ['Cali'] }];
+    service.query('p1', config, 'column').subscribe();
+    service.query('p1', config, 'column', [], false).subscribe();
+    service.query('p1', config, 'column', filters, true).subscribe();
+    service.query('p1', config, 'column', [], true).subscribe();
+
+    const [plain, off, withFilters, alone] = http.match(`${base}/query`);
+    expect(plain.request.body).toEqual({ config, chartType: 'column' });
+    expect('overall' in off.request.body).toBe(false);
+    expect(withFilters.request.body).toEqual({ config, chartType: 'column', dashboardFilters: filters, overall: true });
+    expect(alone.request.body).toEqual({ config, chartType: 'column', overall: true });
+  });
+
   it('replaces a dashboard\'s filters with the whole list and answers them as saved', () => {
     const filters = [{ column: 'municipality', label: 'Municipality', kind: 'text' as const, default: { values: ['Cali'] } }];
     let saved: unknown;
@@ -112,6 +126,28 @@ describe('IndicatorsService', () => {
     expect(request.request.body).toEqual(colors);
     request.flush(colors);
     expect(saved).toEqual(colors);
+  });
+
+  it('sets the source of a dashboard with a put to its source, and answers it as saved', () => {
+    let saved: unknown;
+    service.saveSource('p1', 'd2', '  Encuesta de hogares, ronda 2  ').subscribe((answer) => (saved = answer));
+
+    const request = http.expectOne(`${dashboards}/d2/source`);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.body).toEqual({ source: '  Encuesta de hogares, ronda 2  ' });
+    request.flush({ source: 'Encuesta de hogares, ronda 2' });
+    expect(saved).toEqual({ source: 'Encuesta de hogares, ronda 2' });
+  });
+
+  it('removes the source of a dashboard by sending null', () => {
+    let saved: unknown;
+    service.saveSource('p1', 'd2', null).subscribe((answer) => (saved = answer));
+
+    const request = http.expectOne(`${dashboards}/d2/source`);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.body).toEqual({ source: null });
+    request.flush({ source: null });
+    expect(saved).toEqual({ source: null });
   });
 
   it('sends the palette and the colors kept by value of a colors save, and nothing else the object it was given holds', () => {
@@ -381,6 +417,8 @@ describe('IndicatorsService', () => {
 
   it('names the change that saves a dashboard\'s colors among the kinds of change a version records', () => {
     expect(dashboardChangeKinds).toContain('colorsChanged');
+    expect(dashboardChangeKinds).toContain('sourceChanged');
+    expect(dashboardChangeKinds.indexOf('sourceChanged')).toBe(dashboardChangeKinds.indexOf('colorsChanged') + 1);
     expect(new Set(dashboardChangeKinds).size).toBe(dashboardChangeKinds.length);
   });
 });

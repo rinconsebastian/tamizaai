@@ -71,6 +71,14 @@ export function linePath(points: readonly Point[]): string {
   return points.map((p, i) => `${i === 0 ? 'M' : 'L'}${fixed(p.x)} ${fixed(p.y)}`).join(' ');
 }
 
+/**
+ * A line that steps (add-chart-annotations, design D6): `M x0 y0 H x1 V y1 H x2 V y2 ...`. Each value holds from its point to the x of the
+ * next point, where the line moves straight to the next value, and the last point ends the line. An empty list gives an empty path.
+ */
+export function stepPath(points: readonly Point[]): string {
+  return points.map((p, i) => (i === 0 ? `M${fixed(p.x)} ${fixed(p.y)}` : `H${fixed(p.x)} V${fixed(p.y)}`)).join(' ');
+}
+
 /** A closed polygon path of rings; with even-odd filling the later rings are holes. */
 export function ringsPath(rings: readonly (readonly Point[])[]): string {
   return rings

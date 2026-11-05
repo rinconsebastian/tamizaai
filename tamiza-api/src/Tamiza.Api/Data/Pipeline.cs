@@ -27,6 +27,12 @@ public sealed class ScriptVersion
     /// <summary><c>count</c>, <c>decimal</c>, <c>percent</c> or <c>currency</c>.</summary>
     public string? Format { get; set; }
 
+    /// <summary>
+    /// What the indicator says about the columns of its table, as the JSON object stored (column name to its properties, see
+    /// <c>ColumnMetadata</c>); null when it says nothing, and for the clean and output scripts and a removed indicator.
+    /// </summary>
+    public string? Columns { get; set; }
+
     public Guid AuthorId { get; set; }
 
     /// <summary>Where the version was saved: the editor (<c>app</c>) or an AI client (<c>mcp</c>).</summary>

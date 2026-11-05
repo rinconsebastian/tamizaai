@@ -82,10 +82,10 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         await using var h = await McpProjectHarness.CreateAsync(postgres);
         var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
 
-        const string warning = "To change the chart type of a widget that has a color, a scale or an orientation, also send a config without the display fields the new type does not take: a new chartType alone keeps the old config";
+        const string warning = "To change the chart type of a widget that has a color, a scale, an orientation, reference lines, steps, data labels or an order, also send a config without the display fields the new type does not take: a new chartType alone keeps the old config";
         var update = tools["update_widget"].Description;
         Assert.Contains(warning, update);
-        Assert.Contains("config.display.color, config.display.ramp or config.display.orientation", update);
+        Assert.Contains("config.display.color, config.display.ramp, config.display.orientation, config.display.referenceLines, config.display.interpolation, config.display.dataLabels or config.display.order", update);
         // update_widget says what a new config replaces, which is why the chart type alone is not enough.
         Assert.Contains("What you leave out keeps its value; a new config replaces the old one whole", update);
 
@@ -95,9 +95,80 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         Assert.DoesNotContain("a new chartType alone keeps the old config", create);
         foreach (var description in new[] { create, update })
         {
-            Assert.Contains("config.display = { color, ramp, orientation } sets how the widget is drawn", description);
+            Assert.Contains("config.display = { color, ramp, orientation, labels } sets how the widget is drawn", description);
             Assert.Contains("ramp is a sequential scale", description);
         }
+    }
+
+    [Fact]
+    public async Task The_widget_tools_name_the_texts_of_a_widget_and_the_dashboard_tools_name_its_source()
+    {
+        await using var h = await McpProjectHarness.CreateAsync(postgres);
+        var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
+
+        foreach (var name in new[] { "create_widget", "update_widget" })
+        {
+            var description = tools[name].Description;
+            // The sentence that was there stays, and the texts follow it.
+            Assert.Contains("config.display = { color, ramp, orientation, labels } sets how the widget is drawn", description);
+            Assert.Contains("config.display also takes the widget's texts, on every chart type", description);
+            foreach (var field in new[] { "subtitle", "footnote", "caption", "unit", "showDescription" })
+            {
+                Assert.Contains(field, description);
+            }
+        }
+
+        var data = tools["get_widget_data"].Description;
+        Assert.Contains("subtitle, footnote and own caption text", data);
+        Assert.Contains("the widget's own unit", data);
+
+        var update = tools["update_dashboard"];
+        Assert.Contains("source", update.Title!);
+        Assert.Contains("sets its source", update.Description);
+        Assert.Contains("an empty text removes it", update.Description);
+        var source = update.JsonSchema.GetProperty("properties").GetProperty("source").GetProperty("description").GetString()!;
+        Assert.Contains("an empty text removes it", source);
+        Assert.DoesNotContain("source", update.JsonSchema.GetProperty("required").EnumerateArray().Select(r => r.GetString()));
+        foreach (var name in new[] { "get_dashboard", "get_dashboard_version", "restore_dashboard_version", "duplicate_dashboard" })
+        {
+            Assert.Contains("source", tools[name].Description);
+        }
+
+        Assert.Contains("sourceChanged", tools["list_dashboard_versions"].Description);
+    }
+
+    [Fact]
+    public async Task The_widget_tools_name_the_chart_annotations_with_the_overall_caution_and_no_tool_takes_an_overall_argument()
+    {
+        await using var h = await McpProjectHarness.CreateAsync(postgres);
+        var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
+
+        foreach (var name in new[] { "create_widget", "update_widget" })
+        {
+            var description = tools[name].Description;
+            // Said once, after the texts and the pinned sentence about the display, which stay as they were.
+            Assert.True(description.IndexOf("config.display = { color, ramp, orientation, labels } sets how the widget is drawn", StringComparison.Ordinal)
+                < description.IndexOf("config.display also takes the widget's texts, on every chart type", StringComparison.Ordinal));
+            Assert.True(description.IndexOf("config.display also takes the widget's texts, on every chart type", StringComparison.Ordinal)
+                < description.IndexOf("config.display also takes referenceLines, interpolation and dataLabels.", StringComparison.Ordinal));
+            Assert.Contains("referenceLines is up to 4 lines on a bar, column or line: [{ kind, value, label }]", description);
+            Assert.Contains("kind mean or median (of the bars drawn; not with a seriesBy)", description);
+            Assert.Contains("overall (the ratio's value over all the widget's rows, as a stat tile with the same filters shows; needs a ratio; over the answers of one question it is only the mean of the bars, not a total)", description);
+            Assert.Contains("value (a number in the indicator's units, 0.5 for 50%; the only kind with a value; in a percent layout a share from 0 to 1); label is optional, 1 to 40 characters", description);
+            Assert.Contains("interpolation is linear (the default) or step, for a line only", description);
+            Assert.Contains("dataLabels true writes each value on a bar, column (no seriesBy or layout grouped), line or pie", description);
+        }
+
+        // The derived flag of a query is no setting of any tool, in the arguments or in the nested config.
+        foreach (var tool in tools.Values)
+        {
+            // A property named overall would be written "overall": in the schema; the word in a description is never followed by a colon in quotes.
+            Assert.DoesNotContain("\"overall\":", tool.JsonSchema.GetRawText(), StringComparison.Ordinal);
+            Assert.False(tool.JsonSchema.GetProperty("properties").TryGetProperty("overall", out _), $"{tool.Name} has an overall argument");
+        }
+
+        Assert.Contains("referenceLines", tools["query_indicator"].Description);
+        Assert.Contains("referenceLines", tools["get_widget_data"].Description);
     }
 
     [Fact]
@@ -115,6 +186,50 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         {
             Assert.Contains("The scale is matched exactly, in lower case: Green is refused.", tools[name].Description);
         }
+    }
+
+    [Fact]
+    public async Task The_tools_name_the_column_labels_they_take_and_return()
+    {
+        await using var h = await McpProjectHarness.CreateAsync(postgres);
+        var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
+
+        // save_script: an optional columns argument, its keep rule in the argument and in the description.
+        var save = tools["save_script"];
+        var columns = save.JsonSchema.GetProperty("properties").GetProperty("columns");
+        Assert.DoesNotContain("columns", save.JsonSchema.GetProperty("required").EnumerateArray().Select(r => r.GetString()));
+        var argument = columns.GetProperty("description").GetString()!;
+        Assert.Contains("{ column: { label } }", argument);
+        Assert.Contains("1 to 80 characters", argument);
+        Assert.Contains("at most 100 columns", argument);
+        Assert.Contains("Left out, the current version's labels are kept; {} clears them; given, it replaces them all.", argument);
+        Assert.Contains("columns = { column: { label } }", save.Description);
+        Assert.Contains("columns left out keeps the current version's labels", save.Description);
+        var label = columns.GetProperty("additionalProperties").ToString();
+        Assert.Contains("label", label);
+        Assert.False(columns.TryGetProperty("enum", out _));
+
+        // The reads say that they return the labels.
+        Assert.Contains("column labels (columns)", tools["get_script"].Description);
+        Assert.Contains("labels of their columns (columns)", tools["list_indicators"].Description);
+        Assert.Contains("with its label when its indicator gives it one", tools["get_indicator_columns"].Description);
+
+        // The widget tools: display.labels in the templates, the argument texts and the display's schema; labels in the data they return.
+        foreach (var name in new[] { "create_widget", "update_widget" })
+        {
+            Assert.Contains("labels = { column: name } gives up to 10 of the widget's columns a name of 1 to 80 characters, on every kind", tools[name].Description);
+            var config = tools[name].JsonSchema.GetProperty("properties").GetProperty("config");
+            Assert.Contains("column labels", config.GetProperty("description").GetString());
+            var labels = config.GetProperty("properties").GetProperty("display").GetProperty("properties").GetProperty("labels");
+            Assert.Contains("10 of the widget's columns", labels.GetProperty("description").GetString());
+            Assert.False(labels.TryGetProperty("enum", out _));
+        }
+
+        // The template of create_widget lists the widget's texts after the labels (add-widget-context), and the chart annotations after them (add-chart-annotations).
+        Assert.Contains("display: { color, ramp, orientation, labels, subtitle, footnote, caption, unit, showDescription, referenceLines, interpolation, dataLabels, order } }", tools["create_widget"].Description);
+        Assert.Contains("display: { labels, referenceLines, order } }", tools["query_indicator"].Description);
+        Assert.Contains("labels", tools["query_indicator"].Description);
+        Assert.Contains("labels gives the name shown for each column it names", tools["get_widget_data"].Description);
     }
 
     [Fact]
@@ -156,9 +271,22 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         {
             var displayField = tools[name].JsonSchema.GetProperty("properties").GetProperty("config").GetProperty("properties").GetProperty("display");
             Assert.Contains("How the widget is drawn", displayField.GetProperty("description").GetString());
+            foreach (var word in new[] { "subtitle", "footnote", "caption", "unit", "description button", "reference lines", "steps", "data labels" })
+            {
+                Assert.Contains(word, displayField.GetProperty("description").GetString());
+            }
             var display = displayField.GetProperty("properties");
             AssertColor(display.GetProperty("color"));
             AssertNamed(display.GetProperty("ramp"), Palettes.Scales);
+
+            // The chart annotations: described, with their values named in the description and no enum (add-chart-annotations).
+            AssertNamed(display.GetProperty("referenceLines"), ReferenceLineKinds.All);
+            AssertNamed(display.GetProperty("interpolation"), LineInterpolations.All);
+            AssertDescribed(display.GetProperty("dataLabels"));
+            var line = display.GetProperty("referenceLines").GetProperty("items").GetProperty("properties");
+            AssertNamed(line.GetProperty("kind"), ReferenceLineKinds.All);
+            AssertDescribed(line.GetProperty("value"));
+            AssertDescribed(line.GetProperty("label"));
         }
 
         // The names are in the description and not in an enum: the field is nullable, "not set" is a null the server accepts, and an enum
@@ -295,5 +423,40 @@ public sealed class McpToolCatalogTests(PostgresFixture postgres)
         }
 
         return null;
+    }
+
+    [Fact]
+    public async Task The_tools_name_the_declared_order_of_a_widget_and_of_an_indicators_column()
+    {
+        await using var h = await McpProjectHarness.CreateAsync(postgres);
+        var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
+
+        // The widget tools say what config.display.order is, after the chart annotations, and name it in their template.
+        foreach (var name in new[] { "create_widget", "update_widget" })
+        {
+            var description = tools[name].Description;
+            Assert.Contains("config.display.order = { group, series } lists values, as full text, in the order to draw them (up to 100 each); the others follow in the chart's order.", description);
+            Assert.Contains("group is refused with a sort (a boxplot's median order included), series without a series column and on a pyramid or likert.", description);
+            Assert.True(description.IndexOf("config.display also takes referenceLines", StringComparison.Ordinal) < description.IndexOf("config.display.order =", StringComparison.Ordinal));
+            var display = tools[name].JsonSchema.GetProperty("properties").GetProperty("config").GetProperty("properties").GetProperty("display").GetProperty("properties");
+            Assert.Contains("up to 100", display.GetProperty("order").GetProperty("description").GetString());
+            Assert.Equal(["group", "series"], display.GetProperty("order").GetProperty("properties").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        }
+
+        Assert.Contains("the order of its values", tools["update_widget"].JsonSchema.GetProperty("properties").GetProperty("config").GetProperty("description").GetString());
+
+        // save_script takes the three properties of a column, and says that the map is replaced whole.
+        var save = tools["save_script"];
+        var argument = save.JsonSchema.GetProperty("properties").GetProperty("columns").GetProperty("description").GetString()!;
+        Assert.Contains("order (its values as full text, in the order to draw them, up to 100)", argument);
+        Assert.Contains("last (up to 20 values kept at the end", argument);
+        Assert.Contains("stripPrefix: true", argument);
+        Assert.Contains("The map is replaced whole, so send each column's order, last and stripPrefix again with its name", argument);
+        Assert.DoesNotContain("A property other than label is ignored.", argument);
+        var column = save.JsonSchema.GetProperty("properties").GetProperty("columns").GetProperty("additionalProperties").ToString();
+        foreach (var property in new[] { "label", "order", "last", "stripPrefix" })
+        {
+            Assert.Contains(property, column);
+        }
     }
 }
