@@ -142,10 +142,11 @@ describe('makeImage', () => {
   });
 
   it('puts the data of a stat tile, a cross table or a widget shown as a table where the chart would be', async () => {
-    const stat = await read((await makeImage(job({}, { caption: null, stat: { value: '1,234', description: 'Households' } }, null).value, environment())).blob);
+    const stat = await read((await makeImage(job({}, { caption: null, stat: { value: '1,234', description: 'Households', size: 24, secondary: [] } }, null).value, environment())).blob);
     const table = await read((await makeImage(job({}, { table: { headers: ['g', 'v'], rows: [['Cali', '5']] } }, null).value, environment())).blob);
 
-    expect(stat).toContain('font-size="36"');
+    expect(stat).toContain('font-size="24"');
+    expect(stat).not.toContain('font-size="36"');
     expect(stat).toContain('>1,234<');
     expect(table).toContain('>Cali<');
     expect(table).toContain('>v<');
@@ -154,7 +155,7 @@ describe('makeImage', () => {
   it('leaves out the caption line and the description of a stat tile when the widget hides its caption (Caption hidden)', async () => {
     const withCaption = await read((await makeImage(job({}, { caption: 'Coverage: value' }).value, environment())).blob);
     const hidden = await read((await makeImage(job({ captionHidden: true }, { caption: 'Coverage: value' }).value, environment())).blob);
-    const stat = await read((await makeImage(job({ captionHidden: true }, { caption: null, stat: { value: '1,234', description: 'Households' } }, null).value, environment())).blob);
+    const stat = await read((await makeImage(job({ captionHidden: true }, { caption: null, stat: { value: '1,234', description: 'Households', size: 24, secondary: [] } }, null).value, environment())).blob);
 
     expect(withCaption).toContain('>Coverage: value<');
     expect(hidden).not.toContain('Coverage: value');

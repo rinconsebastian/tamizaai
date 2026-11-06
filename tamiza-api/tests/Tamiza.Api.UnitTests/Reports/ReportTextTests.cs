@@ -89,4 +89,32 @@ public sealed class ReportTextTests
         Assert.Equal("22 more rows", ReportText.For("en-US").MoreRows(22));
         Assert.Equal("22 filas más", ReportText.For("es-CO").MoreRows(22));
     }
+
+    [Fact]
+    public void A_stat_tile_names_its_statistic_and_its_line_without_filters_in_both_languages()
+    {
+        // As indicators.stat in tamiza-ui's en.json and es.json.
+        var english = ReportText.For("en-US");
+        var spanish = ReportText.For("es-CO");
+        string[] keys = ["statMedian", "statP25", "statP75", "statMean"];
+
+        Assert.Equal(
+            ["Median of Precio", "First quartile of Precio", "Third quartile of Precio", "Mean of Precio", "Without filters: 50%"],
+            keys.Select(k => english.Format(k, "Precio")).Append(english.Format("withoutFilters", "50%")));
+        Assert.Equal(
+            ["Mediana de Precio", "Primer cuartil de Precio", "Tercer cuartil de Precio", "Promedio de Precio", "Sin filtros: 50%"],
+            keys.Select(k => spanish.Format(k, "Precio")).Append(spanish.Format("withoutFilters", "50%")));
+    }
+
+    [Fact]
+    public void The_reason_of_a_card_that_would_add_up_several_answers_names_the_column_in_both_languages()
+    {
+        var english = ReportText.For("en-US").Format("combinedCategories", "categoria");
+        var spanish = ReportText.For("es-CO").Format("combinedCategories", "categoria");
+
+        Assert.StartsWith("categoria holds the answers of a multiple-choice question.", english);
+        Assert.Contains("group or split the widget by categoria", english);
+        Assert.StartsWith("categoria contiene las respuestas de una pregunta de selección múltiple.", spanish);
+        Assert.Contains("agrupa o divide el widget por categoria", spanish);
+    }
 }

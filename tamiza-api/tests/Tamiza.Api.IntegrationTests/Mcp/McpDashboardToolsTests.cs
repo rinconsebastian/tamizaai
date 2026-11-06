@@ -2840,4 +2840,248 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         Assert.Equal("mcp.validation", refused.Code());
         Assert.Contains("config.display.minN", refused.Text());
     }
+
+    // Stat tiles and ratios over declared answers through MCP (improve-stat-cards, design D2, D3, D4 and D8). A table shaped like
+    // teatro_precio_hogar with 37 households that paid (18 paid 10,000, one 40,000 and 18 90,000: the median is 40,000), and a table shaped like
+    // cruces_intencion; names and values are invented.
+
+    private static readonly object[] PaidFilter = [new { column = "variable", op = "equals", value = "Pago" }];
+
+    private static async Task SeedPricesAsync(McpProjectHarness h)
+    {
+        var rows = Enumerable.Range(0, 18).Select(_ => "('COMUNA 1', 'Pago', 10000)")
+            .Append("('COMUNA 2', 'Pago', 40000)")
+            .Concat(Enumerable.Range(0, 18).Select(_ => "('COMUNA 2', 'Pago', 90000)"))
+            .Append("('COMUNA 2', 'No pago', 5)");
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "precio_hogar", "comuna text, variable text, value numeric", string.Join(", ", rows));
+        await TestData.ExecuteAsync(h.Db,
+            "INSERT INTO tamiza.script_versions (id, project_id, kind, name, number, code, label, unit, format, author_id, created_at) VALUES (gen_random_uuid(), @p, 'indicator', 'precio_hogar', 1, 'x', 'Precio', 'pesos', 'count', @a, now())",
+            ("p", h.ProjectId), ("a", h.Users["analyst"]));
+    }
+
+    private static object PriceTile(string? statistic, params string[] lines) =>
+        new { indicator = "precio_hogar", measure = "value", filters = PaidFilter, statistic, display = lines.Length == 0 ? null : new { secondary = lines } };
+
+    private static JsonElement WidgetNamed(JsonDocument body, Guid id) =>
+        body.RootElement.GetProperty("widgets").EnumerateArray().Single(w => w.GetProperty("widgetId").GetGuid() == id);
+
+    [Fact]
+    public async Task Median_card_through_MCP()
+    {
+        await using var h = await CreateAsync();
+        await SeedPricesAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+
+        var widget = await AddWidgetAsync(h, dashboard, "Pagó por la última boleta", "stat", PriceTile("median"));
+
+        using var saved = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = dashboard })).Json();
+        Assert.Equal("median", saved.RootElement.GetProperty("widgets")[0].GetProperty("config").GetProperty("statistic").GetString());
+        using var data = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard, widgetId = widget })).Json();
+        var tile = WidgetNamed(data, widget);
+        Assert.Equal("shown", tile.GetProperty("status").GetString());
+        Assert.Equal("median", tile.GetProperty("statistic").GetString());
+        var row = Assert.Single(tile.GetProperty("rows").EnumerateArray());
+        Assert.Equal(40000, row.GetProperty("value").GetDouble());
+        Assert.Equal("40,000 pesos", row.GetProperty("formatted").GetString());
+        // The tile's n is its number of values, on the row and on the widget, and a statistic has no numerator or denominator to return.
+        Assert.Equal(37, row.GetProperty("n").GetDouble());
+        Assert.Equal(37, tile.GetProperty("n").GetDouble());
+        Assert.False(row.TryGetProperty("numerator", out _));
+        Assert.False(row.TryGetProperty("denominator", out _));
+        Assert.False(tile.TryGetProperty("unfiltered", out _));
+        using var preview = (await h.CallAsync("viewer", "query_indicator", new { chartType = "stat", config = PriceTile("median") })).Json();
+        Assert.Equal("median", preview.RootElement.GetProperty("statistic").GetString());
+        Assert.Equal(37, preview.RootElement.GetProperty("n").GetDouble());
+        Assert.Equal("40,000 pesos", preview.RootElement.GetProperty("rows")[0].GetProperty("formatted").GetString());
+    }
+
+    [Fact]
+    public async Task Value_without_the_filters_through_MCP()
+    {
+        await using var h = await CreateAsync();
+        await SeedPricesAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+        await h.CallAsync("analyst", "update_dashboard", new
+        {
+            dashboardId = dashboard, change = Request,
+            filters = new[] { new { column = "comuna", label = "Comuna", kind = "text" } },
+        });
+        var line = await AddWidgetAsync(h, dashboard, "Con línea", "stat", PriceTile("median", "unfiltered"));
+        var plain = await AddWidgetAsync(h, dashboard, "Sin línea", "stat", PriceTile("median"));
+        var one = new[] { new { column = "comuna", kind = "text", values = new[] { "COMUNA 1" } } };
+
+        using var narrowed = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard, filterValues = one })).Json();
+        using var open = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard })).Json();
+
+        // COMUNA 1's households paid 10,000; every household's median is 40,000, shown as the tile shows its value.
+        var tile = WidgetNamed(narrowed, line);
+        Assert.Equal(10000, tile.GetProperty("rows")[0].GetProperty("value").GetDouble());
+        var unfiltered = tile.GetProperty("unfiltered");
+        Assert.Equal(40000, unfiltered.GetProperty("value").GetDouble());
+        Assert.Equal("40,000 pesos", unfiltered.GetProperty("formatted").GetString());
+        // A tile that does not show the line, and a query with no filter in force, have none.
+        Assert.False(WidgetNamed(narrowed, plain).TryGetProperty("unfiltered", out _));
+        Assert.False(WidgetNamed(open, line).TryGetProperty("unfiltered", out _));
+        // A preview has no dashboard: it sets no flag, so it never has a value without filters.
+        using var preview = (await h.CallAsync("viewer", "query_indicator", new { chartType = "stat", config = PriceTile("median", "unfiltered") })).Json();
+        Assert.False(preview.RootElement.TryGetProperty("unfiltered", out _));
+        Assert.DoesNotContain("unfiltered", preview.RootElement.GetRawText());
+    }
+
+    private const string CrucesColumns = "variable text, orden text, categoria text, comuna text, numerator numeric, denominator numeric";
+
+    private const string Components = "Componentes con sí o tal vez";
+
+    /// <summary>Four answers of one question, given by 9,517 of 10,000 households (COMUNA 1 has 6,000, COMUNA 2 4,000), declared as <paramref name="kind"/>.</summary>
+    private static async Task SeedCrucesAsync(McpProjectHarness h, string kind)
+    {
+        (string Orden, string Answer, int First, int Second)[] answers = [("01", "1", 25, 17), ("02", "2", 500, 319), ("03", "3", 2500, 1639), ("04", "4", 2700, 1817)];
+        var rows = answers.SelectMany(a => new[]
+        {
+            $"('{Components}', '{a.Orden}', '{a.Answer}', 'COMUNA 1', {a.First}, 6000)",
+            $"('{Components}', '{a.Orden}', '{a.Answer}', 'COMUNA 2', {a.Second}, 4000)",
+        });
+        await PublishedTables.PublishTableAsync(h.Db, h.ProjectId, "indicators", "cruces_intencion", CrucesColumns, string.Join(", ", rows));
+        await TestData.ExecuteAsync(h.Db,
+            "INSERT INTO tamiza.script_versions (id, project_id, kind, name, number, code, label, format, columns, author_id, created_at) VALUES (gen_random_uuid(), @p, 'indicator', 'cruces_intencion', 1, 'x', 'Cruces', 'percent', @c::jsonb, @a, now())",
+            ("p", h.ProjectId), ("c", JsonSerializer.Serialize(new { variable = new { categories = kind }, orden = new { categories = kind }, categoria = new { categories = kind } })), ("a", h.Users["analyst"]));
+    }
+
+    private static object CrucesCard(params string[] answers) => new
+    {
+        indicator = "cruces_intencion", ratio = new { numerator = "numerator", denominator = "denominator" },
+        filters = new object[] { new { column = "variable", op = "equals", value = Components }, new { column = "categoria", op = "in", values = answers } },
+    };
+
+    [Fact]
+    public async Task Card_over_several_answers_through_MCP()
+    {
+        await using var h = await CreateAsync();
+        await SeedCrucesAsync(h, "single");
+        var dashboard = await FirstDashboardAsync(h);
+        var widget = await AddWidgetAsync(h, dashboard, "Componentes", "stat", CrucesCard("1", "2", "3", "4"));
+
+        using var preview = (await h.CallAsync("viewer", "query_indicator", new { chartType = "stat", config = CrucesCard("1", "2", "3", "4") })).Json();
+        using var data = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard, widgetId = widget })).Json();
+
+        // 9,517 of the 10,000 households, the base counted once across the four answers: not 23.79 %.
+        Assert.Equal("95.17%", preview.RootElement.GetProperty("rows")[0].GetProperty("formatted").GetString());
+        var row = WidgetNamed(data, widget).GetProperty("rows")[0];
+        Assert.Equal("95.17%", row.GetProperty("formatted").GetString());
+        Assert.Equal(9517, row.GetProperty("numerator").GetDouble());
+        Assert.Equal(10000, row.GetProperty("denominator").GetDouble());
+        Assert.Equal(10000, WidgetNamed(data, widget).GetProperty("n").GetDouble());
+    }
+
+    [Fact]
+    public async Task Refused_card_through_MCP()
+    {
+        await using var h = await CreateAsync();
+        await SeedCrucesAsync(h, "multiple");
+        var dashboard = await FirstDashboardAsync(h);
+        var refused = await AddWidgetAsync(h, dashboard, "Componentes", "stat", CrucesCard("1", "2", "3", "4"));
+        var other = await AddWidgetAsync(h, dashboard, "Una respuesta", "stat", CrucesCard("4"));
+
+        using var data = (await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard })).Json();
+        using var preview = (await h.CallAsync("viewer", "query_indicator", new { chartType = "stat", config = CrucesCard("1", "2", "3", "4") })).Json();
+
+        // The refused widget has no rows and the message naming the column; the other widget has its rows.
+        var tile = WidgetNamed(data, refused);
+        Assert.Equal("combinedCategories", tile.GetProperty("status").GetString());
+        Assert.StartsWith("`categoria` holds the answers of a multiple-choice question.", tile.GetProperty("message").GetString());
+        Assert.Contains("group or split the widget by `categoria`", tile.GetProperty("message").GetString());
+        Assert.False(tile.TryGetProperty("rows", out _));
+        var shown = WidgetNamed(data, other);
+        Assert.Equal("shown", shown.GetProperty("status").GetString());
+        Assert.Equal("45.17%", shown.GetProperty("rows")[0].GetProperty("formatted").GetString());
+        // The preview returns the column and the same message, and no rows.
+        Assert.Equal("categoria", preview.RootElement.GetProperty("combinedCategories").GetString());
+        Assert.Equal(tile.GetProperty("message").GetString(), preview.RootElement.GetProperty("message").GetString());
+        Assert.Empty(preview.RootElement.GetProperty("rows").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task A_widget_without_the_new_fields_returns_what_it_returned()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+        await AddWidgetAsync(h, dashboard, "By municipality", "bar", BarConfig());
+        await AddWidgetAsync(h, dashboard, "Overall", "stat", new { indicator = "piped_water_rate", ratio = new { numerator = "numerator", denominator = "denominator" } });
+
+        var data = await h.CallAsync("viewer", "get_widget_data", new { dashboardId = dashboard });
+        var preview = await h.CallAsync("viewer", "query_indicator", new { chartType = "stat", config = new { indicator = "piped_water_rate", ratio = new { numerator = "numerator", denominator = "denominator" } } });
+
+        foreach (var text in new[] { data.Text(), preview.Text() })
+        {
+            foreach (var member in new[] { "statistic", "unfiltered", "combinedCategories" })
+            {
+                Assert.DoesNotContain($"\"{member}\"", text);
+            }
+        }
+
+        Assert.Contains("\"formatted\":\"60%\"", data.Text());
+    }
+
+    [Fact]
+    public async Task Statistic_on_a_bar_chart_through_MCP()
+    {
+        await using var h = await CreateAsync();
+        await SeedPricesAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+
+        var result = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = dashboard, title = "Mediana", chartType = "bar", change = Request,
+            config = new { indicator = "precio_hogar", measure = "value", groupBy = "comuna", statistic = "median" },
+        });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("config.statistic", result.Text());
+        Assert.Contains("Only a stat tile has a statistic.", result.Text());
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+
+        var lines = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = dashboard, title = "Líneas", chartType = "bar", change = Request,
+            config = new { indicator = "precio_hogar", measure = "value", groupBy = "comuna", display = new { secondary = new[] { "n" } } },
+        });
+        Assert.Equal("mcp.validation", lines.Code());
+        Assert.Contains("config.display.secondary", lines.Text());
+        Assert.Equal(0, await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_widgets"));
+    }
+
+    [Fact]
+    public async Task Chart_type_changed_alone_through_MCP()
+    {
+        await using var h = await CreateAsync();
+        await SeedPricesAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+        var widget = await AddWidgetAsync(h, dashboard, "Pagó por la última boleta", "stat", PriceTile("median", "n"));
+
+        var result = await h.CallAsync("analyst", "update_widget", new { dashboardId = dashboard, widgetId = widget, chartType = "bar", change = Request });
+
+        Assert.Equal("mcp.validation", result.Code());
+        Assert.Contains("config.statistic", result.Text());
+        using var body = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = dashboard })).Json();
+        var saved = body.RootElement.GetProperty("widgets").EnumerateArray().Single(w => w.GetProperty("id").GetGuid() == widget);
+        Assert.Equal("stat", saved.GetProperty("chartType").GetString());
+        Assert.Equal("median", saved.GetProperty("config").GetProperty("statistic").GetString());
+        Assert.Equal(["n"], saved.GetProperty("config").GetProperty("display").GetProperty("secondary").EnumerateArray().Select(l => l.GetString()));
+    }
+
+    [Fact]
+    public async Task A_config_that_sends_unfiltered_saves_a_config_without_it()
+    {
+        await using var h = await CreateAsync();
+        await SeedPricesAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+
+        var widget = await AddWidgetAsync(h, dashboard, "Pagó", "stat", new { indicator = "precio_hogar", measure = "value", filters = PaidFilter, unfiltered = true });
+
+        using var body = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = dashboard })).Json();
+        var config = body.RootElement.GetProperty("widgets").EnumerateArray().Single(w => w.GetProperty("id").GetGuid() == widget).GetProperty("config");
+        Assert.DoesNotContain("unfiltered", config.GetRawText());
+        Assert.False(await TestData.ScalarAsync<bool>(h.Db, "SELECT config::text LIKE '%unfiltered%' FROM tamiza.dashboard_widgets WHERE id = @w", ("w", widget)));
+    }
 }

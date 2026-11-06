@@ -43,10 +43,18 @@ public sealed record IndicatorSql(
 /// add-small-sample-warnings): the statement that reports what it left out. Null for every other query, so a widget without the option
 /// runs no statement for it.
 /// </param>
+/// <param name="Unfiltered">
+/// A stat tile that was asked for its value without the dashboard filters, while they narrow it only (design D3 of improve-stat-cards):
+/// next to <paramref name="Sql"/>, the same plan with the widget's own filters and none of the dashboard's. Null for every other query.
+/// </param>
+/// <param name="Combined">
+/// A ratio over an indicator that declares answer columns of multiple choice (design D4b of improve-stat-cards): the check that runs
+/// before the plotted statements, and refuses the widget when one of its values would add up several answers. Null for every other query.
+/// </param>
 public sealed record IndicatorQueryPlan(
     IndicatorSql? Sql, IReadOnlyList<string> MissingColumns, IDictionary<string, string[]>? Errors, IReadOnlyList<string>? NotFiltered = null,
     SeriesQueryPlan? Series = null, IndicatorSql? Domain = null, IndicatorSql? Boxes = null, IndicatorSql? Overall = null, IndicatorSql? Counted = null,
-    NoDataSql? NoData = null);
+    NoDataSql? NoData = null, IndicatorSql? Unfiltered = null, CombinedCheck? Combined = null);
 
 /// <summary>Validates a widget query against the indicator table's columns and turns it into SQL.</summary>
 public static class IndicatorQueryBuilder
@@ -72,15 +80,20 @@ public static class IndicatorQueryBuilder
     /// same name: without an order, groups follow the column's own type. With one, the sort key comes first and the group
     /// column breaks ties, so the order is total.
     /// </summary>
-    internal static string OrderBy(WidgetConfig config, IReadOnlyDictionary<string, TableColumn> byName, string from, string aggregate)
+    /// <param name="nested">
+    /// The order of the nested form of a ratio over answers of single choice (design D4a of improve-stat-cards): the group and the sort
+    /// column are the inner statement's. Null for every other statement, whose text is unchanged.
+    /// </param>
+    internal static string OrderBy(
+        WidgetConfig config, IReadOnlyDictionary<string, TableColumn> byName, string from, string aggregate, NestedSort? nested = null)
     {
-        var group = GroupOrder(from, DataSources.Quote(byName[config.GroupBy!].Name));
+        var group = nested is null ? GroupOrder(from, DataSources.Quote(byName[config.GroupBy!].Name)) : $"{nested.Group} NULLS LAST";
         if (config.Sort is not { } sort)
         {
             return "ORDER BY " + group;
         }
 
-        var key = sort.By == SortValues.ByValue ? $"({aggregate})" : ColumnSortKey(sort, byName[sort.Column!]);
+        var key = sort.By == SortValues.ByValue ? $"({aggregate})" : nested?.SortKey(byName[sort.Column!]) ?? ColumnSortKey(sort, byName[sort.Column!]);
         var direction = sort.Direction == SortValues.Desc ? "DESC" : "ASC";
         return $"ORDER BY {key} {direction} NULLS LAST, {group}";
     }
@@ -129,7 +142,7 @@ public static class IndicatorQueryBuilder
     /// The smallest value of the sort column in the group, compared the way the order says. Text read as a number is guarded, so a
     /// value that is not one is NULL (and goes last) instead of raising an error that would fail the widget.
     /// </summary>
-    private static string ColumnSortKey(WidgetSort sort, TableColumn column)
+    internal static string ColumnSortKey(WidgetSort sort, TableColumn column)
     {
         var name = DataSources.Quote(column.Name);
         var asNumber = sort.CompareAs == SortValues.Number || (sort.CompareAs is null && column.Type is DataColumnType.Integer or DataColumnType.Decimal);
@@ -157,15 +170,32 @@ public static class IndicatorQueryBuilder
     /// is summed; a date or timestamp is the earliest; true/false is false unless every row is true; text is the first in the column's
     /// collation, an empty text counting as no value, cut one character past what the response keeps so the cut can be told.
     /// </summary>
-    private static string TooltipOutput(TableColumn column)
+    private static string TooltipOutput(TableColumn column, string? carried = null)
     {
-        var name = DataSources.Quote(column.Name);
+        // The nested form of a ratio over answers reads the aggregate its inner statement carried (TooltipCarry), taken again over the answers.
+        var name = carried ?? DataSources.Quote(column.Name);
         return column.Type switch
         {
             DataColumnType.Integer or DataColumnType.Decimal => $"sum({name})::text",
             DataColumnType.Date or DataColumnType.Timestamp => $"min({name})::text",
             DataColumnType.Boolean => $"bool_and({name})",
             _ => $"left(min(NULLIF({name}::text, '')), {WidgetConfig.MaxTooltipText + 1})",
+        };
+    }
+
+    /// <summary>The inner statement's carried tooltip column <paramref name="index"/> of the nested form.</summary>
+    private static string Carried(int index) => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"\"__t{index}\"");
+
+    /// <summary>What the inner statement of the nested form carries of a tooltip column: <see cref="TooltipOutput"/> before its text conversion.</summary>
+    private static string TooltipCarry(TableColumn column)
+    {
+        var name = DataSources.Quote(column.Name);
+        return column.Type switch
+        {
+            DataColumnType.Integer or DataColumnType.Decimal => $"sum({name})",
+            DataColumnType.Date or DataColumnType.Timestamp => $"min({name})",
+            DataColumnType.Boolean => $"bool_and({name})",
+            _ => $"min(NULLIF({name}::text, ''))",
         };
     }
 
@@ -188,10 +218,14 @@ public static class IndicatorQueryBuilder
     /// Only the overall statement's own planning sets it (design D6): the rows the plotted widget leaves out, which a stat tile that has no
     /// group or series column cannot derive from its config. Every other caller leaves it null and the plan derives it from the config.
     /// </param>
+    /// <param name="unfiltered">
+    /// Also plan a stat tile's value without the dashboard filters (<see cref="IndicatorQueryPlan.Unfiltered"/>), when they narrow it: the
+    /// request flag of design D3 of improve-stat-cards; no widget stores it. It does nothing for another kind of widget.
+    /// </param>
     public static IndicatorQueryPlan Plan(
         WidgetConfig config, IReadOnlyList<TableColumn> columns, string timeZone, string from, int maxRows, bool perRow = false,
         IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null, string? chartType = null, bool overall = false,
-        IndicatorBases? bases = null, NoDataExclusion? exclusion = null)
+        IndicatorBases? bases = null, NoDataExclusion? exclusion = null, bool unfiltered = false)
     {
         var byName = columns.ToDictionary(c => c.Name, StringComparer.Ordinal);
 
@@ -269,7 +303,8 @@ public static class IndicatorQueryBuilder
         // The rows the widget leaves out as no data (design D6 of add-small-sample-warnings) are out of every plotted statement and every
         // count; the statement that reports them reads the rows without the exclusion.
         var leaving = exclusion is null ? NoDataExclusion.For(config, chartType, bases, Q) : null;
-        var unfiltered = filters;
+        var exclusionGiven = exclusion;
+        var unfilteredRows = filters;
         exclusion ??= leaving;
         filters += exclusion?.Condition;
         var grouped = config.GroupBy is not null;
@@ -293,6 +328,24 @@ public static class IndicatorQueryBuilder
             rowFilter = $"({Q(ratio.Numerator)} IS NOT NULL OR {Q(ratio.Denominator)} IS NOT NULL)";
         }
 
+        // A stat tile asks for its value without the dashboard filters only while they narrow it: the same plan with none of them (design D3
+        // of improve-stat-cards). The statement is run after the plotted one, in the same transaction.
+        var narrowed = dashboard.Where.Length > 0;
+        IndicatorSql? PlanUnfiltered() =>
+            unfiltered && chartType == ChartTypes.Stat && narrowed
+                ? Plan(config, columns, timeZone, from, maxRows, perRow, null, chartType, false, bases, exclusionGiven).Sql
+                : null;
+
+        if (chartType == ChartTypes.Stat && config.Statistic is { } statistic)
+        {
+            var statParameters = new List<SqlParam>(query.Parameters);
+            statParameters.AddRange(dashboard.Parameters.Where(p => !statParameters.Any(q => q.Name == p.Name)));
+            statParameters.AddRange(exclusion?.Parameters ?? []);
+            var statSql = Statistic(statistic, plotted, rowFilter, filters, from, bases?.BaseColumn is { } baseColumn ? Q(baseColumn) : null);
+            return new IndicatorQueryPlan(
+                new IndicatorSql(statSql, statParameters, Figures: StatisticFigures), missing, null, notFiltered, Unfiltered: PlanUnfiltered());
+        }
+
         if (chartType == ChartTypes.Boxplot)
         {
             // A box plot summarizes the rows of each group as they are: no sum, and no series (validation refuses one).
@@ -303,17 +356,49 @@ public static class IndicatorQueryBuilder
             return new IndicatorQueryPlan(null, missing, null, notFiltered, Boxes: boxes);
         }
 
-        if (config.SeriesBy is not null && grouped)
+        // A ratio over declared answer columns (design D4 of improve-stat-cards): single choice counts the base once across the answers,
+        // multiple choice is refused when a plotted value would add them up. A measure and a widget with no declaration have neither.
+        var answers = AnswerColumns.Of(config, rows, bases, columns, Q);
+        var seriesGrouped = config.SeriesBy is not null && grouped;
+        CombinedCheck? combined = null;
+        if (answers.Refuses)
         {
-            var series = SeriesQueryBuilder.Build(config, chartType, byName, from, aggregate, rowFilter, query, dashboard, maxRows, bases, exclusion);
-            return new IndicatorQueryPlan(null, missing, null, notFiltered, series, NoData: NoDataOf(leaving, config, measure, bases, Q, from, rowFilter, unfiltered, query, dashboard));
+            var checkParameters = new List<SqlParam>(query.Parameters);
+            checkParameters.AddRange(dashboard.Parameters.Where(p => !checkParameters.Any(q => q.Name == p.Name)));
+            checkParameters.AddRange(exclusion?.Parameters ?? []);
+            var fixedValues = seriesGrouped ? SeriesQueryBuilder.FixedDomain(config, chartType) : null;
+            var fixedWhere = "";
+            if (fixedValues is not null)
+            {
+                // A pyramid and a Likert widget plot only the rows of their fixed values that have a group.
+                fixedWhere = $" AND {Q(config.GroupBy!)} IS NOT NULL AND {Q(config.SeriesBy!)} IS NOT NULL AND {Q(config.SeriesBy!)}::text = ANY(@{SeriesQueryBuilder.KeptParameter})";
+                checkParameters.Add(new(SeriesQueryBuilder.KeptParameter, NpgsqlDbType.Array | NpgsqlDbType.Text, fixedValues.ToArray()));
+            }
+
+            combined = BaseQueryBuilder.Combined(
+                answers, grouped ? Q(config.GroupBy!) : null, seriesGrouped ? Q(config.SeriesBy!) : null, from, rowFilter, filters, checkParameters, fixedWhere);
         }
 
-        var group = grouped ? $"{Q(config.GroupBy!)}::text" : "NULL::text";
+        if (seriesGrouped)
+        {
+            var series = SeriesQueryBuilder.Build(config, chartType, byName, from, aggregate, rowFilter, query, dashboard, maxRows, bases, exclusion, answers);
+            return new IndicatorQueryPlan(
+                null, missing, null, notFiltered, series, NoData: NoDataOf(leaving, config, measure, bases, Q, from, rowFilter, unfilteredRows, query, dashboard),
+                Combined: combined);
+        }
+
+        // With answer columns of single choice a ratio takes the nested form (design D4a of improve-stat-cards): an inner statement over
+        // each mark and answer, and the outer one reads what it carries.
+        var nested = answers.Corrects;
+        var group = grouped ? $"{(nested ? NestedRatio.Group : Q(config.GroupBy!))}::text" : "NULL::text";
         string geometry;
         if (config.GeometryColumn is null)
         {
             geometry = "NULL::text";
+        }
+        else if (nested)
+        {
+            geometry = $"min({NestedRatio.Geometry})";
         }
         else
         {
@@ -324,12 +409,15 @@ public static class IndicatorQueryBuilder
         // over the same rows the WHERE keeps (see TooltipOutput).
         var isMap = grouped && config.GeometryColumn is not null;
         var tooltip = isMap ? config.Tooltip.Where(item => item is not null).ToList() : [];
-        var extra = isMap ? ", count(*)" + string.Concat(tooltip.Select(item => ", " + TooltipOutput(byName[item.Column]))) : "";
+        var extra = isMap
+            ? (nested ? $", sum({NestedRatio.Rows})::bigint" : ", count(*)")
+                + string.Concat(tooltip.Select((item, i) => ", " + TooltipOutput(byName[item.Column], nested ? Carried(i) : null)))
+            : "";
 
         // The figures (design D5 of add-small-sample-warnings) come after every output the statement has today, so today's select list is a
         // prefix of this one. A measure with no base column adds none, and a histogram and a box plot (planned above) take none.
         SqlFigures? figures = null;
-        var sums = chartType == ChartTypes.Histogram || rows ? null : BaseQueryBuilder.Sums(config, bases, Q);
+        var sums = chartType == ChartTypes.Histogram || rows ? null : BaseQueryBuilder.Sums(config, bases, Q, nested);
         if (sums is not null && sums.Any)
         {
             var window = BaseQueryBuilder.WidgetWindow(bases);
@@ -348,13 +436,57 @@ public static class IndicatorQueryBuilder
                 LIMIT @{IndicatorSql.LimitParameter}
                 """;
         }
+        else if (nested)
+        {
+            // The inner statement sums each mark's numerator and denominator per answer and carries what the outer one needs: the rows
+            // it combines, the base, the geometry, the map's tooltip columns and a sort column, as sums or minimums.
+            var (answerSelect, answerKeys) = NestedRatio.Answers(answers.Single, grouped ? Q(config.GroupBy!) : null);
+            var items = new List<string>();
+            if (grouped)
+            {
+                items.Add($"{Q(config.GroupBy!)} AS {NestedRatio.Group}");
+            }
+
+            items.AddRange(answerSelect);
+            items.Add(NestedRatio.InnerSums(Q(ratio!.Numerator), Q(ratio.Denominator)));
+            if (sums?.Base is not null)
+            {
+                items.Add($"sum({Q(bases!.BaseColumn!)}) AS {NestedRatio.Base}");
+            }
+
+            if (config.GeometryColumn is not null)
+            {
+                items.Add($"min({Q(config.GeometryColumn)}::text) AS {NestedRatio.Geometry}");
+            }
+
+            items.AddRange(tooltip.Select((item, i) => $"{TooltipCarry(byName[item.Column])} AS {Carried(i)}"));
+            var carriedSort = grouped ? NestedSort.Carry(config, byName) : null;
+            var keys = string.Join(", ", (grouped ? [Q(config.GroupBy!)] : Enumerable.Empty<string>()).Concat(answerKeys));
+            var groupBy = grouped ? $"GROUP BY {NestedRatio.Group}" : "";
+            var orderBy = grouped ? OrderBy(config, byName, from, NestedRatio.Value, new NestedSort(NestedRatio.Group)) : "";
+            sql =
+                $"""
+                SELECT {group}, ({NestedRatio.Value}), {geometry}{extra}
+                FROM (SELECT {string.Join(", ", items)}{carriedSort}
+                      FROM {from}
+                      WHERE {rowFilter}{filters}
+                      GROUP BY {keys}) a
+                {groupBy}
+                HAVING ({NestedRatio.Value}) IS NOT NULL
+                {orderBy}
+                LIMIT @{IndicatorSql.LimitParameter}
+                """;
+        }
         else
         {
             var groupBy = grouped ? $"GROUP BY {Q(config.GroupBy!)}" : "";
             var orderBy = grouped ? OrderBy(config, byName, from, aggregate) : "";
+            // A tile over answers of multiple choice has no value when its rows hold several: its own statement never does, since the
+            // check refused it, but the overall and the unfiltered statements are this one over other rows (design D4b).
+            var value = grouped ? aggregate : answers.OneAnswerOnly(aggregate);
             sql =
                 $"""
-                SELECT {group}, ({aggregate}), {geometry}{extra}
+                SELECT {group}, ({value}), {geometry}{extra}
                 FROM {from}
                 WHERE {rowFilter}{filters}
                 {groupBy}
@@ -367,7 +499,7 @@ public static class IndicatorQueryBuilder
         // Both sets bind the project's zone as tz when they have a timestamp range: it is bound once.
         var parameters = new List<SqlParam>(query.Parameters);
         parameters.AddRange(dashboard.Parameters.Where(p => !parameters.Any(q => q.Name == p.Name)));
-        var noData = NoDataOf(leaving, config, measure, bases, Q, from, rowFilter, unfiltered, query, dashboard);
+        var noData = NoDataOf(leaving, config, measure, bases, Q, from, rowFilter, unfilteredRows, query, dashboard);
         parameters.AddRange(exclusion?.Parameters ?? []);
 
         // With answer columns declared, a second statement counts the n of each group and of the widget once across the answers, over the
@@ -383,11 +515,45 @@ public static class IndicatorQueryBuilder
             ? PieDomain(Q(config.GroupBy!), from, aggregate, rowFilter, query, WidgetConfig.MaxSlices + 1, exclusion)
             : null;
         var overallSql = overall && grouped && chartType is (ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line)
-            ? PlanOverall(config, columns, timeZone, from, maxRows, dashboardFilters, exclusion)
+            ? PlanOverall(config, columns, timeZone, from, maxRows, dashboardFilters, exclusion, bases)
             : null;
         return new IndicatorQueryPlan(
             new IndicatorSql(sql, parameters, isMap ? tooltip.Select(item => byName[item.Column].Type).ToList() : null, figures), missing, null, notFiltered,
-            Domain: domain, Overall: overallSql, Counted: counted, NoData: noData);
+            Domain: domain, Overall: overallSql, Counted: counted, NoData: noData, Unfiltered: PlanUnfiltered(), Combined: combined);
+    }
+
+    /// <summary>The figure outputs of a statistic's statement: its n is the fourth output, read as the base column's sum and as the widget's n.</summary>
+    internal static readonly SqlFigures StatisticFigures = new(null, null, Base: 3, WidgetN: 3);
+
+    /// <summary>
+    /// A stat tile's statistic (design D2 and D10 of improve-stat-cards): <c>group, value, geometry, n</c> of one row, over the rows with a
+    /// finite value (<paramref name="plotted"/> is each row's measure, or its numerator over its own denominator, so a zero denominator,
+    /// a null and NaN are left out here, as are the infinities), and no row when none has one. The n is the number of those values, or
+    /// the sum of the base column over their rows when <paramref name="baseColumn"/> is given. Quartiles and the median are
+    /// <c>percentile_cont</c>, linear interpolation as the box plot computes them; the mean is <c>sum(x) / count(*)</c>, not
+    /// <c>avg</c>, so it fails on the same data a sum fails on.
+    /// </summary>
+    /// <param name="statistic">One of <see cref="StatStatistics"/>.</param>
+    /// <param name="plotted">One row's value.</param>
+    /// <param name="rowFilter">The condition that keeps the rows that have something to plot.</param>
+    /// <param name="filters">The widget's and the dashboard's filters, each introduced by <c> AND </c>.</param>
+    /// <param name="baseColumn">The quoted base column of an indicator that declares one, else null.</param>
+    internal static string Statistic(string statistic, string plotted, string rowFilter, string filters, string from, string? baseColumn)
+    {
+        var stat = statistic switch
+        {
+            StatStatistics.P25 => "percentile_cont(0.25) WITHIN GROUP (ORDER BY x)",
+            StatStatistics.P75 => "percentile_cont(0.75) WITHIN GROUP (ORDER BY x)",
+            StatStatistics.Mean => "sum(x) / count(*)",
+            _ => "percentile_cont(0.5) WITHIN GROUP (ORDER BY x)",
+        };
+        return
+            $"""
+            SELECT NULL::text, {stat}, NULL::text, {(baseColumn is null ? "count(*)::double precision" : "sum(b)::double precision")}
+            FROM (SELECT ({plotted}) AS x{(baseColumn is null ? "" : $", {baseColumn}::double precision AS b")} FROM {from}
+                  WHERE {rowFilter} AND ({plotted}) > '-Infinity'::double precision AND ({plotted}) < 'Infinity'::double precision{filters}) v
+            HAVING count(*) > 0
+            """;
     }
 
     /// <summary>
@@ -416,10 +582,19 @@ public static class IndicatorQueryBuilder
     /// </summary>
     private static IndicatorSql? PlanOverall(
         WidgetConfig config, IReadOnlyList<TableColumn> columns, string timeZone, string from, int maxRows,
-        IReadOnlyList<AppliedDashboardFilter>? dashboardFilters, NoDataExclusion? exclusion) =>
+        IReadOnlyList<AppliedDashboardFilter>? dashboardFilters, NoDataExclusion? exclusion, IndicatorBases? bases) =>
         Plan(
-            WidgetQuery.For(ChartTypes.Stat, config).Normalize(), columns, timeZone, from, maxRows, dashboardFilters: dashboardFilters,
-            chartType: ChartTypes.Stat, exclusion: exclusion).Sql;
+            WidgetQuery.For(ChartTypes.Stat, config with { Statistic = null }).Normalize(), columns, timeZone, from, maxRows, dashboardFilters: dashboardFilters,
+            chartType: ChartTypes.Stat, exclusion: exclusion, bases: AnswersOnly(bases)).Sql;
+
+    /// <summary>
+    /// What the overall statement takes of the indicator's declaration (design D4 of improve-stat-cards): its answer columns, so a ratio
+    /// over answers is counted as the tile with the same config counts it. Nothing else, so the statement keeps its figures and its text.
+    /// </summary>
+    private static IndicatorBases? AnswersOnly(IndicatorBases? bases) =>
+        bases is { Answers.Count: > 0 }
+            ? new IndicatorBases(null, bases.Answers, new Dictionary<string, IReadOnlyList<string>>()) { Kinds = bases.Kinds }
+            : null;
 
     /// <summary>
     /// The dashboard filters the table can take, as a second set of filters with parameters <c>d0</c>, <c>d1min</c>…, and the columns of

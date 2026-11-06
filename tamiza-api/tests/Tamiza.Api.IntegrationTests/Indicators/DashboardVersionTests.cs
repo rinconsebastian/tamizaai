@@ -1967,6 +1967,69 @@ public sealed class DashboardVersionTests(PostgresFixture postgres)
         Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
     }
 
+    // A tile's statistic and secondary lines (dashboard-indicators: Stat tiles saved before statistics and secondary lines)
+
+    [Fact]
+    public async Task A_statistic_and_secondary_lines_added_to_a_tile_are_restored_away_with_the_version_before_it_and_back_with_the_one_that_held_them()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var id = await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+        var tile = new { indicator = "coverage", measure = "value", statistic = "median", display = new { secondary = new[] { "n", "unfiltered" } } };
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { chartType = "stat", config = tile })).StatusCode);
+        Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
+        Assert.Equal("""3 grace app [{"kind": "widgetChanged", "widget": "Coverage"}]""", (await VersionsAsync(h, housing))[^1]);
+        var held = (await ContentAsync(h, housing, 3)).GetProperty("widgets")[0].GetProperty("config");
+        Assert.Equal("median", held.GetProperty("statistic").GetString());
+        Assert.Equal(["n", "unfiltered"], held.GetProperty("display").GetProperty("secondary").EnumerateArray().Select(l => l.GetString()));
+
+        var restore = await RestoredAsync(h, housing, 2);
+
+        var restoredConfig = restore.GetProperty("dashboard").GetProperty("widgets")[0].GetProperty("config");
+        Assert.False(restoredConfig.TryGetProperty("statistic", out _));
+        Assert.False(restoredConfig.TryGetProperty("display", out _));
+        Assert.Equal(new[] { 1, 2, 3, 4 }, await NumbersAsync(h, housing));
+        Assert.True(await SameContentAsync(h, housing, 2, 4));
+        // And the version that held them brings them back whole, as stored.
+        await RestoredAsync(h, housing, 3);
+        var config = (await h.GetWidgetsAsync(housing))[0].GetProperty("config");
+        Assert.Equal("median", config.GetProperty("statistic").GetString());
+        Assert.Equal("""["n","unfiltered"]""", config.GetProperty("display").GetProperty("secondary").GetRawText());
+        Assert.True(await SameContentAsync(h, housing, 3, 5));
+    }
+
+    [Fact]
+    public async Task Tile_with_a_statistic_and_secondary_lines_saved_unchanged_makes_no_version_and_a_tile_without_them_makes_none_either()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var withSettings = await AddWidgetAsync(h, "Median", housing, Layout(0, 0));
+        var plain = await AddWidgetAsync(h, "Total", housing, Layout(6, 0));
+        var tile = new { indicator = "coverage", measure = "value", statistic = "p75", display = new { secondary = new[] { "unfiltered", "n" } } };
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(withSettings, housing), new { chartType = "stat", config = tile })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(plain, housing), new { chartType = "stat", config = new { indicator = "coverage", measure = "value" } })).StatusCode);
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await AllVersionsAsync(h);
+
+        foreach (var read in (await h.GetWidgetsAsync(housing)).EnumerateArray())
+        {
+            var form = await h.Analyst.PatchJsonAsync(h.WidgetUrl(read.GetProperty("id").GetGuid(), housing), new
+            {
+                title = read.GetProperty("title").GetString(),
+                chartType = read.GetProperty("chartType").GetString(),
+                config = read.GetProperty("config"),
+            });
+
+            Assert.Equal(HttpStatusCode.OK, form.StatusCode);
+        }
+
+        // The order the user chose is kept as it is, and nothing is rewritten or versioned.
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+        Assert.Contains("\"statistic\": \"p75\"", stored.Single(row => row.StartsWith("Median|", StringComparison.Ordinal)));
+        Assert.DoesNotContain("statistic", stored.Single(row => row.StartsWith("Total|", StringComparison.Ordinal)));
+    }
+
     [Fact]
     public async Task Unit_changed_alone_makes_a_version_that_says_the_widget_changed_and_holds_the_unit()
     {

@@ -398,4 +398,111 @@ describe('WidgetView colors (add-dashboard-palettes, design D3, D7)', () => {
       expect(boxOf(fixture).className).toBe('min-h-0 flex-1');
     });
   });
+
+  describe("the stat tile's lines and the refused widget (improve-stat-cards, design D3, D4b)", () => {
+    const ratio = { numerator: 'numerator', denominator: 'denominator' };
+    const tile = (display?: WidgetConfig['display']) => config({ groupBy: null, ratio, ...(display ? { display } : {}) });
+
+    async function renderTile(display?: WidgetConfig['display']) {
+      const context = await render();
+      context.host.type.set('stat');
+      context.host.config.set(tile(display));
+      await context.settle();
+      const [asked] = context.queries();
+      asked.flush(result([row(null, 0.4685)], { n: 476 }));
+      await context.settle();
+      return { ...context, asked };
+    }
+
+    it('shows the n line without asking again (n line chosen in the form)', async () => {
+      const { host, settle, queries, asked } = await renderTile();
+      expect(asked.request.body).not.toHaveProperty('unfiltered');
+
+      host.config.set(tile({ secondary: ['n'] }));
+      await settle();
+
+      expect(queries()).toHaveLength(0);
+    });
+
+    it('asks again, with unfiltered: true and no field in the config, when the line without filters is chosen (Line without filters chosen in the form)', async () => {
+      const { host, settle, queries } = await renderTile();
+
+      host.config.set(tile({ secondary: ['unfiltered'] }));
+      await settle();
+
+      const chosen = queries();
+      expect(chosen).toHaveLength(1);
+      expect(chosen[0].request.body.unfiltered).toBe(true);
+      expect(chosen[0].request.body.config).not.toHaveProperty('unfiltered');
+      expect(chosen[0].request.body.config).not.toHaveProperty('display');
+      chosen[0].flush(result([row(null, 0.31)], { unfiltered: 0.4685 }));
+      await settle();
+
+      host.config.set(tile({ secondary: ['unfiltered', 'n'] }));
+      await settle();
+      expect(queries()).toHaveLength(0);
+
+      host.config.set(tile({ secondary: ['n'] }));
+      await settle();
+      const removed = queries();
+      expect(removed).toHaveLength(1);
+      expect(removed[0].request.body).not.toHaveProperty('unfiltered');
+    });
+
+    it('posts a body with no unfiltered key for a widget without the line, and for any other kind that carries it', async () => {
+      const { host, settle, queries } = await renderTile();
+
+      host.type.set('column');
+      host.config.set(config({ groupBy: 'municipality', ratio, display: { secondary: ['n', 'unfiltered'] } }));
+      await settle();
+
+      const sent = queries();
+      expect(sent).toHaveLength(1);
+      expect(sent[0].request.body).not.toHaveProperty('unfiltered');
+    });
+
+    it('draws no base n line under a stat tile: the tile draws it once (Base n line of the dashboard)', async () => {
+      const { fixture } = await renderTile({ showN: true });
+      const element = fixture.nativeElement as HTMLElement;
+
+      expect(element.querySelector('[data-testid="widget-n-line"]')).toBeNull();
+      expect(element.querySelectorAll('[data-testid="stat-line"]')).toHaveLength(1);
+      expect(element.querySelector('[data-testid="stat-line"]')!.textContent!.trim()).toBe('n = 476 denominator');
+    });
+
+    it('shows a warning with the message in place of the figures, and gives it as the reason it cannot be exported (Card over two reasons)', async () => {
+      const context = await render();
+      context.host.type.set('stat');
+      context.host.config.set(tile());
+      await context.settle();
+      const [asked] = context.queries();
+      asked.flush(result([], { combinedCategories: 'categoria' }));
+      await context.settle();
+
+      const element = context.fixture.nativeElement as HTMLElement;
+      const alert = element.querySelector('[data-testid="widget-combined"]')!;
+      expect(alert).not.toBeNull();
+      expect(alert.textContent).toContain('This figure would count people more than once');
+      const message = element.querySelector('[data-testid="combined-text"]')!.textContent!;
+      expect(message).toContain('categoria holds the answers of a multiple-choice question');
+      expect(message).toContain('group or split the widget by categoria');
+      for (const gone of ['widget-empty', 'stat', 'widget-missing', 'view-not-published']) {
+        expect(element.querySelector(`[data-testid="${gone}"]`), gone).toBeNull();
+      }
+      const state = context.view.exportState();
+      expect(state.image).toBe(message);
+      expect(state.workbook).toBe(message);
+    });
+
+    it('shows the message of a draft before it is saved, whatever its kind (Message in the preview)', async () => {
+      const context = await render();
+      context.host.type.set('bar');
+      context.host.config.set(config({ groupBy: 'categoria', ratio }));
+      await context.settle();
+      context.queries().forEach((request) => request.flush(result([], { combinedCategories: 'categoria' })));
+      await context.settle();
+
+      expect((context.fixture.nativeElement as HTMLElement).querySelector('[data-testid="widget-combined"]')).not.toBeNull();
+    });
+  });
 });

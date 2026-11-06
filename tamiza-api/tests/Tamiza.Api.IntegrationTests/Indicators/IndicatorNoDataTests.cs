@@ -231,7 +231,7 @@ public sealed class IndicatorNoDataTests(PostgresFixture postgres)
             "teatro_hoy", "variable text, orden text, categoria text, comuna text, numerator numeric, denominator numeric", LongRows(), format: "percent",
             labels: new
             {
-                variable = new { categories = "multiple" }, orden = new { categories = "multiple" }, categoria = new { categories = "multiple" },
+                variable = new { categories = "single" }, orden = new { categories = "single" }, categoria = new { categories = "single" },
                 comuna = new { missing = new[] { "Sin dato" } },
             });
 

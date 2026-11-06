@@ -60,6 +60,19 @@ describe('WidgetView exportState', () => {
     expect(http.match(isQuery)).toHaveLength(0);
   });
 
+  it('gives the message of a ratio over several answers as the reason, for the image and for the workbook (Card over two reasons)', async () => {
+    const { view, answer } = await render({ type: 'stat', config: config({ groupBy: null, ratio: { numerator: 'numerator', denominator: 'denominator' } }) });
+
+    await answer(result([], { combinedCategories: 'categoria' }));
+
+    const state = view.exportState();
+    expect(state.image).toBe(
+      'categoria holds the answers of a multiple-choice question. Adding up several of them counts a respondent once for each answer. Keep one answer, group or split the widget by categoria, or plot a row the indicator publishes for any of them.',
+    );
+    expect(state.workbook).toBe(state.image);
+    expect(state.imageNote).toBeNull();
+  });
+
   it('says the indicator has not published when the answer says so', async () => {
     const { view, answer } = await render();
 

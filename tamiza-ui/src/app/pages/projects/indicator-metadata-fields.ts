@@ -192,6 +192,10 @@ interface ColumnRow {
                           }
                         </select>
                         <p class="mt-1 text-sm text-body">{{ t('scripts.columns.facts.answersHelp') }}</p>
+                        @if (row.draft.categories === 'single' || row.draft.categories === 'multiple') {
+                          <!-- What the kind does to a ratio over several of the answers (improve-stat-cards, design D4, D6). -->
+                          <p class="mt-1 text-sm text-body" data-testid="meta-column-answers-effect">{{ t('scripts.columns.facts.answers' + (row.draft.categories === 'single' ? 'Single' : 'Multiple') + 'Effect') }}</p>
+                        }
                         @if (errorOf(row.column, 'categories'); as error) {
                           <p class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="error" data-testid="answers-error">{{ error }}</p>
                         }

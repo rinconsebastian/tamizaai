@@ -155,6 +155,62 @@ public static class IndicatorValidation
         CheckIgnoredDashboardFilters(config.IgnoredDashboardFilters, prefix, errors);
         CheckDisplay(config, chartType, prefix, errors);
         CheckMissingFooter(config, chartType, prefix, errors);
+        CheckStatistic(config, chartType, prefix, errors);
+    }
+
+    /// <summary>
+    /// A stat tile's statistic (design D2 of improve-stat-cards): one of the four, and only on a stat tile. A query with no chart type
+    /// that names one is refused too, unlike the other per-kind rules, since the planner needs the kind to know that it must not sum.
+    /// </summary>
+    private static void CheckStatistic(WidgetConfig config, string? chartType, string prefix, FieldErrors errors)
+    {
+        if (config.Statistic is not { } statistic)
+        {
+            return;
+        }
+
+        var key = prefix + "statistic";
+        if (!StatStatistics.IsKnown(statistic))
+        {
+            errors.Add(key, "The statistic must be median, p25, p75 or mean.");
+        }
+
+        if (chartType is null)
+        {
+            errors.Add(key, "A statistic needs the chart type stat.");
+        }
+        else if (chartType != ChartTypes.Stat)
+        {
+            errors.Add(key, "Only a stat tile has a statistic.");
+        }
+    }
+
+    /// <summary>
+    /// A stat tile's secondary lines (design D3 of improve-stat-cards): only <c>n</c> and <c>unfiltered</c>, each once. The kind rule is
+    /// skipped when <paramref name="chartType"/> is null, as the other per-kind rules are.
+    /// </summary>
+    private static void CheckSecondary(IReadOnlyList<string>? lines, string? chartType, string prefix, FieldErrors errors)
+    {
+        if (lines is null)
+        {
+            return;
+        }
+
+        var key = prefix + "display.secondary";
+        if (lines.Any(line => !StatSecondaryLines.IsKnown(line)))
+        {
+            errors.Add(key, "Each secondary line must be 'n' or 'unfiltered'.");
+        }
+
+        if (lines.Where(line => line is not null).GroupBy(line => line, StringComparer.Ordinal).Any(group => group.Count() > 1))
+        {
+            errors.Add(key, "A secondary line is listed twice.");
+        }
+
+        if (chartType is not null && chartType != ChartTypes.Stat)
+        {
+            errors.Add(key, "Only a stat tile has secondary lines.");
+        }
     }
 
     /// <summary>
@@ -232,6 +288,7 @@ public static class IndicatorValidation
         CheckContext(display, prefix, errors);
         CheckAnnotations(display, config, chartType, prefix, errors);
         CheckOrder(display, config, chartType, prefix, errors);
+        CheckSecondary(display.Secondary, chartType, prefix, errors);
     }
 
     /// <summary>

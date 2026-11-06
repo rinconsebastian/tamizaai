@@ -189,7 +189,7 @@ public sealed class ProductionShapesTests
         }
 
         var names = shapes.Select(s => s!["name"]!.GetValue<string>()).ToList();
-        Assert.Equal(30, names.Count);
+        Assert.Equal(32, names.Count);
         Assert.Equal(names.Count, names.Distinct().Count());
         Assert.Equal(
             [ChartTypes.Column, ChartTypes.Column, ChartTypes.Bar, ChartTypes.Bar, ChartTypes.Bar, ChartTypes.Bar, ChartTypes.Stat, ChartTypes.Stat, ChartTypes.Line,
@@ -201,7 +201,9 @@ public sealed class ProductionShapesTests
              // The shapes of the declared category order (add-declared-category-order)
              ChartTypes.Column, ChartTypes.Bar, ChartTypes.Heatmap,
              // The shapes of the base settings (add-small-sample-warnings)
-             ChartTypes.Column, ChartTypes.Column],
+             ChartTypes.Column, ChartTypes.Column,
+             // The shapes of the stat tiles (improve-stat-cards)
+             ChartTypes.Stat, ChartTypes.Stat],
             shapes.Select(s => s!["chartType"]!.GetValue<string>()));
         Assert.All(shapes, s => Assert.True(ChartTypes.IsKnown(s!["chartType"]!.GetValue<string>())));
     }
@@ -267,6 +269,9 @@ public sealed class ProductionShapesTests
 
         Assert.Equal(shape["stored"]!.GetValue<string>(), Write(Read(formSaved.ToJsonString())));
     }
+
+    /// <summary>The shape of a stat tile with a statistic and secondary lines (improve-stat-cards, task 1.5), the last of the fixture.</summary>
+    private const string StatisticShape = "stat tile with a median and both secondary lines";
 
     /// <summary>The members of a widget's display that the widget context adds (design D1).</summary>
     private static readonly string[] ContextMembers = ["subtitle", "footnote", "caption", "unit", "showDescription"];
@@ -464,7 +469,10 @@ public sealed class ProductionShapesTests
     /// Every shape planned again with its indicator declaring a base column, no-data values and answer columns, and no setting on (design
     /// D15 of add-small-sample-warnings): the plotted statements, once the figure outputs are removed, are the shape's golden, a value that
     /// means no data leaves nothing out (<c>missingFooter</c> is off), and the only statement that is added is the one that counts the
-    /// answers, run for a widget whose marks have an n over answer columns it declares.
+    /// answers, run for a widget whose marks have an n over answer columns it declares. The exception is a ratio over answer columns that
+    /// its table has and the map declares (design D4 of improve-stat-cards): single choice counts the base once across the answers, and
+    /// multiple choice has no value where its rows hold several, with a check that runs first. Its declared plan is not the golden, which
+    /// is the plan of an indicator that declares nothing.
     /// </summary>
     [Theory]
     [MemberData(nameof(ShapeNames))]
@@ -486,12 +494,35 @@ public sealed class ProductionShapesTests
             var plan = PlanFor(shape, bases);
 
             Assert.Null(plan.Errors);
+            if (name == StatisticShape)
+            {
+                // A statistic counts the values it covers, whatever the indicator declares (design D10 of improve-stat-cards): no answers
+                // statement, and its n comes from the statement itself, so only its own statement is compared.
+                Assert.True(plan.Counted is null && plan.Sql!.Sql.Contains("percentile_cont", StringComparison.Ordinal) && plan.NoData is null && plan.Overall is null, label);
+                continue;
+            }
+
             var described = Describe(plan).ToJsonString();
+            var stored = Read(shape["stored"]!.GetValue<string>());
+            var answers = AnswerColumns.Of(stored, false, bases, ColumnsOf(shape), DataSources.Quote);
+            // Multiple choice only changes the text of a tile and of a widget with a series (their totals have no value over several
+            // answers); a plain grouped widget keeps its statement and gains the check that runs first.
+            var rewritten = answers.Corrects || (answers.Refuses && (stored.GroupBy is null || stored.SeriesBy is not null));
+            Assert.True(answers.Refuses == (plan.Combined is not null), label);
+            if (rewritten)
+            {
+                var marker = answers.Corrects ? "__num" : "count(DISTINCT (";
+                Assert.True(described.Contains(marker, StringComparison.Ordinal) && shape["plan"]!.ToJsonString() != described, $"{label}: {described}");
+            }
             // A value that means no data leaves a row out only for a widget that asks for it (missingFooter) and whose group column declares one.
             var group = Read(shape["stored"]!.GetValue<string>()).GroupBy;
             var leavesOut = HoldsBaseSettings(shape) && group is not null && bases?.Missing.ContainsKey(group) == true
                 && JsonNode.Parse(shape["stored"]!.GetValue<string>())!["missingFooter"] is not null;
-            if (leavesOut)
+            if (rewritten)
+            {
+                Assert.True(plan.NoData is null, label);
+            }
+            else if (leavesOut)
             {
                 Assert.True(described.Contains("AND NOT ((", StringComparison.Ordinal) && plan.NoData is not null, $"{label}: {described}");
             }
@@ -562,7 +593,7 @@ public sealed class ProductionShapesTests
 
     /// <summary>
     /// What the page sends with a widget workbook request is the saved config (design D10 of the widget context), which the endpoint
-    /// validates as a save does: no shape's config may be refused for its kind. A shape with no UI goldens yet is checked as it is stored.
+    /// validates as a save does: no shape's config may be refused for its kind.
     /// </summary>
     [Theory]
     [MemberData(nameof(ShapeNames))]
@@ -570,7 +601,7 @@ public sealed class ProductionShapesTests
     {
         var shape = Shape(name);
         var chartType = shape["chartType"]!.GetValue<string>();
-        var sent = shape["saved"]?.ToJsonString() ?? shape["stored"]!.GetValue<string>();
+        var sent = Assert.IsAssignableFrom<JsonNode>(shape["saved"]).ToJsonString();
 
         var errors = new FieldErrors();
         IndicatorValidation.CheckConfig(Read(sent), chartType, "config.", errors);
@@ -635,5 +666,88 @@ public sealed class ProductionShapesTests
         Assert.Equal(without["palette"]!.ToJsonString(), with["palette"]!.ToJsonString());
         Assert.Equal(without["valueColors"]!.ToJsonString(), with["valueColors"]!.ToJsonString());
         Assert.NotNull(with["source"]);
+    }
+
+    /// <summary>
+    /// The statistic is a query setting and the line without filters a flag of the request (design D2 and D3 of improve-stat-cards): no
+    /// earlier shape holds either, so their query carries no <c>statistic</c> and none asks for the value without the dashboard filters;
+    /// the last shape holds both and asks for it. The statistic shape's query is that of the same config without its lines, plus its statistic.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShapeNames))]
+    public void Only_the_statistic_shape_has_a_statistic_and_asks_for_the_value_without_the_dashboard_filters(string name)
+    {
+        var shape = Shape(name);
+        var chartType = shape["chartType"]!.GetValue<string>();
+        var config = Read(shape["stored"]!.GetValue<string>());
+        var holds = name == StatisticShape;
+
+        Assert.Equal(holds ? "median" : null, config.Statistic);
+        Assert.Equal(holds ? "median" : null, WidgetQuery.For(chartType, config).Statistic);
+        Assert.Equal(holds, QueryOf(shape)["statistic"] is not null);
+        Assert.Equal(holds, WidgetQuery.Unfiltered(chartType, config));
+        Assert.Equal(holds, config.Display?.Secondary is not null);
+        Assert.DoesNotContain("\"statistic\"", holds ? "" : shape["stored"]!.GetValue<string>());
+        Assert.DoesNotContain("secondary", holds ? "" : shape["stored"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void The_statistic_shape_holds_the_median_and_both_lines_and_comes_last_after_the_ratio_tile()
+    {
+        if (Shapes() is not { } shapes)
+        {
+            return;
+        }
+
+        var tile = JsonNode.Parse(shapes[31]!["stored"]!.GetValue<string>())!;
+        Assert.Equal(StatisticShape, shapes[31]!["name"]!.GetValue<string>());
+        Assert.Equal("median", tile["statistic"]!.GetValue<string>());
+        Assert.Equal(["n", "unfiltered"], tile["display"]!["secondary"]!.AsArray().Select(line => line!.GetValue<string>()));
+        // The goldens of the page (task 6.2): the saved config and the form's body hold the statistic and both lines, and the query the page
+        // sends holds the statistic and no display, and none of them holds the derived flag.
+        foreach (var golden in new[] { "saved", "formSaved" })
+        {
+            var held = Assert.IsAssignableFrom<JsonNode>(shapes[31]![golden]);
+            Assert.Equal("median", held["statistic"]!.GetValue<string>());
+            Assert.Equal(["n", "unfiltered"], held["display"]!["secondary"]!.AsArray().Select(line => line!.GetValue<string>()));
+        }
+
+        var uiQuery = Assert.IsAssignableFrom<JsonNode>(shapes[31]!["uiQuery"]);
+        Assert.Equal("median", uiQuery["statistic"]!.GetValue<string>());
+        Assert.Null(uiQuery["display"]);
+        foreach (var golden in new[] { "saved", "uiQuery", "formSaved" })
+        {
+            Assert.DoesNotContain("unfiltered\":", shapes[31]![golden]!.ToJsonString());
+        }
+
+        // The ratio tile before it plots a ratio over a question column and an answer column and holds neither setting.
+        var ratio = Read(shapes[30]!["stored"]!.GetValue<string>());
+        Assert.NotNull(ratio.Ratio);
+        Assert.Equal(["pregunta", "respuesta"], ratio.Filters.Select(f => f.Column));
+        Assert.Null(ratio.Statistic);
+        Assert.Null(ratio.Display);
+    }
+
+    [Fact]
+    public void The_statistic_shape_is_planned_as_one_statement_with_its_n_and_the_unfiltered_statement_when_a_filter_narrows_it()
+    {
+        if (Shapes() is not { } shapes)
+        {
+            return;
+        }
+
+        var shape = shapes[31]!;
+        var config = Read(shape["stored"]!.GetValue<string>());
+        AppliedDashboardFilter[] dashboard = [new("zona", DashboardFilterKinds.Text, Values: ["Zona 1"])];
+
+        var plan = IndicatorQueryBuilder.Plan(
+            WidgetQuery.For(ChartTypes.Stat, config).Normalize(), ColumnsOf(shape), "UTC", From, 5000, false, dashboard, ChartTypes.Stat, false, null, null,
+            WidgetQuery.Unfiltered(ChartTypes.Stat, config));
+
+        Assert.Contains("percentile_cont(0.5)", plan.Sql!.Sql);
+        Assert.Contains("\"zona\"::text = ANY(@d0)", plan.Sql.Sql);
+        Assert.NotNull(plan.Unfiltered);
+        Assert.DoesNotContain("@d0", plan.Unfiltered.Sql);
+        Assert.Equal(shape["plan"]!["main"]!["sql"]!.GetValue<string>(), plan.Unfiltered.Sql);
     }
 }

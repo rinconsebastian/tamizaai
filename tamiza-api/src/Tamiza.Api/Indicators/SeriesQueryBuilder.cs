@@ -55,12 +55,21 @@ public static class SeriesQueryBuilder
     /// The rows the widget leaves out as no data (design D6 of add-small-sample-warnings): out of the domain, the cells, the totals and the
     /// left-out count alike, so a left-out series takes no slot and no color. Null: nothing is left out and every statement is as it was.
     /// </param>
+    /// <param name="answers">
+    /// The answer columns of a ratio (design D4 of improve-stat-cards). Of single choice, each group, cell, series total and the grand total
+    /// takes the nested form, counting its base once across the answers; of multiple choice, the group totals, the series totals and the
+    /// grand total have no value when their rows hold several answers, and so does a cell that does (the folded "Other"). Null or empty:
+    /// every statement is as it was. The <paramref name="aggregate"/> stays what the domain, the rank of the groups and the
+    /// <c>HAVING</c> of the multiple-choice form read.
+    /// </param>
     public static SeriesQueryPlan Build(
         WidgetConfig config, string? chartType, IReadOnlyDictionary<string, TableColumn> byName, string from, string aggregate, string rowFilter,
-        DataQuery own, DataQuery dashboard, int maxRows, IndicatorBases? bases = null, NoDataExclusion? exclusion = null)
+        DataQuery own, DataQuery dashboard, int maxRows, IndicatorBases? bases = null, NoDataExclusion? exclusion = null, AnswerColumns? answers = null)
     {
         string Q(string name) => DataSources.Quote(byName[name].Name);
-        var sums = BaseQueryBuilder.Sums(config, bases, Q);
+        answers ??= AnswerColumns.None;
+        var nested = answers.Corrects;
+        var sums = BaseQueryBuilder.Sums(config, bases, Q, nested);
         // The sums are CTE columns of each group and cell (fn, fd, fb), and sums over the rows of a total.
         var named = new[] { ("fn", sums.Numerator), ("fd", sums.Denominator), ("fb", sums.Base) }.Where(pair => pair.Item2 is not null).ToList();
         var cteFigures = string.Concat(named.Select(pair => $", {pair.Item2} AS {pair.Item1}"));
@@ -95,7 +104,9 @@ public static class SeriesQueryBuilder
         var kind = fixedDomain is null
             ? $"CASE WHEN {series} IS NULL THEN '{SeriesKinds.None}' WHEN {series}::text = ANY(@{KeptParameter}) THEN '{SeriesKinds.Value}' ELSE '{SeriesKinds.Other}' END"
             : $"'{SeriesKinds.Value}'";
-        var rank = IndicatorQueryBuilder.OrderBy(config, new Dictionary<string, TableColumn>(byName, StringComparer.Ordinal), "src", aggregate);
+        var rank = nested
+            ? IndicatorQueryBuilder.OrderBy(config, new Dictionary<string, TableColumn>(byName, StringComparer.Ordinal), "src", NestedRatio.Value, new NestedSort("g"))
+            : IndicatorQueryBuilder.OrderBy(config, new Dictionary<string, TableColumn>(byName, StringComparer.Ordinal), "src", aggregate);
         var leftOut = fixedDomain is null
             ? ""
             : $"""
@@ -109,6 +120,43 @@ public static class SeriesQueryBuilder
         string Source(string indent = "") =>
             $"SELECT {from}.*, {seriesText} AS {SeriesColumn}, {kind} AS {KindColumn}\n{indent}FROM {from}\n{indent}WHERE {rowFilter}{allWhere}{(included.Length > 0 ? " AND " + included : "")}";
 
+        // A ratio over declared answers (design D4 of improve-stat-cards). Single choice: every value and total reads a nested statement
+        // that sums per mark and answer and divides by the largest denominator sum. Multiple choice: the totals have no value when their
+        // rows hold several answers, a cell that does is left out, and the groups keep the plain aggregate in their HAVING and their rank.
+        var having = nested ? NestedRatio.Value : aggregate;
+        var total = nested ? NestedRatio.Value : answers.OneAnswerOnly(aggregate);
+        var count = nested ? $"sum({NestedRatio.Rows})::bigint" : "count(*)";
+        var cellGuard = answers.Refuses ? $" AND {answers.DistinctAnswers} <= 1" : "";
+        var carriedSort = NestedSort.Carry(config, byName);
+        string NestedSource(string levelItems, string levelKeys, string? exceptGroup, bool carrySort)
+        {
+            var (select, keys) = NestedRatio.Answers(answers.Single, exceptGroup);
+            var items = new List<string>();
+            if (levelItems.Length > 0)
+            {
+                items.Add(levelItems);
+            }
+
+            items.AddRange(select);
+            items.Add(NestedRatio.InnerSums(Q(config.Ratio!.Numerator), Q(config.Ratio!.Denominator)));
+            if (sums.Base is not null)
+            {
+                items.Add($"sum({Q(bases!.BaseColumn!)}) AS {NestedRatio.Base}");
+            }
+
+            var list = (levelKeys.Length > 0 ? new[] { levelKeys } : []).Concat(keys);
+            return $"(SELECT {string.Join(", ", items)}{(carrySort ? carriedSort : null)} FROM src GROUP BY {string.Join(", ", list)}) a";
+        }
+
+        var grpFrom = nested ? NestedSource($"{group} AS g", group, group, true) : "src";
+        var grpKey = nested ? "g" : group;
+        var cellFrom = nested ? NestedSource($"{group} AS g, {KindColumn} AS k, {SeriesColumn} AS s", $"{group}, {KindColumn}, {SeriesColumn}", group, false) : "src";
+        var (cellG, cellK, cellS) = nested ? ("g", "k", "s") : (group, KindColumn, SeriesColumn);
+        var seriesFrom = nested ? NestedSource($"{KindColumn} AS k, {SeriesColumn} AS s", $"{KindColumn}, {SeriesColumn}", null, false) : "src";
+        var (seriesK, seriesS) = nested ? ("k", "s") : (KindColumn, SeriesColumn);
+        var seriesKeys = nested ? "k, s" : $"{KindColumn}, {SeriesColumn}";
+        var grandFrom = nested ? NestedSource("", "", null, false) : "src";
+
         IndicatorSql Cells(IReadOnlyList<string> kept)
         {
             var sql =
@@ -117,12 +165,12 @@ public static class SeriesQueryBuilder
                   {Source("  ")}
                 ),
                 grp AS (
-                  SELECT {group} AS g, ({aggregate}) AS v, count(*) AS n, row_number() OVER ({rank}) AS rk{cteFigures}
-                  FROM src GROUP BY {group} HAVING ({aggregate}) IS NOT NULL
+                  SELECT {grpKey} AS g, ({total}) AS v, {count} AS n, row_number() OVER ({rank}) AS rk{cteFigures}
+                  FROM {grpFrom} GROUP BY {grpKey} HAVING ({having}) IS NOT NULL
                 ),
                 cell AS (
-                  SELECT {group} AS g, {KindColumn} AS k, {SeriesColumn} AS s, ({aggregate}) AS v, count(*) AS n{cteFigures}
-                  FROM src GROUP BY {group}, {KindColumn}, {SeriesColumn} HAVING ({aggregate}) IS NOT NULL
+                  SELECT {cellG} AS g, {cellK} AS k, {cellS} AS s, ({having}) AS v, {count} AS n{cteFigures}
+                  FROM {cellFrom} GROUP BY {cellG}, {cellK}, {cellS} HAVING ({having}) IS NOT NULL{cellGuard}
                 )
                 (SELECT {SeriesParts.GroupTotal} AS part, g::text, NULL::text, NULL::text, v, n, rk{Columns("")} FROM grp ORDER BY rk LIMIT @{IndicatorSql.LimitParameter})
                 UNION ALL
@@ -130,10 +178,10 @@ public static class SeriesQueryBuilder
                  FROM cell JOIN grp ON cell.g IS NOT DISTINCT FROM grp.g
                  ORDER BY grp.rk, cell.k, cell.s LIMIT @{IndicatorSql.LimitParameter})
                 UNION ALL
-                (SELECT {SeriesParts.SeriesTotal}, NULL::text, {KindColumn}, {SeriesColumn}, ({aggregate}), count(*), NULL::bigint{totalFigures}
-                 FROM src GROUP BY {KindColumn}, {SeriesColumn})
+                (SELECT {SeriesParts.SeriesTotal}, NULL::text, {seriesK}, {seriesS}, ({total}), {count}, NULL::bigint{totalFigures}
+                 FROM {seriesFrom} GROUP BY {seriesKeys})
                 UNION ALL
-                (SELECT {SeriesParts.Grand}, NULL::text, NULL::text, NULL::text, ({aggregate}), count(*), NULL::bigint{totalFigures} FROM src){leftOut}
+                (SELECT {SeriesParts.Grand}, NULL::text, NULL::text, NULL::text, ({total}), {count}, NULL::bigint{totalFigures} FROM {grandFrom}){leftOut}
                 """;
             var all = new List<SqlParam>(parameters)
             {
@@ -147,9 +195,9 @@ public static class SeriesQueryBuilder
         Func<IReadOnlyList<string>, IndicatorSql>? counted = null;
         if (bases is not null && BaseQueryBuilder.CountsAnswers(bases, sums))
         {
-            var answers = bases.Answers.Select(Q).ToList();
+            var answered = bases.Answers.Select(Q).ToList();
             counted = kept => BaseQueryBuilder.CountedSeries(
-                group, SeriesColumn, KindColumn, answers, sums.NColumn!, Source(),
+                group, SeriesColumn, KindColumn, answered, sums.NColumn!, Source(),
                 [.. parameters, new(KeptParameter, NpgsqlDbType.Array | NpgsqlDbType.Text, kept.ToArray())]);
         }
 

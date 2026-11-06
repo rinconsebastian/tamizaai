@@ -290,6 +290,8 @@ export interface DashboardColors {
  * The base settings (add-small-sample-warnings, design D7), accepted on every kind and never part of a query: `minN` is the widget's own
  * small-base threshold (0 turns it off for the widget, 1 to `maxMinN` sets one; absent follows the dashboard's) and `showN` whether the
  * widget shows its base n under it (`true` or `false`, both kept as saved; absent follows the dashboard's).
+ *
+ * `secondary` (improve-stat-cards, design D3) is a stat tile's lines under what it plots, `n` and `unfiltered`, each at most once.
  */
 export interface WidgetDisplay {
   color?: number;
@@ -307,7 +309,24 @@ export interface WidgetDisplay {
   order?: WidgetCategoryOrder;
   minN?: number;
   showN?: boolean;
+  secondary?: StatSecondaryLine[];
 }
+
+/**
+ * The statistic of a stat tile (improve-stat-cards, design D2): the median, the first or third quartile or the mean of the rows' values,
+ * each row taken as one value instead of summed. Part of the query, since it changes the rows.
+ */
+export type StatStatistic = 'median' | 'p25' | 'p75' | 'mean';
+
+export const statStatistics: readonly StatStatistic[] = ['median', 'p25', 'p75', 'mean'];
+
+/**
+ * The lines a stat tile shows under what it plots (improve-stat-cards, design D3): `n`, the base n, and `unfiltered`, its value without
+ * the dashboard filters. Display only (the second asks the query for one more figure through a request flag, never a config field).
+ */
+export type StatSecondaryLine = 'n' | 'unfiltered';
+
+export const statSecondaryLines: readonly StatSecondaryLine[] = ['n', 'unfiltered'];
 
 /**
  * A widget's own order of values (add-declared-category-order, design D1): the groups and the series it lists, as full text, in the order
@@ -384,6 +403,11 @@ export interface WidgetConfig {
    * saved widget unless set, `false` kept as saved.
    */
   missingFooter?: boolean;
+  /**
+   * Stat tiles only (improve-stat-cards, design D2): the median, a quartile or the mean of the rows' values in place of their sum. Part of
+   * the query; left out of a query and of a saved widget unless set.
+   */
+  statistic?: StatStatistic;
   /** Maps only; null draws none. Saved with the widget, never part of the query. */
   basemap: BasemapKind | null;
   /**
@@ -714,6 +738,16 @@ export interface QueryResult {
   n?: number | null;
   /** What the widget left out as no data, when it asked to and some rows were left out. */
   noData?: QueryNoData | null;
+  /**
+   * A stat tile that asked for it (`query`'s `unfiltered` argument) only, while a dashboard filter narrowed it: its value over the same rows
+   * without the dashboard filters (improve-stat-cards, design D3). Absent otherwise.
+   */
+  unfiltered?: number;
+  /**
+   * The column whose answers a multiple-choice question holds, when the widget would add up several of them (improve-stat-cards, design
+   * D4b): the response then has no rows and the widget says why instead of drawing a figure.
+   */
+  combinedCategories?: string;
   leftOut?: number;
   /**
    * The columns of the dashboard filters sent that did not narrow the rows: the table has no such column, or has it with another kind
@@ -807,14 +841,16 @@ export class IndicatorsService {
   /**
    * Renders a saved widget, or previews a draft: the same query either way. The chart type lets a histogram plot a value per row. The
    * dashboard filters in force that the widget does not ignore narrow the rows too; they are sent only when there are some. `overall`
-   * (derived from the widget by `overallFor`, never saved) asks for its overall value too, and is sent only when true.
+   * (derived from the widget by `overallFor`, never saved) asks for its overall value too, and is sent only when true; so is `unfiltered`
+   * (derived by `unfilteredFor`), which asks a stat tile for its value without the dashboard filters.
    */
-  query(projectId: string, config: WidgetConfig, chartType?: ChartType, dashboardFilters: AppliedDashboardFilter[] = [], overall = false): Observable<QueryResult> {
+  query(projectId: string, config: WidgetConfig, chartType?: ChartType, dashboardFilters: AppliedDashboardFilter[] = [], overall = false, unfiltered = false): Observable<QueryResult> {
     return this.http.post<QueryResult>(`${this.url(projectId)}/query`, {
       config,
       ...(chartType ? { chartType } : {}),
       ...(dashboardFilters.length ? { dashboardFilters } : {}),
       ...(overall ? { overall: true } : {}),
+      ...(unfiltered ? { unfiltered: true } : {}),
     });
   }
 

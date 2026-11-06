@@ -29,7 +29,17 @@ public static class WidgetQuery
         chartType is ChartTypes.Bar or ChartTypes.Column ? config.Layout : null,
         chartType == ChartTypes.Pyramid ? config.Pyramid : null,
         chartType == ChartTypes.Likert ? config.Scale : [],
-        MissingFooter: ChartTypes.TakesMissingFooter(chartType) ? config.MissingFooter : null);
+        MissingFooter: ChartTypes.TakesMissingFooter(chartType) ? config.MissingFooter : null,
+        Statistic: chartType == ChartTypes.Stat ? config.Statistic : null);
+
+    /// <summary>
+    /// Whether a saved widget asks its query for its value without the dashboard filters too (design D3 of improve-stat-cards): a stat
+    /// tile whose <c>display.secondary</c> holds <c>unfiltered</c>. It is a flag of the query request, derived here and never stored in a
+    /// config, so <see cref="For"/> builds the same config with the line checked or not, and the <c>n</c> line alone asks for nothing.
+    /// Twin of <c>unfilteredFor</c> in <c>widget-view.ts</c>: change both together.
+    /// </summary>
+    public static bool Unfiltered(string chartType, WidgetConfig config) =>
+        chartType == ChartTypes.Stat && config.Display?.Secondary?.Contains(StatSecondaryLines.Unfiltered) == true;
 
     /// <summary>
     /// Whether a saved widget asks its query for the overall value too (design D4 of add-chart-annotations): a bar, column or line with

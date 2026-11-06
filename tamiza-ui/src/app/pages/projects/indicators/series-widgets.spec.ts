@@ -717,6 +717,29 @@ describe('cross table widget', () => {
     ]);
   });
 
+  it('writes a dash for a total with no value, in the row and in the column (Total over several answers)', async () => {
+    const answer = seriesResult([cell('Armenia', 'Piped', 100, 10), cell('Armenia', 'Well', 20, 2), cell('Buga', 'Piped', 40, 4)], ['Piped', 'Well']);
+    answer.totals!.series.forEach((entry) => (entry.value = null));
+    answer.totals!.all.value = null;
+    const context = await show('crosstab', sources, answer, [households]);
+
+    expect(tableRows(context)).toEqual([
+      ['Armenia', '100 households', '20 households', '120 households'],
+      ['Buga', '40 households', '—', '40 households'],
+      ['Total', '—', '—', '—'],
+    ]);
+  });
+
+  it('writes the same dash in the table of a heat map shown as a table (Total over several answers)', async () => {
+    const answer = seriesResult([cell('Armenia', 'Piped', 100, 10), cell('Buga', 'Piped', 40, 4)], ['Piped']);
+    answer.totals!.series.forEach((entry) => (entry.value = null));
+    answer.totals!.all.value = null;
+    const context = await show('heatmap', sources, answer, [households]);
+    await toggle(context);
+
+    expect(tableRows(context).at(-1)).toEqual(['Total', '—', '—']);
+  });
+
   it('keeps the group column in view when the table scrolls, and writes the totals in bold', async () => {
     const context = await show('crosstab', sources, grid(), [households]);
 

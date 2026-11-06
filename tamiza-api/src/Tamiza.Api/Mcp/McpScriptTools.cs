@@ -28,6 +28,8 @@ public sealed class McpScriptTools(
         "A column can also declare what the widgets' counts of people (n) need: base: true (a numeric column that counts the units each row stands for, such as hogares; at most one column, never also missing or categories), " +
         "missing (up to 20 values, as exact text, that mean no data, such as Sin dato or No sabe; a widget with missingFooter leaves them out and says what they held) " +
         "and categories, single or multiple (the columns of a long table that name a question and its answers, such as variable, orden and categoria; multiple when any question of the column is multiple-choice; never a column that splits the households, such as comuna or estrato). " +
+        "Declared answers change a ratio over several of them: single counts the base once across the answers (each value divides its numerators by the largest per-answer denominator sum, per group), " +
+        "and multiple makes a widget that would add up several answers show a message instead of a figure, since it would count a person once per answer; declare multiple when in doubt. " +
         "The map is replaced whole, so send each column's order, last and stripPrefix again with its name, and its base, missing and categories too (get_script shows what the current version has). A property that is not one of these is ignored.";
 
     [McpServerTool(Name = "get_authoring_guide", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Get the script authoring guide"),

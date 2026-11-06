@@ -4700,3 +4700,294 @@ describe('the widget dialog and the answer columns of its indicator (add-small-s
     expect(body.config.display).toEqual(display);
   });
 });
+
+describe('the widget dialog and the stat tile (improve-stat-cards, design D5, D6)', () => {
+  afterEach(clearOverlay);
+
+  const ratio = { ratio: { numerator: 'numerator', denominator: 'denominator' } };
+  const declared = (columns: NonNullable<IndicatorEntry['columns']>) => [indicator('coverage', { columns })];
+  const tile = (display: WidgetConfig['display'] | undefined, overrides: Partial<WidgetConfig> = {}) =>
+    widget('w1', { chartType: 'stat', config: config({ groupBy: null, ...(display ? { display } : {}), ...overrides }) });
+  const answer = (extra: Partial<ReturnType<typeof result>> = {}) => result([row(null, 0.4685)], extra);
+  const saved = async (context: Context) => {
+    await click(context, field('dialog-save'));
+    return context.http.expectOne(isPatch).request.body as { chartType: ChartType; config: WidgetConfig };
+  };
+  const refuse = async (context: Context, errors: Record<string, string[]>) => {
+    await click(context, field('dialog-save'));
+    context.http.expectOne(isPatch).flush({ title: 'x', errors }, { status: 400, statusText: 'Bad Request' });
+    await settle(context.harness);
+  };
+  const fieldIn = (id: string) => field(id).closest('tmz-form-field')!;
+  const quiet = async (context: Context) => {
+    await wait(previewDelayMs + 100);
+    await settle(context.harness);
+    return context.http.match(isQuery).filter((r) => !r.cancelled);
+  };
+
+  describe('the statistic', () => {
+    it('offers the default worded by what the tile plots, then the four statistics', async () => {
+      await openDialog({ existing: tile(undefined) });
+
+      expect(optionsOf('dialog-statistic')).toEqual(['', 'median', 'p25', 'p75', 'mean']);
+      expect(optionTexts('dialog-statistic')).toEqual(['Sum of the rows', 'Median', 'First quartile (25th percentile)', 'Third quartile (75th percentile)', 'Mean']);
+      expect(field<HTMLSelectElement>('dialog-statistic').value).toBe('');
+    });
+
+    it('words the default as the ratio of sums for a ratio, and in Spanish', async () => {
+      await openDialog({ existing: tile(undefined, ratio), lang: 'es' });
+
+      expect(optionTexts('dialog-statistic')).toEqual(['Razón de sumas', 'Mediana', 'Primer cuartil (percentil 25)', 'Tercer cuartil (percentil 75)', 'Promedio']);
+    });
+
+    it('is offered to a stat tile only', async () => {
+      await openDialog({ existing: widget('w1', { chartType: 'column', config: config() }) });
+
+      expect(fields('dialog-statistic')).toHaveLength(0);
+    });
+
+    it('says that a statistic needs one row per unit, and that each row of a ratio is divided by its own denominator', async () => {
+      const context = await openDialog({ existing: tile({ footnote: 'x' }, ratio) });
+      expect(text(fieldIn('dialog-statistic'))).toContain('one row per unit');
+      expect(text(fieldIn('dialog-denominator'))).toContain('Plots the sum of the numerator divided by the sum of the denominator');
+
+      await change(context, field('dialog-statistic'), 'median');
+
+      expect(text(fieldIn('dialog-denominator'))).toContain('divided by its own denominator');
+    });
+
+    it('asks the indicator again with the statistic when it is chosen in the form (Statistic chosen in the form)', async () => {
+      const context = await openDialog({ existing: tile(undefined) });
+      await previewAnswer(context, answer());
+
+      await change(context, field('dialog-statistic'), 'median');
+      const body = await previewAnswer(context, answer());
+
+      expect(body.chartType).toBe('stat');
+      expect(body.config.statistic).toBe('median');
+      expect(body.config).not.toHaveProperty('display');
+    });
+
+    it('saves the statistic chosen, and none when the default is chosen again', async () => {
+      const context = await openDialog({ existing: tile(undefined) });
+      await change(context, field('dialog-statistic'), 'p75');
+      expect((await saved(context)).config.statistic).toBe('p75');
+    });
+
+    it('saves no statistic when the default is chosen on a tile that had one', async () => {
+      const context = await openDialog({ existing: tile(undefined, { statistic: 'median' }) });
+      expect(field<HTMLSelectElement>('dialog-statistic').value).toBe('median');
+
+      await change(context, field('dialog-statistic'), '');
+      const body = await saved(context);
+
+      expect(body.config).not.toHaveProperty('statistic');
+    });
+
+    it('drops the statistic when the tile is changed into a bar chart (Stat tile turned into a bar chart)', async () => {
+      const context = await openDialog({ existing: tile(undefined, { statistic: 'median' }) });
+
+      await change(context, field('dialog-chart-type'), 'bar');
+      await change(context, field('dialog-group-by'), 'municipality');
+      const body = await saved(context);
+
+      expect(body.chartType).toBe('bar');
+      expect(body.config).not.toHaveProperty('statistic');
+    });
+
+    it('shows a refusal of the statistic on its select', async () => {
+      const context = await openDialog({ existing: tile(undefined, { statistic: 'median' }) });
+
+      await refuse(context, { 'config.statistic': ['The statistic must be median, p25, p75 or mean.'] });
+
+      expect(text(fieldIn('dialog-statistic'))).toContain('The statistic must be median, p25, p75 or mean.');
+      expect(field('dialog-statistic').getAttribute('aria-invalid')).toBe('true');
+    });
+  });
+
+  describe('the secondary lines', () => {
+    it('offers the two lines as checkboxes of a group of their own, with a note about the room of the tile', async () => {
+      await openDialog({ existing: tile(undefined) });
+
+      expect(text(field('dialog-secondary').querySelector('legend'))).toBe('Lines under the figure');
+      expect(text(field('dialog-secondary-n').closest('label'))).toBe('Base (n)');
+      expect(text(field('dialog-secondary-unfiltered').closest('label'))).toBe('Value without the dashboard filters');
+      expect(field<HTMLInputElement>('dialog-secondary-n').checked).toBe(false);
+      expect(text(field('dialog-secondary-room'))).toContain('3 rows high has room');
+    });
+
+    it('is offered to a stat tile only', async () => {
+      await openDialog({ existing: widget('w1', { chartType: 'column', config: config() }) });
+
+      expect(fields('dialog-secondary')).toHaveLength(0);
+    });
+
+    it('seeds the boxes from the saved lines', async () => {
+      await openDialog({ existing: tile({ secondary: ['unfiltered'] }) });
+
+      expect(field<HTMLInputElement>('dialog-secondary-n').checked).toBe(false);
+      expect(field<HTMLInputElement>('dialog-secondary-unfiltered').checked).toBe(true);
+    });
+
+    it('shows the n line in the preview without asking the indicator again (n line chosen in the form)', async () => {
+      const context = await openDialog({ existing: tile(undefined) });
+      await previewAnswer(context, answer({ n: 476 }));
+
+      await click(context, field('dialog-secondary-n'));
+
+      expect(await quiet(context)).toHaveLength(0);
+      expect(dialog().querySelector('[data-testid="dialog-preview"] [data-testid="stat-line"]')!.textContent!.trim()).toBe('n = 476');
+    });
+
+    it('asks again, with the flag, and shows the line when the value without filters is chosen (Line without filters chosen in the form)', async () => {
+      const context = await openDialog({ existing: tile(undefined) });
+      await previewAnswer(context, answer());
+
+      await click(context, field('dialog-secondary-unfiltered'));
+      await wait(previewDelayMs + 100);
+      await settle(context.harness);
+      const asked = context.http.match(isQuery).filter((r) => !r.cancelled);
+
+      expect(asked).toHaveLength(1);
+      expect(asked[0].request.body.unfiltered).toBe(true);
+      expect(asked[0].request.body.config).not.toHaveProperty('display');
+      asked[0].flush(answer({ unfiltered: 0.31 }));
+      await settle(context.harness);
+      expect(dialog().querySelector('[data-testid="dialog-preview"] [data-testid="stat-line"]')!.textContent).toContain('Without filters: ');
+    });
+
+    it('saves the lines in the fixed order, n first, whatever order they were checked in', async () => {
+      const context = await openDialog({ existing: tile(undefined) });
+
+      await click(context, field('dialog-secondary-unfiltered'));
+      await click(context, field('dialog-secondary-n'));
+      const body = await saved(context);
+
+      expect(body.config.display?.secondary).toEqual(['n', 'unfiltered']);
+    });
+
+    it('saves no display when every box is cleared on a tile that had lines', async () => {
+      const context = await openDialog({ existing: tile({ secondary: ['n'] }) });
+
+      await click(context, field('dialog-secondary-n'));
+      const body = await saved(context);
+
+      expect(body.config).not.toHaveProperty('display');
+    });
+
+    it.each([[['unfiltered', 'n']], [['n']], [[]]])('sends the same lines back when a tile saved with %j is saved without a change (Form saved unchanged)', async (lines) => {
+      const display = lines.length ? { secondary: lines as ('n' | 'unfiltered')[] } : undefined;
+      const context = await openDialog({ existing: tile(display, { statistic: 'mean' }) });
+
+      const body = await saved(context);
+
+      expect(body.config.display?.secondary).toEqual(display?.secondary);
+      expect(body.config.statistic).toBe('mean');
+      if (!display) {
+        expect(body.config).not.toHaveProperty('display');
+      }
+    });
+
+    it('drops the lines when the tile is changed into a column chart (Stat tile turned into a column chart)', async () => {
+      const context = await openDialog({ existing: tile({ secondary: ['n', 'unfiltered'] }) });
+
+      await change(context, field('dialog-chart-type'), 'column');
+      await change(context, field('dialog-group-by'), 'municipality');
+      const body = await saved(context);
+
+      expect(body.chartType).toBe('column');
+      expect(body).not.toHaveProperty('config.display');
+    });
+
+    it('says why a tile with no statistic can have no n: nothing declared, or a measure with no base column', async () => {
+      await openDialog({ existing: tile(undefined, ratio) });
+      expect(text(field('dialog-secondary-n-hint'))).toContain('must declare its base column or its answer columns');
+    });
+
+    it('says it of a measure over an indicator that declares answers but no base', async () => {
+      await openDialog({ existing: tile(undefined), indicators: declared({ municipality: { categories: 'single' } }) });
+
+      expect(text(field('dialog-secondary-n-hint'))).toContain('a measure has one only when its indicator declares a base column');
+    });
+
+    it('says nothing of the n for a tile that has a base, or a statistic, which always has one (Number of values of a median)', async () => {
+      await openDialog({ existing: tile(undefined, ratio), indicators: declared({ denominator: { base: true } }) });
+      expect(fields('dialog-secondary-n-hint')).toHaveLength(0);
+    });
+
+    it('says nothing of the n for a median tile over an indicator that declares nothing', async () => {
+      await openDialog({ existing: tile(undefined, { statistic: 'median' }) });
+
+      expect(fields('dialog-secondary-n-hint')).toHaveLength(0);
+    });
+
+    it('shows a refusal of the lines on their fieldset', async () => {
+      const context = await openDialog({ existing: tile({ secondary: ['n'] }) });
+
+      await refuse(context, { 'config.display.secondary': ['A secondary line is listed twice.'] });
+
+      expect(text(dialog().querySelector('#widgetSecondary-error'))).toBe('A secondary line is listed twice.');
+      expect(field('dialog-secondary').getAttribute('aria-describedby')).toBe('widgetSecondary-error');
+    });
+  });
+
+  describe('the hint for a ratio over several values of one column', () => {
+    const several = (column: string, values: string[]) => [{ column, op: 'in' as const, values, min: null, max: null, value: null }];
+    const hint = () => dialog().querySelector('[data-testid="dialog-answers-hint"]');
+
+    it('names the column and says how to avoid the count, and the widget can still be saved (Card over several answers)', async () => {
+      const context = await openDialog({ existing: tile(undefined, { ...ratio, filters: several('municipality', ['1', '2', '3', '4']) as never }) });
+
+      expect(text(hint())).toBe(
+        'This widget adds up 4 values of municipality. If they are answers of one question, a respondent is counted once per answer and the share comes out too small: keep one value, group by municipality, or declare municipality as the answers of one question in the indicator’s column names.',
+      );
+      expect((await saved(context)).config.filters).toHaveLength(1);
+    });
+
+    it('is worded in Spanish', async () => {
+      await openDialog({ existing: tile(undefined, { ...ratio, filters: several('municipality', ['1', '2']) as never }), lang: 'es' });
+
+      expect(text(hint())).toContain('Este widget suma 2 valores de municipality.');
+    });
+
+    it('shows none for a filter on the group column (Filter on the group column)', async () => {
+      await openDialog({ existing: widget('w1', { chartType: 'column', config: config({ ...ratio, filters: several('municipality', ['A', 'B']) as never }) }) });
+
+      expect(hint()).toBeNull();
+    });
+
+    it('shows one for a column chart whose filter is on another column than its group', async () => {
+      await openDialog({
+        existing: widget('w1', { chartType: 'column', config: config({ ...ratio, groupBy: 'round', filters: several('municipality', ['A', 'B']) as never }) }),
+        columns: catalog({ columns: [...catalog().columns] }),
+      });
+
+      expect(hint()).not.toBeNull();
+    });
+
+    it('shows none for a measure (Measure)', async () => {
+      await openDialog({ existing: tile(undefined, { filters: several('municipality', ['A', 'B']) as never }) });
+
+      expect(hint()).toBeNull();
+    });
+
+    it('shows none for a column the indicator declares as answers, single or multiple', async () => {
+      await openDialog({ existing: tile(undefined, { ...ratio, filters: several('municipality', ['A', 'B']) as never }), indicators: declared({ municipality: { categories: 'multiple' } }) });
+      expect(hint()).toBeNull();
+    });
+
+    it('shows none for one value, and none for a column that is not text', async () => {
+      await openDialog({ existing: tile(undefined, { ...ratio, filters: [...several('municipality', ['A']), ...several('round', ['1', '2'])] as never }) });
+
+      expect(hint()).toBeNull();
+    });
+
+    it('shows none for the series column of a widget that splits by it', async () => {
+      await openDialog({
+        existing: widget('w1', { chartType: 'column', config: config({ ...ratio, groupBy: 'round', seriesBy: 'municipality', filters: several('municipality', ['A', 'B']) as never }) }),
+      });
+
+      expect(hint()).toBeNull();
+    });
+  });
+});

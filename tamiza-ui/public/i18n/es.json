@@ -650,7 +650,9 @@
         "summaryMissing": "Sin dato: {{ count }}",
         "summarySingle": "Respuestas: única",
         "summaryMultiple": "Respuestas: múltiple",
-        "textMissing": "Sin dato: {{ values }}"
+        "textMissing": "Sin dato: {{ values }}",
+        "answersSingleEffect": "Respuesta única: una razón sobre varias respuestas cuenta la base una sola vez entre ellas, y no una vez por respuesta, así que la proporción sobre varias respuestas no sale demasiado pequeña.",
+        "answersMultipleEffect": "Respuesta múltiple: una razón que sumaría varias respuestas muestra un mensaje en lugar de una cifra, porque contaría a cada persona una vez por respuesta. Deja una sola respuesta, o agrupa o divide el widget por esta columna."
       },
       "chips": {
         "addLabel": "Agregar un valor",
@@ -1982,7 +1984,26 @@
           "undeclared": "Este widget no tiene un n de base que mostrar: su indicador debe declarar su columna de base o sus columnas de respuesta.",
           "measure": "Este widget no tiene n de base: una medida solo lo tiene cuando su indicador declara una columna de base."
         }
-      }
+      },
+      "ratioHelpStatistic": "El numerador de cada fila se divide por su propio denominador, y la estadística se toma sobre esos valores.",
+      "statistic": {
+        "label": "Estadística",
+        "hint": "Una estadística toma cada fila como un valor, así que necesita una tabla con una fila por unidad, por ejemplo una fila por hogar. Deja la opción predeterminada para sumar las filas.",
+        "defaultMeasure": "Suma de las filas",
+        "defaultRatio": "Razón de sumas",
+        "median": "Mediana",
+        "p25": "Primer cuartil (percentil 25)",
+        "p75": "Tercer cuartil (percentil 75)",
+        "mean": "Promedio"
+      },
+      "secondary": {
+        "legend": "Líneas bajo la cifra",
+        "help": "Cada línea que marques se muestra bajo lo que grafica el widget, empezando por la base.",
+        "n": "Base (n)",
+        "unfiltered": "Valor sin los filtros del tablero",
+        "room": "Un widget de 3 filas de alto tiene espacio para las líneas. En uno más bajo se cortan la descripción y las líneas antes que la cifra."
+      },
+      "answersHint": "Este widget suma {{ count }} valores de {{ column }}. Si son respuestas de una misma pregunta, cada persona se cuenta una vez por respuesta y la proporción sale demasiado pequeña: deja un solo valor, agrupa por {{ column }}, o declara {{ column }} como las respuestas de una pregunta en los nombres de columna del indicador."
     },
     "series": {
       "legend": "Series",
@@ -2114,6 +2135,19 @@
       "tableNote": "* Base menor que {{ min }}.",
       "tableMark": "base pequeña",
       "nColumn": "n"
+    },
+    "stat": {
+      "of": {
+        "median": "Mediana de {{ what }}",
+        "p25": "Primer cuartil de {{ what }}",
+        "p75": "Tercer cuartil de {{ what }}",
+        "mean": "Promedio de {{ what }}"
+      },
+      "withoutFilters": "Sin filtros: {{ value }}"
+    },
+    "combined": {
+      "title": "Esta cifra contaría a las personas más de una vez",
+      "text": "{{ column }} contiene las respuestas de una pregunta de selección múltiple. Sumar varias de ellas cuenta a cada persona una vez por respuesta. Deja una sola respuesta, agrupa o divide el widget por {{ column }}, o grafica una fila que el indicador publique para cualquiera de ellas."
     }
   },
   "dashboards": {

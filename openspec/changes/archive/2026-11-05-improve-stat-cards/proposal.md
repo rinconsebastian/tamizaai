@@ -35,9 +35,9 @@ Not in this change:
 
 ## Depends on
 
-- `add-small-sample-warnings`: the base n of the `n` line, the base n line under a widget, the answer columns (`categories`) of indicator column metadata with the reader that gives them to the query, and its rule for counting a base once across answers. Through it, `add-indicator-column-metadata` (the column names in the n line and the captions). Both changes ship in the same release, decided with the user on 2026-11-04: `add-small-sample-warnings` is implemented first, then this change, and neither is deployed alone.
+- `add-small-sample-warnings`, implemented and archived on 2026-11-05 and held back from deploy until this change ships with it: the base n of the `n` line, the base n line under a widget, the answer columns (`categories`) of indicator column metadata with the reader that gives them to the query, and its rule for counting a base once across answers. Through it, `add-indicator-column-metadata` (the column names in the n line and the captions). Both changes ship in the same release, decided with the user on 2026-11-04, and neither is deployed alone. This change was rebased on its archived text on 2026-11-05.
 - `add-indicator-column-metadata` and `add-widget-context`, implemented and archived on 2026-11-04. The stored `display` ends with `ShowDescription`, after which this change appends `secondary`. The widget's own unit and caption (its own text, or hidden) are in "Stat tile", and the subtitle and footnote sit around a tile. The widget workbook's request already sends the widget's saved config, so the lines and the flag reach its workbook with no change to the request.
-- `add-chart-annotations`, earlier in the program: its reference line's overall value is a stat tile's statement, so it follows the same rule for declared answers, and its `overall` flag of `IndicatorQueryRequest` is the pattern the `unfiltered` line follows (decided with the user on 2026-11-04): a flag of the request, derived from the saved widget by the code that sends it, that `WidgetConfigInput`, `WidgetConfig` and `queryFor` never hold. A stat tile has no reference line, so its request never carries both flags.
+- `add-chart-annotations`, implemented and archived on 2026-11-04: its reference line's overall value is a stat tile's statement, so it follows the same rule for declared answers, and its `overall` flag of `IndicatorQueryRequest` is the pattern the `unfiltered` line follows (decided with the user on 2026-11-04): a flag of the request, derived from the saved widget by the code that sends it, that `WidgetConfigInput`, `WidgetConfig` and `queryFor` never hold. A stat tile has no reference line, so its request never carries both flags.
 
 ## Capabilities
 
@@ -50,12 +50,15 @@ None. Stat tiles and widget queries belong to `dashboard-indicators`.
 - `dashboard-indicators`:
   - "Stat tile": the tile shows a sum, a ratio of sums or a statistic, with the widget's own unit as before, and what it shows under its value unless the widget hides its caption;
   - "Ratio of sums": a stat tile with a statistic divides per row, and a ratio over several declared answers follows the new rules wherever a ratio of sums is taken;
-  - "Widget query over one indicator": a stat tile with a statistic does not sum its rows;
+  - "Widget query over one indicator": a stat tile with a statistic does not sum its rows, and returns its n with no numerator or denominator sums;
+  - "Base n of a mark" and "Base n of a widget": a stat tile with a statistic has the n of "Stat tile statistic n", declared or not;
+  - "Base n counted once across answers": the declaration changes no plotted value, total or order, except a ratio over several answers;
   - new requirements: "Stat tile value size", "Stat tile statistic", "Stat tile statistic n", "Stat tile statistic settings", "Stat tile secondary lines", "Stat tile secondary line settings", "Stat tiles saved before statistics and secondary lines", "Ratio over declared categories never summed across their values", "Ratio over declared multiple-choice categories refused", "Hint for a ratio over several values of one column".
 - `widget-export`: "Stat tile in a widget image" and "Stat tile lines in a widget workbook".
 - `dashboard-reports`: "Stat tile in a scheduled email" and "Ratio over declared categories in a scheduled email".
 - `dashboard-printing`: "Stat tile on paper".
 - `mcp-server`: "Stat tiles through MCP" and "Ratio over declared categories through MCP".
+- `pipeline`: "Answer columns of an indicator": the declaration changes no plotted value, except a ratio over several of its answers.
 
 ## Impact
 

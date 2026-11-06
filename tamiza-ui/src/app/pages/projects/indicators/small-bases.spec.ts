@@ -332,6 +332,24 @@ describe('the figures and small bases of the charts with a series (add-small-sam
       expect(byTestId(plain.root, 'stat-value')!.style.opacity).toBe('');
     });
 
+    it('draws the small-base note of a stat tile inside the tile and none under it, and always centers its column safely (Tile with texts and the n line)', async () => {
+      const context = await show('stat', { groupBy: null, display: { minN: 30, subtitle: 'Subtitle', footnote: 'Footnote' } }, result([row(null, 0.4, null, { numerator: 2, denominator: 5, n: 5 })]));
+      const tile = byTestId(context.root, 'stat')!;
+      const note = byTestId(context.root, 'widget-small-note')!;
+
+      expect(tile.contains(note)).toBe(true);
+      expect(all(context.root, 'widget-small-note')).toHaveLength(1);
+      expect(note.textContent!.trim()).toBe('Marks with a base below 30 are dimmed.');
+      expect(tile.classList.contains('justify-center-safe')).toBe(true);
+      expect(tile.classList.contains('justify-center')).toBe(false);
+      clearOverlay();
+      TestBed.resetTestingModule();
+
+      const plain = await show('stat', { groupBy: null }, result([row(null, 0.4, null, { numerator: 2, denominator: 5, n: 50 })]));
+      expect(byTestId(plain.root, 'widget-small-note')).toBeNull();
+      expect(byTestId(plain.root, 'stat')!.classList.contains('justify-center-safe')).toBe(true);
+    });
+
     it('never dims a value that has no n, such as the sum of a measure with no base column', async () => {
       const context = await show('column', { ratio: null, measure: 'value', groupBy: 'comuna', display: { minN: 30 } }, result([row('COMUNA 7', 5), row('COMUNA 1', 80)]));
 

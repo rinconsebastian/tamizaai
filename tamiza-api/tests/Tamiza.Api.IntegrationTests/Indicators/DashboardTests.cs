@@ -1032,6 +1032,39 @@ public sealed class DashboardTests(PostgresFixture postgres)
             ("original", h.DashboardId), ("copy", copyId)));
     }
 
+    // A tile's statistic and secondary lines duplicated (custom-dashboards: Duplicating a dashboard)
+
+    [Fact]
+    public async Task A_duplicate_holds_the_statistic_and_the_secondary_lines_of_the_originals_tiles_as_they_are_stored()
+    {
+        await using var h = await PublishedAsync();
+        await h.AddWidgetAsync(new
+        {
+            title = "Median", chartType = "stat",
+            config = new { indicator = "coverage", measure = "value", statistic = "median", display = new { secondary = new[] { "unfiltered", "n" } } },
+        });
+        await h.AddWidgetAsync(new { title = "Total", chartType = "stat", config = new { indicator = "coverage", measure = "value" } });
+
+        var response = await DuplicateAsync(h, h.DashboardId, "Housing (copy)");
+        var copyId = (await ReadAsync(response)).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var widgets = (await h.GetWidgetsAsync(copyId)).EnumerateArray().ToArray();
+        var median = widgets.Single(w => w.GetProperty("title").GetString() == "Median").GetProperty("config");
+        Assert.Equal("median", median.GetProperty("statistic").GetString());
+        Assert.Equal("""["unfiltered","n"]""", median.GetProperty("display").GetProperty("secondary").GetRawText());
+        var total = widgets.Single(w => w.GetProperty("title").GetString() == "Total").GetProperty("config");
+        Assert.False(total.TryGetProperty("statistic", out _));
+        Assert.False(total.TryGetProperty("display", out _));
+        Assert.Equal(2L, await TestData.ScalarAsync<long>(h.Db,
+            """
+            SELECT count(*) FROM tamiza.dashboard_widgets AS c
+            JOIN tamiza.dashboard_widgets AS o ON o.title = c.title AND o.dashboard_id = @original AND o.config = c.config
+            WHERE c.dashboard_id = @copy
+            """,
+            ("original", h.DashboardId), ("copy", copyId)));
+    }
+
     // Source duplicated (custom-dashboards: Dashboard source in a copy)
 
     private const string SurveySource = "Encuesta de ejemplo, 120 respuestas, primera ronda";

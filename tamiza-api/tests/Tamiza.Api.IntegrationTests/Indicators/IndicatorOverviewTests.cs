@@ -531,6 +531,44 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task The_openapi_document_describes_the_statistic_the_secondary_lines_the_unfiltered_flag_and_the_combined_categories()
+    {
+        await using var h = await IndicatorsHarness.CreateAsync(postgres);
+        using var anonymous = h.Factory.CreateClient();
+
+        var document = await anonymous.GetFromJsonAsync<JsonElement>("/api/v1/openapi.json");
+
+        var schemas = document.GetProperty("components").GetProperty("schemas");
+        string Described(string schema, string name)
+        {
+            var properties = schemas.GetProperty(schema).GetProperty("properties");
+            Assert.True(properties.TryGetProperty(name, out var field), $"{schema}.{name}");
+            var text = field.TryGetProperty("description", out var description) ? description.GetString() : null;
+            Assert.False(string.IsNullOrWhiteSpace(text), $"{schema}.{name} description");
+            return text!;
+        }
+
+        // The statistic is a setting of the widget (it changes the rows), in what it is saved with and in what it is read back as.
+        var statistic = Described("WidgetConfigInput", "statistic");
+        Assert.All(new[] { "median", "p25", "p75", "mean" }, value => Assert.Contains(value, statistic));
+        Assert.True(schemas.GetProperty("WidgetConfig").GetProperty("properties").TryGetProperty("statistic", out _), "WidgetConfig.statistic");
+        foreach (var schema in new[] { "WidgetConfigInput", "WidgetConfig" })
+        {
+            Assert.False(schemas.GetProperty(schema).GetProperty("properties").TryGetProperty("unfiltered", out _), $"{schema}.unfiltered");
+        }
+
+        var secondary = Described("WidgetDisplay", "secondary");
+        Assert.Contains("n", secondary);
+        Assert.Contains("unfiltered", secondary);
+        // The flag is the request's, and the value it asks for the response's.
+        Assert.Contains("dashboard filter", Described("IndicatorQueryRequest", "unfiltered"));
+        Assert.Contains("without the dashboard filters", Described("IndicatorQueryResponse", "unfiltered"));
+        var combined = Described("IndicatorQueryResponse", "combinedCategories");
+        Assert.Contains("multiple-choice", combined);
+        Assert.Contains("column", combined);
+    }
+
+    [Fact]
     public async Task The_openapi_document_describes_the_reference_lines_the_interpolation_and_the_data_labels_of_a_widget()
     {
         await using var h = await IndicatorsHarness.CreateAsync(postgres);

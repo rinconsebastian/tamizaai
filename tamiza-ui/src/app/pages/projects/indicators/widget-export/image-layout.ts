@@ -1,6 +1,7 @@
 import { smallBaseOpacity } from '../small-base-style';
 import { dashOf } from '../chart-annotations';
 import { ExportKeyGlyph, ExportLegend, ExportLegendEntry, ExportParts } from '../export-parts';
+import { clampFigure } from '../stat-figure';
 import { TableLabels, TableTheme, drawTable, fitText } from './svg-table';
 
 // Lays out the picture of a widget (add-widget-export, design D8): the title, the subtitle, the notes above the chart, the caption, the body
@@ -90,6 +91,25 @@ export function wrap(text: string, width: number, measure: (text: string) => num
   return line || lines.length === 0 ? [...lines, line] : lines;
 }
 
+/**
+ * Breaks a text into lines of at most `width` pixels between words, and never inside one: a word wider than a line stays whole on a line
+ * of its own, for the caller to widen the picture to (improve-stat-cards, design D1).
+ */
+export function wrapWords(text: string, width: number, measure: (text: string) => number): string[] {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (!line || measure(candidate) <= width) {
+      line = candidate;
+      continue;
+    }
+    lines.push(line);
+    line = word;
+  }
+  return line || lines.length === 0 ? [...lines, line] : lines;
+}
+
 /** Cuts a list of lines to `max`, ending the last one with an ellipsis when something was cut. */
 function limit(lines: string[], max: number, measure: (text: string) => number, width: number): string[] {
   if (lines.length <= max) {
@@ -141,6 +161,14 @@ export function composeImage(input: ImageInput): ImageLayout {
     width = Math.max(width, table.width + margin * 2);
   }
 
+  // A stat tile's figure, in the same way: it is never cut, so the picture is as wide as its widest word.
+  const stat = input.parts.stat;
+  const figureSize = stat ? clampFigure(stat.size) : 0;
+  if (stat && !table) {
+    const widest = Math.max(0, ...stat.value.split(/\s+/).map((word) => measure(word, figureSize, 600)));
+    width = Math.max(width, Math.ceil(widest) + margin * 2);
+  }
+
   paragraph(input.title, titleSize, 500, theme.heading, maxTitleLines);
   if (input.subtitle) {
     paragraph(input.subtitle, noteSize, 400, theme.body);
@@ -156,13 +184,20 @@ export function composeImage(input: ImageInput): ImageLayout {
     const holder = add(body, 'svg', { x: margin, y, width: table.width, height: table.height, viewBox: `0 0 ${table.width} ${table.height}` });
     holder.appendChild(table.node);
     y += table.height + gap;
-  } else if (input.parts.stat) {
-    const value = input.parts.stat.value;
-    // A figure with a small base is drawn at the reduced opacity the page gives it (design D10); its size is `improve-stat-cards`'.
-    add(body, 'text', { x: margin, y: y + 36, 'font-size': 36, 'font-weight': 600, fill: theme.heading, ...(input.parts.stat.dimmed ? { 'fill-opacity': smallBaseOpacity } : {}) }, value);
-    y += 36 + gap + 4;
-    if (input.parts.stat.description) {
-      paragraph(input.parts.stat.description, 14, 400, theme.body);
+  } else if (stat) {
+    // A figure with a small base is drawn at the reduced opacity the page gives it (add-small-sample-warnings, design D10), at the size
+    // its tile gave it on screen (improve-stat-cards, design D1), broken only between words.
+    const lines = wrapWords(stat.value, width - margin * 2, (text) => measure(text, figureSize, 600));
+    const lineHeight = Math.round(figureSize * 1.2);
+    lines.forEach((line, index) => {
+      add(body, 'text', { x: margin, y: y + index * lineHeight + figureSize, 'font-size': figureSize, 'font-weight': 600, fill: theme.heading, ...(stat.dimmed ? { 'fill-opacity': smallBaseOpacity } : {}) }, line);
+    });
+    y += lines.length * lineHeight + gap;
+    if (stat.description) {
+      paragraph(stat.description, 14, 400, theme.body);
+    }
+    for (const line of stat.secondary) {
+      paragraph(line, noteSize, 400, theme.body);
     }
   } else if (input.plot) {
     const height = Number(input.plot.getAttribute('height')) || 0;

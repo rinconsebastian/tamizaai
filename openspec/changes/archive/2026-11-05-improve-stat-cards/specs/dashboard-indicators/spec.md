@@ -39,6 +39,8 @@ A widget SHALL be able to plot, instead of one measure, the ratio of the sums of
 ### Requirement: Widget query over one indicator
 A widget's query SHALL select one indicator, either a measure (a numeric column of its table, `value` by default when the table has it, otherwise its first numeric column) or a ratio of two numeric columns, a column to group by (required for bar, column, line, pie, map, heat map, population pyramid, diverging Likert and cross table widgets), an optional series column (see "Series in a widget"), and up to 50 filters built the same way as the clean data dashboard's. Rows matching the query that share the same group value, and the same series value when there is a series, SHALL be summed, or combined as a ratio of sums, before being plotted, except in a box plot, where each row gives one value of its group's box (see "Box plot"), and in a stat tile with a statistic, where each row gives one value of the statistic (see "Stat tile statistic"). The row limit SHALL count what the widget plots: its groups, its pairs of group and series value when it has a series, the rows of a histogram with no group column, or the boxes of a box plot. On a dashboard, the rows SHALL also match the dashboard filters that narrow the widget (see `dashboard-filters`); those filters do not count toward the widget's 50.
 
+For each value and each total it plots, the query SHALL also return its base n (see "Base n of a mark") and, for a ratio, the sums of its numerator and of its denominator; a measure whose indicator declares no base column SHALL return neither, and the rows of a histogram and the boxes of a box plot SHALL be returned as before. A stat tile with a statistic SHALL return its n (see "Stat tile statistic n") and no sums of its numerator or denominator. A widget that leaves out the values that mean no data SHALL leave their rows out of every value, total and count it returns (see "No-data values left out of a widget").
+
 #### Scenario: Default measure
 - **WHEN** a widget is created over an indicator whose table has the columns `municipality`, `value` and `count`, without choosing a measure
 - **THEN** it plots `value`
@@ -67,9 +69,86 @@ A widget's query SHALL select one indicator, either a measure (a numeric column 
 - **WHEN** two rows of the indicator `household_income` share the municipality `Cali`, with values 400 and 900, and a box plot plots `value` grouped by `municipality`
 - **THEN** `Cali`'s box holds the two values 400 and 900, not their sum
 
+#### Scenario: Numerator and denominator returned
+- **WHEN** a column chart of the ratio of `numerator` to `denominator` of `teatro_hoy`, grouped by `comuna` and filtered to the variable "Asistió (E1)" and the answer "Sí", plots 0.5 for `COMUNA 7`
+- **THEN** the query also returns for `COMUNA 7` the numerator 8, the denominator 16 and the n 16
+
+#### Scenario: Measure without a base answers as before
+- **WHEN** a widget sums `value` of `teatro_conteo`, whose indicator declares no base column
+- **THEN** its query returns no numerator, denominator or n, the same answer it gave before base figures existed
+
 #### Scenario: Statistic rows not summed
 - **WHEN** a stat tile with the statistic median plots `value` over three matching rows with the values 10,000, 40,000 and 90,000
 - **THEN** it shows the median 40,000, not the sum 140,000
+
+#### Scenario: Statistic of a ratio returns its n only
+- **WHEN** a stat tile with the statistic median plots the ratio of `numerator` to `denominator` over 37 matching rows with a value
+- **THEN** its query returns the median and the n 37, and no sums of its numerator or denominator
+
+### Requirement: Base n of a mark
+Each plotted value SHALL have a base n: the sum of the indicator's base column over the value's rows when the indicator declares one (see `pipeline` "Base column of an indicator"), else, for a ratio, the sum of its denominator. A measure with neither SHALL have none, nor SHALL a histogram's bar or a pie's "Other" slice. A share in a 100% layout or a Likert bar SHALL have its group's n, a box its number of values, and a stat tile with a statistic the n that "Stat tile statistic n" gives it, whatever the indicator declares. Every n SHALL be unweighted and counted after all filters.
+
+#### Scenario: Denominator as the base
+- **WHEN** a column chart of the ratio of `numerator` to `denominator` of `teatro_hoy` is grouped by `comuna`, filtered to "Asistió (E1)" and "Sí", and the denominators of `COMUNA 7` sum to 16
+- **THEN** the n of `COMUNA 7` is 16
+
+#### Scenario: Declared base column
+- **WHEN** `comercio_gastos_resumen` declares `hogares` as its base column, and a column chart of its `value` grouped by `estrato` has one row for `Estrato 2` whose `hogares` is 154
+- **THEN** the n of `Estrato 2` is 154
+
+#### Scenario: Measure without a base
+- **WHEN** a stacked bar chart sums `value` of `teatro_conteo`, which declares no base column
+- **THEN** its segments have no n
+
+#### Scenario: Share of a group
+- **WHEN** a 100% column chart of `teatro_conteo`, which declares `value` as its base column, is grouped by `comuna` with the series `respuesta`, and the rows of `COMUNA 7` add up to 16 households
+- **THEN** every segment of `COMUNA 7` has the n 16
+
+#### Scenario: Dashboard filter before the n
+- **WHEN** a member sets the dashboard filter "Estrato" to `Estrato 4` over a column chart of `teatro_hoy` grouped by `comuna`
+- **THEN** each column's n counts only the rows of `Estrato 4`
+
+#### Scenario: Statistic over a measure without a base
+- **WHEN** a stat tile with the statistic median plots `value` of `teatro_precio_hogar`, which declares no base column, over 37 households
+- **THEN** its n is 37
+
+### Requirement: Base n counted once across answers
+When the indicator declares answer columns (see `pipeline` "Answer columns of an indicator"), an answer SHALL be one combination of their values, and an n over the rows of several answers SHALL count the base once: the largest of the sums of the base over the rows of each answer, not their total. The declaration SHALL change no plotted value, total or order, except a ratio over several answers (see "Ratio over declared categories never summed across their values" and "Ratio over declared multiple-choice categories refused").
+
+#### Scenario: Total over the answers
+- **WHEN** a grouped column chart of `teatro_hoy`, whose `categoria` is declared as answers, is grouped by `comuna` with the series `categoria` for "Frecuencia (E2)", and the denominators of each answer of `COMUNA 1` sum to 57
+- **THEN** the total of `COMUNA 1` has the n 57, not 57 times the number of answers
+
+#### Scenario: Two questions in one widget
+- **WHEN** a grouped column chart of `comercio_lugar_compra`, whose `variable` and `categoria` are declared as answers, splits the places by `variable` "Ropa y calzado" and "Tecnología", each asked of the same 476 households
+- **THEN** the widget's n is 476, not 952
+
+#### Scenario: Values unchanged by the declaration
+- **WHEN** an analyst declares `categoria` of `teatro_hoy` as answers
+- **THEN** every widget over `teatro_hoy` that plots a measure, or whose values and totals each hold one answer, plots the values, totals and order it plotted before
+
+### Requirement: Base n of a widget
+A widget SHALL have a base n when its marks have one and its indicator declares a base column or an answer column: the n over every row it plots, counted as a mark's is. A widget whose indicator declares neither SHALL have none, since its group column may hold the answers of one question, and adding their bases would count each unit once per answer; a stat tile with a statistic is the exception (see "Stat tile statistic n"). A histogram and a box plot SHALL have none.
+
+#### Scenario: Answers of one question
+- **WHEN** a bar chart of `teatro_hoy`, whose `categoria` is declared as answers, plots the answers of "Lugar (E4)", whose denominators each sum to 223
+- **THEN** the widget's n is 223
+
+#### Scenario: Nothing declared
+- **WHEN** the indicator of that bar chart declares no base column and no answer column
+- **THEN** the widget has no base n
+
+#### Scenario: Subgroups added up
+- **WHEN** a column chart of `teatro_hoy`, whose `categoria` is declared as answers, is grouped by `comuna` and filtered to "Asistió (E1)" and "Sí"
+- **THEN** the widget's n is the sum of its comunas' n, 476 when no filter leaves a comuna out
+
+#### Scenario: Widget n after the filters
+- **WHEN** a member sets the dashboard filter "Comuna" to `COMUNA 1` over that column chart
+- **THEN** the widget's n is 121
+
+#### Scenario: Statistic tile with nothing declared
+- **WHEN** a stat tile with the statistic median over `teatro_precio_hogar`, which declares no base column and no answer column, covers 37 households
+- **THEN** the widget's n is 37
 
 ## ADDED Requirements
 
@@ -207,6 +286,10 @@ A stat tile SHALL be able to show up to two secondary lines under what it plots,
 #### Scenario: Tile short of room
 - **WHEN** a stat tile 3 columns wide and 2 rows high has a footnote and shows both secondary lines
 - **THEN** its value shows whole, and its label and lines are cut as far as the room needs
+
+#### Scenario: Tile with texts and the n line
+- **WHEN** a stat tile 3 columns wide and 2 rows high has a one-line subtitle and a one-line footnote and shows the n line
+- **THEN** its tile is as tall as before, its value is drawn whole at no less than 18 px, and its label and n line are cut as far as the room needs
 
 #### Scenario: Measure with no base
 - **WHEN** a stat tile with no statistic plots the measure `value` of an indicator that declares no base column, and shows the n line

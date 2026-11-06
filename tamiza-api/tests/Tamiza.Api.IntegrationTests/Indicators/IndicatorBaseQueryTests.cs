@@ -391,14 +391,27 @@ public sealed class IndicatorBaseQueryTests(PostgresFixture postgres)
     [Fact]
     public async Task A_stat_tile_over_several_answers_has_the_widget_n_of_the_answers()
     {
-        await using var h = await WithTeatroAsync(DeclaredAnswers);
+        // The answers of a single-choice question: the two answers of E1 are 952 households' worth of denominators, but 476 households, and a
+        // value over both counts the base once as its n does (design D4a of improve-stat-cards), so its denominator is the n.
+        await using var h = await WithTeatroAsync(new { categoria = new { categories = "single" } });
 
-        // The two answers of E1 are 952 households' worth of denominators, but 476 households.
         var tile = await h.QueryAsync(new { indicator = "teatro_hoy", ratio = RatioOf, filters = new[] { Filter("variable", "Asistio (E1)") } }, "stat");
 
-        Assert.Equal(952, tile.GetProperty("rows")[0].GetProperty("denominator").GetDouble());
+        Assert.Equal(476, tile.GetProperty("rows")[0].GetProperty("denominator").GetDouble());
         Assert.Equal(476, tile.GetProperty("rows")[0].GetProperty("n").GetDouble());
         Assert.Equal(476, tile.GetProperty("n").GetDouble());
+        Assert.Equal(1, tile.GetProperty("rows")[0].GetProperty("value").GetDouble());
+    }
+
+    [Fact]
+    public async Task A_stat_tile_over_several_answers_of_a_multiple_choice_question_is_refused()
+    {
+        await using var h = await WithTeatroAsync(DeclaredAnswers);
+
+        var tile = await h.QueryAsync(new { indicator = "teatro_hoy", ratio = RatioOf, filters = new[] { Filter("variable", "Asistio (E1)") } }, "stat");
+
+        Assert.Equal("categoria", tile.GetProperty("combinedCategories").GetString());
+        Assert.Empty(tile.GetProperty("rows").EnumerateArray());
     }
 
     [Fact]
@@ -426,8 +439,9 @@ public sealed class IndicatorBaseQueryTests(PostgresFixture postgres)
 
         var result = await h.QueryAsync(new { indicator = "teatro_semanal", ratio = RatioOf, groupBy = "semana" }, "line");
 
-        // The counted statement writes the timestamps as the rows do, so each row finds its n.
-        Assert.Equal(["2026-01-05T00:00:00Z|0.5|10|20|10", "2026-01-12T00:00:00Z|0.5|8|16|8"], Figures(result).Select(r => r.Replace("+00:00", "Z")));
+        // The counted statement writes the timestamps as the rows do, so each row finds its n. Each week holds both answers of a single-choice
+        // question, so its denominator is its households once (design D4a of improve-stat-cards): 10 of 10 and 8 of 8 households.
+        Assert.Equal(["2026-01-05T00:00:00Z|1|10|10|10", "2026-01-12T00:00:00Z|1|8|8|8"], Figures(result).Select(r => r.Replace("+00:00", "Z")));
         Assert.Equal(18, result.GetProperty("n").GetDouble());
     }
 

@@ -3,6 +3,7 @@ import es from '../../../../../public/i18n/es.json';
 import { byTestId, settle } from '../../../../testing/project-harness';
 import { pressKey } from '../../../../testing/cdk';
 import { ChartType, DashboardColors, IndicatorEntry, PaletteId, QueryResult, QueryRow, QuerySeries, ValueColor, WidgetConfig } from '../../../core/projects/indicators.service';
+import { figureMax, figureMin, figureSize } from './stat-figure';
 import { Context, all, cell, clearOverlay, config, indicator, isQuery, open, overlay, printOf, result, row, seriesResult, text, tips, wait, menuItem, openWidgetMenu, toggleTable, widget } from './indicators-testing';
 
 interface Query {
@@ -86,12 +87,55 @@ describe('chart widgets', () => {
       ['a color', { color: 2 }],
       ['a hidden caption', { caption: { hidden: true as const } }],
       ['a blank subtitle', { subtitle: '   ' }],
-    ])('keeps its column centered as it was with %s (Widgets saved before)', async (_name, display) => {
+    ])('centers its column while it fits and starts at the top when it does not with %s, as with texts (Widgets saved before; improve-stat-cards, design D1)', async (_name, display) => {
       const { root } = await show('stat', { indicator: 'piped_water_rate', ...(display ? { display } : {}) }, [row(null, 0.42)]);
 
       const column = byTestId(root, 'stat')!;
-      expect(column.classList.contains('justify-center')).toBe(true);
-      expect(column.classList.contains('justify-center-safe')).toBe(false);
+      expect(column.classList.contains('justify-center-safe')).toBe(true);
+      expect(column.classList.contains('justify-center')).toBe(false);
+    });
+
+    describe('size of the figure (improve-stat-cards, design D1)', () => {
+      const clamp = 'clamp(1.125rem, min(9cqi, 38cqh), 1.875rem)';
+
+      it.each([
+        ['Default tile', 'piped_water_rate', 0.4685, '46.85%'],
+        ['Narrow tile', 'households_visited', 1016279, '1,016,279 households'],
+        ['Tile saved before the change', 'piped_water_rate', 0.42, '42%'],
+      ])('sizes the figure from the room of its tile, between 18 and 30 px, and breaks it nowhere inside a word (%s)', async (_name, name, value, shown) => {
+        const { root } = await show('stat', { indicator: name }, [row(null, value)]);
+
+        const figure = byTestId(root, 'stat-value')!;
+        expect(text(figure)).toBe(shown);
+        expect(byTestId(root, 'stat')!.getAttribute('style')).toContain('container-type: size');
+        expect(figure.style.fontSize).toBe(clamp);
+        expect(figure.style.lineHeight).toBe('1');
+        expect(figure.getAttribute('style')).toContain('overflow-x: clip');
+        expect(figure.getAttribute('style')).toContain('text-wrap: balance');
+        for (const gone of ['break-all', 'break-words', 'overflow-hidden']) {
+          expect(figure.classList, gone).not.toContain(gone);
+        }
+        expect(figure.className).not.toMatch(/text-\dxl/);
+        // Whatever the tile cuts, its whole figure stays in the DOM for screen readers, and in the title for a pointer.
+        expect(figure.getAttribute('title')).toBe(shown);
+      });
+
+      it('keeps the bounds of the clamp inside the spec: 18 px at least and 30 px at most', () => {
+        expect(clamp).toContain('1.125rem');
+        expect(clamp).toContain('1.875rem');
+        expect(figureMin).toBe(18);
+        expect(figureMax).toBe(30);
+        expect(clamp).toBe(figureSize);
+      });
+
+      it('keeps the label under the figure at the size it had, so only the figure changes (Tile with texts)', async () => {
+        const { root } = await show('stat', { indicator: 'piped_water_rate', display: { subtitle: 'Hogares', footnote: 'Sin ponderar.' } }, [row(null, 0.42)]);
+
+        const label = byTestId(root, 'stat-label')!;
+        expect(label.classList).toContain('text-sm');
+        expect(label.classList).not.toContain('sr-only');
+        expect(text(byTestId(root, 'stat-value'))).toBe('42%');
+      });
     });
 
     it('shows the footnote under the figure and its label', async () => {
@@ -2132,3 +2176,222 @@ function textWidthOf(text: string): number {
 }
 
 const hitsOf = (context: Context) => all(context.root, 'chart-hit');
+
+describe('stat tile statistic and secondary lines (improve-stat-cards, design D2, D3, D10)', () => {
+  const ratio = { numerator: 'numerator', denominator: 'denominator' };
+  const teatro = indicator('teatro_hoy', {
+    label: 'Teatro hoy',
+    format: 'percent',
+    unit: 'de los hogares',
+    columns: { numerator: { label: 'Hogares que asistieron' }, denominator: { label: 'Hogares' } },
+  });
+  /** `teatro_precio_hogar`: one row per household, a price in pesos. */
+  const price = indicator('teatro_precio_hogar', { label: 'Teatro precio hogar', format: 'count', unit: 'pesos' });
+  /** The same, with the households each row stands for declared as its base. */
+  const priced = indicator('teatro_precio_hogar', { label: 'Teatro precio hogar', format: 'count', unit: 'pesos', columns: { hogares: { label: 'Hogares', base: true } } });
+  const lines = (context: Pick<Context, 'root'>) => all(context.root, 'stat-line').map(text);
+
+  /** Opens a dashboard with one stat tile and answers its one query with `answer`. */
+  async function showTile(settings: Partial<WidgetConfig>, indicators: IndicatorEntry[], answer: QueryResult, at: Parameters<typeof open>[4] = {}) {
+    const context = await open('viewer', [widget('w1', { chartType: 'stat', config: config({ groupBy: null, ...settings }) })], null, { indicators }, at);
+    const requests = context.http.match(isQuery);
+    expect(requests).toHaveLength(1);
+    requests[0].flush(answer);
+    await settle(context.harness);
+    return { ...context, request: requests[0].request.body as { config: WidgetConfig; unfiltered?: true } };
+  }
+
+  it('names the statistic under the value (Statistic named under the value)', async () => {
+    const { root } = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median' }, [price], result([row(null, 40000)]));
+
+    expect(text(byTestId(root, 'stat-value'))).toBe('40,000 pesos');
+    expect(text(byTestId(root, 'stat-label'))).toBe('Median of Teatro precio hogar: value');
+  });
+
+  it.each([
+    ['median', 'Median of'],
+    ['p25', 'First quartile of'],
+    ['p75', 'Third quartile of'],
+    ['mean', 'Mean of'],
+  ] as const)('names %s as "%s", and sends the statistic in the query', async (statistic, words) => {
+    const { root, request } = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic }, [price], result([row(null, 4.5)]));
+
+    expect(text(byTestId(root, 'stat-label'))).toBe(`${words} Teatro precio hogar: value`);
+    expect(request.config.statistic).toBe(statistic);
+  });
+
+  it('keeps the statistic in front of an own caption text (Statistic with an own caption text)', async () => {
+    const display = { caption: { text: 'Precio de la boleta' } };
+    const { root } = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median', display }, [price], result([row(null, 40000)]));
+
+    expect(text(byTestId(root, 'stat-label'))).toBe('Median of Precio de la boleta');
+  });
+
+  it('writes the description of a tile with no statistic as before, whatever its lines', async () => {
+    const { root, request } = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['n'] } }, [teatro], result([row(null, 0.4685)]));
+
+    expect(text(byTestId(root, 'stat-label'))).toBe('Teatro hoy: Hogares que asistieron / Hogares');
+    expect(request.config).not.toHaveProperty('statistic');
+  });
+
+  it('writes the n of a tile under what it plots, with the name of its base (Base under the value)', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['n'] } }, [teatro], result([row(null, 0.4685)], { n: 476 }));
+
+    expect(text(byTestId(context.root, 'stat-value'))).toBe('46.85% de los hogares');
+    expect(lines(context)).toEqual(['n = 476 Hogares']);
+    expect(byTestId(context.root, 'stat-line')!.classList).toContain('text-xs');
+  });
+
+  it('draws the base n line of the dashboard once, inside the tile, and none under the widget (Base n line of the dashboard)', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio }, [teatro], result([row(null, 0.4685)], { n: 476 }), { bases: { showN: true } });
+
+    expect(lines(context)).toEqual(['n = 476 Hogares']);
+    expect(byTestId(context.root, 'widget-n-line')).toBeNull();
+  });
+
+  it('lets the widget turn the dashboard line off', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { showN: false } }, [teatro], result([row(null, 0.4685)], { n: 476 }), { bases: { showN: true } });
+
+    expect(lines(context)).toEqual([]);
+  });
+
+  it('shows the n of a tile that chose it whatever the dashboard says', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { showN: false, secondary: ['n'] } }, [teatro], result([row(null, 0.4685)], { n: 476 }));
+
+    expect(lines(context)).toEqual(['n = 476 Hogares']);
+  });
+
+  it('shows no n line for a tile whose indicator declares nothing (Nothing declared)', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['n'] } }, [teatro], result([row(null, 0.4685)]));
+
+    expect(lines(context)).toEqual([]);
+    expect(text(byTestId(context.root, 'stat-value'))).toBe('46.85% de los hogares');
+  });
+
+  it('shows no n line for a measure with no base (Measure with no base)', async () => {
+    const context = await showTile({ indicator: 'households_visited', measure: 'value', display: { secondary: ['n'] } }, [households], result([row(null, 120)]));
+
+    expect(lines(context)).toEqual([]);
+    expect(text(byTestId(context.root, 'stat-value'))).toBe('120 households');
+  });
+
+  it('words the n of a statistic as a number of values, with no name (Number of values of a median)', async () => {
+    const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median', display: { secondary: ['n'] } }, [price], result([row(null, 40000, null, { n: 37 })], { n: 37 }));
+
+    expect(lines(context)).toEqual(['n = 37']);
+  });
+
+  it('words it with the name of the base column when the indicator declares one (Base column of a statistic)', async () => {
+    const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'mean', display: { secondary: ['n'] } }, [priced], result([row(null, 60000, null, { n: 4 })], { n: 4 }));
+
+    expect(lines(context)).toEqual(['n = 4 Hogares']);
+  });
+
+  it('never names the denominator of a ratio for the n of its statistic', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, statistic: 'median', display: { secondary: ['n'] } }, [teatro], result([row(null, 0.4, null, { n: 12 })], { n: 12 }));
+
+    expect(lines(context)).toEqual(['n = 12']);
+  });
+
+  it('dims the figure of a statistic whose number of values is below the threshold (Small base of a median)', async () => {
+    const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median', display: { secondary: ['n'] } }, [price], result([row(null, 35000, null, { n: 6 })], { n: 6 }), { bases: { minN: 30 } });
+
+    expect(byTestId(context.root, 'stat-value')!.style.opacity).toBe('0.35');
+    expect(lines(context)).toEqual(['n = 6']);
+  });
+
+  it('draws the figure of a statistic over the threshold as it is', async () => {
+    const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median' }, [price], result([row(null, 40000, null, { n: 37 })], { n: 37 }), { bases: { minN: 30 } });
+
+    expect(byTestId(context.root, 'stat-value')!.style.opacity).toBe('');
+  });
+
+  it('writes the value without the dashboard filters with the format of the tile (Value without the dashboard filters)', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['unfiltered'] } }, [teatro], result([row(null, 0.31)], { unfiltered: 0.4685 }));
+
+    expect(text(byTestId(context.root, 'stat-value'))).toBe('31% de los hogares');
+    expect(lines(context)).toEqual(['Without filters: 46.85% de los hogares']);
+    expect(context.request.unfiltered).toBe(true);
+  });
+
+  it('shows no line while the query gives no value without filters (No dashboard filter in force)', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['unfiltered'] } }, [teatro], result([row(null, 0.4685)]));
+
+    expect(lines(context)).toEqual([]);
+  });
+
+  it('shows the n line first and the line without filters second, whatever order they were saved in', async () => {
+    const answer = result([row(null, 0.31)], { n: 121, unfiltered: 0.4685 });
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['unfiltered', 'n'] } }, [teatro], answer);
+
+    expect(lines(context)).toEqual(['n = 121 Hogares', 'Without filters: 46.85% de los hogares']);
+  });
+
+  it('shows no line for the secondary lines a tile did not choose, and asks for no figure without filters', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio }, [teatro], result([row(null, 0.4685)], { n: 476, unfiltered: 0.5 }));
+
+    expect(lines(context)).toEqual([]);
+    expect(context.request).not.toHaveProperty('unfiltered');
+  });
+
+  it('keeps a tile without lines as it was: one description, centered while it fits, no clamp (Widgets saved before)', async () => {
+    const { root } = await showTile({ indicator: 'teatro_hoy', ratio }, [teatro], result([row(null, 0.4685)]));
+
+    expect(byTestId(root, 'stat-label')!.classList).not.toContain('line-clamp-2');
+    expect(byTestId(root, 'stat-label')!.getAttribute('title')).toBeNull();
+    expect(byTestId(root, 'stat')!.classList).toContain('justify-center-safe');
+  });
+
+  it('keeps the figure whole and lets the label and the lines be the part cut, with the whole texts in their titles (Tile with texts and lines)', async () => {
+    const display = { subtitle: '% de quienes asistieron (E4)', footnote: 'Sin ponderar.', secondary: ['n' as const, 'unfiltered' as const] };
+    const { root } = await showTile({ indicator: 'teatro_hoy', ratio, display }, [teatro], result([row(null, 0.31)], { n: 121, unfiltered: 0.4685 }));
+
+    const column = byTestId(root, 'stat')!;
+    expect(column.classList).toContain('justify-center-safe');
+    expect(column.classList).not.toContain('justify-center');
+    const figure = byTestId(root, 'stat-value')!;
+    expect(figure.style.fontSize).toBe(figureSize);
+    expect(figure.style.lineHeight).toBe('1');
+    const label = byTestId(root, 'stat-label')!;
+    expect(label.classList).toContain('line-clamp-2');
+    expect(label.getAttribute('title')).toBe('Teatro hoy: Hogares que asistieron / Hogares');
+    const shown = all(root, 'stat-line');
+    expect(shown.map((line) => line.getAttribute('title'))).toEqual(shown.map(text));
+    for (const line of shown) {
+      expect(line.classList).toContain('truncate');
+    }
+  });
+
+  it('centers its column in the safe way as soon as it shows a line, though it has no subtitle or footnote', async () => {
+    const { root } = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['n'] } }, [teatro], result([row(null, 0.4685)], { n: 476 }));
+
+    expect(byTestId(root, 'stat')!.classList).toContain('justify-center-safe');
+  });
+
+  it('keeps the lines of a tile that hides its caption, and the caption for screen readers (Lines of a tile that hides its caption)', async () => {
+    const display = { caption: { hidden: true as const }, secondary: ['n' as const] };
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display }, [teatro], result([row(null, 0.4685)], { n: 476 }));
+
+    expect(text(byTestId(context.root, 'stat-value'))).toBe('46.85% de los hogares');
+    expect(byTestId(context.root, 'stat-label')!.classList).toContain('sr-only');
+    expect(lines(context)).toEqual(['n = 476 Hogares']);
+  });
+
+  it('words the statistic, the base and the line without filters in Spanish', async () => {
+    const answer = result([row(null, 35000, null, { n: 6 })], { n: 6, unfiltered: 40000 });
+    const settings = { indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median' as const, display: { secondary: ['n' as const, 'unfiltered' as const] } };
+    const context = await open('viewer', [widget('w1', { chartType: 'stat', config: config({ groupBy: null, ...settings }) })], null, { indicators: [price] }, { lang: 'es' });
+    context.http.match(isQuery)[0].flush(answer);
+    await settle(context.harness);
+
+    expect(text(byTestId(context.root, 'stat-label'))).toBe('Mediana de Teatro precio hogar: value');
+    expect(lines(context)).toEqual(['n = 6', expect.stringMatching(/^Sin filtros: 40\.000\s?pesos$/)]);
+  });
+
+  it('has the words of the statistics and of the line without filters in each language', () => {
+    expect(en.indicators.stat.of).toEqual({ median: 'Median of {{ what }}', p25: 'First quartile of {{ what }}', p75: 'Third quartile of {{ what }}', mean: 'Mean of {{ what }}' });
+    expect(es.indicators.stat.of).toEqual({ median: 'Mediana de {{ what }}', p25: 'Primer cuartil de {{ what }}', p75: 'Tercer cuartil de {{ what }}', mean: 'Promedio de {{ what }}' });
+    expect(en.indicators.stat.withoutFilters).toBe('Without filters: {{ value }}');
+    expect(es.indicators.stat.withoutFilters).toBe('Sin filtros: {{ value }}');
+  });
+});

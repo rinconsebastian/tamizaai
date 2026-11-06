@@ -622,4 +622,114 @@ public sealed class WidgetDisplayTests
         Assert.False(off.MissingFooter);
         Assert.Contains(",\"missingFooter\":false,", JsonSerializer.Serialize(off, Json));
     }
+
+    // The statistic and the secondary lines of a stat tile (design D2 and D3 of improve-stat-cards)
+
+    [Theory]
+    [InlineData("median")]
+    [InlineData("p25")]
+    [InlineData("p75")]
+    [InlineData("mean")]
+    public void A_statistic_round_trips_and_is_kept_as_given(string statistic)
+    {
+        var config = Read("""{"indicator":"encuesta_hoy","statistic":""" + $"\"{statistic}\"" + "}");
+        var json = JsonSerializer.Serialize(config, Json);
+
+        Assert.Equal(statistic, config.Statistic);
+        Assert.Contains($"\"statistic\":\"{statistic}\"", json);
+        Assert.Equal(json, JsonSerializer.Serialize(Read(json), Json));
+    }
+
+    [Fact]
+    public void A_statistic_that_is_empty_or_null_is_none_and_a_config_without_one_writes_no_statistic()
+    {
+        var empty = Read("""{"indicator":"encuesta_hoy","statistic":""}""");
+        var nothing = Read("""{"indicator":"encuesta_hoy","statistic":null}""");
+        var plain = Read("""{"indicator":"encuesta_hoy"}""");
+
+        Assert.All(new[] { empty, nothing, plain }, config =>
+        {
+            Assert.Null(config.Statistic);
+            Assert.DoesNotContain("statistic", JsonSerializer.Serialize(config, Json));
+        });
+        Assert.Equal(["median", "p25", "p75", "mean"], StatStatistics.All);
+    }
+
+    [Fact]
+    public void A_config_saved_before_the_statistic_serializes_exactly_as_before()
+    {
+        Assert.Equal(MinimalBefore, JsonSerializer.Serialize(Read(MinimalBefore), Json));
+        Assert.Equal(RichBefore, JsonSerializer.Serialize(Read(RichBefore), Json));
+    }
+
+    [Fact]
+    public void A_display_with_secondary_lines_keeps_their_order_and_round_trips()
+    {
+        var config = Read("""{"indicator":"encuesta_hoy","display":{"secondary":["unfiltered","n"]}}""");
+        var json = JsonSerializer.Serialize(config, Json);
+
+        Assert.Equal(new WidgetDisplay(Secondary: ["unfiltered", "n"]).Secondary, config.Display!.Secondary);
+        Assert.Contains(""","display":{"secondary":["unfiltered","n"]},""", json);
+        Assert.Equal(json, JsonSerializer.Serialize(Read(json), Json));
+        Assert.Equal(["n", "unfiltered"], StatSecondaryLines.All);
+    }
+
+    [Fact]
+    public void A_display_holding_only_secondary_lines_is_a_display_and_an_empty_list_is_none()
+    {
+        Assert.NotNull(new WidgetDisplay(Secondary: ["n"]).Normalize());
+        Assert.Null(new WidgetDisplay(Secondary: []).Normalize());
+
+        var empty = Read("""{"indicator":"encuesta_hoy","display":{"secondary":[]}}""");
+        var nothing = Read("""{"indicator":"encuesta_hoy","display":{"secondary":null}}""");
+        var next = Read("""{"indicator":"encuesta_hoy","display":{"color":2,"secondary":[]}}""");
+
+        Assert.All(new[] { empty, nothing }, config =>
+        {
+            Assert.Null(config.Display);
+            Assert.DoesNotContain("display", JsonSerializer.Serialize(config, Json));
+        });
+        Assert.Equal(new WidgetDisplay(Color: 2), next.Display);
+        Assert.Contains(""","display":{"color":2},""", JsonSerializer.Serialize(next, Json));
+    }
+
+    [Fact]
+    public void The_secondary_lines_are_the_last_member_of_a_display_and_the_old_members_keep_their_place()
+    {
+        var config = Read(
+            """{"indicator":"encuesta_hoy","display":{"secondary":["n"],"showN":true,"minN":30,"order":{"group":["a"]},"dataLabels":true,"interpolation":"linear","referenceLines":[{"kind":"overall"}],"showDescription":true,"unit":"hogares","caption":{"hidden":true},"footnote":"Nota","subtitle":"Pregunta","labels":{"value":"Hogares"},"orientation":"vertical","ramp":"green","color":3}}""");
+
+        var display = JsonNode.Parse(JsonSerializer.Serialize(config, Json))!["display"]!.AsObject();
+
+        Assert.Equal(
+            ["color", "ramp", "orientation", "labels", "subtitle", "footnote", "caption", "unit", "showDescription", "referenceLines", "interpolation", "dataLabels", "order", "minN", "showN", "secondary"],
+            display.Select(member => member.Key));
+    }
+
+    [Fact]
+    public void A_display_without_secondary_lines_serializes_as_it_did_before()
+    {
+        const string stored = """{"color":3,"subtitle":"Pregunta","minN":30,"showN":true}""";
+
+        var json = JsonSerializer.Serialize(Read("""{"indicator":"encuesta_hoy","display":""" + stored + "}"), Json);
+
+        Assert.Contains(",\"display\":" + stored + ",", json);
+        Assert.DoesNotContain("secondary", json);
+    }
+
+    [Fact]
+    public void A_query_carries_no_secondary_lines_and_the_statistic_only_for_a_stat_tile()
+    {
+        var config = new WidgetConfigInput(
+            "encuesta_hoy", GroupBy: "zona", Display: new WidgetDisplay(Secondary: ["n", "unfiltered"]), Statistic: "median").Normalize();
+
+        var tile = WidgetQuery.For(ChartTypes.Stat, config);
+        var bar = WidgetQuery.For(ChartTypes.Bar, config);
+
+        Assert.Null(tile.Display);
+        Assert.Equal("median", tile.Statistic);
+        Assert.Null(bar.Statistic);
+        Assert.DoesNotContain("secondary", JsonSerializer.Serialize(tile, Json));
+        Assert.DoesNotContain("unfiltered", JsonSerializer.Serialize(tile, Json));
+    }
 }

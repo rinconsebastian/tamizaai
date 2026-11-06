@@ -104,6 +104,20 @@ describe('IndicatorsService', () => {
     expect(alone.request.body).toEqual({ config, chartType: 'column', overall: true });
   });
 
+  it('asks for the value without the dashboard filters only when told to, and then adds only `unfiltered: true` to the body', () => {
+    const filters = [{ column: 'municipality', kind: 'text' as const, values: ['Cali'] }];
+    service.query('p1', config, 'stat').subscribe();
+    service.query('p1', config, 'stat', filters, false, false).subscribe();
+    service.query('p1', config, 'stat', filters, false, true).subscribe();
+    service.query('p1', config, 'stat', filters, true, true).subscribe();
+
+    const [plain, off, asked, both] = http.match(`${base}/query`);
+    expect(plain.request.body).toEqual({ config, chartType: 'stat' });
+    expect('unfiltered' in off.request.body).toBe(false);
+    expect(asked.request.body).toEqual({ config, chartType: 'stat', dashboardFilters: filters, unfiltered: true });
+    expect(both.request.body).toEqual({ config, chartType: 'stat', dashboardFilters: filters, overall: true, unfiltered: true });
+  });
+
   it('replaces a dashboard\'s filters with the whole list and answers them as saved', () => {
     const filters = [{ column: 'municipality', label: 'Municipality', kind: 'text' as const, default: { values: ['Cali'] } }];
     let saved: unknown;

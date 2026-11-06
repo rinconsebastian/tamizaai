@@ -22,6 +22,8 @@ import {
   ReferenceLineKind,
   ScaleId,
   SeriesLayout,
+  StatSecondaryLine,
+  StatStatistic,
   Widget,
   WidgetConfig,
   WidgetCaption,
@@ -58,6 +60,8 @@ import {
   paletteSize,
   scaleIds,
   seriesLayouts,
+  statSecondaryLines,
+  statStatistics,
   takesMissingFooter,
   takesSeries,
   TooltipFormat,
@@ -238,7 +242,9 @@ type Problems = Partial<
     | 'seriesOrder'
     | 'minN'
     | 'showN'
-    | 'missingFooter',
+    | 'missingFooter'
+    | 'statistic'
+    | 'secondary',
     string
   >
 >;
@@ -382,7 +388,7 @@ export class LineField {
               }
             </select>
           </tmz-form-field>
-          <tmz-form-field [label]="t('indicators.dialog.denominator')" fieldId="widgetDenominator" [hint]="t(chartType() === 'boxplot' ? 'indicators.dialog.ratioHelpBoxplot' : 'indicators.dialog.ratioHelp')">
+          <tmz-form-field [label]="t('indicators.dialog.denominator')" fieldId="widgetDenominator" [hint]="t(ratioHelpKey())">
             <select tmzInput id="widgetDenominator" (change)="denominator.set($any($event.target).value)" data-testid="dialog-denominator">
               <option value="" [selected]="!denominator()">{{ t('indicators.dialog.columnChoose') }}</option>
               @for (column of numericColumns(); track column) {
@@ -394,6 +400,17 @@ export class LineField {
       }
 
       <div class="grid gap-4 sm:grid-cols-2">
+        @if (chartType() === 'stat') {
+          <!-- The statistic of a stat tile (improve-stat-cards, design D6): the sum or ratio of sums by default, or the median, a quartile or the mean of the rows' values. -->
+          <tmz-form-field [label]="t('indicators.dialog.statistic.label')" fieldId="widgetStatistic" [error]="shown().statistic" [hint]="t('indicators.dialog.statistic.hint')">
+            <select tmzInput id="widgetStatistic" (change)="setStatistic($any($event.target).value)" data-testid="dialog-statistic">
+              <option value="" [selected]="!statistic()">{{ t(mode() === 'ratio' ? 'indicators.dialog.statistic.defaultRatio' : 'indicators.dialog.statistic.defaultMeasure') }}</option>
+              @for (option of statistics; track option) {
+                <option [value]="option" [selected]="option === statistic()">{{ t('indicators.dialog.statistic.' + option) }}</option>
+              }
+            </select>
+          </tmz-form-field>
+        }
         @if (chartType() !== 'stat') {
           <tmz-form-field [label]="t('indicators.dialog.groupBy')" fieldId="widgetGroupBy" [error]="shown().groupBy" [hint]="groups() ? null : t(chartType() === 'boxplot' ? 'indicators.dialog.groupByOptionalBoxplot' : 'indicators.dialog.groupByOptional')">
             <select tmzInput id="widgetGroupBy" (change)="groupBy.set($any($event.target).value)" data-testid="dialog-group-by">
@@ -876,6 +893,33 @@ export class LineField {
         }
       </fieldset>
 
+      @if (chartType() === 'stat') {
+        <!-- The lines under what a stat tile plots (improve-stat-cards, design D6): its base n and its value without the dashboard filters. -->
+        <fieldset class="min-w-0" [attr.aria-describedby]="shown().secondary ? 'widgetSecondary-error' : null" data-testid="dialog-secondary">
+          <legend class="mb-1 text-sm font-medium text-heading">{{ t('indicators.dialog.secondary.legend') }}</legend>
+          <p class="mb-1 text-sm text-body">{{ t('indicators.dialog.secondary.help') }}</p>
+          @for (line of secondaryLines; track line) {
+            <label class="flex min-h-10 cursor-pointer items-start gap-3 py-1 text-sm">
+              <input
+                type="checkbox"
+                class="mt-0.5 size-4 shrink-0"
+                [checked]="secondary().includes(line)"
+                (change)="setSecondary(line, $any($event.target).checked)"
+                [attr.data-testid]="'dialog-secondary-' + line"
+              />
+              <span class="min-w-0 flex-1 break-words text-heading">{{ t('indicators.dialog.secondary.' + line) }}</span>
+            </label>
+          }
+          @if (secondaryNoN(); as reason) {
+            <p class="text-sm text-body" data-testid="dialog-secondary-n-hint">{{ t('indicators.dialog.bases.noN.' + reason) }}</p>
+          }
+          <p class="text-sm text-body" data-testid="dialog-secondary-room">{{ t('indicators.dialog.secondary.room') }}</p>
+          @if (shown().secondary; as message) {
+            <p id="widgetSecondary-error" class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
+          }
+        </fieldset>
+      }
+
       <!-- The bases (add-small-sample-warnings, design D12): the base n line, the small-base threshold and the values that mean no data. A histogram has no n. -->
       @if (offersBases() || offersMissingFooter()) {
         <fieldset class="flex min-w-0 flex-col gap-4" data-testid="dialog-bases">
@@ -1105,6 +1149,10 @@ export class LineField {
                 </li>
               }
             </ul>
+          }
+          @if (answersHint(); as hint) {
+            <!-- A ratio over several values of a column that may hold the answers of one question (improve-stat-cards, design D5). It never blocks saving. -->
+            <p class="mb-3 text-sm text-body" data-testid="dialog-answers-hint">{{ t('indicators.dialog.answersHint', { count: hint.count, column: hint.column }) }}</p>
           }
           @if (filters().length < maxFilters) {
             <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
@@ -1341,6 +1389,15 @@ export class WidgetDialog {
   protected readonly minNChoice = signal<MinNChoice>(typeof this.start.display?.minN !== 'number' ? 'dashboard' : this.start.display.minN === 0 ? 'off' : 'own');
   /** The threshold as typed while the widget has its own. */
   protected readonly minNText = signal(typeof this.start.display?.minN === 'number' && this.start.display.minN > 0 ? String(this.start.display.minN) : '');
+  /** The statistic of a stat tile (improve-stat-cards, design D6): empty for the default, the sum or the ratio of sums. Kept while the kind changes; `savedConfig` drops it from any other kind. */
+  protected readonly statistic = signal<StatStatistic | ''>(this.start.statistic ?? '');
+  protected readonly statistics = statStatistics;
+  protected readonly secondaryLines = statSecondaryLines;
+  /**
+   * The lines a stat tile shows under what it plots, as the form holds them: the stored list as it was (its order too) until a box is
+   * changed, then in the fixed order, `n` first, so a form saved unchanged sends what it read (design D3).
+   */
+  protected readonly secondary = signal<StatSecondaryLine[]>([...(this.start.display?.secondary ?? [])]);
   /** Whether to leave out the values that mean no data: stored `true` when ticked, and `false` only for a widget that already had it saved (design D6). */
   protected readonly missingFooter = signal<boolean | null>(typeof this.start.missingFooter === 'boolean' ? this.start.missingFooter : null);
   /**
@@ -1510,6 +1567,46 @@ export class WidgetDialog {
     }
     return this.mode() === 'measure' && !base ? 'measure' : null;
   });
+  /**
+   * Why a stat tile with no statistic can have no n, for the hint under its n line (improve-stat-cards, design D6): its indicator declares
+   * neither a base column nor an answer column, or it plots a measure with no base column. A tile with a statistic always has one (design D10).
+   */
+  protected readonly secondaryNoN = computed<NoNReason | null>(() => {
+    const declared = this.entry()?.columns;
+    if (this.statistic() || !this.entry()) {
+      return null;
+    }
+    const base = baseColumnOf(declared);
+    if (!base && answerColumnsOf(declared).length === 0) {
+      return 'undeclared';
+    }
+    return this.mode() === 'measure' && !base ? 'measure' : null;
+  });
+  /** The hint under the denominator: a box plot and a stat tile with a statistic divide each row by its own denominator (design D6). */
+  protected ratioHelpKey(): string {
+    return this.chartType() === 'boxplot' ? 'indicators.dialog.ratioHelpBoxplot' : this.chartType() === 'stat' && this.statistic() ? 'indicators.dialog.ratioHelpStatistic' : 'indicators.dialog.ratioHelp';
+  }
+  /**
+   * The hint of design D5: the widget plots a ratio and a filter keeps several values of a text column that is neither its group column
+   * nor its series column and that its indicator does not declare as the answers of one question. The first such filter; null otherwise.
+   */
+  protected readonly answersHint = computed<{ count: number; column: string } | null>(() => {
+    const catalog = this.catalog();
+    if (this.mode() !== 'ratio' || !catalog?.published) {
+      return null;
+    }
+    const type = this.chartType();
+    const apart = new Set([type === 'stat' ? '' : this.groupBy(), hasSeries(type) ? this.seriesBy() : ''].filter((column) => !!column));
+    const declared = this.entry()?.columns ?? {};
+    for (const filter of this.filters()) {
+      const values = filter.values ?? [];
+      const text = catalog.columns.find((column) => column.name === filter.column)?.type === 'text';
+      if (filter.op === 'in' && values.length >= 2 && text && !apart.has(filter.column) && !declared[filter.column]?.categories) {
+        return { count: values.length, column: filter.column };
+      }
+    }
+    return null;
+  });
   /** Steps are the choice of a line chart. */
   protected readonly offersSteps = computed(() => this.chartType() === 'line');
   protected readonly offersDataLabels = computed(() => offersDataLabels(this.chartType(), this.annotationRules()));
@@ -1620,6 +1717,7 @@ export class WidgetDialog {
       pyramid: this.pyramidLeft() || this.pyramidRight() ? { left: this.pyramidLeft(), right: this.pyramidRight() } : null,
       scale: this.scaleSteps(),
       ...(this.missingFooter() !== null ? { missingFooter: this.missingFooter()! } : {}),
+      ...(this.statistic() ? { statistic: this.statistic() as StatStatistic } : {}),
       ...this.displayDraft(),
     };
   });
@@ -1649,6 +1747,7 @@ export class WidgetDialog {
     const order = groups?.length || series?.length ? { ...(groups?.length ? { group: [...groups] } : {}), ...(series?.length ? { series: [...series] } : {}) } : null;
     const showN = this.showNChoice() === 'dashboard' ? null : this.showNChoice() === 'show';
     const minN = this.minNChoice() === 'dashboard' ? null : this.minNChoice() === 'off' ? 0 : this.ownMinN();
+    const secondary = this.secondary();
     return color === null &&
       ramp === null &&
       orientation === null &&
@@ -1663,7 +1762,8 @@ export class WidgetDialog {
       dataLabels === null &&
       !order &&
       showN === null &&
-      minN === null
+      minN === null &&
+      !secondary.length
       ? {}
       : {
           display: {
@@ -1682,6 +1782,7 @@ export class WidgetDialog {
             ...(order ? { order } : {}),
             ...(minN !== null ? { minN } : {}),
             ...(showN !== null ? { showN } : {}),
+            ...(secondary.length ? { secondary: [...secondary] } : {}),
           },
         };
   }
@@ -2073,6 +2174,18 @@ export class WidgetDialog {
   protected setDataLabels(on: boolean): void {
     this.dataLabels.set(on ? true : this.start.display?.dataLabels == null ? null : false);
     this.serverFieldErrors.update(({ dataLabels: _dataLabels, ...others }) => others);
+  }
+
+  /** The statistic of a stat tile. The default stores none; a statistic changes the rows, so the preview asks again. */
+  protected setStatistic(value: string): void {
+    this.statistic.set((statStatistics as readonly string[]).includes(value) ? (value as StatStatistic) : '');
+    this.serverFieldErrors.update(({ statistic: _statistic, ...others }) => others);
+  }
+
+  /** A line under the figure of a stat tile: the lines are written in the fixed order, `n` first. Checking `n` asks for nothing; the other line does. */
+  protected setSecondary(line: StatSecondaryLine, on: boolean): void {
+    this.secondary.update((held) => statSecondaryLines.filter((candidate) => (candidate === line ? on : held.includes(candidate))));
+    this.serverFieldErrors.update(({ secondary: _secondary, ...others }) => others);
   }
 
   /** The base n line: as the dashboard says, or shown or hidden for this widget. A display setting: the preview redraws and nothing is asked again. */
@@ -2667,6 +2780,8 @@ export class WidgetDialog {
     if (name.includes('display.order.group')) return 'groupOrder';
     if (name.includes('display.order.series')) return 'seriesOrder';
     if (name.includes('display.labels')) return 'labels';
+    if (name.includes('display.secondary')) return 'secondary';
+    if (name.includes('config.statistic') || name === 'statistic') return 'statistic';
     if (name.includes('display.minn')) return 'minN';
     if (name.includes('display.shown')) return 'showN';
     if (name.includes('missingfooter')) return 'missingFooter';

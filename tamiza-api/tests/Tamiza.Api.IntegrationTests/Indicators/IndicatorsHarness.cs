@@ -309,17 +309,20 @@ public sealed class IndicatorsHarness : IAsyncDisposable
     /// Runs a widget's query (<paramref name="config"/> is the widget's <c>config</c>) and returns the response. <paramref name="dashboardFilters"/>
     /// are the dashboard filter values in force (<c>[{ column, kind, values | min, max }]</c>); left out of the body when null.
     /// </summary>
-    public async Task<JsonElement> QueryAsync(object config, string? chartType = null, HttpClient? client = null, object? dashboardFilters = null, bool overall = false)
+    public async Task<JsonElement> QueryAsync(
+        object config, string? chartType = null, HttpClient? client = null, object? dashboardFilters = null, bool overall = false, bool unfiltered = false)
     {
-        var response = await PostQueryAsync(config, chartType, client, dashboardFilters, overall);
+        var response = await PostQueryAsync(config, chartType, client, dashboardFilters, overall, unfiltered);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
     /// <summary>Posts a query; <paramref name="overall"/> adds the request flag of the overall value (add-chart-annotations), left out of the body unless true.</summary>
     public Task<HttpResponseMessage> PostQueryAsync(
-        object config, string? chartType = null, HttpClient? client = null, object? dashboardFilters = null, bool overall = false) =>
-        overall
+        object config, string? chartType = null, HttpClient? client = null, object? dashboardFilters = null, bool overall = false, bool unfiltered = false) =>
+        unfiltered
+            ? (client ?? Viewer).PostAsJsonAsync(Url + "/query", new { config, chartType, dashboardFilters, overall = overall ? true : (bool?)null, unfiltered = true })
+        : overall
             ? (client ?? Viewer).PostAsJsonAsync(Url + "/query", new { config, chartType, dashboardFilters, overall = true })
             : dashboardFilters is null
                 ? (client ?? Viewer).PostAsJsonAsync(Url + "/query", new { config, chartType })

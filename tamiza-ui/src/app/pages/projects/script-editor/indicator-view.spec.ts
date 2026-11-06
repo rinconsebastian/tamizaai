@@ -135,6 +135,21 @@ describe('IndicatorView', () => {
     expect(q('view-ratio-tile')!.querySelector('[data-testid="stat-value"]')!.textContent).toBe('0.50 households');
   });
 
+  it('draws the two total tiles with the figure sizing of every stat tile, inside boxes of a definite height (Preview of an indicator)', async () => {
+    const { q } = await render();
+
+    for (const tile of ['view-measure-tile', 'view-ratio-tile']) {
+      const box = q(tile)!;
+      const figure = box.querySelector<HTMLElement>('[data-testid="stat-value"]')!;
+      expect(box.classList).toContain('h-28');
+      expect(box.querySelector('[data-testid="stat"]')!.getAttribute('style')).toContain('container-type: size');
+      expect(figure.style.fontSize).toBe('clamp(1.125rem, min(9cqi, 38cqh), 1.875rem)');
+      expect(figure.getAttribute('style')).toContain('overflow-x: clip');
+      expect(figure.classList).not.toContain('break-all');
+      expect(figure.getAttribute('title')).toBe(figure.textContent);
+    }
+  });
+
   it('names the columns of its tiles and chart with the labels being typed, without saving them (Test view uses the labels being typed)', async () => {
     const { fixture, q, host } = await render();
     expect(q('view-ratio-tile')!.querySelector('[data-testid="stat-label"]')!.textContent).toBe('Households with piped water: numerator / denominator');

@@ -88,7 +88,7 @@ function seriesSettings(type: ChartType, config: WidgetConfig): Partial<WidgetCo
  * labels, texts, annotations or base settings saves exactly what it did.
  */
 function displayFor(type: ChartType, config: WidgetConfig): { display?: WidgetDisplay } {
-  const { color, ramp, orientation, labels, subtitle, footnote, caption, unit, showDescription, referenceLines, interpolation, dataLabels, order, minN, showN } = config.display ?? {};
+  const { color, ramp, orientation, labels, subtitle, footnote, caption, unit, showDescription, referenceLines, interpolation, dataLabels, order, minN, showN, secondary } = config.display ?? {};
   const named = labels ? Object.entries(labels).filter(([, label]) => label.trim()) : [];
   const captionText = caption?.text?.trim() ? caption.text : null;
   const captionKept: WidgetCaption | null = caption?.hidden && !captionText ? { hidden: true } : captionText ? { text: captionText } : null;
@@ -113,6 +113,8 @@ function displayFor(type: ChartType, config: WidgetConfig): { display?: WidgetDi
     // The base settings (add-small-sample-warnings, design D7) are kept on every kind, a 0 and a false as saved: a chart-type change never drops them.
     ...(typeof minN === 'number' ? { minN } : {}),
     ...(typeof showN === 'boolean' ? { showN } : {}),
+    // A stat tile's lines under its figure (improve-stat-cards, design D3), in the order saved; no other kind has them.
+    ...(type === 'stat' && secondary?.length ? { secondary } : {}),
   };
   return Object.keys(kept).length ? { display: kept } : {};
 }
@@ -233,6 +235,15 @@ export function overallFor(type: ChartType, config: WidgetConfig): boolean {
 }
 
 /**
+ * Whether a saved widget asks its query for its value without the dashboard filters too (improve-stat-cards, design D3): a stat tile whose
+ * `display.secondary` holds `unfiltered`. It is a flag of the query request, never part of a config: `queryFor` builds the same query with
+ * the line checked or not, and the `n` line alone asks for nothing. Twin of `WidgetQuery.Unfiltered` in tamiza-api; change both together.
+ */
+export function unfilteredFor(type: ChartType, config: WidgetConfig): boolean {
+  return type === 'stat' && !!config.display?.secondary?.includes('unfiltered');
+}
+
+/**
  * The order a chart type sends. A bar or column keeps its order. A box plot keeps only an order by its median, and only with a group
  * column: the form keeps the choice while the group is cleared, but the query is not sent it, so it is not refused for it. Twin of
  * `SortOf` in `WidgetQuery` (tamiza-api).
@@ -270,6 +281,8 @@ export function queryFor(type: ChartType, config: WidgetConfig): WidgetConfig {
     ...seriesSettings(type, config),
     // Left out unless set, and only where the kind takes it, so the query of every widget without it is what it was (add-small-sample-warnings, design D6).
     ...(takesMissingFooter(type) && typeof config.missingFooter === 'boolean' ? { missingFooter: config.missingFooter } : {}),
+    // The statistic of a stat tile (improve-stat-cards, design D2): left out unless set, and on no other kind, so a change of kind drops it.
+    ...(type === 'stat' && config.statistic ? { statistic: config.statistic } : {}),
   };
 }
 
@@ -346,6 +359,11 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
                 <p data-testid="missing-columns">{{ t('indicators.missing.columns', { names: result.missing.columns.join(', ') }) }}</p>
                 <p class="mt-1">{{ t('indicators.missing.help') }}</p>
               </tmz-alert>
+            } @else if (result.combinedCategories) {
+              <!-- A ratio that would add up several answers of a multiple-choice question: the message in place of the figures (improve-stat-cards, design D4b). -->
+              <tmz-alert tone="warning" [heading]="t('indicators.combined.title')" class="overflow-auto" data-testid="widget-combined">
+                <p data-testid="combined-text">{{ t('indicators.combined.text', { column: combinedColumn() }) }}</p>
+              </tmz-alert>
             } @else {
               @if (notFiltered().length) {
                 <!-- Not a warning: the rows are right, only not narrowed by these filters (dashboard filters, design D7). -->
@@ -370,7 +388,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
                 <div class="min-h-0 flex-1" [class.overflow-hidden]="!!footnote() || hasBaseLines()">
                   @switch (chartType()) {
                     @case ('stat') {
-                      <app-stat-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [bases]="chartBases()" (dimmed)="dimmedMarks.set($event)" />
+                      <app-stat-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [bases]="chartBases()" [n]="result.n" [unfiltered]="result.unfiltered" (dimmed)="dimmedMarks.set($event)" />
                     }
                     @case ('pie') {
                       <app-pie-widget [rows]="result.rows" [domain]="result.domain" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [orders]="orders()" [colors]="resolvedColors()" [bases]="chartBases()" [asTable]="asTable()" (dimmed)="dimmedMarks.set($event)" />
@@ -419,7 +437,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
     <!-- The lines of the bases (add-small-sample-warnings, design D11): the small-base note, the base n and what was left out as no data, under the chart and above the footnote. They take their room from the plot as the footnote does. -->
     <ng-template #baseLines>
       <ng-container *transloco="let t">
-        @if (smallMin(); as min) {
+        @if (smallMinBelow(); as min) {
           <p class="shrink-0 text-xs text-body paper:line-clamp-none" [class.line-clamp-1]="compact()" [class.line-clamp-2]="!compact()" [attr.title]="smallNote(min, t)" data-testid="widget-small-note">{{ smallNote(min, t) }}</p>
         }
         @if (nLineText(); as line) {
@@ -558,13 +576,24 @@ export class WidgetView {
   protected readonly dimmedMarks = signal(0);
   /** The threshold of the note under the chart, while a mark is dimmed: a table says it with its own note, a cross table by its cells. */
   protected readonly smallMin = computed(() => (this.inForce().minN !== null && !this.asTable() && this.chartType() !== 'crosstab' && this.dimmedMarks() > 0 ? this.inForce().minN : null));
-  /** The base n line (design D11): "n = 223 Hogares que asistieron", while the widget shows it and has an n. */
+  /**
+   * The base n line (design D11): "n = 223 Hogares que asistieron", while the widget shows it and has an n. A stat tile draws its own inside
+   * (improve-stat-cards, design D3), so none is drawn under it.
+   */
   protected readonly nLineText = computed(() =>
-    this.inForce().showN ? nLine(this.result()?.n, figureNames(this.config() ?? emptyConfig(), this.names(), baseColumnOf(this.indicator()?.columns)).base, this.locale) : null,
+    this.inForce().showN && this.chartType() !== 'stat' ? nLine(this.result()?.n, figureNames(this.config() ?? emptyConfig(), this.names(), baseColumnOf(this.indicator()?.columns)).base, this.locale) : null,
   );
   /** What the widget left out as no data, in the widget's formatter and unit (design D6, D11). */
   protected readonly noDataText = computed(() => noDataLine(this.result()?.noData, this.formatter(), this.inForce().showN, this.locale));
-  protected readonly hasBaseLines = computed(() => this.smallMin() !== null || this.nLineText() !== null || this.noDataText() !== null);
+  /** The note under the chart: a stat tile draws its own inside (improve-stat-cards, design D1), so none is drawn under it. */
+  protected readonly smallMinBelow = computed(() => (this.chartType() === 'stat' ? null : this.smallMin()));
+  protected readonly hasBaseLines = computed(() => this.smallMinBelow() !== null || this.nLineText() !== null || this.noDataText() !== null);
+
+  /** The message of a widget that would add up several answers of a multiple-choice question, naming the column (improve-stat-cards, design D4b). */
+  protected readonly combinedColumn = computed(() => {
+    const column = this.result()?.combinedCategories;
+    return column ? this.names()(column) : '';
+  });
 
   protected smallNote(min: number, t: (key: string, params?: Record<string, unknown>) => string): string {
     return smallBaseNote(min, this.locale, t);
@@ -662,6 +691,9 @@ export class WidgetView {
     if (result.missing.columns.length) {
       return neither(t('indicators.widgetExport.reason.missing', { names: result.missing.columns.join(', ') }));
     }
+    if (result.combinedCategories) {
+      return neither(t('indicators.combined.text', { column: this.combinedColumn() }));
+    }
     if (result.rows.length === 0) {
       return neither(t('indicators.widget.empty'));
     }
@@ -684,6 +716,8 @@ export class WidgetView {
           config: queryFor(this.chartType(), config),
           dashboardFilters: this.applied(),
           ...(overallFor(this.chartType(), config) ? { overall: true } : {}),
+          // Likewise `unfiltered`, only while a stat tile asks for its value without the dashboard filters (improve-stat-cards, design D3).
+          ...(unfilteredFor(this.chartType(), config) ? { unfiltered: true } : {}),
         })
       : null;
   });
@@ -707,8 +741,8 @@ export class WidgetView {
             : // A newer draft cancels both the wait and the request, so an old answer never lands on a changed draft.
               timer(this.debounceMs()).pipe(
                 switchMap(() => {
-                  const { type, config, dashboardFilters, overall } = JSON.parse(key) as { type: ChartType; config: WidgetConfig; dashboardFilters: AppliedDashboardFilter[]; overall?: true };
-                  return this.service.query(this.projectId(), config, type, dashboardFilters, overall === true);
+                  const { type, config, dashboardFilters, overall, unfiltered } = JSON.parse(key) as { type: ChartType; config: WidgetConfig; dashboardFilters: AppliedDashboardFilter[]; overall?: true; unfiltered?: true };
+                  return this.service.query(this.projectId(), config, type, dashboardFilters, overall === true, unfiltered === true);
                 }),
                 map((result): State => ({ kind: 'ready', result })),
                 catchError((failure) => {

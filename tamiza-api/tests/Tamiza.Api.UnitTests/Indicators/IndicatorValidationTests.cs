@@ -1987,4 +1987,120 @@ public sealed class IndicatorValidationTests
         Assert.Empty(Check(WithBase(missingFooter: true), null));
         Assert.Empty(Check(WithBase(), ChartTypes.Stat));
     }
+
+    // The statistic and the secondary lines of a stat tile (design D2 and D3 of improve-stat-cards)
+
+    private static WidgetConfig Tile(string? statistic = null, WidgetDisplay? display = null) =>
+        new WidgetConfigInput("coverage", Display: display, Statistic: statistic).Normalize();
+
+    [Theory]
+    [InlineData("median")]
+    [InlineData("p25")]
+    [InlineData("p75")]
+    [InlineData("mean")]
+    public void A_stat_tile_takes_each_of_the_four_statistics(string statistic) => Assert.Empty(Check(Tile(statistic), ChartTypes.Stat));
+
+    [Fact]
+    public void An_unknown_statistic_is_refused_on_the_statistic()
+    {
+        foreach (var statistic in new[] { "p90", "Median", "average", " median" })
+        {
+            Assert.Equal(["The statistic must be median, p25, p75 or mean."], Check(Tile(statistic), ChartTypes.Stat)["config.statistic"]);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void A_statistic_is_refused_on_every_kind_but_a_stat_tile(string chartType)
+    {
+        var errors = Check(WithBase(groupBy: ChartTypes.NeedsGroup(chartType) ? "municipality" : null, seriesBy: ChartTypes.NeedsSeries(chartType) ? "water_source" : null) with { Statistic = "median" }, chartType);
+
+        if (chartType == ChartTypes.Stat)
+        {
+            Assert.DoesNotContain("config.statistic", errors.Keys);
+        }
+        else
+        {
+            Assert.Equal(["Only a stat tile has a statistic."], errors["config.statistic"]);
+        }
+    }
+
+    [Fact]
+    public void A_query_with_no_chart_type_that_names_a_statistic_is_refused_and_one_that_names_none_is_not()
+    {
+        Assert.Equal(["A statistic needs the chart type stat."], Check(Tile("median"), null)["config.statistic"]);
+        Assert.Empty(Check(Tile(), null));
+        Assert.Empty(Check(Tile(), ChartTypes.Stat));
+    }
+
+    [Fact]
+    public void An_unknown_statistic_with_no_chart_type_names_both_problems()
+    {
+        Assert.Equal(
+            ["The statistic must be median, p25, p75 or mean.", "A statistic needs the chart type stat."],
+            Check(Tile("p90"), null)["config.statistic"]);
+    }
+
+    [Theory]
+    [InlineData("n")]
+    [InlineData("unfiltered")]
+    public void A_stat_tile_takes_each_secondary_line(string line) =>
+        Assert.Empty(Check(Tile(display: new WidgetDisplay(Secondary: [line])), ChartTypes.Stat));
+
+    [Fact]
+    public void A_stat_tile_takes_both_lines_in_either_order_and_a_query_with_no_chart_type_takes_them_too()
+    {
+        Assert.Empty(Check(Tile(display: new WidgetDisplay(Secondary: ["n", "unfiltered"])), ChartTypes.Stat));
+        Assert.Empty(Check(Tile(display: new WidgetDisplay(Secondary: ["unfiltered", "n"])), ChartTypes.Stat));
+        Assert.Empty(Check(Tile(display: new WidgetDisplay(Secondary: ["n", "unfiltered"])), null));
+    }
+
+    [Fact]
+    public void An_unknown_secondary_line_is_refused_on_the_secondary_lines()
+    {
+        foreach (var lines in new[] { new[] { "total" }, new[] { "N" }, new[] { "n", "share" }, new string?[] { null } })
+        {
+            Assert.Equal(
+                ["Each secondary line must be 'n' or 'unfiltered'."],
+                Check(Tile(display: new WidgetDisplay(Secondary: lines!)), ChartTypes.Stat)["config.display.secondary"]);
+        }
+    }
+
+    [Fact]
+    public void A_repeated_secondary_line_is_refused_once()
+    {
+        Assert.Equal(
+            ["A secondary line is listed twice."],
+            Check(Tile(display: new WidgetDisplay(Secondary: ["n", "n"])), ChartTypes.Stat)["config.display.secondary"]);
+        Assert.Equal(
+            ["A secondary line is listed twice."],
+            Check(Tile(display: new WidgetDisplay(Secondary: ["unfiltered", "n", "unfiltered"])), ChartTypes.Stat)["config.display.secondary"]);
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void Secondary_lines_are_refused_on_every_kind_but_a_stat_tile(string chartType)
+    {
+        var config = WithBase(
+            new WidgetDisplay(Secondary: ["n"]), groupBy: ChartTypes.NeedsGroup(chartType) ? "municipality" : null,
+            seriesBy: ChartTypes.NeedsSeries(chartType) ? "water_source" : null);
+
+        var errors = Check(config, chartType);
+
+        if (chartType == ChartTypes.Stat)
+        {
+            Assert.DoesNotContain("config.display.secondary", errors.Keys);
+        }
+        else
+        {
+            Assert.Equal(["Only a stat tile has secondary lines."], errors["config.display.secondary"]);
+        }
+    }
+
+    [Fact]
+    public void Secondary_lines_with_no_chart_type_skip_the_kind_rule()
+    {
+        Assert.Empty(Check(WithBase(new WidgetDisplay(Secondary: ["n"])), null));
+        Assert.Contains("config.display.secondary", Check(WithBase(new WidgetDisplay(Secondary: ["total"])), null).Keys);
+    }
 }

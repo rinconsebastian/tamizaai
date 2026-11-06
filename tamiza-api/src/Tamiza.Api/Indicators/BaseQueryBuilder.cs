@@ -13,6 +13,23 @@ namespace Tamiza.Api.Indicators;
 /// <param name="Missing">By column, the values that mean no data, as exact text.</param>
 public sealed record IndicatorBases(string? BaseColumn, IReadOnlyList<string> Answers, IReadOnlyDictionary<string, IReadOnlyList<string>> Missing)
 {
+    /// <summary>
+    /// The kind of each answer column, <see cref="AnswerKinds.Single"/> or <see cref="AnswerKinds.Multiple"/> (design D4 of improve-stat-cards).
+    /// Null when the kinds were not given: the answers then only count the n, and a ratio over them is added up as it always was.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? Kinds { get; init; }
+
+    /// <summary>
+    /// The answer columns of single choice that a ratio's values and totals count the base once across (design D4a): every declared
+    /// column when all of them are single choice; none when the kinds are not given or one of them is multiple choice (mixed kinds are
+    /// all taken as multiple choice, the safe side).
+    /// </summary>
+    public IReadOnlyList<string> SingleAnswers =>
+        Kinds is not null && Answers.Count > 0 && Answers.All(a => Kinds.GetValueOrDefault(a) == AnswerKinds.Single) ? Answers : [];
+
+    /// <summary>The answer columns of multiple choice that a ratio is never added up across (design D4b): every declared column unless all are single choice.</summary>
+    public IReadOnlyList<string> MultipleAnswers => Kinds is null || Answers.Count == 0 || SingleAnswers.Count > 0 ? [] : Answers;
+
     /// <summary>Nothing is declared that applies to the table.</summary>
     public bool IsEmpty => BaseColumn is null && Answers.Count == 0 && Missing.Count == 0;
 
@@ -29,6 +46,7 @@ public sealed record IndicatorBases(string? BaseColumn, IReadOnlyList<string> An
 
         string? baseColumn = null;
         var answers = new List<string>();
+        var kinds = new Dictionary<string, string>(StringComparer.Ordinal);
         var missing = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         foreach (var column in columns)
         {
@@ -47,6 +65,7 @@ public sealed record IndicatorBases(string? BaseColumn, IReadOnlyList<string> An
                 if (!string.IsNullOrWhiteSpace(entry.Categories) && AnswerKinds.All.Contains(entry.Categories, StringComparer.Ordinal))
                 {
                     answers.Add(column.Name);
+                    kinds[column.Name] = entry.Categories;
                 }
 
                 if (entry.Missing is { Count: > 0 } values)
@@ -57,7 +76,7 @@ public sealed record IndicatorBases(string? BaseColumn, IReadOnlyList<string> An
         }
 
         answers.Sort(StringComparer.Ordinal);
-        var resolved = new IndicatorBases(baseColumn, answers, missing);
+        var resolved = new IndicatorBases(baseColumn, answers, missing) { Kinds = kinds };
         return resolved.IsEmpty ? null : resolved;
     }
 }
@@ -195,16 +214,46 @@ public static class BaseQueryBuilder
     /// indicator declares one, its sum; a measure with no base column gives nothing, so its statement is today's.
     /// </summary>
     /// <param name="quote">Quotes a column of the table as the statement does.</param>
-    public static FigureSums Sums(WidgetConfig config, IndicatorBases? bases, Func<string, string> quote)
+    /// <param name="nested">
+    /// The statement is the nested form of a ratio over answers of single choice (design D4a of improve-stat-cards): the sums are over
+    /// the inner statement's columns, the numerator's and the base's added up, the denominator's the largest of its answers. The n column
+    /// stays the table's, since the counted statement reads the table.
+    /// </param>
+    public static FigureSums Sums(WidgetConfig config, IndicatorBases? bases, Func<string, string> quote, bool nested = false)
     {
         var ratio = config.Ratio;
         var baseColumn = bases?.BaseColumn;
         var nColumn = baseColumn is not null ? quote(baseColumn) : ratio is not null ? quote(ratio.Denominator) : null;
+        if (nested)
+        {
+            return new FigureSums(
+                Sum(NestedRatio.Num), ratio is null ? null : $"max({NestedRatio.Den})::double precision", baseColumn is null ? null : Sum(NestedRatio.Base), nColumn);
+        }
+
         return new FigureSums(
             ratio is null ? null : Sum(quote(ratio.Numerator)),
             ratio is null ? null : Sum(quote(ratio.Denominator)),
             baseColumn is null ? null : Sum(quote(baseColumn)),
             nColumn);
+    }
+
+    /// <summary>
+    /// The check that refuses a ratio over answers of multiple choice (design D4b of improve-stat-cards), over the rows of the plotted
+    /// statement: the first plotted value whose rows hold more than one answer, with how many distinct values each answer column has in
+    /// it. A tile has one value, so no group; a widget with a series has one per group and series value.
+    /// </summary>
+    /// <param name="group">The quoted group column, or null for a stat tile.</param>
+    /// <param name="series">The quoted series column of a widget with a series, else null.</param>
+    /// <param name="filters">The widget's and the dashboard's filters, each introduced by <c> AND </c>, and the exclusion's.</param>
+    /// <param name="parameters">The parameters of <paramref name="filters"/>.</param>
+    /// <param name="also">A condition, introduced by <c> AND </c>, of the rows a fixed-domain widget plots, with its parameters.</param>
+    public static CombinedCheck Combined(
+        AnswerColumns answers, string? group, string? series, string from, string rowFilter, string filters, IReadOnlyList<SqlParam> parameters, string also = "")
+    {
+        var counts = string.Join(", ", answers.Multiple.Select(column => $"count(DISTINCT {column})"));
+        var by = group is null ? "" : $" GROUP BY {group}{(series is null ? "" : ", " + series)}";
+        var sql = $"SELECT {counts} FROM {from} WHERE {rowFilter}{filters}{also}{by} HAVING {answers.DistinctAnswers} > 1 LIMIT 1";
+        return new CombinedCheck(new IndicatorSql(sql, [.. parameters]), answers.MultipleNames);
     }
 
     private static string Sum(string quotedColumn) => $"sum({quotedColumn})::double precision";

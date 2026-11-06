@@ -336,4 +336,19 @@ public sealed class ReportWorkbookTests : IDisposable
         Assert.Equal(["Comuna", "Teatro hoy: numerator / denominator", "n"], Rows("1. First")[0].Keys);
         Assert.Equal(["n (2)", "Value"], Rows("2. Other")[0].Keys);
     }
+
+    [Fact]
+    public void The_summary_line_of_a_stat_tile_gives_its_lines_after_the_value()
+    {
+        var tile = Stat(1, "Asistieron", "46.85% de los hogares") with { StatLines = ["n = 476 Hogares", "Without filters: 50%"], Footnote = "Sin dato aparte (E5)." };
+
+        Write(Model([tile, Stat(2, "Total", "250")]));
+
+        var rows = Rows("Summary").Select(r => r.Values.Select(v => v?.ToString()).ToArray()).ToList();
+        Assert.Contains(rows, r => r.SequenceEqual(["Asistieron", "46.85% de los hogares; n = 476 Hogares; Without filters: 50%"]));
+        // A tile without lines keeps its line.
+        Assert.Contains(rows, r => r.SequenceEqual(["Total", "250"]));
+        // The lines are before the tile's footnote, which has its own line.
+        Assert.True(rows.FindIndex(r => r[0] == "Asistieron") < rows.FindIndex(r => r[0] == "Footnote: Asistieron"));
+    }
 }

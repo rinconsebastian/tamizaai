@@ -113,9 +113,14 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
     /// Also reads the overall value of a plain grouped query (<see cref="IndicatorQueryResponse.Overall"/>, design D4 of add-chart-annotations),
     /// after its rows and in the same transaction. A caller derives it from the saved widget (<see cref="WidgetQuery.Overall"/>).
     /// </param>
+    /// <param name="unfiltered">
+    /// Also reads a stat tile's value without the dashboard filters (<see cref="IndicatorQueryResponse.Unfiltered"/>, design D3 of
+    /// improve-stat-cards), after its row and in the same transaction, only while the filters given narrow it. A caller derives it from the
+    /// saved widget (<see cref="WidgetQuery.Unfiltered"/>).
+    /// </param>
     public async Task<IndicatorQueryOutcome> QueryAsync(
         Guid projectId, WidgetConfigInput input, string? chartType, CancellationToken ct, IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null,
-        bool overall = false)
+        bool overall = false, bool unfiltered = false)
     {
         var config = input.Normalize();
         var errors = new FieldErrors();
@@ -145,7 +150,7 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
             var bases = IndicatorBases.Resolve(await ReadColumnMetadataAsync(connection, transaction, projectId, config.Indicator, ct), columns);
             var plan = IndicatorQueryBuilder.Plan(
                 config, columns, project.TimeZone, From(projectId, config.Indicator), maxRows, perRow: chartType == ChartTypes.Histogram, dashboardFilters,
-                chartType, overall, bases);
+                chartType, overall, bases, unfiltered: unfiltered);
             if (plan.Errors is not null)
             {
                 return new IndicatorQueryOutcome(null, plan.Errors);
@@ -157,6 +162,14 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
             }
 
             await data.SleepForTestsAsync(connection, transaction, ct);
+            if (plan.Combined is { } combined && await ReadCombinedAsync(connection, transaction, combined, ct) is { } combinedColumn)
+            {
+                // A value would add up several answers of a multiple-choice question (design D4b of improve-stat-cards): the widget has no
+                // rows, and neither the plotted statements nor the one without the dashboard filters run.
+                return new IndicatorQueryOutcome(
+                    new IndicatorQueryResponse(true, [], false, MissingReferences.None, CombinedCategories: combinedColumn), null);
+            }
+
             if (plan.Boxes is { } boxesPlan)
             {
                 var boxGroupType = columns.FirstOrDefault(c => c.Name == config.GroupBy)?.Type;
@@ -191,10 +204,11 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
 
             var overallValue = plan.Overall is null ? null : await ReadOverallAsync(connection, transaction, plan.Overall, ct);
             var noData = plan.NoData is null ? null : await ReadNoDataAsync(connection, transaction, plan.NoData, ct);
+            var unfilteredValue = plan.Unfiltered is null ? null : await ReadOverallAsync(connection, transaction, plan.Unfiltered, ct);
             return new IndicatorQueryOutcome(
                 new IndicatorQueryResponse(
                     true, rows, limitReached, MissingReferences.None, plan.Sql!.TooltipTypes, dashboardFilters is { Count: > 0 } ? plan.NotFiltered : null,
-                    Domain: domain, Overall: overallValue, N: widgetN, NoData: noData),
+                    Domain: domain, Overall: overallValue, N: widgetN, NoData: noData, Unfiltered: unfilteredValue),
                 null);
         }, ct), ct);
     }
@@ -571,6 +585,28 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
     }
 
     /// <summary>
+    /// Runs the check of a ratio over answers of multiple choice (design D4b of improve-stat-cards): null when every value it plots holds
+    /// one answer, else the column that has the most distinct values in the first one that holds several (the last in the table's order
+    /// on a tie).
+    /// </summary>
+    private static async Task<string?> ReadCombinedAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CombinedCheck check, CancellationToken ct)
+    {
+        await using var command = new NpgsqlCommand(check.Sql.Sql, connection, transaction);
+        foreach (var parameter in check.Sql.Parameters)
+        {
+            command.Parameters.Add(parameter.ToParameter());
+        }
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            return null;
+        }
+
+        return check.Named(Enumerable.Range(0, check.Columns.Count).Select(i => reader.GetInt64(i)).ToList());
+    }
+
+    /// <summary>
     /// What the widget left out as no data (design D6 of add-small-sample-warnings): null when no left-out value had a row. The value is a
     /// ratio's left-out numerator over its left-out denominator, or a measure's left-out sum, whose share is its part of the sum of every
     /// row. NaN and infinity have no number in JSON, and read as no value.
@@ -707,6 +743,11 @@ public sealed class IndicatorDashboard(DataDashboard data, IOptions<DataDashboar
 
             // The window's value is the same on every row: the n of every plotted group, past the row limit too.
             widgetN ??= ReadFigure(reader, sql.Figures?.WidgetN);
+            if (reader.IsDBNull(1))
+            {
+                continue; // a tile over several answers of a multiple-choice question has no value (design D4b of improve-stat-cards)
+            }
+
             var value = reader.GetDouble(1);
             if (!double.IsFinite(value))
             {

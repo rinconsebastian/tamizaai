@@ -416,6 +416,27 @@ describe('the base facts in the column names (add-small-sample-warnings, design 
     expect(help).toContain('multiple choice');
   });
 
+  it('says what each kind of answers does to a ratio over several of them, and nothing for none (Save form)', async () => {
+    const { host, fixture, facts, text, settle } = await render();
+    const effect = () => facts('categoria')!.querySelector('[data-testid="meta-column-answers-effect"]');
+    expect(effect()).toBeNull();
+
+    host.value.set({ ...base, columns: { categoria: row('', { categories: 'single' }) } });
+    fixture.detectChanges();
+    await settle();
+    expect(text(effect()!)).toBe('Single choice: a ratio over several answers counts the base once across them, not once per answer, so a share over several answers is not too small.');
+
+    host.value.set({ ...base, columns: { categoria: row('', { categories: 'multiple' }) } });
+    fixture.detectChanges();
+    await settle();
+    expect(text(effect()!)).toContain('Multiple choice: a ratio that would add up several answers shows a message instead of a figure');
+
+    host.value.set({ ...base, columns: { categoria: row('') } });
+    fixture.detectChanges();
+    await settle();
+    expect(effect()).toBeNull();
+  });
+
   it('declares one column as the base, takes it from the other, and leaves None to clear it', async () => {
     const { host, fixture, baseOptions, none, choose, settle } = await render();
     host.value.set({ ...base, columns: { numerator: row('', { base: true }), comuna: row('Comuna') } });

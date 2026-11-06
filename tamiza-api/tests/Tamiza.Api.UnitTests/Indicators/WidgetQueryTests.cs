@@ -389,4 +389,86 @@ public sealed class WidgetQueryTests
             System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, plain), json),
             System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, based), json));
     }
+
+    // The statistic is a query setting and the line without filters a flag of the request (design D2 and D3 of improve-stat-cards).
+    // These are the shared cases of the twins: tamiza-ui's query-for.spec.ts holds the same ones for queryFor and unfilteredFor.
+
+    private static WidgetConfig Tile(string? statistic = null, WidgetDisplay? display = null) => new(
+        "encuesta_hoy", "value", null, "zona", [], null, null, Display: display, Statistic: statistic);
+
+    [Fact]
+    public void A_stat_tile_sends_its_statistic_and_a_tile_without_one_sends_none()
+    {
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+
+        Assert.Equal("median", WidgetQuery.For(ChartTypes.Stat, Tile("median")).Statistic);
+        Assert.Equal("mean", WidgetQuery.For(ChartTypes.Stat, Tile("mean")).Statistic);
+        Assert.Null(WidgetQuery.For(ChartTypes.Stat, Tile()).Statistic);
+        Assert.DoesNotContain("statistic", System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(ChartTypes.Stat, Tile()), json));
+        Assert.Null(WidgetQuery.For(ChartTypes.Stat, Tile("median")).GroupBy);
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void A_statistic_is_sent_only_for_a_stat_tile_and_never_changes_another_kinds_query(string chartType)
+    {
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var query = WidgetQuery.For(chartType, Tile("median"));
+
+        Assert.Equal(chartType == ChartTypes.Stat ? "median" : null, query.Statistic);
+        if (chartType != ChartTypes.Stat)
+        {
+            Assert.Equal(
+                System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(chartType, Tile()), json),
+                System.Text.Json.JsonSerializer.Serialize(query, json));
+        }
+    }
+
+    public static TheoryData<string?[]> SecondaryLines() => new()
+    {
+        { new string?[] { "n" } },
+        { new string?[] { "unfiltered" } },
+        { new string?[] { "n", "unfiltered" } },
+        { new string?[] { "unfiltered", "n" } },
+    };
+
+    [Theory]
+    [MemberData(nameof(SecondaryLines))]
+    public void A_tile_with_lines_queries_as_the_same_tile_without_them_and_asks_for_the_unfiltered_value_only_when_it_holds_that_line(string?[] lines)
+    {
+        var json = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        var plain = Tile("median");
+        var lined = Tile("median", new WidgetDisplay(Secondary: lines!));
+
+        Assert.Equal(
+            System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(ChartTypes.Stat, plain), json),
+            System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(ChartTypes.Stat, lined), json));
+        Assert.DoesNotContain("unfiltered", System.Text.Json.JsonSerializer.Serialize(WidgetQuery.For(ChartTypes.Stat, lined), json));
+        Assert.Equal(lines.Contains("unfiltered"), WidgetQuery.Unfiltered(ChartTypes.Stat, lined));
+        Assert.False(WidgetQuery.Unfiltered(ChartTypes.Stat, plain));
+    }
+
+    [Fact]
+    public void The_unfiltered_flag_is_true_only_for_a_stat_tile_that_holds_the_line()
+    {
+        var withLine = Tile(display: new WidgetDisplay(Secondary: ["unfiltered"]));
+        var nOnly = Tile(display: new WidgetDisplay(Secondary: ["n"]));
+        var other = Tile(display: new WidgetDisplay(Color: 2));
+
+        Assert.True(WidgetQuery.Unfiltered(ChartTypes.Stat, withLine));
+        Assert.True(WidgetQuery.Unfiltered(ChartTypes.Stat, Tile("p75", new WidgetDisplay(Secondary: ["n", "unfiltered"]))));
+        Assert.False(WidgetQuery.Unfiltered(ChartTypes.Stat, nOnly));
+        Assert.False(WidgetQuery.Unfiltered(ChartTypes.Stat, other));
+        Assert.False(WidgetQuery.Unfiltered(ChartTypes.Stat, Tile()));
+        Assert.False(WidgetQuery.Unfiltered(ChartTypes.Stat, Tile(display: new WidgetDisplay(Secondary: [null!]))));
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryKind))]
+    public void A_stray_secondary_line_never_asks_for_the_unfiltered_value_of_another_kind(string chartType)
+    {
+        var stray = Tile(display: new WidgetDisplay(Secondary: ["n", "unfiltered"]));
+
+        Assert.Equal(chartType == ChartTypes.Stat, WidgetQuery.Unfiltered(chartType, stray));
+    }
 }

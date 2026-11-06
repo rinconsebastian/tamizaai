@@ -109,6 +109,33 @@ public static class LineInterpolations
     public static bool IsKnown(string? interpolation) => interpolation is not null && All.Contains(interpolation);
 }
 
+/// <summary>
+/// The statistics a stat tile can take of its matching rows (<see cref="WidgetConfig.Statistic"/>, design D2 of improve-stat-cards), stored
+/// as strings: the median, the first and third quartiles (25th and 75th percentiles) and the mean.
+/// </summary>
+public static class StatStatistics
+{
+    public const string Median = "median";
+    public const string P25 = "p25";
+    public const string P75 = "p75";
+    public const string Mean = "mean";
+
+    public static readonly IReadOnlyList<string> All = [Median, P25, P75, Mean];
+
+    public static bool IsKnown(string? statistic) => statistic is not null && All.Contains(statistic);
+}
+
+/// <summary>The secondary lines a stat tile can show under what it plots (<see cref="WidgetDisplay.Secondary"/>, design D3 of improve-stat-cards), stored as strings.</summary>
+public static class StatSecondaryLines
+{
+    public const string N = "n";
+    public const string Unfiltered = "unfiltered";
+
+    public static readonly IReadOnlyList<string> All = [N, Unfiltered];
+
+    public static bool IsKnown(string? line) => line is not null && All.Contains(line);
+}
+
 /// <summary>The side of a Likert scale's value (<see cref="LikertStep.Side"/>), stored as strings.</summary>
 public static class LikertSides
 {
@@ -259,6 +286,7 @@ public sealed record WidgetCategoryOrder(
 /// <param name="Order">The widget's own order of groups and of series (design D1 of add-declared-category-order); left out, the indicator's order, else the chart's.</param>
 /// <param name="MinN">Every kind (design D7 of add-small-sample-warnings): the widget's own small-base threshold, 0 (off for this widget) or 1 to <see cref="WidgetDisplay.MaxMinN"/>; left out, the dashboard's. A saved <c>0</c> is kept as it is.</param>
 /// <param name="ShowN">Every kind: shows (<c>true</c>) or hides (<c>false</c>) the widget's base n line whatever the dashboard says; left out, the dashboard's. A saved <c>false</c> is kept as it is.</param>
+/// <param name="Secondary">Stat tile only (design D3 of improve-stat-cards): the lines under what it plots, a list of <see cref="StatSecondaryLines"/> each at most once; left out, none. The order is kept as given.</param>
 public sealed record WidgetDisplay(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
      Description("A place in the dashboard's palette, 1 to 8, never a color code. For a bar, column or line chart with no seriesBy, for a histogram and for a boxplot; left out, color 1."),
@@ -290,7 +318,9 @@ public sealed record WidgetDisplay(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
      Description("The small-base threshold of this widget: 0 turns it off, 1 to 10000 dims the marks whose base n is below it. For every kind; left out, the dashboard's threshold.")] int? MinN = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("true shows the widget's base n line under it and false hides it, whatever the dashboard says. For every kind; left out, the dashboard's setting.")] bool? ShowN = null)
+     Description("true shows the widget's base n line under it and false hides it, whatever the dashboard says. For every kind; left out, the dashboard's setting.")] bool? ShowN = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("The lines a stat tile shows under what it plots: a list of n (the base n) and unfiltered (the value without the dashboard filters), each at most once, in lower case. For a stat tile only; left out, no lines.")] IReadOnlyList<string>? Secondary = null)
 {
     /// <summary>The greatest small-base threshold of a widget or a dashboard (design D7 of add-small-sample-warnings).</summary>
     public const int MaxMinN = 10000;
@@ -316,6 +346,7 @@ public sealed record WidgetDisplay(
     /// A null line, and a line with no kind, are kept so validation can name them.
     /// An order that lists nothing is none, so a display that holds only an empty order is no display.
     /// A saved <c>minN</c> of 0 and <c>showN: false</c> are kept as given, so a form saved unchanged stays unchanged (design D7 of add-small-sample-warnings).
+    /// An empty list of secondary lines is none, and a list keeps the order it was given in (design D3 of improve-stat-cards).
     /// </summary>
     public WidgetDisplay? Normalize()
     {
@@ -330,14 +361,16 @@ public sealed record WidgetDisplay(
         var referenceLines = NormalizeReferenceLines(ReferenceLines);
         var interpolation = string.IsNullOrEmpty(Interpolation) ? null : Interpolation;
         var order = Order?.Normalize();
+        var secondary = Secondary is { Count: 0 } ? null : Secondary;
         return Color is null && ramp is null && orientation is null && labels is null
             && subtitle is null && footnote is null && caption is null && unit is null && showDescription is null
-            && referenceLines is null && interpolation is null && DataLabels is null && order is null && MinN is null && ShowN is null
+            && referenceLines is null && interpolation is null && DataLabels is null && order is null && MinN is null && ShowN is null && secondary is null
             ? null
             : this with
             {
                 Ramp = ramp, Orientation = orientation, Labels = labels, Subtitle = subtitle, Footnote = footnote, Caption = caption,
                 Unit = unit, ShowDescription = showDescription, ReferenceLines = referenceLines, Interpolation = interpolation, Order = order,
+                Secondary = secondary,
             };
     }
 
@@ -423,6 +456,10 @@ public sealed record WidgetDisplay(
 /// add-small-sample-warnings): leaves out the rows whose group or series value the indicator declares as meaning no data. A query setting,
 /// since it changes the rows. Kept as given, a saved <c>false</c> too; left out of the JSON while it is not set.
 /// </param>
+/// <param name="Statistic">
+/// Stat tile only (design D2 of improve-stat-cards): one of <see cref="StatStatistics"/>, which takes each matching row as one value
+/// instead of summing the rows. A query setting, since it changes the rows. Left out of the JSON while it is not set; an empty text is none.
+/// </param>
 public sealed record WidgetConfigInput(
     string? Indicator = null,
     string? Measure = null,
@@ -440,9 +477,11 @@ public sealed record WidgetConfigInput(
     WidgetPyramid? Pyramid = null,
     IReadOnlyList<LikertStep>? Scale = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("How the widget is drawn and what it says: its color, its scale, its orientation, the names of its columns, its subtitle, footnote, caption, unit and description button, its reference lines, its steps, its data labels, the order of its values, its small-base threshold or its base n line. It never changes the rows.")] WidgetDisplay? Display = null,
+     Description("How the widget is drawn and what it says: its color, its scale, its orientation, the names of its columns, its subtitle, footnote, caption, unit and description button, its reference lines, its steps, its data labels, the order of its values, its small-base threshold, its base n line or, for a stat tile, the lines under its figure (secondary). It never changes the rows.")] WidgetDisplay? Display = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("true leaves out of the widget the rows whose group or series value the indicator declares as meaning no data (save_script columns, missing), and says under the chart what they held. For a bar, column, line, pie, heatmap, pyramid, likert or crosstab; it changes the rows. Left out, nothing is left out.")] bool? MissingFooter = null)
+     Description("true leaves out of the widget the rows whose group or series value the indicator declares as meaning no data (save_script columns, missing), and says under the chart what they held. For a bar, column, line, pie, heatmap, pyramid, likert or crosstab; it changes the rows. Left out, nothing is left out.")] bool? MissingFooter = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("The statistic of a stat tile: median, p25, p75 or mean, matched exactly in lower case. It takes each row as one value (its measure, or its numerator over its own denominator) instead of summing the rows, for a table with one row per unit. For a stat tile only; it changes the rows. Left out, the tile sums its rows.")] string? Statistic = null)
 {
     public WidgetConfig Normalize() => new(
         Indicator ?? "",
@@ -463,7 +502,8 @@ public sealed record WidgetConfigInput(
         // A null step is kept so validation can name it.
         Scale ?? [],
         Display?.Normalize(),
-        MissingFooter);
+        MissingFooter,
+        string.IsNullOrEmpty(Statistic) ? null : Statistic);
 }
 
 /// <summary>A widget's query with its defaults applied. With no <see cref="Measure"/> and no <see cref="Ratio"/>, the table's default measure is plotted.</summary>
@@ -484,7 +524,8 @@ public sealed record WidgetConfig(
     WidgetPyramid? Pyramid = null,
     IReadOnlyList<LikertStep>? Scale = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WidgetDisplay? Display = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? MissingFooter = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? MissingFooter = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Statistic = null)
 {
     public const int DefaultBuckets = 10;
 
@@ -697,6 +738,17 @@ public sealed record MissingReferences(bool Indicator, IReadOnlyList<string> Col
 /// add-small-sample-warnings): what it left out. Left out of the JSON when the widget does not ask, when nothing is declared, and when no
 /// row was left out.
 /// </param>
+/// <param name="Unfiltered">
+/// A stat tile that asked for it only (<see cref="IndicatorQueryRequest.Unfiltered"/>), while the dashboard filters it was given narrowed it
+/// (design D3 of improve-stat-cards): the tile's value over the same rows without the dashboard filters. Left out otherwise, and when no
+/// row gave it a value.
+/// </param>
+/// <param name="CombinedCategories">
+/// A ratio over an indicator that declares a column as the answers of a multiple-choice question, when a value the widget plots would add
+/// up the rows of several of those answers (design D4b of improve-stat-cards): the name of that column, in which the widget has no rows
+/// and its message says to keep one answer, group or split by the column, or plot a row the indicator publishes for any of them. Left
+/// out otherwise.
+/// </param>
 public sealed record IndicatorQueryResponse(
     bool Published,
     IReadOnlyList<IndicatorRow> Rows,
@@ -714,7 +766,11 @@ public sealed record IndicatorQueryResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
      Description("The widget's base n (design D4 of add-small-sample-warnings): the n over every row it plots, each unit counted once across the answers of one question. Only when its marks have an n and its indicator declares a base column or answer columns; left out for a histogram and a box plot.")] double? N = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("What a widget that leaves out the values that mean no data (config.missingFooter) left out, combined as one value. Left out when the widget does not ask for it or no row was left out.")] IndicatorNoData? NoData = null);
+     Description("What a widget that leaves out the values that mean no data (config.missingFooter) left out, combined as one value. Left out when the widget does not ask for it or no row was left out.")] IndicatorNoData? NoData = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("Only on a query that asked for it with the request's unfiltered flag, and only while a dashboard filter narrowed the stat tile: its value over the same rows without the dashboard filters. Left out otherwise, and when no row gave it a value.")] double? Unfiltered = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("Only when the widget plots a ratio over an indicator that declares a column as the answers of a multiple-choice question and a value it plots would add up several of those answers, which counts a respondent once for each: the name of that column. The widget then has no rows. Keep one answer, group or split the widget by that column, or plot a row the indicator publishes for any of them. Left out otherwise.")] string? CombinedCategories = null);
 
 /// <summary>
 /// What a widget left out as no data (design D6 of add-small-sample-warnings): the rows whose group or series value its indicator
@@ -750,10 +806,17 @@ public sealed record IndicatorQueryOutcome(IndicatorQueryResponse? Response, IDi
 /// Asks a plain grouped query (a bar, column or line with no series) for its overall value too (design D4 of add-chart-annotations). The
 /// page and the server derive it from the widget they draw and no widget stores it; left out of the JSON unless set.
 /// </param>
+/// <param name="Unfiltered">
+/// Asks a stat tile for its value without the dashboard filters too (design D3 of improve-stat-cards), when a dashboard filter narrows it.
+/// The page and the server derive it from the widget they draw (<see cref="WidgetQuery.Unfiltered"/>) and no widget stores it; it is not
+/// validated, and where it cannot apply it does nothing. Left out of the JSON unless set.
+/// </param>
 public sealed record IndicatorQueryRequest(
     WidgetConfigInput? Config, string? ChartType = null, IReadOnlyList<AppliedDashboardFilter>? DashboardFilters = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("The page and the server set this to also get the overall value of a bar, column or line with no series: the value over all the widget's rows, as a stat tile with the same indicator and filters shows it. Derived from the widget; no widget stores it.")] bool? Overall = null);
+     Description("The page and the server set this to also get the overall value of a bar, column or line with no series: the value over all the widget's rows, as a stat tile with the same indicator and filters shows it. Derived from the widget; no widget stores it.")] bool? Overall = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
+     Description("The page and the server set this to also get the value of a stat tile without the dashboard filters, while a dashboard filter narrows it. Derived from the widget; no widget stores it, and it does nothing for another kind of widget.")] bool? Unfiltered = null);
 
 /// <param name="Layout">Left out: the chart type's default size, placed under the existing widgets.</param>
 public sealed record CreateWidgetRequest(string? Title, string? ChartType, WidgetConfigInput? Config, WidgetLayout? Layout = null);

@@ -923,4 +923,73 @@ public sealed class WidgetExportTests(PostgresFixture postgres)
         Assert.Equal(HttpStatusCode.BadRequest, negative.StatusCode);
         Assert.Empty(h.ExportFiles);
     }
+
+    // Stat tiles (widget-export "Stat tile lines in a widget workbook"; improve-stat-cards, design D2, D3 and D7). A table shaped like
+    // teatro_precio_hogar with invented values: COMUNA 1 paid 10,000 and 40,000, COMUNA 2 paid 60,000 and 90,000.
+
+    private async Task<IndicatorsHarness> PricesAsync()
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync(
+            "precio_hogar", "comuna text, variable text, value numeric",
+            "('COMUNA 1', 'Pago', 10000), ('COMUNA 1', 'Pago', 40000), ('COMUNA 2', 'Pago', 60000), ('COMUNA 2', 'Pago', 90000)",
+            label: "Precio", format: "count", unit: "pesos");
+        await h.SaveFiltersAsync(new[] { new { label = "Comuna", column = "comuna", kind = "text", @default = (object?)null } });
+        return h;
+    }
+
+    private static object TileConfig(string? statistic, params string[] lines) => new
+    {
+        indicator = "precio_hogar", measure = "value", statistic,
+        filters = new object[] { new { column = "variable", op = "equals", value = "Pago" } },
+        display = new { secondary = lines },
+    };
+
+    private static readonly object[] Comuna1 = [new { column = "comuna", kind = "text", values = new[] { "COMUNA 1" }, ignored = false }];
+
+    [Fact]
+    public async Task Median_tiles_workbook()
+    {
+        await using var h = await PricesAsync();
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("Pagó por boleta", "stat", TileConfig("median"), Comuna1)));
+
+        // One column and one row: the median of COMUNA 1's rows, as a number.
+        var sheet = Rows(path, "Pagó por boleta");
+        var row = Assert.Single(sheet);
+        Assert.Equal(["Median of Precio: value (pesos)"], row.Keys);
+        Assert.Equal(25000d, Convert.ToDouble(row.Values.Single(), System.Globalization.CultureInfo.InvariantCulture));
+        var plotted = Rows(path, "Summary").Select(Values).Single(r => r[0] == "Plotted");
+        Assert.StartsWith("Median of", plotted[1]);
+        Assert.Equal("Median of Precio: value", plotted[1]);
+    }
+
+    [Fact]
+    public async Task Secondary_lines_in_the_Summary()
+    {
+        await using var h = await PricesAsync();
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("Pagó por boleta", "stat", TileConfig("median", "n", "unfiltered"), Comuna1)));
+
+        // The tile's n and its value without the dashboard filters, as the tile shows them, right after what it plots; the data sheet is one cell.
+        var summary = Rows(path, "Summary").Select(Values).ToList();
+        var plotted = summary.FindIndex(r => r[0] == "Plotted");
+        Assert.Equal(["n", "n = 2"], summary[plotted + 1]);
+        Assert.Equal(["Without filters", "Without filters: 50,000 pesos"], summary[plotted + 2]);
+        Assert.Contains(summary, r => r.SequenceEqual(["Filters: Comuna", "COMUNA 1"]));
+        Assert.Single(Rows(path, "Pagó por boleta"));
+        Assert.DoesNotContain(summary, r => r[0] == "Notes");
+    }
+
+    [Fact]
+    public async Task A_tile_with_the_line_and_no_filter_in_force_has_no_line_without_filters()
+    {
+        await using var h = await PricesAsync();
+
+        var path = await DownloadAsync(h, await ExportAsync(h, Body("Pagó por boleta", "stat", TileConfig("median", "unfiltered"))));
+
+        var summary = Rows(path, "Summary").Select(Values).ToList();
+        Assert.DoesNotContain(summary, r => r[0] == "Without filters");
+        Assert.Equal(50000d, Convert.ToDouble(Rows(path, "Pagó por boleta").Single().Values.Single(), System.Globalization.CultureInfo.InvariantCulture));
+    }
 }

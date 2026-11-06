@@ -138,7 +138,13 @@ public sealed class ReportDataBuilder(
         // What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D11):
         // its own order, else its indicator's current one. Null when it declares nothing, and every table is then built as it always was.
         var orders = CategoryOrder.For(widget.ChartType, widget.Config, meta.Columns);
+        // A stat tile with a statistic names it in what it plots: "Median of {what}" (design D2 of improve-stat-cards).
         var caption = Plotted(widget.Config, meta.Label, names);
+        if (widget.ChartType == ChartTypes.Stat && StatisticKey(widget.Config.Statistic) is { } statisticKey)
+        {
+            caption = text.Format(statisticKey, caption);
+        }
+
         ReportWidget Without(WidgetOutcome outcome, string reason, IReadOnlyList<string>? notes = null) =>
             new(position, widget.Title, widget.ChartType, caption, outcome, [], [], null, reason, notes ?? []);
 
@@ -146,7 +152,8 @@ public sealed class ReportDataBuilder(
         try
         {
             outcome = await indicators.QueryAsync(
-                projectId, WidgetQuery.For(widget.ChartType, widget.Config), widget.ChartType, ct, applied, WidgetQuery.Overall(widget.ChartType, widget.Config));
+                projectId, WidgetQuery.For(widget.ChartType, widget.Config), widget.ChartType, ct, applied, WidgetQuery.Overall(widget.ChartType, widget.Config),
+                WidgetQuery.Unfiltered(widget.ChartType, widget.Config));
         }
         catch (DataTimeoutException)
         {
@@ -167,6 +174,13 @@ public sealed class ReportDataBuilder(
         if (response.Missing.Columns.Count > 0)
         {
             return Without(WidgetOutcome.MissingColumns, text.Format("missingColumns", string.Join(", ", response.Missing.Columns)));
+        }
+
+        // A ratio that would add up several answers of a multiple-choice question has no rows, and a column to name (design D4b, D7 of
+        // improve-stat-cards): it is a widget whose settings no longer fit, before the empty-rows branch.
+        if (response.CombinedCategories is { } combined)
+        {
+            return Without(WidgetOutcome.NoLongerFits, text.Format("combinedCategories", combined));
         }
 
         var notes = new List<string>();
@@ -190,7 +204,8 @@ public sealed class ReportDataBuilder(
         // The lines under a widget (design D11, D13 of add-small-sample-warnings): the overall line that is not drawn over answers, the small
         // bases, the base n and the no-data values, in that order, among the notes above the table (the footnote follows the table, last).
         var answerColumns = BaseFigures.AnswerColumnsOf(meta.Columns);
-        List<string> BaseNotes(int small)
+        // A stat tile draws its n line among its own lines (design D3 of improve-stat-cards), so it is not written a second time among its notes.
+        List<string> BaseNotes(int small, bool nLineInNotes = true)
         {
             var figures = BaseFigures.Names(widget.Config.Ratio, names, BaseFigures.BaseColumnOf(meta.Columns));
             var lines = new List<string>();
@@ -204,7 +219,7 @@ public sealed class ReportDataBuilder(
                 lines.Add(smallNote);
             }
 
-            if (bases.ShowN && BaseFigures.NLine(response.N, figures.Base, format) is { } nLine)
+            if (nLineInNotes && bases.ShowN && BaseFigures.NLine(response.N, figures.Base, format) is { } nLine)
             {
                 lines.Add(nLine);
             }
@@ -236,8 +251,11 @@ public sealed class ReportDataBuilder(
         if (widget.ChartType == ChartTypes.Stat)
         {
             return new(position, widget.Title, widget.ChartType, caption, WidgetOutcome.Shown, [], [],
-                format.Value(response.Rows[0].Value, meta.Format, meta.Unit), null, [.. notes, .. BaseNotes(0)],
-                StatColumn: ValueColumn(caption, meta), StatCell: ValueCell(response.Rows[0].Value, meta, format));
+                format.Value(response.Rows[0].Value, meta.Format, meta.Unit), null, [.. notes, .. BaseNotes(0, nLineInNotes: false)],
+                StatColumn: ValueColumn(caption, meta), StatCell: ValueCell(response.Rows[0].Value, meta, format))
+            {
+                StatLines = StatLinesOf(widget, response, meta, format, text, names, bases),
+            };
         }
 
         // A widget made of a series that came back without one cannot be told apart from a settings change: it no longer fits.
@@ -264,6 +282,47 @@ public sealed class ReportDataBuilder(
         {
             ReferenceLines = ReferenceLinesOf(widget, response, meta, format, text, answerColumns),
         };
+    }
+
+    /// <summary>The key of the words that name a statistic in what a tile plots ("Median of {0}"); null for none or an unknown one.</summary>
+    public static string? StatisticKey(string? statistic) => statistic switch
+    {
+        StatStatistics.Median => "statMedian",
+        StatStatistics.P25 => "statP25",
+        StatStatistics.P75 => "statP75",
+        StatStatistics.Mean => "statMean",
+        _ => null,
+    };
+
+    /// <summary>
+    /// The lines under a stat tile's figure (design D3, D7 of improve-stat-cards), in the order the tile draws them: its n line, when the
+    /// tile chooses it (<c>display.secondary</c>) or the base n line is in force for it, and then its value without the dashboard filters,
+    /// when the tile chose it and the query gave one. A tile with a statistic names its base column or nothing ("n = 37": a number of
+    /// values); one without names its base column, else its denominator. Twin of the lines of <c>StatWidget</c> in tamiza-ui.
+    /// </summary>
+    private static IReadOnlyList<string> StatLinesOf(
+        Widget widget, IndicatorQueryResponse response, IndicatorMeta meta, ReportFormat format, ReportText text, Func<string, string> names, BaseSettings bases)
+    {
+        var secondary = widget.Config.Display?.Secondary;
+        var lines = new List<string>();
+        if (secondary?.Contains(StatSecondaryLines.N) == true || bases.ShowN)
+        {
+            var baseColumn = BaseFigures.BaseColumnOf(meta.Columns);
+            var name = widget.Config.Statistic is not null
+                ? baseColumn is null ? null : names(baseColumn)
+                : BaseFigures.Names(widget.Config.Ratio, names, baseColumn).Base;
+            if (BaseFigures.NLine(response.N ?? response.Rows[0].N, name, format) is { } nLine)
+            {
+                lines.Add(nLine);
+            }
+        }
+
+        if (secondary?.Contains(StatSecondaryLines.Unfiltered) == true && response.Unfiltered is { } unfiltered)
+        {
+            lines.Add(text.Format("withoutFilters", format.Value(unfiltered, meta.Format, meta.Unit)));
+        }
+
+        return lines;
     }
 
     /// <summary>

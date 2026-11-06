@@ -1469,4 +1469,188 @@ public sealed class IndicatorQueryBuilderTests
         var plain = Planned(Leaving(RatioBy()), Missing(("comuna", ["Sin dato"])), ChartTypes.Column).NoData!.Sql.Sql;
         Assert.Contains("(sum(\"denominator\") FILTER", plain.Split('\n').Last(line => line.Contains("FILTER")));
     }
+
+    // A stat tile's statistic and its value without the dashboard filters (design D2, D3 and D10 of improve-stat-cards)
+
+    private static IndicatorQueryPlan Tile(
+        WidgetConfigInput input, IndicatorBases? bases = null, IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null, bool unfiltered = false,
+        string? chartType = ChartTypes.Stat) =>
+        IndicatorQueryBuilder.Plan(input.Normalize(), BaseColumns, "UTC", From, 5000, false, dashboardFilters, chartType, false, bases, null, unfiltered);
+
+    private static WidgetConfigInput Median(string statistic = "median", string? measure = "value", WidgetRatio? ratio = null, string? groupBy = null, IReadOnlyList<DataFilter>? filters = null) =>
+        new("coverage", ratio is null ? measure : null, ratio, groupBy, filters, Statistic: statistic);
+
+
+    [Theory]
+    [InlineData("median", "percentile_cont(0.5) WITHIN GROUP (ORDER BY x)")]
+    [InlineData("p25", "percentile_cont(0.25) WITHIN GROUP (ORDER BY x)")]
+    [InlineData("p75", "percentile_cont(0.75) WITHIN GROUP (ORDER BY x)")]
+    [InlineData("mean", "sum(x) / count(*)")]
+    public void A_statistic_is_one_row_over_the_finite_values_of_the_rows(string statistic, string expected)
+    {
+        var plan = Tile(Median(statistic));
+
+        Assert.Null(plan.Errors);
+        var sql = plan.Sql!.Sql;
+        Assert.StartsWith($"SELECT NULL::text, {expected}, NULL::text, count(*)::double precision", sql);
+        Assert.Contains("FROM (SELECT (\"value\"::double precision) AS x FROM", sql);
+        Assert.Contains("WHERE \"value\" IS NOT NULL AND (\"value\"::double precision) > '-Infinity'::double precision AND (\"value\"::double precision) < 'Infinity'::double precision) v", sql);
+        Assert.EndsWith("HAVING count(*) > 0", sql.Trim());
+        Assert.DoesNotContain("GROUP BY", sql);
+        Assert.DoesNotContain("LIMIT", sql);
+        Assert.DoesNotContain("avg(", sql);
+        Assert.Empty(plan.Sql.Parameters);
+        Assert.Equal(new SqlFigures(null, null, 3, 3), plan.Sql.Figures);
+        Assert.Null(plan.Counted);
+        Assert.Null(plan.Unfiltered);
+    }
+
+    [Fact]
+    public void A_statistic_of_a_ratio_takes_each_rows_own_ratio_and_leaves_out_a_zero_denominator()
+    {
+        var sql = Tile(Median(ratio: CoverageRatio)).Sql!.Sql;
+
+        Assert.Contains("(\"numerator\"::double precision / nullif(\"denominator\", 0)) AS x", sql);
+        Assert.Contains("WHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL) AND (\"numerator\"::double precision / nullif(\"denominator\", 0)) > '-Infinity'::double precision", sql);
+        Assert.DoesNotContain("sum(\"numerator\")", sql);
+        Assert.DoesNotContain("sum(\"denominator\")", sql);
+    }
+
+    [Fact]
+    public void A_statistic_returns_the_value_and_the_n_and_never_the_sums_of_a_ratio()
+    {
+        var plan = Tile(Median(ratio: CoverageRatio), Declared(answers: ["categoria"]));
+
+        Assert.Null(plan.Sql!.Figures!.Numerator);
+        Assert.Null(plan.Sql.Figures.Denominator);
+        Assert.Equal(3, plan.Sql.Figures.Base);
+        Assert.Equal(3, plan.Sql.Figures.WidgetN);
+        Assert.Contains("count(*)::double precision", plan.Sql.Sql);
+        Assert.Null(plan.Counted);
+    }
+
+    [Fact]
+    public void The_n_of_a_statistic_is_the_sum_of_the_base_column_over_the_rows_it_keeps_when_the_indicator_declares_one()
+    {
+        var sql = Tile(Median(), Declared("hogares")).Sql!.Sql;
+
+        Assert.StartsWith("SELECT NULL::text, percentile_cont(0.5) WITHIN GROUP (ORDER BY x), NULL::text, sum(b)::double precision", sql);
+        Assert.Contains("FROM (SELECT (\"value\"::double precision) AS x, \"hogares\"::double precision AS b FROM", sql);
+        Assert.DoesNotContain("count(*)::double precision", sql);
+        Assert.Equal(new SqlFigures(null, null, 3, 3), Tile(Median(), Declared("hogares")).Sql!.Figures);
+    }
+
+    [Fact]
+    public void A_stray_group_column_never_groups_a_statistic_and_the_filters_apply_before_it()
+    {
+        var plan = Tile(Median(groupBy: "comuna", filters: [new DataFilter("variable", "equals", Value: "Asistió (E1)")]));
+
+        var sql = plan.Sql!.Sql;
+        Assert.DoesNotContain("GROUP BY", sql);
+        Assert.StartsWith("SELECT NULL::text, percentile_cont(0.5)", sql);
+        Assert.Contains("AND \"variable\"::text = @f0) v", sql.Replace("\n", " "));
+        Assert.Equal(["f0"], plan.Sql.Parameters.Select(p => p.Name));
+    }
+
+    [Fact]
+    public void A_dashboard_filter_narrows_a_statistic_beside_the_widget_filters()
+    {
+        AppliedDashboardFilter[] dashboard = [new("comuna", DashboardFilterKinds.Text, Values: ["COMUNA 1"])];
+
+        var plan = Tile(Median(filters: [new DataFilter("variable", "equals", Value: "Pagó")]), dashboardFilters: dashboard);
+
+        Assert.Contains("\"variable\"::text = @f0 AND \"comuna\"::text = ANY(@d0)) v", plan.Sql!.Sql.Replace("\n", " "));
+        Assert.Equal(["f0", "d0"], plan.Sql.Parameters.Select(p => p.Name));
+        Assert.Empty(plan.NotFiltered!);
+    }
+
+    [Fact]
+    public void A_dashboard_filter_the_table_lacks_is_listed_and_narrows_nothing_in_a_statistic()
+    {
+        var plan = Tile(Median(), dashboardFilters: [new("estrato", DashboardFilterKinds.Text, Values: ["Estrato 1"])]);
+
+        Assert.Equal(["estrato"], plan.NotFiltered);
+        Assert.DoesNotContain("estrato", plan.Sql!.Sql);
+    }
+
+    [Fact]
+    public void A_statistic_is_planned_only_for_a_stat_tile_and_a_tile_without_one_is_planned_as_before()
+    {
+        var withStatistic = Tile(Median());
+        var asBar = Tile(Median(groupBy: "comuna"), chartType: ChartTypes.Bar);
+        var plain = Tile(new WidgetConfigInput("coverage"));
+
+        Assert.Contains("percentile_cont", withStatistic.Sql!.Sql);
+        Assert.DoesNotContain("percentile_cont", asBar.Sql!.Sql);
+        Assert.Contains("GROUP BY \"comuna\"", asBar.Sql.Sql);
+        Assert.Contains("SELECT NULL::text, (sum(\"value\")::double precision), NULL::text", plain.Sql!.Sql);
+        Assert.Contains("LIMIT @limit", plain.Sql.Sql);
+    }
+
+    [Fact]
+    public void The_overall_statement_of_a_chart_never_takes_a_statistic()
+    {
+        var plan = IndicatorQueryBuilder.Plan(
+            (Median(groupBy: "comuna") with { Ratio = CoverageRatio, Measure = null }).Normalize(), BaseColumns, "UTC", From, 5000, false, null, ChartTypes.Column, true);
+
+        Assert.DoesNotContain("percentile_cont", plan.Overall!.Sql);
+        Assert.Contains("sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)", plan.Overall.Sql);
+    }
+
+    // The value without the dashboard filters
+
+    private static readonly AppliedDashboardFilter[] ByComuna = [new("comuna", DashboardFilterKinds.Text, Values: ["COMUNA 1"])];
+
+    [Fact]
+    public void The_unfiltered_statement_is_the_tile_without_the_dashboard_filters_and_the_tile_itself_is_unchanged()
+    {
+        var input = new WidgetConfigInput("coverage", Ratio: CoverageRatio, Filters: [new DataFilter("variable", "equals", Value: "Asistió (E1)")]);
+
+        var plan = Tile(input, dashboardFilters: ByComuna, unfiltered: true);
+        var alone = Tile(input);
+        var withFilter = Tile(input, dashboardFilters: ByComuna);
+
+        Assert.NotNull(plan.Unfiltered);
+        Assert.Equal(Statement(alone.Sql!), Statement(plan.Unfiltered));
+        Assert.DoesNotContain("@d0", plan.Unfiltered.Sql);
+        Assert.Contains("\"variable\"::text = @f0", plan.Unfiltered.Sql);
+        Assert.Equal(Statement(withFilter.Sql!), Statement(plan.Sql!));
+        Assert.Contains("@d0", plan.Sql!.Sql);
+        Assert.Null(withFilter.Unfiltered);
+    }
+
+    [Fact]
+    public void The_unfiltered_statement_of_a_statistic_is_the_statistic_without_the_dashboard_filters()
+    {
+        var plan = Tile(Median(), dashboardFilters: ByComuna, unfiltered: true);
+
+        Assert.Equal(Statement(Tile(Median()).Sql!), Statement(plan.Unfiltered!));
+        Assert.Contains("percentile_cont(0.5)", plan.Unfiltered!.Sql);
+        Assert.DoesNotContain("@d0", plan.Unfiltered.Sql);
+        Assert.Contains("@d0", plan.Sql!.Sql);
+    }
+
+    [Fact]
+    public void The_unfiltered_statement_is_planned_only_while_a_dashboard_filter_narrows_the_tile()
+    {
+        var input = new WidgetConfigInput("coverage", Measure: "value");
+
+        Assert.Null(Tile(input, unfiltered: true).Unfiltered);
+        Assert.Null(Tile(input, dashboardFilters: [], unfiltered: true).Unfiltered);
+        // A filter the table lacks, or has with another kind of type, narrows nothing.
+        Assert.Null(Tile(input, dashboardFilters: [new("estrato", DashboardFilterKinds.Text, Values: ["Estrato 1"])], unfiltered: true).Unfiltered);
+        Assert.Null(Tile(input, dashboardFilters: [new("comuna", DashboardFilterKinds.Number, Min: "1", Max: "2")], unfiltered: true).Unfiltered);
+        Assert.NotNull(Tile(input, dashboardFilters: ByComuna, unfiltered: true).Unfiltered);
+    }
+
+    [Fact]
+    public void Without_the_flag_or_for_another_kind_no_unfiltered_statement_is_planned()
+    {
+        var input = new WidgetConfigInput("coverage", Measure: "value", GroupBy: "comuna");
+
+        Assert.Null(Tile(input, dashboardFilters: ByComuna).Unfiltered);
+        Assert.Null(Tile(input, dashboardFilters: ByComuna, unfiltered: true, chartType: ChartTypes.Bar).Unfiltered);
+        Assert.Null(Tile(input, dashboardFilters: ByComuna, unfiltered: true, chartType: null).Unfiltered);
+        Assert.Null(Tile(Median(), dashboardFilters: ByComuna).Unfiltered);
+    }
 }

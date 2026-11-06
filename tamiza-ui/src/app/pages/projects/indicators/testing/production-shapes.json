@@ -3827,6 +3827,301 @@
     "ignoredDashboardFilters": [],
     "missingFooter": true
    }
+  },
+  {
+   "name": "stat tile of a ratio with equals filters on a question and an answer column",
+   "chartType": "stat",
+   "columns": [
+    {
+     "name": "pregunta",
+     "type": "text"
+    },
+    {
+     "name": "respuesta",
+     "type": "text"
+    },
+    {
+     "name": "numerator",
+     "type": "decimal"
+    },
+    {
+     "name": "denominator",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":{\"numerator\":\"numerator\",\"denominator\":\"denominator\"},\"groupBy\":null,\"filters\":[{\"column\":\"pregunta\",\"op\":\"equals\",\"value\":\"3. Servicio B\",\"values\":null,\"min\":null,\"max\":null},{\"column\":\"respuesta\",\"op\":\"equals\",\"value\":\"Si\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "pregunta",
+      "op": "equals",
+      "value": "3. Servicio B",
+      "values": null,
+      "min": null,
+      "max": null
+     },
+     {
+      "column": "respuesta",
+      "op": "equals",
+      "value": "Si",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT NULL::text, (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL) AND \"pregunta\"::text = @f0 AND \"respuesta\"::text = @f1\n\nHAVING (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) IS NOT NULL\n\nLIMIT @limit",
+     "parameters": [
+      "f0",
+      "f1",
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "pregunta",
+      "op": "equals",
+      "value": "3. Servicio B",
+      "values": null,
+      "min": null,
+      "max": null
+     },
+     {
+      "column": "respuesta",
+      "op": "equals",
+      "value": "Si",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "pregunta",
+      "op": "equals",
+      "value": "3. Servicio B",
+      "values": null,
+      "min": null,
+      "max": null
+     },
+     {
+      "column": "respuesta",
+      "op": "equals",
+      "value": "Si",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "pregunta",
+      "op": "equals",
+      "value": "3. Servicio B"
+     },
+     {
+      "column": "respuesta",
+      "op": "equals",
+      "value": "Si"
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   }
+  },
+  {
+   "name": "stat tile with a median and both secondary lines",
+   "chartType": "stat",
+   "columns": [
+    {
+     "name": "pregunta",
+     "type": "text"
+    },
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"value\",\"ratio\":null,\"groupBy\":null,\"filters\":[{\"column\":\"pregunta\",\"op\":\"equals\",\"value\":\"4. Gasto del hogar\",\"values\":null,\"min\":null,\"max\":null}],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"secondary\":[\"n\",\"unfiltered\"]},\"statistic\":\"median\",\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "pregunta",
+      "op": "equals",
+      "value": "4. Gasto del hogar",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": [],
+    "statistic": "median"
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT NULL::text, percentile_cont(0.5) WITHIN GROUP (ORDER BY x), NULL::text, count(*)::double precision\nFROM (SELECT (\"value\"::double precision) AS x FROM \"p_x_indicators\".\"encuesta_hoy\"\n      WHERE \"value\" IS NOT NULL AND (\"value\"::double precision) > '-Infinity'::double precision AND (\"value\"::double precision) < 'Infinity'::double precision AND \"pregunta\"::text = @f0) v\nHAVING count(*) > 0",
+     "parameters": [
+      "f0"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "pregunta",
+      "op": "equals",
+      "value": "4. Gasto del hogar",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "statistic": "median",
+    "display": {
+     "secondary": [
+      "n",
+      "unfiltered"
+     ]
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "pregunta",
+      "op": "equals",
+      "value": "4. Gasto del hogar",
+      "values": null,
+      "min": null,
+      "max": null
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "statistic": "median"
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "value",
+    "ratio": null,
+    "groupBy": null,
+    "filters": [
+     {
+      "column": "pregunta",
+      "op": "equals",
+      "value": "4. Gasto del hogar"
+     }
+    ],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "statistic": "median",
+    "display": {
+     "secondary": [
+      "n",
+      "unfiltered"
+     ]
+    }
+   }
   }
  ],
  "dashboard": {

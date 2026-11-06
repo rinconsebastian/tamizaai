@@ -344,4 +344,48 @@ public sealed class WidgetWorkbookTests : IDisposable
         Assert.DoesNotContain(Rows("Summary"), r => Pair(r)[0] == "Notes");
         Assert.Equal(["municipality", "Households visited: value"], Rows("2.1")[0].Keys);
     }
+
+    [Fact]
+    public void The_summary_of_a_stat_tile_has_a_line_for_each_secondary_line_after_what_is_plotted_and_the_data_sheet_keeps_one_cell()
+    {
+        var stat = Stat(1, "Asistieron", "46.85% de los hogares") with
+        {
+            Caption = "Median of Asistieron: value",
+            StatColumn = new ReportColumn("Median of Asistieron: value", "0.00%"),
+            StatCell = new ReportCell(0.4685, "46.85% de los hogares"),
+            StatLines = ["n = 476 Hogares", "Without filters: 50%"],
+            Footnote = "Sin dato aparte (E5).",
+        };
+
+        var names = Write(Model(stat));
+
+        Assert.Equal(["Asistieron", "Summary"], names);
+        Assert.Single(Rows("Asistieron"));
+        Assert.Equal(["Median of Asistieron: value"], Rows("Asistieron")[0].Keys);
+        var rows = Rows("Summary").Select(Pair).ToList();
+        var plotted = rows.FindIndex(r => r[0] == "Plotted");
+        Assert.Equal(["Plotted", "Median of Asistieron: value"], rows[plotted]);
+        Assert.Equal(["n", "n = 476 Hogares"], rows[plotted + 1]);
+        Assert.Equal(["Without filters", "Without filters: 50%"], rows[plotted + 2]);
+        Assert.StartsWith("Filters", rows[plotted + 3][0]);
+        Assert.Contains(rows, r => r.SequenceEqual(["Rows", "1"]));
+
+        Write(Model(stat with { StatLines = ["n = 476 Hogares", "Sin filtros: 50%"] }, locale: "es-CO"));
+        Assert.Contains(Rows("Resumen").Select(Pair), r => r.SequenceEqual(["Sin filtros", "Sin filtros: 50%"]));
+    }
+
+    [Fact]
+    public void A_stat_tile_without_secondary_lines_has_the_summary_it_had()
+    {
+        var stat = Stat(1, "Households visited", "1,234 households") with
+        {
+            StatColumn = new ReportColumn("Households visited: value", "#,##0"), StatCell = new ReportCell(1234d, "1,234 households"),
+        };
+
+        Write(Model(stat));
+
+        var rows = Rows("Summary").Select(Pair).ToList();
+        Assert.Equal(["Project", "Dashboard", "Widget", "Indicator", "Plotted"], rows.Take(5).Select(r => r[0]));
+        Assert.StartsWith("Filters", rows[5][0]);
+    }
 }

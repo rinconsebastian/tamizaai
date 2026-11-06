@@ -118,7 +118,7 @@ public static class IndicatorEndpoints
         try
         {
             var outcome = await dashboard.QueryAsync(
-                projectId, request?.Config ?? new WidgetConfigInput(), request?.ChartType, ct, request?.DashboardFilters, request?.Overall == true);
+                projectId, request?.Config ?? new WidgetConfigInput(), request?.ChartType, ct, request?.DashboardFilters, request?.Overall == true, request?.Unfiltered == true);
             return outcome.Errors is { } errors ? Problems.Validation(errors) : TypedResults.Ok(outcome.Response!);
         }
         catch (DataTimeoutException)

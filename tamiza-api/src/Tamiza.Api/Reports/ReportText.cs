@@ -92,6 +92,14 @@ public sealed partial class ReportText
         ["referenceValue"] = "Reference",
         // The note of a chart that draws no overall line over the answers of one question (add-small-sample-warnings); as in tamiza-ui's en.json.
         ["noOverall"] = "No overall line: the bars are the answers of one question.",
+        // What a stat tile with a statistic plots, its line without the dashboard filters and the reason of a widget that would add up several
+        // answers of a multiple-choice question (improve-stat-cards); as indicators.stat and indicators.combined in tamiza-ui's en.json.
+        ["statMedian"] = "Median of {0}",
+        ["statP25"] = "First quartile of {0}",
+        ["statP75"] = "Third quartile of {0}",
+        ["statMean"] = "Mean of {0}",
+        ["withoutFilters"] = "Without filters: {0}",
+        ["combinedCategories"] = "{0} holds the answers of a multiple-choice question. Adding up several of them counts a respondent once for each answer. Keep one answer, group or split the widget by {0}, or plot a row the indicator publishes for any of them.",
     };
 
     private static readonly IReadOnlyDictionary<string, string> Spanish = new Dictionary<string, string>
@@ -174,6 +182,12 @@ public sealed partial class ReportText
         ["referenceOverall"] = "Valor general",
         ["referenceValue"] = "Referencia",
         ["noOverall"] = "Sin línea de valor general: las barras son las respuestas de una pregunta.",
+        ["statMedian"] = "Mediana de {0}",
+        ["statP25"] = "Primer cuartil de {0}",
+        ["statP75"] = "Tercer cuartil de {0}",
+        ["statMean"] = "Promedio de {0}",
+        ["withoutFilters"] = "Sin filtros: {0}",
+        ["combinedCategories"] = "{0} contiene las respuestas de una pregunta de selección múltiple. Sumar varias de ellas cuenta a cada persona una vez por respuesta. Deja una sola respuesta, agrupa o divide el widget por {0}, o grafica una fila que el indicador publique para cualquiera de ellas.",
     };
 
     private readonly IReadOnlyDictionary<string, string> _texts;

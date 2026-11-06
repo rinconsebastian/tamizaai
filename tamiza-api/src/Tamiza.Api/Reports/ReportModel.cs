@@ -53,7 +53,7 @@ public sealed record ReportReferenceLine(string Kind, string Label, double Value
 /// <param name="Subtitle">The widget's subtitle, whatever became of the widget; null when it has none.</param>
 /// <param name="Footnote">The widget's footnote, whatever became of the widget; null when it has none.</param>
 /// <param name="CaptionHidden">The widget hides its caption line: the body leaves it out, and the headers and the workbook still name what is plotted.</param>
-/// <remarks>The reference lines are the property <see cref="ReferenceLines"/>.</remarks>
+/// <remarks>The reference lines are the property <see cref="ReferenceLines"/>, a stat tile's secondary lines <see cref="StatLines"/>.</remarks>
 public sealed record ReportWidget(
     int Position,
     string Title,
@@ -77,6 +77,14 @@ public sealed record ReportWidget(
     /// after <c>CaptionHidden</c>, the last positional member, as an initialized property so every construction stays valid.
     /// </summary>
     public IReadOnlyList<ReportReferenceLine> ReferenceLines { get; init; } = [];
+
+    /// <summary>
+    /// The lines a stat tile shows under what it plots, in the email's language and format (design D7 of improve-stat-cards): its n line,
+    /// when the tile chooses it or the base n line is in force for it, then its value without the dashboard filters. Empty for any other
+    /// widget and for a tile that shows none. Declared after <see cref="ReferenceLines"/>, as an initialized property, so every
+    /// construction stays valid.
+    /// </summary>
+    public IReadOnlyList<string> StatLines { get; init; } = [];
 
     /// <summary>The most series columns the body of an email shows for one widget; the workbook shows them all.</summary>
     public const int BodySeriesColumns = 6;

@@ -60,9 +60,26 @@ describe('what a widget registers for an image', () => {
   it('gives a stat tile its figure and what it measures, and no plot', async () => {
     const { parts, registration } = await render('stat', config({ groupBy: null }), result([row(null, 75)]));
 
-    expect(parts.stat).toEqual({ value: '75', description: 'Coverage' });
+    expect(parts.stat).toEqual({ value: '75', description: 'Coverage', size: expect.any(Number), secondary: [] });
+    expect(parts.stat!.size).toBeGreaterThanOrEqual(18);
+    expect(parts.stat!.size).toBeLessThanOrEqual(30);
     expect(registration.plot()).toBeNull();
     expect([parts.caption, parts.legend, parts.table]).toEqual([null, null, null]);
+  });
+
+  it('gives a stat tile the size its figure has on the page, kept between 18 and 30 px (Smaller value)', async () => {
+    let given = '22.5px';
+    const real = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element: Element, pseudo?: string | null) =>
+      element.getAttribute('data-testid') === 'stat-value' ? ({ fontSize: given } as CSSStyleDeclaration) : real(element, pseudo),
+    );
+    const { registration } = await render('stat', config({ groupBy: null }), result([row(null, 75)]));
+
+    const sizeFor = (fontSize: string) => {
+      given = fontSize;
+      return registration.parts().stat!.size;
+    };
+    expect([sizeFor('22.5px'), sizeFor('40px'), sizeFor('9px'), sizeFor('')]).toEqual([22.5, 30, 18, 24]);
   });
 
   it('gives a chart without a series its caption and its plot', async () => {
@@ -335,7 +352,7 @@ describe('what a widget registers for an image', () => {
     it('names the columns in the description of a stat tile', async () => {
       const { parts } = await render('stat', config({ ratio, groupBy: null }), result([row(null, 0.5)]), false, [], teatro);
 
-      expect(parts.stat).toEqual({ value: '1', description: 'Teatro hoy: Hogares que asistieron / Hogares' });
+      expect(parts.stat).toMatchObject({ value: '1', description: 'Teatro hoy: Hogares que asistieron / Hogares', secondary: [] });
     });
 
     it('keeps the own names of the columns for a widget and an indicator that have no label', async () => {
@@ -377,7 +394,7 @@ describe('what a widget registers for an image', () => {
     it('marks the figure of a stat tile with a small base as dimmed, for an image to draw it lighter (Dimmed stat figure)', async () => {
       const { parts } = await render('stat', config({ groupBy: null, ratio, display: { minN: 30 } }), result([small(16)]));
 
-      expect(parts.stat).toEqual({ value: '50', description: 'Coverage: numerator / denominator', dimmed: true });
+      expect(parts.stat).toMatchObject({ value: '50', description: 'Coverage: numerator / denominator', secondary: [], dimmed: true });
     });
 
     it('does not mark the figure of a tile whose base is large, nor one with no threshold in force', async () => {

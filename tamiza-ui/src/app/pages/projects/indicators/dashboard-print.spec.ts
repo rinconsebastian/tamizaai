@@ -827,3 +827,84 @@ describe('small bases on paper (add-small-sample-warnings, "Small bases on paper
     expect(byTestId(context.root, 'widget-table-note')!.closest('.paper\:hidden')).toBeNull();
   });
 });
+
+describe('stat tiles on paper (improve-stat-cards, "Stat tile on paper")', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearOverlay();
+    document.documentElement.classList.remove(printingClass);
+    document.getElementById('tmz-print-page')?.remove();
+  });
+
+  // The sizes of Teatro's tiles: 3 or 4 columns wide, 2 or 3 rows high. jsdom lays nothing out, so this checks the figure's rule and the box that
+  // gives it room; the sheets themselves are checked in a real browser (tasks 2.1 and 8.3).
+  const places = [
+    { x: 0, y: 0, w: 3, h: 2 },
+    { x: 3, y: 0, w: 4, h: 2 },
+    { x: 0, y: 2, w: 3, h: 3 },
+    { x: 3, y: 2, w: 4, h: 3 },
+  ];
+
+  it('prints the figure of each tile whole in its box by the rule of the screen: at most 30 px, between words, with its whole value in the title (Tiles of a long dashboard)', async () => {
+    const widgets = places.map((layout, index) => widget(`w${index}`, { chartType: 'stat', layout, config: config({ indicator: 'households_visited', groupBy: null }) }));
+    const context = await open('viewer', widgets, null, { indicators: [indicator('households_visited')] });
+    const requests = context.http.match(isQuery);
+    expect(requests).toHaveLength(4);
+    requests.forEach((request) => request.flush(result([row(null, 1016279)])));
+    await settle(context.harness);
+
+    await paperOn(context);
+
+    const figures = all(context.root, 'stat-value');
+    expect(figures).toHaveLength(4);
+    for (const figure of figures) {
+      expect(text(figure)).toBe('1,016,279 households');
+      expect(figure.style.fontSize).toBe('clamp(1.125rem, min(9cqi, 38cqh), 1.875rem)');
+      expect(figure.getAttribute('style')).toContain('overflow-x: clip');
+      expect(figure.classList).not.toContain('break-all');
+      expect(figure.classList.value).not.toMatch(/text-(4xl|3xl|5xl)/);
+      expect(figure.getAttribute('title')).toBe('1,016,279 households');
+      expect(figure.closest('[data-testid="stat"]')!.getAttribute('style')).toContain('container-type: size');
+      // The tile is not hidden on paper, and its box keeps the grid's own height for the container units to read.
+      expect(figure.closest('.paper\:hidden')).toBeNull();
+      expect(figure.closest('li')!.getAttribute('style')).toContain('grid-row');
+    }
+  });
+
+  it('prints the secondary lines inside the box of the tile, under what it plots, and its statistic (Secondary lines on paper)', async () => {
+    const ratio = { numerator: 'numerator', denominator: 'denominator' };
+    const display = { subtitle: 'Hogares', footnote: 'Sin ponderar.', secondary: ['n' as const, 'unfiltered' as const] };
+    const tile = widget('w0', { chartType: 'stat', layout: places[0], config: config({ indicator: 'households_visited', groupBy: null, ratio, statistic: 'median', display }) });
+    const context = await open('viewer', [tile], null, { indicators: [indicator('households_visited', { columns: { denominator: { label: 'Hogares' } } })] });
+    const [request] = context.http.match(isQuery);
+    request.flush(result([row(null, 0.31)], { n: 121, unfiltered: 0.4685 }));
+    await settle(context.harness);
+
+    await paperOn(context);
+
+    const column = byTestId(context.root, 'stat')!;
+    expect(text(byTestId(context.root, 'stat-label'))).toBe('Median of Households visited: numerator / Hogares');
+    expect(all(context.root, 'stat-line').map(text)).toEqual(['n = 121', expect.stringMatching(/^Without filters: /)]);
+    for (const line of all(context.root, 'stat-line')) {
+      expect(column.contains(line)).toBe(true);
+      expect(line.closest('.paper\:hidden')).toBeNull();
+    }
+    expect(text(byTestId(context.root, 'widget-footnote'))).toBe('Sin ponderar.');
+  });
+
+  it('prints the message of a widget that would add up several answers in place of its figure (Card over two reasons)', async () => {
+    const ratio = { numerator: 'numerator', denominator: 'denominator' };
+    const tile = widget('w0', { chartType: 'stat', layout: places[0], config: config({ indicator: 'households_visited', groupBy: null, ratio }) });
+    const context = await open('viewer', [tile], null, { indicators: [indicator('households_visited')] });
+    context.http.match(isQuery)[0].flush(result([], { combinedCategories: 'categoria' }));
+    await settle(context.harness);
+
+    await paperOn(context);
+
+    const alert = byTestId(context.root, 'widget-combined')!;
+    expect(alert).not.toBeNull();
+    expect(alert.closest('.paper\:hidden')).toBeNull();
+    expect(text(byTestId(context.root, 'combined-text'))).toContain('categoria holds the answers of a multiple-choice question');
+    expect(byTestId(context.root, 'stat')).toBeNull();
+  });
+});

@@ -564,4 +564,58 @@ public sealed class ReportHtmlTests
         Assert.InRange(shown.Count, 1, 50);
         Assert.Contains("50% *", html);
     }
+
+    private static ReportWidget Tile(string value = "46.85% de los hogares") =>
+        Stat(1, "Asistieron", value) with { StatLines = ["n = 476 Hogares", "Without filters: 50%"] };
+
+    [Fact]
+    public void A_stat_tiles_value_is_written_at_20_pixels_and_not_at_24()
+    {
+        var (html, _) = ReportHtml.Write(Model([Stat(1, "Teatro", "46.85% de los hogares")]), true, Options);
+
+        Assert.Contains("font-size:20px;font-weight:bold", html);
+        Assert.DoesNotContain("font-size:24px", html);
+    }
+
+    [Fact]
+    public void A_stat_tiles_lines_come_after_what_it_plots_in_the_muted_color_and_before_its_notes_and_footnote()
+    {
+        var stat = Tile() with { Subtitle = "Hogares", Notes = ["Not filtered by: Round"], Footnote = "Sin dato aparte (E5)." };
+        var model = Model([stat]);
+
+        var (html, shown) = ReportHtml.Write(model, true, Options);
+
+        var order = new[] { "Asistieron", "Hogares</p>", "46.85% de los hogares", "Asistieron: value", "n = 476 Hogares", "Without filters: 50%", "Not filtered by: Round", "Sin dato aparte (E5)." }
+            .Select(part => html.IndexOf(part, StringComparison.Ordinal)).ToList();
+        Assert.All(order, i => Assert.True(i >= 0));
+        Assert.Equal(order.Order(), order);
+        Assert.Contains("margin:2px 0 0;font-size:12px;color:#5b6270;\">n = 476 Hogares</p>", html);
+        // The plain text puts them after the value on the tile's own line, then the subtitle, the notes and the footnote.
+        var text = ReportPlainText.Write(model, true, shown, Options);
+        Assert.Contains("- Asistieron: 46.85% de los hogares; n = 476 Hogares; Without filters: 50% (Asistieron: value)", text);
+        Assert.Contains($"  Not filtered by: Round{Environment.NewLine}  Sin dato aparte (E5).", text);
+    }
+
+    [Fact]
+    public void A_stat_tile_that_hides_its_caption_still_has_its_lines()
+    {
+        var model = Model([Tile() with { CaptionHidden = true }]);
+
+        var (html, shown) = ReportHtml.Write(model, true, Options);
+
+        Assert.DoesNotContain("Asistieron: value", html);
+        Assert.Contains("n = 476 Hogares", html);
+        Assert.Contains("- Asistieron: 46.85% de los hogares; n = 476 Hogares; Without filters: 50%" + Environment.NewLine, ReportPlainText.Write(model, true, shown, Options));
+    }
+
+    [Fact]
+    public void A_stat_tile_without_lines_has_the_cell_and_the_line_it_had()
+    {
+        var model = Model([Stat(1, "Total", "250 households")]);
+
+        var (html, shown) = ReportHtml.Write(model, true, Options);
+
+        Assert.DoesNotContain("margin:2px 0 0;font-size:12px", html);
+        Assert.Contains("- Total: 250 households (Total: value)" + Environment.NewLine, ReportPlainText.Write(model, true, shown, Options));
+    }
 }

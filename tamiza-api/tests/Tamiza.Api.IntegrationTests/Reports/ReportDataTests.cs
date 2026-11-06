@@ -1239,17 +1239,69 @@ public sealed class ReportDataTests(PostgresFixture postgres)
 
         var stat = Assert.Single(model.Stats);
         Assert.Equal("50%", stat.StatValue);
-        Assert.Equal(["n = 156 Hogares"], stat.Notes);
+        // The tile draws the n line among its own lines (improve-stat-cards, design D3): once, and not among its notes.
+        Assert.Equal(["n = 156 Hogares"], stat.StatLines);
+        Assert.Empty(stat.Notes);
         var (html, shown) = ReportHtml.Write(model, true, new ReportOptions());
         Assert.Contains("n = 156 Hogares", html);
-        Assert.Contains("  n = 156 Hogares", ReportPlainText.Write(model, true, shown, new ReportOptions()));
+        Assert.Contains("- Asistieron: 50%; n = 156 Hogares (", ReportPlainText.Write(model, true, shown, new ReportOptions()));
+    }
+
+    [Fact]
+    public async Task A_tile_that_chooses_the_n_line_on_a_dashboard_that_shows_it_has_one_n_line()
+    {
+        await using var h = await LongTeatroAsync();
+        await h.AddWidgetAsync(Widget("Asistieron", "stat",
+            new { indicator = "teatro_hoy", ratio = TeatroRatio, filters = Attended, display = new { secondary = new[] { "n" } } }, y: 0, w: 3));
+        await h.SaveBasesAsync(null, true);
+
+        var stat = Assert.Single((await BuildAsync(h)).Stats);
+
+        Assert.Equal(["n = 156 Hogares"], stat.StatLines);
+        Assert.Empty(stat.Notes);
+    }
+
+    [Fact]
+    public async Task A_tile_that_chooses_the_n_line_on_a_dashboard_that_does_not_show_it_has_it_and_a_tile_that_does_not_has_none()
+    {
+        await using var h = await LongTeatroAsync();
+        await h.AddWidgetAsync(Widget("Con n", "stat",
+            new { indicator = "teatro_hoy", ratio = TeatroRatio, filters = Attended, display = new { secondary = new[] { "n" } } }, y: 0, w: 3));
+        await h.AddWidgetAsync(Widget("Sin n", "stat", new { indicator = "teatro_hoy", ratio = TeatroRatio, filters = Attended }, y: 2, w: 3));
+
+        var model = await BuildAsync(h);
+
+        Assert.Equal(["n = 156 Hogares"], model.Widgets[0].StatLines);
+        Assert.Empty(model.Widgets[1].StatLines);
+        Assert.Empty(model.Widgets[1].Notes);
+    }
+
+    [Fact]
+    public async Task A_tile_with_no_n_to_show_has_no_n_line_and_a_tile_that_hides_its_caption_still_has_its_lines()
+    {
+        await using var h = await LongTeatroAsync();
+        await h.PublishAsync("plain", "value numeric", "(5)", label: "Plain", format: "count");
+        await h.AddWidgetAsync(Widget("Sin n", "stat",
+            new { indicator = "plain", measure = "value", display = new { secondary = new[] { "n" } } }, y: 0, w: 3));
+        await h.AddWidgetAsync(Widget("Oculto", "stat",
+            new { indicator = "teatro_hoy", ratio = TeatroRatio, filters = Attended, display = new { secondary = new[] { "n" }, caption = new { hidden = true } } }, y: 2, w: 3));
+
+        var model = await BuildAsync(h);
+
+        Assert.Empty(model.Widgets.Single(w => w.Title == "Sin n").StatLines);
+        var hidden = model.Widgets.Single(w => w.Title == "Oculto");
+        Assert.True(hidden.CaptionHidden);
+        Assert.Equal(["n = 156 Hogares"], hidden.StatLines);
+        var (html, _) = ReportHtml.Write(model, true, new ReportOptions());
+        Assert.DoesNotContain("Teatro hoy: numerator / Hogares", html);
+        Assert.Contains("n = 156 Hogares", html);
     }
 
     private const string NoOverall = "No overall line: the bars are the answers of one question.";
 
-    private static object OverPlaces(string groupBy) => new
+    private static object OverPlaces(string groupBy, object[]? filters = null) => new
     {
-        indicator = "teatro_hoy", ratio = TeatroRatio, groupBy, filters = new[] { EqualsFilter("variable", "Asistio (E1)") },
+        indicator = "teatro_hoy", ratio = TeatroRatio, groupBy, filters = filters ?? new object[] { EqualsFilter("variable", "Asistio (E1)") },
         display = new { referenceLines = new object[] { new { kind = "mean" }, new { kind = "overall" } } },
     };
 
@@ -1273,7 +1325,9 @@ public sealed class ReportDataTests(PostgresFixture postgres)
     public async Task Overall_line_over_comunas()
     {
         await using var h = await LongTeatroAsync();
-        await h.AddWidgetAsync(Widget("2.1. Asistio, por comuna", "bar", OverPlaces("comuna"), y: 0));
+        // One answer kept: with a question's answers added up by comuna the indicator's multiple-choice declaration would refuse the widget
+        // (design D4b of improve-stat-cards).
+        await h.AddWidgetAsync(Widget("2.1. Asistio, por comuna", "bar", OverPlaces("comuna", Attended), y: 0));
 
         var widget = (await BuildAsync(h)).Widgets.Single();
 
@@ -1291,5 +1345,211 @@ public sealed class ReportDataTests(PostgresFixture postgres)
 
         Assert.Equal(["mean", "overall"], widget.ReferenceLines.Select(l => l.Kind));
         Assert.Empty(widget.Notes);
+    }
+
+    // Stat tiles with a statistic and secondary lines, and ratios over declared answers (improve-stat-cards, design D2, D3, D4 and D7). A table
+    // shaped like teatro_precio_hogar (one row per household) and one shaped like cruces_intencion, with invented values.
+
+    private const string PriceColumns = "comuna text, variable text, value numeric";
+
+    private static readonly object[] Paid = [EqualsFilter("variable", "Pago")];
+
+    private static object PriceTile(string? statistic, params string[] lines) =>
+        new { indicator = "precio_hogar", measure = "value", filters = Paid, statistic, display = new { secondary = lines } };
+
+    /// <summary>COMUNA 1 paid 10,000 and 40,000 (median 25,000); every household that paid, 10,000, 40,000, 60,000 and 90,000 (median 50,000).</summary>
+    private async Task<IndicatorsHarness> PricesAsync(bool withDefault = true)
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        await h.PublishAsync(
+            "precio_hogar", PriceColumns,
+            "('COMUNA 1', 'Pago', 10000), ('COMUNA 1', 'Pago', 40000), ('COMUNA 2', 'Pago', 60000), ('COMUNA 2', 'Pago', 90000), ('COMUNA 2', 'No pago', 5)",
+            label: "Precio", format: "count", unit: "pesos");
+        await h.SaveFiltersAsync(withDefault
+            ? new object[] { new { column = "comuna", label = "Comuna", kind = "text", @default = new { values = new[] { "COMUNA 1" } } } }
+            : new object[] { new { column = "comuna", label = "Comuna", kind = "text" } });
+        return h;
+    }
+
+    [Fact]
+    public async Task Median_in_the_email()
+    {
+        await using var h = await PricesAsync();
+        await h.AddWidgetAsync(Widget("Pagó por boleta", "stat", PriceTile("median", "n"), y: 0, w: 3));
+
+        var stat = Assert.Single((await BuildAsync(h)).Stats);
+
+        // The median over the rows the filter's default keeps, named in what the tile plots, with its n among the tile's lines.
+        Assert.Equal("25,000 pesos", stat.StatValue);
+        Assert.Equal("Median of Precio: value", stat.Caption);
+        Assert.Equal(25000d, stat.StatCell!.Value);
+        Assert.Equal("Median of Precio: value", stat.StatColumn!.Header);
+        Assert.Equal(["n = 2"], stat.StatLines);
+        Assert.Empty(stat.Notes);
+
+        var spanish = Assert.Single((await BuildAsync(h, "es-CO")).Stats);
+        Assert.Equal("Mediana de Precio: value", spanish.Caption);
+        Assert.Equal(["n = 2"], spanish.StatLines);
+    }
+
+    [Theory]
+    [InlineData("p25", "First quartile of Precio: value", 17500d)]
+    [InlineData("p75", "Third quartile of Precio: value", 32500d)]
+    [InlineData("mean", "Mean of Precio: value", 25000d)]
+    public async Task The_other_statistics_are_named_in_what_the_tile_plots(string statistic, string caption, double value)
+    {
+        await using var h = await PricesAsync();
+        await h.AddWidgetAsync(Widget("Pagó por boleta", "stat", PriceTile(statistic), y: 0, w: 3));
+
+        var stat = Assert.Single((await BuildAsync(h)).Stats);
+
+        Assert.Equal(caption, stat.Caption);
+        Assert.Equal(value, stat.StatCell!.Value);
+        Assert.Empty(stat.StatLines);
+    }
+
+    [Fact]
+    public async Task Line_without_filters_with_a_default()
+    {
+        await using var h = await PricesAsync();
+        await h.AddWidgetAsync(Widget("Pagó por boleta", "stat", PriceTile("median", "n", "unfiltered"), y: 0, w: 3));
+
+        var stat = Assert.Single((await BuildAsync(h)).Stats);
+
+        // The value for COMUNA 1 and, under it, the value without the dashboard filters (the widget's own filter still applies).
+        Assert.Equal("25,000 pesos", stat.StatValue);
+        Assert.Equal(["n = 2", "Without filters: 50,000 pesos"], stat.StatLines);
+        Assert.Empty(stat.Notes);
+
+        var spanish = Assert.Single((await BuildAsync(h, "es-CO")).Stats);
+        Assert.Equal("Sin filtros: 50.000 pesos", spanish.StatLines[1]);
+    }
+
+    [Fact]
+    public async Task Line_without_filters_and_no_default()
+    {
+        await using var h = await PricesAsync(withDefault: false);
+        await h.AddWidgetAsync(Widget("Pagó por boleta", "stat", PriceTile("median", "unfiltered"), y: 0, w: 3));
+
+        var stat = Assert.Single((await BuildAsync(h)).Stats);
+
+        // No dashboard filter is in force, so nothing narrows the tile and it has no figure to compare with.
+        Assert.Equal("50,000 pesos", stat.StatValue);
+        Assert.Empty(stat.StatLines);
+        var (html, _) = ReportHtml.Write(await BuildAsync(h), true, new ReportOptions());
+        Assert.DoesNotContain("Without filters", html);
+    }
+
+    [Fact]
+    public async Task A_tile_without_a_statistic_or_lines_is_the_tile_it_was()
+    {
+        await using var h = await PricesAsync();
+        await h.AddWidgetAsync(Widget("Total pagado", "stat", new { indicator = "precio_hogar", measure = "value", filters = Paid }, y: 0, w: 3));
+
+        var stat = Assert.Single((await BuildAsync(h)).Stats);
+
+        Assert.Equal("50,000 pesos", stat.StatValue);
+        Assert.Equal("Precio: value", stat.Caption);
+        Assert.Empty(stat.StatLines);
+        Assert.Empty(stat.Notes);
+    }
+
+    private const string AnswerColumns = "variable text, orden text, categoria text, comuna text, numerator numeric, denominator numeric";
+
+    private const string Components = "Componentes con sí o tal vez";
+
+    private static readonly object[] FourAnswers =
+        [EqualsFilter("variable", Components), new { column = "categoria", op = "in", values = new[] { "1", "2", "3", "4" } }];
+
+    private static readonly object CrucesRatio = new { numerator = "numerator", denominator = "denominator" };
+
+    /// <summary>
+    /// A long table shaped like cruces_intencion: four answers of one question given by shares of 10,000 households (COMUNA 1 has 6,000 and COMUNA 2
+    /// 4,000), which add up to 9,517 households, and a second question with one answer.
+    /// </summary>
+    private async Task<IndicatorsHarness> AnswersAsync(string kind)
+    {
+        var h = await IndicatorsHarness.CreateAsync(postgres);
+        (string Orden, string Answer, int First, int Second)[] answers = [("01", "1", 25, 17), ("02", "2", 500, 319), ("03", "3", 2500, 1639), ("04", "4", 2700, 1817)];
+        var rows = answers.SelectMany(a => new[]
+        {
+            $"('{Components}', '{a.Orden}', '{a.Answer}', 'COMUNA 1', {a.First}, 6000)",
+            $"('{Components}', '{a.Orden}', '{a.Answer}', 'COMUNA 2', {a.Second}, 4000)",
+        }).Append("('Al menos un componente', '05', '5', 'COMUNA 1', 5725, 6000)").Append("('Al menos un componente', '05', '5', 'COMUNA 2', 3792, 4000)");
+        await h.PublishAsync("cruces_intencion", AnswerColumns, string.Join(",\n", rows), label: "Cruces", format: "percent",
+            labels: new { variable = new { categories = kind }, orden = new { categories = kind }, categoria = new { categories = kind } });
+        return h;
+    }
+
+    [Fact]
+    public async Task Corrected_card_in_the_email()
+    {
+        await using var h = await AnswersAsync("single");
+        await h.AddWidgetAsync(Widget("Componentes", "stat", new { indicator = "cruces_intencion", ratio = CrucesRatio, filters = FourAnswers }, y: 0, w: 3));
+
+        var stat = Assert.Single((await BuildAsync(h)).Stats);
+
+        // 9,517 of the 10,000 households, counted once across the four answers: 95.17 %, not 23.79 %.
+        Assert.Equal(WidgetOutcome.Shown, stat.Outcome);
+        Assert.Equal("95.17%", stat.StatValue);
+    }
+
+    [Fact]
+    public async Task Refused_card_in_the_email()
+    {
+        await using var h = await AnswersAsync("multiple");
+        await h.AddWidgetAsync(Widget("Componentes", "stat", new { indicator = "cruces_intencion", ratio = CrucesRatio, filters = FourAnswers }, y: 0, w: 3));
+        await h.AddWidgetAsync(Widget("Una respuesta", "stat",
+            new { indicator = "cruces_intencion", ratio = CrucesRatio, filters = new[] { EqualsFilter("variable", Components), EqualsFilter("categoria", "4") } }, y: 2, w: 3));
+
+        var model = await BuildAsync(h);
+
+        // The tile shows the reason, naming the column; the tile over one answer is drawn as usual and the email still goes.
+        var refused = model.Widgets[0];
+        Assert.Equal(WidgetOutcome.NoLongerFits, refused.Outcome);
+        Assert.StartsWith("categoria holds the answers of a multiple-choice question.", refused.Reason);
+        Assert.Null(refused.StatValue);
+        Assert.Equal("45.17%", model.Widgets[1].StatValue);
+        Assert.False(model.NothingToSend);
+        var (html, shown) = ReportHtml.Write(model, true, new ReportOptions());
+        Assert.Contains("categoria holds the answers of a multiple-choice question.", html);
+        Assert.Contains("- Componentes: categoria holds the answers", ReportPlainText.Write(model, true, shown, new ReportOptions()));
+
+        var spanish = (await BuildAsync(h, "es-CO")).Widgets[0];
+        Assert.StartsWith("categoria contiene las respuestas de una pregunta de selección múltiple.", spanish.Reason);
+    }
+
+    [Fact]
+    public async Task Total_row_of_a_declared_column()
+    {
+        await using var h = await AnswersAsync("multiple");
+        await h.AddWidgetAsync(SeriesWidget("Respuestas", "heatmap",
+            new { indicator = "cruces_intencion", ratio = CrucesRatio, groupBy = "categoria", seriesBy = "comuna", filters = new[] { EqualsFilter("variable", Components) } }));
+
+        var model = await BuildAsync(h);
+
+        // Each answer's row is drawn; the totals of a comuna add up four answers, so they are missing values: "—" in the body, empty in the workbook.
+        var widget = model.Widgets.Single();
+        Assert.Equal(WidgetOutcome.Shown, widget.Outcome);
+        var total = widget.Rows[^1];
+        Assert.Equal("Total", total[0].Text);
+        Assert.All(total.Skip(1), cell =>
+        {
+            Assert.Equal("—", cell.Text);
+            Assert.Null(cell.Value);
+        });
+        Assert.All(widget.Rows.SkipLast(1), row => Assert.NotEqual("—", row[1].Text));
+
+        var path = Path.Combine(Path.GetTempPath(), $"declared-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            ReportWorkbook.Write(model, path);
+            var sheet = MiniExcelLibs.MiniExcel.Query(path, useHeaderRow: false, sheetName: "1. Respuestas").Cast<IDictionary<string, object?>>().ToList();
+            Assert.All(sheet[^1].Values.Skip(1), value => Assert.Null(value));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 }

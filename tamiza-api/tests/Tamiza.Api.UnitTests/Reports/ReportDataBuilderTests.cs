@@ -74,6 +74,18 @@ public sealed class ReportDataBuilderTests
     }
 
     [Fact]
+    public void Every_statistic_has_the_words_that_name_it_and_no_other_value_has()
+    {
+        var text = ReportText.For("en-US");
+
+        Assert.Equal(
+            ["Median of Coverage", "First quartile of Coverage", "Third quartile of Coverage", "Mean of Coverage"],
+            StatStatistics.All.Select(s => text.Format(ReportDataBuilder.StatisticKey(s)!, "Coverage")));
+        Assert.Null(ReportDataBuilder.StatisticKey(null));
+        Assert.Null(ReportDataBuilder.StatisticKey("mode"));
+    }
+
+    [Fact]
     public void Describes_each_kind_of_default_as_the_filter_bar_does()
     {
         var text = ReportText.For("en-US");
