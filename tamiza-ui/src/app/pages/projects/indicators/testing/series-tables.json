@@ -1114,6 +1114,458 @@
     "leftOut": 0,
     "rowLimitReached": false
    }
+  },
+  {
+   "name": "ratio grid keeps the figures of each cell",
+   "chartType": "column",
+   "layout": "grouped",
+   "response": {
+    "series": [
+     {
+      "value": "Sí",
+      "kind": "value"
+     },
+     {
+      "value": "No",
+      "kind": "value"
+     }
+    ],
+    "rows": [
+     {
+      "group": "COMUNA 7",
+      "series": "Sí",
+      "seriesKind": "value",
+      "value": 0.5,
+      "rows": 1,
+      "numerator": 8,
+      "denominator": 16,
+      "n": 16
+     },
+     {
+      "group": "COMUNA 7",
+      "series": "No",
+      "seriesKind": "value",
+      "value": 0.5,
+      "rows": 1,
+      "numerator": 8,
+      "denominator": 16,
+      "n": 16
+     },
+     {
+      "group": "COMUNA 1",
+      "series": "Sí",
+      "seriesKind": "value",
+      "value": 0.5,
+      "rows": 1,
+      "numerator": 60,
+      "denominator": 120,
+      "n": 120
+     }
+    ],
+    "totals": {
+     "groups": [
+      {
+       "group": "COMUNA 7",
+       "value": 0.5,
+       "rows": 2,
+       "numerator": 16,
+       "denominator": 32,
+       "n": 16
+      },
+      {
+       "group": "COMUNA 1",
+       "value": 0.5,
+       "rows": 1,
+       "numerator": 60,
+       "denominator": 120,
+       "n": 120
+      }
+     ],
+     "series": [
+      {
+       "series": "Sí",
+       "kind": "value",
+       "value": 0.5,
+       "rows": 2,
+       "numerator": 68,
+       "denominator": 136,
+       "n": 136
+      },
+      {
+       "series": "No",
+       "kind": "value",
+       "value": 0.5,
+       "rows": 1,
+       "numerator": 8,
+       "denominator": 16,
+       "n": 16
+      }
+     ],
+     "all": {
+      "value": 0.5,
+      "rows": 3,
+      "numerator": 76,
+      "denominator": 152,
+      "n": 136
+     }
+    }
+   },
+   "expected": {
+    "columns": [
+     {
+      "series": "Sí",
+      "kind": "value",
+      "total": 0.5,
+      "rows": 2
+     },
+     {
+      "series": "No",
+      "kind": "value",
+      "total": 0.5,
+      "rows": 1
+     }
+    ],
+    "rows": [
+     {
+      "group": "COMUNA 7",
+      "total": 0.5,
+      "rows": 2,
+      "cells": [
+       0.5,
+       0.5
+      ],
+      "shares": null,
+      "figures": [
+       {
+        "numerator": 8,
+        "denominator": 16,
+        "n": 16
+       },
+       {
+        "numerator": 8,
+        "denominator": 16,
+        "n": 16
+       }
+      ]
+     },
+     {
+      "group": "COMUNA 1",
+      "total": 0.5,
+      "rows": 1,
+      "cells": [
+       0.5,
+       null
+      ],
+      "shares": null,
+      "figures": [
+       {
+        "numerator": 60,
+        "denominator": 120,
+        "n": 120
+       },
+       null
+      ]
+     }
+    ],
+    "grandTotal": 0.5,
+    "grandRows": 3,
+    "negativeLeftOut": 0,
+    "leftOut": 0,
+    "rowLimitReached": false
+   }
+  },
+  {
+   "name": "100% layout cells take the n of their group",
+   "chartType": "column",
+   "layout": "percent",
+   "response": {
+    "series": [
+     {
+      "value": "Sí",
+      "kind": "value"
+     },
+     {
+      "value": "No",
+      "kind": "value"
+     }
+    ],
+    "rows": [
+     {
+      "group": "COMUNA 7",
+      "series": "Sí",
+      "seriesKind": "value",
+      "value": 12,
+      "rows": 1,
+      "n": 12
+     },
+     {
+      "group": "COMUNA 7",
+      "series": "No",
+      "seriesKind": "value",
+      "value": 4,
+      "rows": 1,
+      "n": 4
+     },
+     {
+      "group": "COMUNA 1",
+      "series": "Sí",
+      "seriesKind": "value",
+      "value": 60,
+      "rows": 1,
+      "n": 60
+     }
+    ],
+    "totals": {
+     "groups": [
+      {
+       "group": "COMUNA 7",
+       "value": 16,
+       "rows": 2,
+       "n": 16
+      },
+      {
+       "group": "COMUNA 1",
+       "value": 60,
+       "rows": 1,
+       "n": 120
+      }
+     ],
+     "series": [
+      {
+       "series": "Sí",
+       "kind": "value",
+       "value": 72,
+       "rows": 2,
+       "n": 72
+      },
+      {
+       "series": "No",
+       "kind": "value",
+       "value": 4,
+       "rows": 1,
+       "n": 4
+      }
+     ],
+     "all": {
+      "value": 76,
+      "rows": 3,
+      "n": 136
+     }
+    }
+   },
+   "expected": {
+    "columns": [
+     {
+      "series": "Sí",
+      "kind": "value",
+      "total": 72,
+      "rows": 2
+     },
+     {
+      "series": "No",
+      "kind": "value",
+      "total": 4,
+      "rows": 1
+     }
+    ],
+    "rows": [
+     {
+      "group": "COMUNA 7",
+      "total": 16,
+      "rows": 2,
+      "cells": [
+       12,
+       4
+      ],
+      "shares": [
+       0.75,
+       0.25
+      ],
+      "figures": [
+       {
+        "numerator": null,
+        "denominator": null,
+        "n": 16
+       },
+       {
+        "numerator": null,
+        "denominator": null,
+        "n": 16
+       }
+      ]
+     },
+     {
+      "group": "COMUNA 1",
+      "total": 60,
+      "rows": 1,
+      "cells": [
+       60,
+       null
+      ],
+      "shares": [
+       1,
+       null
+      ],
+      "figures": [
+       {
+        "numerator": null,
+        "denominator": null,
+        "n": 120
+       },
+       null
+      ]
+     }
+    ],
+    "grandTotal": 76,
+    "grandRows": 3,
+    "negativeLeftOut": 0,
+    "leftOut": 0,
+    "rowLimitReached": false
+   }
+  },
+  {
+   "name": "Likert cells take the n of their group",
+   "chartType": "likert",
+   "layout": null,
+   "response": {
+    "series": [
+     {
+      "value": "Desacuerdo",
+      "kind": "value"
+     },
+     {
+      "value": "Acuerdo",
+      "kind": "value"
+     }
+    ],
+    "rows": [
+     {
+      "group": "Pregunta 1",
+      "series": "Desacuerdo",
+      "seriesKind": "value",
+      "value": 2,
+      "rows": 1
+     },
+     {
+      "group": "Pregunta 1",
+      "series": "Acuerdo",
+      "seriesKind": "value",
+      "value": 6,
+      "rows": 1
+     },
+     {
+      "group": "Pregunta 2",
+      "series": "Acuerdo",
+      "seriesKind": "value",
+      "value": 3,
+      "rows": 1
+     }
+    ],
+    "totals": {
+     "groups": [
+      {
+       "group": "Pregunta 1",
+       "value": 8,
+       "rows": 2,
+       "n": 8
+      },
+      {
+       "group": "Pregunta 2",
+       "value": 3,
+       "rows": 1,
+       "n": 5
+      }
+     ],
+     "series": [
+      {
+       "series": "Desacuerdo",
+       "kind": "value",
+       "value": 2,
+       "rows": 1
+      },
+      {
+       "series": "Acuerdo",
+       "kind": "value",
+       "value": 9,
+       "rows": 2
+      }
+     ],
+     "all": {
+      "value": 11,
+      "rows": 3,
+      "n": 8
+     }
+    }
+   },
+   "expected": {
+    "columns": [
+     {
+      "series": "Desacuerdo",
+      "kind": "value",
+      "total": 2,
+      "rows": 1
+     },
+     {
+      "series": "Acuerdo",
+      "kind": "value",
+      "total": 9,
+      "rows": 2
+     }
+    ],
+    "rows": [
+     {
+      "group": "Pregunta 1",
+      "total": 8,
+      "rows": 2,
+      "cells": [
+       2,
+       6
+      ],
+      "shares": [
+       0.25,
+       0.75
+      ],
+      "figures": [
+       {
+        "numerator": null,
+        "denominator": null,
+        "n": 8
+       },
+       {
+        "numerator": null,
+        "denominator": null,
+        "n": 8
+       }
+      ]
+     },
+     {
+      "group": "Pregunta 2",
+      "total": 3,
+      "rows": 1,
+      "cells": [
+       null,
+       3
+      ],
+      "shares": [
+       null,
+       1
+      ],
+      "figures": [
+       null,
+       {
+        "numerator": null,
+        "denominator": null,
+        "n": 5
+       }
+      ]
+     }
+    ],
+    "grandTotal": 11,
+    "grandRows": 3,
+    "negativeLeftOut": 0,
+    "leftOut": 0,
+    "rowLimitReached": false
+   }
   }
  ]
 }

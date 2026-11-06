@@ -1,6 +1,7 @@
 import { LOCALE_ID, Component, computed, inject, input } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { ChartType, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
+import { ChartBases, isSmallBase, markSmallCells, noChartBases } from './base-figures';
 import { CategoryOrders, arrangeColumns, groupTexts, seriesTexts, shown } from './category-order';
 import { ColumnNamer, ValueFormatter, captionShown, named, plotted, rawNames } from './format';
 import { registerExportParts } from './export-parts';
@@ -21,6 +22,8 @@ export interface CrossTableContext {
   names: ColumnNamer;
   /** What the widget declares for its values (add-declared-category-order): their order, and whether their numbers are hidden. */
   orders?: CategoryOrders | null;
+  /** The threshold in force: a cell with a base below it is marked, and the table says what the mark means (add-small-sample-warnings, design D11). */
+  minN?: number | null;
 }
 
 /**
@@ -46,13 +49,17 @@ export function crossTableModel(table: SeriesTable, context: CrossTableContext):
     const share = row.shares?.[i];
     return share === null || share === undefined ? null : percent.format(share);
   };
-  const rows = chartOrder(table, type, orders).map((row) => [shown(groupText, row.group) ?? t('indicators.chart.noGroup'), ...table.columns.map((_, i) => cellText(row, i)), value(row.total)]);
-  return {
+  const ordered = chartOrder(table, type, orders);
+  const rows = ordered.map((row) => [shown(groupText, row.group) ?? t('indicators.chart.noGroup'), ...table.columns.map((_, i) => cellText(row, i)), value(row.total)]);
+  const model: TableModel = {
     headers: [names(config.groupBy ?? ''), ...table.columns.map((column) => seriesName(column, t, seriesText)), total],
     align: ['start', ...table.columns.map(() => 'end' as const), 'end'],
     rows: shares ? rows : [...rows, [total, ...table.columns.map((column) => value(column.total)), value(table.grandTotal)]],
     totals: { row: !shares, column: true },
   };
+  // A cell with a small base is followed by "*", and the table says what it means (design D11); a table with none is as it was.
+  const minN = context.minN ?? null;
+  return markSmallCells(model, ordered.map((row) => row.cells.map((cell, i) => cell !== null && isSmallBase(row.figures?.[i]?.n, minN))), minN, locale, t);
 }
 
 /**
@@ -89,6 +96,8 @@ export class CrosstabWidget {
   readonly orders = input<CategoryOrders | null>(null);
   /** The kind of widget the table is the view of: it decides the layout of the cells (shares or values) and the order of the groups. */
   readonly chartType = input.required<ChartType>();
+  /** The threshold in force, for the cells with a small base (add-small-sample-warnings, design D11). */
+  readonly bases = input<ChartBases>(noChartBases);
 
   protected readonly what = computed(() => plotted(this.config(), this.label(), this.names()));
   protected readonly groupShown = computed(() => named(this.names(), this.config().groupBy));
@@ -104,18 +113,19 @@ export class CrosstabWidget {
       parts: () => {
         const t: Translate = (key, params) => this.transloco.translate(key, params);
         const table = this.table();
+        const model = this.model(t);
         return {
           caption: t('indicators.series.caption', { what: this.what(), group: this.groupShown(), series: this.seriesShown() }),
           legend: null,
-          notes: seriesNoteTexts({ negativeLeftOut: table.negativeLeftOut, leftOut: table.leftOut, kind: this.notesKind() }, t, this.transloco.getActiveLang()),
+          notes: [...seriesNoteTexts({ negativeLeftOut: table.negativeLeftOut, leftOut: table.leftOut, kind: this.notesKind() }, t, this.transloco.getActiveLang()), ...(model.note ? [model.note] : [])],
           stat: null,
-          table: this.model(t),
+          table: model,
         };
       },
     });
   }
 
   protected model(t: Translate): TableModel {
-    return crossTableModel(this.table(), { type: this.chartType(), config: this.config(), format: this.format(), locale: this.locale, t, names: this.names(), orders: this.orders() });
+    return crossTableModel(this.table(), { type: this.chartType(), config: this.config(), format: this.format(), locale: this.locale, t, names: this.names(), orders: this.orders(), minN: this.bases().minN });
   }
 }

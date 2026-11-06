@@ -3,7 +3,8 @@ import es from '../../../../../public/i18n/es.json';
 import { byTestId, settle } from '../../../../testing/project-harness';
 import { pressKey } from '../../../../testing/cdk';
 import { ChartType, DashboardColors, IndicatorEntry, PaletteId, QueryResult, QueryRow, QuerySeries, ValueColor, WidgetConfig } from '../../../core/projects/indicators.service';
-import { Context, all, cell, clearOverlay, config, indicator, isQuery, open, overlay, printOf, result, row, seriesResult, text, wait, menuItem, openWidgetMenu, toggleTable, widget } from './indicators-testing';
+import { figureMax, figureMin, figureSize } from './stat-figure';
+import { Context, all, cell, clearOverlay, config, indicator, isQuery, open, overlay, printOf, result, row, seriesResult, text, tips, wait, menuItem, openWidgetMenu, toggleTable, widget } from './indicators-testing';
 
 interface Query {
   config: WidgetConfig;
@@ -86,12 +87,55 @@ describe('chart widgets', () => {
       ['a color', { color: 2 }],
       ['a hidden caption', { caption: { hidden: true as const } }],
       ['a blank subtitle', { subtitle: '   ' }],
-    ])('keeps its column centered as it was with %s (Widgets saved before)', async (_name, display) => {
+    ])('centers its column while it fits and starts at the top when it does not with %s, as with texts (Widgets saved before; improve-stat-cards, design D1)', async (_name, display) => {
       const { root } = await show('stat', { indicator: 'piped_water_rate', ...(display ? { display } : {}) }, [row(null, 0.42)]);
 
       const column = byTestId(root, 'stat')!;
-      expect(column.classList.contains('justify-center')).toBe(true);
-      expect(column.classList.contains('justify-center-safe')).toBe(false);
+      expect(column.classList.contains('justify-center-safe')).toBe(true);
+      expect(column.classList.contains('justify-center')).toBe(false);
+    });
+
+    describe('size of the figure (improve-stat-cards, design D1)', () => {
+      const clamp = 'clamp(1.125rem, min(9cqi, 38cqh), 1.875rem)';
+
+      it.each([
+        ['Default tile', 'piped_water_rate', 0.4685, '46.85%'],
+        ['Narrow tile', 'households_visited', 1016279, '1,016,279 households'],
+        ['Tile saved before the change', 'piped_water_rate', 0.42, '42%'],
+      ])('sizes the figure from the room of its tile, between 18 and 30 px, and breaks it nowhere inside a word (%s)', async (_name, name, value, shown) => {
+        const { root } = await show('stat', { indicator: name }, [row(null, value)]);
+
+        const figure = byTestId(root, 'stat-value')!;
+        expect(text(figure)).toBe(shown);
+        expect(byTestId(root, 'stat')!.getAttribute('style')).toContain('container-type: size');
+        expect(figure.style.fontSize).toBe(clamp);
+        expect(figure.style.lineHeight).toBe('1');
+        expect(figure.getAttribute('style')).toContain('overflow-x: clip');
+        expect(figure.getAttribute('style')).toContain('text-wrap: balance');
+        for (const gone of ['break-all', 'break-words', 'overflow-hidden']) {
+          expect(figure.classList, gone).not.toContain(gone);
+        }
+        expect(figure.className).not.toMatch(/text-\dxl/);
+        // Whatever the tile cuts, its whole figure stays in the DOM for screen readers, and in the title for a pointer.
+        expect(figure.getAttribute('title')).toBe(shown);
+      });
+
+      it('keeps the bounds of the clamp inside the spec: 18 px at least and 30 px at most', () => {
+        expect(clamp).toContain('1.125rem');
+        expect(clamp).toContain('1.875rem');
+        expect(figureMin).toBe(18);
+        expect(figureMax).toBe(30);
+        expect(clamp).toBe(figureSize);
+      });
+
+      it('keeps the label under the figure at the size it had, so only the figure changes (Tile with texts)', async () => {
+        const { root } = await show('stat', { indicator: 'piped_water_rate', display: { subtitle: 'Hogares', footnote: 'Sin ponderar.' } }, [row(null, 0.42)]);
+
+        const label = byTestId(root, 'stat-label')!;
+        expect(label.classList).toContain('text-sm');
+        expect(label.classList).not.toContain('sr-only');
+        expect(text(byTestId(root, 'stat-value'))).toBe('42%');
+      });
     });
 
     it('shows the footnote under the figure and its label', async () => {
@@ -140,7 +184,7 @@ describe('chart widgets', () => {
       const context = await show('column', {}, groups);
 
       expect(marks(context)).toHaveLength(5);
-      expect(titles(marks(context))).toEqual(['Cali: 75', 'Bogotá: 60', 'Pasto: 35', 'Quibdó: 90', 'Leticia: 10']);
+      expect(await tips(context)).toEqual(['Cali: 75', 'Bogotá: 60', 'Pasto: 35', 'Quibdó: 90', 'Leticia: 10']);
       expect(all(context.root, 'legend-item')).toHaveLength(0); // one series: the caption names it
       expect(context.query).toEqual({ config: config(), chartType: 'column' });
     });
@@ -148,13 +192,13 @@ describe('chart widgets', () => {
     it('labels each column with its value, format and unit (count with a unit)', async () => {
       const context = await show('column', { indicator: 'households_visited' }, [row('Cali', 12450), row('Pasto', 800)], [households]);
 
-      expect(titles(marks(context))).toEqual(['Cali: 12,450 households', 'Pasto: 800 households']);
+      expect(await tips(context)).toEqual(['Cali: 12,450 households', 'Pasto: 800 households']);
     });
 
     it('writes the axis, the tooltips and the table with the indicator\'s format', async () => {
       const context = await show('column', { indicator: 'piped_water_rate' }, [row('Cali', 0.5), row('Pasto', 0.25)], [rate]);
 
-      expect(titles(marks(context))).toEqual(['Cali: 50%', 'Pasto: 25%']);
+      expect(await tips(context)).toEqual(['Cali: 50%', 'Pasto: 25%']);
       expect(svgTexts(context)).toEqual(expect.arrayContaining(['0%', '10%', '50%']));
       expect(label(context)).toBe('Column chart of Piped water rate by municipality: 2 groups, from 25% to 50%. Highest: Cali.');
       await toggle(context);
@@ -198,7 +242,8 @@ describe('chart widgets', () => {
       const context = await show('column', {}, groups);
 
       const svg = byTestId(context.root, 'chart-svg')!;
-      expect(svg.getAttribute('role')).toBe('img');
+      expect(svg.getAttribute('role')).toBe('application'); // one Tab stop with a tooltip for each column (add-small-sample-warnings, design D9)
+      expect(svg.getAttribute('tabindex')).toBe('0');
       expect(label(context)).toBe('Column chart of Coverage by municipality: 5 groups, from 10 to 90. Highest: Quibdó.');
       expect(text(byTestId(context.root, 'chart-caption'))).toBe('Coverage by municipality');
 
@@ -254,7 +299,7 @@ describe('chart widgets', () => {
     it('shows one bar per group, the groups down the chart', async () => {
       const context = await show('bar', {}, rows);
 
-      expect(titles(marks(context))).toEqual(['Cali: 75', 'Bogotá: 60', 'Pasto: 35']);
+      expect(await tips(context)).toEqual(['Cali: 75', 'Bogotá: 60', 'Pasto: 35']);
       expect(svgTexts(context)).toEqual(expect.arrayContaining(['Cali', 'Bogotá', 'Pasto']));
       expect(all(context.root, 'legend-item')).toHaveLength(0);
     });
@@ -296,7 +341,7 @@ describe('chart widgets', () => {
 
       const lines = all(context.root, 'chart-line');
       expect(lines).toHaveLength(1);
-      expect(titles(all(context.root, 'chart-dot'))).toEqual(['1: 60', '2: 70', '3: 80', '10: 95']);
+      expect(await tips(context)).toEqual(['1: 60', '2: 70', '3: 80', '10: 95']);
       const path = lines[0].getAttribute('d')!;
       expect(path.match(/[ML]/g)).toEqual(['M', 'L', 'L', 'L']);
       const xs = Array.from(path.matchAll(/[ML]([\d.]+) /g)).map((m) => Number(m[1]));
@@ -307,7 +352,7 @@ describe('chart widgets', () => {
       const context = await show('line', settings, [row('1', 60), row('2', 70), row('3', 80)]);
 
       expect(all(context.root, 'chart-line')).toHaveLength(1);
-      expect(titles(all(context.root, 'chart-dot'))).toEqual(['1: 60', '2: 70', '3: 80']);
+      expect(await tips(context)).toEqual(['1: 60', '2: 70', '3: 80']);
     });
 
     it('draws a lone point as a marker, with no line to draw', async () => {
@@ -336,12 +381,12 @@ describe('chart widgets', () => {
       const context = await show('histogram', { buckets: 10, groupBy: null }, coverage);
 
       expect(marks(context)).toHaveLength(10);
-      const counts = titles(marks(context)).map((t) => Number(t.split(': ')[1].split(' ')[0]));
+      const counts = (await tips(context)).map((t) => Number(t.split(': ')[1].split(' ')[0]));
       expect(counts.reduce((a, b) => a + b, 0)).toBe(80);
       // 80 evenly spaced values over 10 ranges: 7 or 8 in each.
       expect(counts).toEqual(Array.from({ length: 10 }, (_, k) => values.filter((_v, i) => Math.min(9, Math.floor((i * 10) / 79)) === k).length));
       expect(Math.min(...counts)).toBeGreaterThanOrEqual(7);
-      expect(titles(marks(context))[0]).toBe('10–23: 8 rows');
+      expect((await tips(context))[0]).toBe('10–23: 8');
     });
 
     it('asks the server for one row per table row when there is no group column, and counts them in the browser', async () => {
@@ -351,10 +396,10 @@ describe('chart widgets', () => {
     });
 
     it('can group first, and then counts the groups', async () => {
-      const { query, root } = await show('histogram', { buckets: 4 }, [row('a', 0), row('b', 10), row('c', 5), row('d', 3)]);
+      const { query, root, harness } = await show('histogram', { buckets: 4 }, [row('a', 0), row('b', 10), row('c', 5), row('d', 3)]);
 
       expect(query.config.groupBy).toBe('municipality');
-      expect(titles(all(root, 'chart-mark'))).toEqual(['0–2.5: 1 row', '2.5–5: 1 row', '5–7.5: 1 row', '7.5–10: 1 row']);
+      expect(await tips({ root, harness })).toEqual(['0–2.5: 1', '2.5–5: 1', '5–7.5: 1', '7.5–10: 1']);
     });
 
     it('uses ten buckets when none is set', async () => {
@@ -366,9 +411,9 @@ describe('chart widgets', () => {
     it('buckets to the number asked for, putting the largest value in the last bucket', async () => {
       const context = await show('histogram', { buckets: 4, groupBy: null }, rowsOf([0, 10, 5, 3]));
 
-      expect(titles(marks(context)).map((t) => t.split(': ')[1])).toEqual(['1 row', '1 row', '1 row', '1 row']);
-      expect(titles(marks(context))[0]).toBe('0–2.5: 1 row');
-      expect(titles(marks(context))[3]).toBe('7.5–10: 1 row');
+      expect((await tips(context)).map((t) => t.split(': ')[1])).toEqual(['1', '1', '1', '1']);
+      expect((await tips(context))[0]).toBe('0–2.5: 1');
+      expect((await tips(context))[3]).toBe('7.5–10: 1');
     });
 
     it('describes a single range in the singular', async () => {
@@ -380,14 +425,14 @@ describe('chart widgets', () => {
     it('puts every row in one bucket when all values are equal', async () => {
       const context = await show('histogram', { buckets: 3, groupBy: null }, rowsOf([7, 7]));
 
-      const counts = titles(marks(context)).map((t) => Number(t.split(': ')[1].split(' ')[0]));
+      const counts = (await tips(context)).map((t) => Number(t.split(': ')[1].split(' ')[0]));
       expect(counts[0]).toBe(2);
     });
 
     it('writes the ranges with the indicator\'s format, and the counts as plain numbers', async () => {
       const context = await show('histogram', { indicator: 'piped_water_rate', buckets: 2, groupBy: null }, rowsOf([0.1, 0.2, 0.9]), [rate]);
 
-      expect(titles(marks(context))).toEqual(['10%–50%: 2 rows', '50%–90%: 1 row']);
+      expect(await tips(context)).toEqual(['10%–50%: 2', '50%–90%: 1']);
     });
 
     it('lists the ranges and counts in the table', async () => {
@@ -410,7 +455,7 @@ describe('chart widgets', () => {
 
       const slices = all(context.root, 'pie-slice');
       expect(slices).toHaveLength(4);
-      expect(titles(slices)).toEqual([
+      expect(await tips(context, 'pie')).toEqual([
         'Cali: 50 households (50%)',
         'Bogotá: 30 households (30%)',
         'Pasto: 15 households (15%)',
@@ -436,21 +481,21 @@ describe('chart widgets', () => {
     it('draws the slices from the largest, each in its own color', async () => {
       const context = await show('pie', {}, [row('Small', 10), row('Large', 90)]);
 
-      expect(titles(all(context.root, 'pie-slice'))).toEqual(['Large: 90 (90%)', 'Small: 10 (10%)']);
+      expect(await tips(context, 'pie')).toEqual(['Large: 90 (90%)', 'Small: 10 (10%)']);
       expect(all(context.root, 'pie-slice').map((s) => s.getAttribute('style'))).toEqual([expect.stringContaining('var(--tmz-pal-tamiza-1)'), expect.stringContaining('var(--tmz-pal-tamiza-2)')]);
     });
 
     describe('colors from the domain (add-dashboard-palettes)', () => {
       const own = { groupBy: 'water_source' };
       const named = (...values: string[]): QuerySeries[] => values.map((value) => ({ value, kind: 'value' }));
-      const sliceTitles = (context: Context) => titles(all(context.root, 'pie-slice'));
+      const sliceTitles = (context: Context) => tips(context, 'pie');
       const sliceColors = (context: Context) => all(context.root, 'pie-slice').map(colorOf);
 
       it('keeps the colors of the slices when a dashboard filter makes the second the largest, and sizes them by the filtered rows (Colors kept under a dashboard filter)', async () => {
         // Piped is the larger in the widget\'s own rows; after the filter Well is.
         const context = await show('pie', own, [row('Piped', 20), row('Well', 50)], undefined, undefined, named('Piped', 'Well'));
 
-        expect(sliceTitles(context)).toEqual(['Well: 50 (71.4%)', 'Piped: 20 (28.6%)']);
+        expect((await sliceTitles(context))).toEqual(['Well: 50 (71.4%)', 'Piped: 20 (28.6%)']);
         expect(sliceColors(context)).toEqual([pal('tamiza', 2), pal('tamiza', 1)]);
         expect(all(context.root, 'legend-item').map((item) => colorOf(item.querySelector('span[aria-hidden]')))).toEqual([pal('tamiza', 2), pal('tamiza', 1)]);
       });
@@ -461,7 +506,7 @@ describe('chart widgets', () => {
         const filtered = [row('G2', 10), row('G8', 5), row('G9', 50), row('G10', 1), row('G1', 3)];
         const context = await show('pie', own, filtered, undefined, undefined, domain);
 
-        expect(sliceTitles(context)).toEqual(['G2: 10 (14.5%)', 'G1: 3 (4.3%)', 'Other: 56 (81.2%)']);
+        expect((await sliceTitles(context))).toEqual(['G2: 10 (14.5%)', 'G1: 3 (4.3%)', 'Other: 56 (81.2%)']);
         expect(sliceColors(context)).toEqual([pal('tamiza', 2), pal('tamiza', 1), 'var(--tmz-series-other)']);
       });
 
@@ -470,7 +515,7 @@ describe('chart widgets', () => {
         const kept = palette('tamiza', [{ column: 'water_source', value: 'Other', color: 3 }]);
         const context = await show('pie', own, [row('A', 10), row('B', 20), row('Z', 100)], undefined, kept, domain);
 
-        expect(sliceTitles(context).map((title) => title.split(':')[0])).toEqual(['B', 'A', 'Other']);
+        expect((await sliceTitles(context)).map((title) => title.split(':')[0])).toEqual(['B', 'A', 'Other']);
         expect(sliceColors(context)).toEqual([pal('tamiza', 2), pal('tamiza', 1), 'var(--tmz-series-other)']);
       });
 
@@ -478,7 +523,7 @@ describe('chart widgets', () => {
         const kept = palette('tamiza', [{ column: 'water_source', value: 'River', color: 1 }]);
         const context = await show('pie', own, [row('Piped', 50), row('Well', 30), row('River', 20)], undefined, kept, named('Piped', 'Well', 'River'));
 
-        expect(sliceTitles(context).map((title) => title.split(':')[0])).toEqual(['Piped', 'Well', 'River']);
+        expect((await sliceTitles(context)).map((title) => title.split(':')[0])).toEqual(['Piped', 'Well', 'River']);
         expect(sliceColors(context)).toEqual([pal('tamiza', 2), pal('tamiza', 3), pal('tamiza', 1)]);
       });
 
@@ -493,7 +538,7 @@ describe('chart widgets', () => {
         const domain: QuerySeries[] = [...named('Piped'), { value: null, kind: 'none' }];
         const context = await show('pie', own, [row('Piped', 30), row(null, 10)], undefined, kept, domain);
 
-        expect(sliceTitles(context)).toEqual(['Piped: 30 (75%)', '(none): 10 (25%)']);
+        expect((await sliceTitles(context))).toEqual(['Piped: 30 (75%)', '(none): 10 (25%)']);
         expect(sliceColors(context)).toEqual([pal('tamiza', 1), pal('tamiza', 2)]);
       });
 
@@ -506,7 +551,7 @@ describe('chart widgets', () => {
         const domain: QuerySeries[] = [...named('Piped'), { value: null, kind: 'none' }, ...named('River')];
         const context = await show('pie', own, [row('Piped', 50), row(null, 30), row('River', 20)], undefined, kept, domain);
 
-        expect(sliceTitles(context).map((title) => title.split(':')[0])).toEqual(['Piped', '(none)', 'River']);
+        expect((await sliceTitles(context)).map((title) => title.split(':')[0])).toEqual(['Piped', '(none)', 'River']);
         // River's color is set aside, so Piped and the missing group take the free ones in order of the domain.
         expect(sliceColors(context)).toEqual([pal('tamiza', 1), pal('tamiza', 3), pal('tamiza', 2)]);
       });
@@ -518,28 +563,28 @@ describe('chart widgets', () => {
         const domain: QuerySeries[] = [...named('G1', 'G2'), { value: null, kind: 'none' }, ...named('G4', 'G5', 'G6', 'G7'), { value: null, kind: 'other' }];
         const expectedNames = ['G1', 'G2', '(none)', 'G4', 'G5', 'G6', 'G7', 'Other'];
         const expectedColors = [1, 2, 3, 4, 5, 6, 7].map((n) => pal('tamiza', n)).concat('var(--tmz-series-other)');
-        const names = (context: Context) => sliceTitles(context).map((title) => title.split(':')[0]);
+        const names = async (context: Context) => (await sliceTitles(context)).map((title) => title.split(':')[0]);
 
         it('colors the missing group by its rank and folds the smallest groups, not it, into "Other"', async () => {
           const context = await show('pie', own, rows, undefined, undefined, domain);
 
-          expect(names(context)).toEqual(expectedNames);
+          expect(await names(context)).toEqual(expectedNames);
           expect(sliceColors(context)).toEqual(expectedColors);
-          expect(sliceTitles(context).at(-1)).toMatch(/^Other: 60 /);
+          expect((await sliceTitles(context)).at(-1)).toMatch(/^Other: 60 /);
         });
 
         it('draws the same slices in the same colors from an answer with no domain (an older API)', async () => {
           const context = await show('pie', own, rows);
 
-          expect(names(context)).toEqual(expectedNames);
+          expect(await names(context)).toEqual(expectedNames);
           expect(sliceColors(context)).toEqual(expectedColors);
-          expect(sliceTitles(context).at(-1)).toMatch(/^Other: 60 /);
+          expect((await sliceTitles(context)).at(-1)).toMatch(/^Other: 60 /);
         });
 
         it('draws an answer with an empty domain as one with none', async () => {
           const context = await show('pie', own, rows, undefined, undefined, []);
 
-          expect(names(context)).toEqual(expectedNames);
+          expect(await names(context)).toEqual(expectedNames);
           expect(sliceColors(context)).toEqual(expectedColors);
         });
       });
@@ -549,7 +594,7 @@ describe('chart widgets', () => {
         // filter then makes both positive.
         const context = await show('pie', own, [row('Piped', 50), row('Well', 10), row('Lake', 15), row('River', 25)], undefined, undefined, named('Piped', 'Well'));
 
-        expect(sliceTitles(context)).toEqual(['Piped: 50 (50%)', 'Well: 10 (10%)', 'Other: 40 (40%)']);
+        expect((await sliceTitles(context))).toEqual(['Piped: 50 (50%)', 'Well: 10 (10%)', 'Other: 40 (40%)']);
         expect(sliceColors(context)).toEqual([pal('tamiza', 1), pal('tamiza', 2), 'var(--tmz-series-other)']);
         expect(all(context.root, 'legend-item').map((item) => colorOf(item.querySelector('span[aria-hidden]')))).toEqual([pal('tamiza', 1), pal('tamiza', 2), 'var(--tmz-series-other)']);
         expect(all(context.root, 'legend-item').map((item) => text(item.querySelector('span:not([aria-hidden])')))).toEqual(['Piped', 'Well', 'Other']);
@@ -559,7 +604,7 @@ describe('chart widgets', () => {
       it('leaves a group outside the domain with a value at or below zero out of "Other", and counts it', async () => {
         const context = await show('pie', own, [row('Piped', 30), row('Lake', -5), row('River', 0)], undefined, undefined, named('Piped'));
 
-        expect(sliceTitles(context)).toEqual(['Piped: 30 (100%)']);
+        expect((await sliceTitles(context))).toEqual(['Piped: 30 (100%)']);
         expect(text(byTestId(context.root, 'pie-skipped'))).toBe('2 groups with a zero or negative value are not drawn; the table lists them.');
       });
 
@@ -567,14 +612,14 @@ describe('chart widgets', () => {
         const domain: QuerySeries[] = [...named('A'), { value: null, kind: 'other' }];
         const context = await show('pie', own, [row('A', 10), row('Z', 30), row('Y', 20)], undefined, undefined, domain);
 
-        expect(sliceTitles(context)).toEqual(['A: 10 (16.7%)', 'Other: 50 (83.3%)']);
+        expect((await sliceTitles(context))).toEqual(['A: 10 (16.7%)', 'Other: 50 (83.3%)']);
         expect(sliceColors(context)).toEqual([pal('tamiza', 1), 'var(--tmz-series-other)']);
       });
 
       it('still counts a group at or below zero instead of drawing it', async () => {
         const context = await show('pie', own, [row('Piped', 30), row('Well', 0)], undefined, undefined, named('Piped', 'Well'));
 
-        expect(sliceTitles(context)).toEqual(['Piped: 30 (100%)']);
+        expect((await sliceTitles(context))).toEqual(['Piped: 30 (100%)']);
         expect(text(byTestId(context.root, 'pie-skipped'))).toBe('1 group with a zero or negative value is not drawn; the table lists it.');
       });
 
@@ -590,7 +635,7 @@ describe('chart widgets', () => {
         const kept = palette('tamiza', [{ column: 'water_source', value: 'Small', color: 5 }]);
         const context = await show('pie', own, [row('Small', 10), row('Large', 90)], undefined, kept);
 
-        expect(sliceTitles(context)).toEqual(['Large: 90 (90%)', 'Small: 10 (10%)']);
+        expect((await sliceTitles(context))).toEqual(['Large: 90 (90%)', 'Small: 10 (10%)']);
         expect(sliceColors(context)).toEqual([pal('tamiza', 1), pal('tamiza', 5)]);
       });
     });
@@ -606,7 +651,7 @@ describe('chart widgets', () => {
 
       const slice = all(context.root, 'pie-slice')[0];
       expect(slice.tagName.toLowerCase()).toBe('circle');
-      expect(titles([slice])).toEqual(['Cali: 50 (100%)']);
+      expect(await tips(context, 'pie')).toEqual(['Cali: 50 (100%)']);
       expect(label(context)).toContain(': 1 slice. Largest: Cali, 100%.');
     });
 
@@ -616,8 +661,8 @@ describe('chart widgets', () => {
 
       const slices = all(context.root, 'pie-slice');
       expect(slices).toHaveLength(8);
-      expect(titles(slices).at(-1)).toMatch(/^Other: /);
-      expect(Number(titles(slices).at(-1)!.match(/: (\d+) /)![1])).toBe(100 - 7 * 5 + (100 - 8 * 5) + (100 - 9 * 5));
+      expect((await tips(context, 'pie')).at(-1)).toMatch(/^Other: /);
+      expect(Number((await tips(context, 'pie')).at(-1)!.match(/: (\d+) /)![1])).toBe(100 - 7 * 5 + (100 - 8 * 5) + (100 - 9 * 5));
     });
 
     it('counts values at or below zero instead of drawing them, and keeps them in the table', async () => {
@@ -1184,7 +1229,7 @@ describe('one value in several widgets (add-dashboard-palettes)', () => {
     );
 
     const slices = all(context.root, 'pie-slice');
-    expect(titles(slices)).toEqual(['Male: 60 households (60%)', 'Female: 40 households (40%)']);
+    expect(await tips(context, 'pie')).toEqual(['Male: 60 households (60%)', 'Female: 40 households (40%)']);
     expect(slices.map(colorOf)).toEqual([pal('tamiza', 1), pal('tamiza', 5)]);
     const segments = marks(context);
     expect(segments.map(colorOf)).toEqual([pal('tamiza', 5), pal('tamiza', 1)]); // Female, Male
@@ -1354,7 +1399,7 @@ describe('the unit of a widget (add-widget-context, design D4)', () => {
   it('writes the values with the unit of the widget in place of the indicator\'s (Base of a subgroup)', async () => {
     const context = await show('column', { indicator: 'teatro_hoy', groupBy: 'zona', display: { unit: 'de quienes asistieron' } }, zones, [teatro]);
 
-    expect(titles(marks(context))).toEqual(['Zona 1: 11.21% de quienes asistieron', 'Zona 2: 25% de quienes asistieron']);
+    expect(await tips(context)).toEqual(['Zona 1: 11.21% de quienes asistieron', 'Zona 2: 25% de quienes asistieron']);
     await toggle(context);
     expect(tableRows(context)).toEqual([['Zona 1', '11.21% de quienes asistieron'], ['Zona 2', '25% de quienes asistieron']]);
     // The unit draws, it does not query.
@@ -1364,13 +1409,13 @@ describe('the unit of a widget (add-widget-context, design D4)', () => {
   it('leaves the unit of the indicator on the other widgets over it (Other widgets keep the indicator\'s unit)', async () => {
     const context = await show('column', { indicator: 'teatro_hoy', groupBy: 'zona' }, zones, [teatro]);
 
-    expect(titles(marks(context))).toEqual(['Zona 1: 11.21% de los hogares', 'Zona 2: 25% de los hogares']);
+    expect(await tips(context)).toEqual(['Zona 1: 11.21% de los hogares', 'Zona 2: 25% de los hogares']);
   });
 
   it('replaces the unit of a count and keeps its format (Widget\'s own unit)', async () => {
     const context = await show('column', { indicator: 'households_visited', display: { unit: 'households with children' } }, [row('Cali', 12450)], [households]);
 
-    expect(titles(marks(context))).toEqual(['Cali: 12,450 households with children']);
+    expect(await tips(context)).toEqual(['Cali: 12,450 households with children']);
   });
 
   it('writes the figure of a stat tile with the unit of the widget (Stat tile with its own unit)', async () => {
@@ -1394,13 +1439,13 @@ describe('the unit of a widget (add-widget-context, design D4)', () => {
 
   it('shows two decimals and its own unit for a widget whose indicator the project no longer lists', async () => {
     const own = await show('column', { indicator: 'encuesta_hoy', groupBy: 'zona', display: { unit: 'viviendas' } }, [row('Zona 1', 5)], [households]);
-    expect(titles(marks(own))).toEqual(['Zona 1: 5.00 viviendas']);
+    expect(await tips(own)).toEqual(['Zona 1: 5.00 viviendas']);
   });
 
   it('shows two decimals and no unit for a widget whose indicator the project no longer lists and which has no unit of its own', async () => {
     const none = await show('column', { indicator: 'encuesta_hoy', groupBy: 'zona' }, [row('Zona 1', 5)], [households]);
 
-    expect(titles(marks(none))).toEqual(['Zona 1: 5.00']);
+    expect(await tips(none)).toEqual(['Zona 1: 5.00']);
   });
 });
 
@@ -1542,7 +1587,7 @@ describe('the caption of a widget (add-widget-context, design D3)', () => {
     it('names the value in the tooltips of its marks', async () => {
       const context = await show('column', { indicator: 'households_visited', groupBy: 'municipality', display: hidden }, [row('Cali', 12450)], [households]);
 
-      expect(titles(marks(context))).toEqual(['Cali: 12,450 households']);
+      expect(await tips(context)).toEqual(['Cali: 12,450 households']);
     });
   });
 
@@ -1907,7 +1952,7 @@ describe('chart annotations (add-chart-annotations)', () => {
       const mark = marks(context)[0];
       expect(num(label, 'x')).toBeCloseTo(num(mark, 'x') + num(mark, 'width') + 4, 6);
       expect(label.getAttribute('text-anchor')).toBe('start');
-      expect(titles(marks(context))[0]).toBe('Centro cultural o casa de la cultura: 24.22% de los hogares');
+      expect((await tips(context))[0]).toBe('Centro cultural o casa de la cultura: 24.22% de los hogares');
     });
 
     it('hides the labels from assistive technology, since the table and the tooltips carry the values', async () => {
@@ -1997,7 +2042,7 @@ describe('chart annotations (add-chart-annotations)', () => {
 
       expect(marks(context)).toHaveLength(24);
       expect(dataLabels(context)).toHaveLength(0);
-      expect(titles(marks(context))[0]).toBe('Zona 1: 10% de los hogares');
+      expect((await tips(context))[0]).toBe('Zona 1: 10% de los hogares');
     });
 
     it('leaves out the labels of grouped columns narrower than their text and keeps their marks (Columns too narrow)', async () => {
@@ -2131,3 +2176,222 @@ function textWidthOf(text: string): number {
 }
 
 const hitsOf = (context: Context) => all(context.root, 'chart-hit');
+
+describe('stat tile statistic and secondary lines (improve-stat-cards, design D2, D3, D10)', () => {
+  const ratio = { numerator: 'numerator', denominator: 'denominator' };
+  const teatro = indicator('teatro_hoy', {
+    label: 'Teatro hoy',
+    format: 'percent',
+    unit: 'de los hogares',
+    columns: { numerator: { label: 'Hogares que asistieron' }, denominator: { label: 'Hogares' } },
+  });
+  /** `teatro_precio_hogar`: one row per household, a price in pesos. */
+  const price = indicator('teatro_precio_hogar', { label: 'Teatro precio hogar', format: 'count', unit: 'pesos' });
+  /** The same, with the households each row stands for declared as its base. */
+  const priced = indicator('teatro_precio_hogar', { label: 'Teatro precio hogar', format: 'count', unit: 'pesos', columns: { hogares: { label: 'Hogares', base: true } } });
+  const lines = (context: Pick<Context, 'root'>) => all(context.root, 'stat-line').map(text);
+
+  /** Opens a dashboard with one stat tile and answers its one query with `answer`. */
+  async function showTile(settings: Partial<WidgetConfig>, indicators: IndicatorEntry[], answer: QueryResult, at: Parameters<typeof open>[4] = {}) {
+    const context = await open('viewer', [widget('w1', { chartType: 'stat', config: config({ groupBy: null, ...settings }) })], null, { indicators }, at);
+    const requests = context.http.match(isQuery);
+    expect(requests).toHaveLength(1);
+    requests[0].flush(answer);
+    await settle(context.harness);
+    return { ...context, request: requests[0].request.body as { config: WidgetConfig; unfiltered?: true } };
+  }
+
+  it('names the statistic under the value (Statistic named under the value)', async () => {
+    const { root } = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median' }, [price], result([row(null, 40000)]));
+
+    expect(text(byTestId(root, 'stat-value'))).toBe('40,000 pesos');
+    expect(text(byTestId(root, 'stat-label'))).toBe('Median of Teatro precio hogar: value');
+  });
+
+  it.each([
+    ['median', 'Median of'],
+    ['p25', 'First quartile of'],
+    ['p75', 'Third quartile of'],
+    ['mean', 'Mean of'],
+  ] as const)('names %s as "%s", and sends the statistic in the query', async (statistic, words) => {
+    const { root, request } = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic }, [price], result([row(null, 4.5)]));
+
+    expect(text(byTestId(root, 'stat-label'))).toBe(`${words} Teatro precio hogar: value`);
+    expect(request.config.statistic).toBe(statistic);
+  });
+
+  it('keeps the statistic in front of an own caption text (Statistic with an own caption text)', async () => {
+    const display = { caption: { text: 'Precio de la boleta' } };
+    const { root } = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median', display }, [price], result([row(null, 40000)]));
+
+    expect(text(byTestId(root, 'stat-label'))).toBe('Median of Precio de la boleta');
+  });
+
+  it('writes the description of a tile with no statistic as before, whatever its lines', async () => {
+    const { root, request } = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['n'] } }, [teatro], result([row(null, 0.4685)]));
+
+    expect(text(byTestId(root, 'stat-label'))).toBe('Teatro hoy: Hogares que asistieron / Hogares');
+    expect(request.config).not.toHaveProperty('statistic');
+  });
+
+  it('writes the n of a tile under what it plots, with the name of its base (Base under the value)', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['n'] } }, [teatro], result([row(null, 0.4685)], { n: 476 }));
+
+    expect(text(byTestId(context.root, 'stat-value'))).toBe('46.85% de los hogares');
+    expect(lines(context)).toEqual(['n = 476 Hogares']);
+    expect(byTestId(context.root, 'stat-line')!.classList).toContain('text-xs');
+  });
+
+  it('draws the base n line of the dashboard once, inside the tile, and none under the widget (Base n line of the dashboard)', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio }, [teatro], result([row(null, 0.4685)], { n: 476 }), { bases: { showN: true } });
+
+    expect(lines(context)).toEqual(['n = 476 Hogares']);
+    expect(byTestId(context.root, 'widget-n-line')).toBeNull();
+  });
+
+  it('lets the widget turn the dashboard line off', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { showN: false } }, [teatro], result([row(null, 0.4685)], { n: 476 }), { bases: { showN: true } });
+
+    expect(lines(context)).toEqual([]);
+  });
+
+  it('shows the n of a tile that chose it whatever the dashboard says', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { showN: false, secondary: ['n'] } }, [teatro], result([row(null, 0.4685)], { n: 476 }));
+
+    expect(lines(context)).toEqual(['n = 476 Hogares']);
+  });
+
+  it('shows no n line for a tile whose indicator declares nothing (Nothing declared)', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['n'] } }, [teatro], result([row(null, 0.4685)]));
+
+    expect(lines(context)).toEqual([]);
+    expect(text(byTestId(context.root, 'stat-value'))).toBe('46.85% de los hogares');
+  });
+
+  it('shows no n line for a measure with no base (Measure with no base)', async () => {
+    const context = await showTile({ indicator: 'households_visited', measure: 'value', display: { secondary: ['n'] } }, [households], result([row(null, 120)]));
+
+    expect(lines(context)).toEqual([]);
+    expect(text(byTestId(context.root, 'stat-value'))).toBe('120 households');
+  });
+
+  it('words the n of a statistic as a number of values, with no name (Number of values of a median)', async () => {
+    const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median', display: { secondary: ['n'] } }, [price], result([row(null, 40000, null, { n: 37 })], { n: 37 }));
+
+    expect(lines(context)).toEqual(['n = 37']);
+  });
+
+  it('words it with the name of the base column when the indicator declares one (Base column of a statistic)', async () => {
+    const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'mean', display: { secondary: ['n'] } }, [priced], result([row(null, 60000, null, { n: 4 })], { n: 4 }));
+
+    expect(lines(context)).toEqual(['n = 4 Hogares']);
+  });
+
+  it('never names the denominator of a ratio for the n of its statistic', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, statistic: 'median', display: { secondary: ['n'] } }, [teatro], result([row(null, 0.4, null, { n: 12 })], { n: 12 }));
+
+    expect(lines(context)).toEqual(['n = 12']);
+  });
+
+  it('dims the figure of a statistic whose number of values is below the threshold (Small base of a median)', async () => {
+    const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median', display: { secondary: ['n'] } }, [price], result([row(null, 35000, null, { n: 6 })], { n: 6 }), { bases: { minN: 30 } });
+
+    expect(byTestId(context.root, 'stat-value')!.style.opacity).toBe('0.35');
+    expect(lines(context)).toEqual(['n = 6']);
+  });
+
+  it('draws the figure of a statistic over the threshold as it is', async () => {
+    const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median' }, [price], result([row(null, 40000, null, { n: 37 })], { n: 37 }), { bases: { minN: 30 } });
+
+    expect(byTestId(context.root, 'stat-value')!.style.opacity).toBe('');
+  });
+
+  it('writes the value without the dashboard filters with the format of the tile (Value without the dashboard filters)', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['unfiltered'] } }, [teatro], result([row(null, 0.31)], { unfiltered: 0.4685 }));
+
+    expect(text(byTestId(context.root, 'stat-value'))).toBe('31% de los hogares');
+    expect(lines(context)).toEqual(['Without filters: 46.85% de los hogares']);
+    expect(context.request.unfiltered).toBe(true);
+  });
+
+  it('shows no line while the query gives no value without filters (No dashboard filter in force)', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['unfiltered'] } }, [teatro], result([row(null, 0.4685)]));
+
+    expect(lines(context)).toEqual([]);
+  });
+
+  it('shows the n line first and the line without filters second, whatever order they were saved in', async () => {
+    const answer = result([row(null, 0.31)], { n: 121, unfiltered: 0.4685 });
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['unfiltered', 'n'] } }, [teatro], answer);
+
+    expect(lines(context)).toEqual(['n = 121 Hogares', 'Without filters: 46.85% de los hogares']);
+  });
+
+  it('shows no line for the secondary lines a tile did not choose, and asks for no figure without filters', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio }, [teatro], result([row(null, 0.4685)], { n: 476, unfiltered: 0.5 }));
+
+    expect(lines(context)).toEqual([]);
+    expect(context.request).not.toHaveProperty('unfiltered');
+  });
+
+  it('keeps a tile without lines as it was: one description, centered while it fits, no clamp (Widgets saved before)', async () => {
+    const { root } = await showTile({ indicator: 'teatro_hoy', ratio }, [teatro], result([row(null, 0.4685)]));
+
+    expect(byTestId(root, 'stat-label')!.classList).not.toContain('line-clamp-2');
+    expect(byTestId(root, 'stat-label')!.getAttribute('title')).toBeNull();
+    expect(byTestId(root, 'stat')!.classList).toContain('justify-center-safe');
+  });
+
+  it('keeps the figure whole and lets the label and the lines be the part cut, with the whole texts in their titles (Tile with texts and lines)', async () => {
+    const display = { subtitle: '% de quienes asistieron (E4)', footnote: 'Sin ponderar.', secondary: ['n' as const, 'unfiltered' as const] };
+    const { root } = await showTile({ indicator: 'teatro_hoy', ratio, display }, [teatro], result([row(null, 0.31)], { n: 121, unfiltered: 0.4685 }));
+
+    const column = byTestId(root, 'stat')!;
+    expect(column.classList).toContain('justify-center-safe');
+    expect(column.classList).not.toContain('justify-center');
+    const figure = byTestId(root, 'stat-value')!;
+    expect(figure.style.fontSize).toBe(figureSize);
+    expect(figure.style.lineHeight).toBe('1');
+    const label = byTestId(root, 'stat-label')!;
+    expect(label.classList).toContain('line-clamp-2');
+    expect(label.getAttribute('title')).toBe('Teatro hoy: Hogares que asistieron / Hogares');
+    const shown = all(root, 'stat-line');
+    expect(shown.map((line) => line.getAttribute('title'))).toEqual(shown.map(text));
+    for (const line of shown) {
+      expect(line.classList).toContain('truncate');
+    }
+  });
+
+  it('centers its column in the safe way as soon as it shows a line, though it has no subtitle or footnote', async () => {
+    const { root } = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['n'] } }, [teatro], result([row(null, 0.4685)], { n: 476 }));
+
+    expect(byTestId(root, 'stat')!.classList).toContain('justify-center-safe');
+  });
+
+  it('keeps the lines of a tile that hides its caption, and the caption for screen readers (Lines of a tile that hides its caption)', async () => {
+    const display = { caption: { hidden: true as const }, secondary: ['n' as const] };
+    const context = await showTile({ indicator: 'teatro_hoy', ratio, display }, [teatro], result([row(null, 0.4685)], { n: 476 }));
+
+    expect(text(byTestId(context.root, 'stat-value'))).toBe('46.85% de los hogares');
+    expect(byTestId(context.root, 'stat-label')!.classList).toContain('sr-only');
+    expect(lines(context)).toEqual(['n = 476 Hogares']);
+  });
+
+  it('words the statistic, the base and the line without filters in Spanish', async () => {
+    const answer = result([row(null, 35000, null, { n: 6 })], { n: 6, unfiltered: 40000 });
+    const settings = { indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median' as const, display: { secondary: ['n' as const, 'unfiltered' as const] } };
+    const context = await open('viewer', [widget('w1', { chartType: 'stat', config: config({ groupBy: null, ...settings }) })], null, { indicators: [price] }, { lang: 'es' });
+    context.http.match(isQuery)[0].flush(answer);
+    await settle(context.harness);
+
+    expect(text(byTestId(context.root, 'stat-label'))).toBe('Mediana de Teatro precio hogar: value');
+    expect(lines(context)).toEqual(['n = 6', expect.stringMatching(/^Sin filtros: 40\.000\s?pesos$/)]);
+  });
+
+  it('has the words of the statistics and of the line without filters in each language', () => {
+    expect(en.indicators.stat.of).toEqual({ median: 'Median of {{ what }}', p25: 'First quartile of {{ what }}', p75: 'Third quartile of {{ what }}', mean: 'Mean of {{ what }}' });
+    expect(es.indicators.stat.of).toEqual({ median: 'Mediana de {{ what }}', p25: 'Primer cuartil de {{ what }}', p75: 'Tercer cuartil de {{ what }}', mean: 'Promedio de {{ what }}' });
+    expect(en.indicators.stat.withoutFilters).toBe('Without filters: {{ value }}');
+    expect(es.indicators.stat.withoutFilters).toBe('Sin filtros: {{ value }}');
+  });
+});

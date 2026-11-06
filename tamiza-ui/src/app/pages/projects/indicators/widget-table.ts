@@ -13,6 +13,10 @@ export interface TableModel {
   align?: ('start' | 'end')[];
   /** A cross table: the last row and the last column hold totals, and are written in bold. */
   totals?: { row?: boolean; column?: boolean };
+  /** The cells that hold a small-base value (add-small-sample-warnings, design D11): their text already ends in "*", and a screen reader is told why. */
+  marks?: boolean[][];
+  /** What the "*" means, written under the table ("* Base below 30."); also an image's note. */
+  note?: string;
 }
 
 /** The room kept under the rows for the note on the rows left out, about one line of small text. */
@@ -33,14 +37,14 @@ const noteRoom = 24;
           </tr>
         </thead>
         <tbody>
-          @for (row of model().rows; track $index; let lastRow = $last) {
+          @for (row of model().rows; track $index; let lastRow = $last; let rowIndex = $index) {
             <!-- On paper only the rows that fit the box are printed, never half a row (dashboard printing, design D8). -->
             <tr [class]="tableRow + ($index >= printedRows() ? ' paper:hidden' : '') + (model().totals?.row && lastRow ? ' font-semibold text-heading' : '')" data-testid="widget-table-row">
               @for (cell of row; track $index) {
                 @if ($index === 0) {
                   <th scope="row" [class]="tableCell + ' sticky start-0 z-10 max-w-xs break-words bg-neutral-primary-soft text-heading ' + (model().totals?.row && lastRow ? 'font-semibold' : 'font-normal')">{{ cell }}</th>
                 } @else {
-                  <td [class]="tableCell + (endAligned($index) ? ' text-end tabular-nums' : '') + (inLastColumn($index) ? ' font-semibold text-heading' : '') + ($index >= printedColumns() ? ' paper:hidden' : '')">{{ cell ?? '—' }}</td>
+                  <td [class]="tableCell + (endAligned($index) ? ' text-end tabular-nums' : '') + (inLastColumn($index) ? ' font-semibold text-heading' : '') + ($index >= printedColumns() ? ' paper:hidden' : '')">{{ cell ?? '—' }}@if (model().marks?.[rowIndex]?.[$index]) {<span class="sr-only" data-testid="widget-table-small"> {{ smallLabel() }}</span>}</td>
                 }
               }
             </tr>
@@ -48,6 +52,9 @@ const noteRoom = 24;
         </tbody>
       </table>
     </tmz-table-container>
+    @if (model().note; as note) {
+      <p class="mt-1 text-xs text-body" data-testid="widget-table-note">{{ note }}</p>
+    }
     @if (leftOut(); as count) {
       <p class="mt-1 hidden text-xs text-body paper:block" data-testid="widget-table-left-out" *transloco="let t">{{ t(leftOutKey(count), { count }) }}</p>
     }
@@ -94,6 +101,11 @@ export class WidgetTable {
     if (print) {
       inject(DestroyRef).onDestroy(print.registerMeasure(() => this.measure(print.printedAt())));
     }
+  }
+
+  /** The words a screen reader adds to a value with a small base. */
+  protected smallLabel(): string {
+    return this.transloco.translate('indicators.bases.tableMark');
   }
 
   protected endAligned(column: number): boolean {

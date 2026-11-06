@@ -1,7 +1,7 @@
 import { pressKey } from '../../../../testing/cdk';
 import { byTestId, settle } from '../../../../testing/project-harness';
 import { ChartType, DashboardColors, IndicatorEntry, PaletteId, QueryBox, QueryResult, QueryRow, ValueColor, WidgetConfig } from '../../../core/projects/indicators.service';
-import { Context, all, cell, clearOverlay, config, indicator, isQuery, open, result, row, seriesResult, text, toggleTable, widget } from './indicators-testing';
+import { Context, all, cell, clearOverlay, config, indicator, isQuery, open, result, row, seriesResult, text, tips, toggleTable, widget } from './indicators-testing';
 
 // The declared category order (add-declared-category-order, design D4 and D5) as every kind of chart draws it: the order of the
 // groups and of the series, the values kept last, the text without its leading number, and today's order when nothing is declared.
@@ -27,8 +27,8 @@ async function toggle(context: Context) {
   await settle(context.harness);
 }
 
-/** The group names of a chart with no series, as the marks' titles write them (`name: value`). */
-const groupsOf = (context: Context) => titles(marks(context)).map((title) => title.split(':')[0]);
+/** The group names of a chart with no series, as the tooltips of its marks write them (`name: value`). */
+const groupsOf = async (context: Context) => (await tips(context)).map((title) => title.split(':')[0]);
 
 const stores = (columns: IndicatorEntry['columns']) => [indicator('comercio_lugar_compra', { label: 'Lugar de compra', columns })];
 const places: QueryRow[] = [row('Almacenes del barrio', 10), row('Centro de Duitama', 30), row('Otro', 5), row('Vendedores ambulantes', 20)];
@@ -42,13 +42,13 @@ describe('the order of the groups of a bar or column chart', () => {
 
     const context = await show('column', byPlace, result(places), stores(columns));
 
-    expect(groupsOf(context)).toEqual(['Centro de Duitama', 'Almacenes del barrio', 'Otro', 'Vendedores ambulantes']);
+    expect(await groupsOf(context)).toEqual(['Centro de Duitama', 'Almacenes del barrio', 'Otro', 'Vendedores ambulantes']);
   });
 
   it('keeps a value last at the end (Declared order without a sort)', async () => {
     const context = await show('bar', byPlace, result(places), stores({ categoria: { last: ['Otro'] } }));
 
-    expect(groupsOf(context)).toEqual(['Almacenes del barrio', 'Centro de Duitama', 'Vendedores ambulantes', 'Otro']);
+    expect(await groupsOf(context)).toEqual(['Almacenes del barrio', 'Centro de Duitama', 'Vendedores ambulantes', 'Otro']);
   });
 
   it('follows the widget\'s own order over the indicator\'s (Widget order over the indicator\'s)', async () => {
@@ -56,7 +56,7 @@ describe('the order of the groups of a bar or column chart', () => {
 
     const context = await show('column', own, result(places), stores({ categoria: { order: ['Almacenes del barrio'], last: ['Otro'] } }));
 
-    expect(groupsOf(context)).toEqual(['Vendedores ambulantes', 'Centro de Duitama', 'Almacenes del barrio', 'Otro']);
+    expect(await groupsOf(context)).toEqual(['Vendedores ambulantes', 'Centro de Duitama', 'Almacenes del barrio', 'Otro']);
   });
 
   it('keeps its sort and moves only the values kept last (Sorted bars keep the values kept last at the end)', async () => {
@@ -65,7 +65,7 @@ describe('the order of the groups of a bar or column chart', () => {
 
     const context = await show('bar', sorted, ascending, stores({ categoria: { order: ['Centro de Duitama'], last: ['Otro'] } }));
 
-    expect(groupsOf(context)).toEqual(['Almacenes del barrio', 'Vendedores ambulantes', 'Centro de Duitama', 'Otro']);
+    expect(await groupsOf(context)).toEqual(['Almacenes del barrio', 'Vendedores ambulantes', 'Centro de Duitama', 'Otro']);
   });
 
   it('writes the groups without their numbers and colors them by the full value (Numbered answers)', async () => {
@@ -75,14 +75,14 @@ describe('the order of the groups of a bar or column chart', () => {
       indicator('comercio_lugar_compra', { columns: { respuesta: { stripPrefix: true } } }),
     ]);
 
-    expect(groupsOf(context)).toEqual(['Sí', 'Tal vez', 'No']);
+    expect(await groupsOf(context)).toEqual(['Sí', 'Tal vez', 'No']);
     expect(text(byTestId(context.root, 'chart-svg')?.querySelector('title') ?? null)).not.toContain('1.');
   });
 
   it('draws as before when nothing is declared (Widgets without a declared category order)', async () => {
     const context = await show('column', byPlace, result(places), stores({ categoria: { label: 'Categoría' } }));
 
-    expect(groupsOf(context)).toEqual(['Almacenes del barrio', 'Centro de Duitama', 'Otro', 'Vendedores ambulantes']);
+    expect(await groupsOf(context)).toEqual(['Almacenes del barrio', 'Centro de Duitama', 'Otro', 'Vendedores ambulantes']);
   });
 });
 
@@ -195,7 +195,7 @@ describe('the order of a pie chart', () => {
   it('draws its slices from the largest without a declaration (Largest slice first without a declared order)', async () => {
     const context = await show('pie', settings, result(visits), sources(undefined));
 
-    expect(titles(all(context.root, 'pie-slice')).map((t) => t.split(':')[0])).toEqual(['Piped', 'Well', 'River']);
+    expect((await tips(context, 'pie')).map((t) => t.split(':')[0])).toEqual(['Piped', 'Well', 'River']);
   });
 
   it('draws its slices in the widget\'s own order and still names the largest in its summary (Slices in a declared order)', async () => {
@@ -203,7 +203,7 @@ describe('the order of a pie chart', () => {
 
     const context = await show('pie', own, result(visits), sources(undefined));
 
-    expect(titles(all(context.root, 'pie-slice')).map((t) => t.split(':')[0])).toEqual(['River', 'Well', 'Piped']);
+    expect((await tips(context, 'pie')).map((t) => t.split(':')[0])).toEqual(['River', 'Well', 'Piped']);
     expect(label(context)).toContain('Piped');
     expect(all(context.root, 'legend-item').map((item) => text(item.querySelector('span:not([aria-hidden])')))).toEqual(['River', 'Well', 'Piped']);
   });
@@ -292,7 +292,7 @@ describe('numbered category prefixes hidden (design D5)', () => {
 
     const context = await show('column', { indicator: 'teatro_conteo', groupBy: 'rango' }, result(ranges), [indicator('teatro_conteo', { columns: { rango: { stripPrefix: true } } })]);
 
-    expect(groupsOf(context)).toEqual(['10 - 14', '0 - 4', '1.5 horas']);
+    expect(await groupsOf(context)).toEqual(['10 - 14', '0 - 4', '1.5 horas']);
   });
 
   it('keeps the full text of values that would read alike (Values that would read alike)', async () => {
@@ -300,7 +300,7 @@ describe('numbered category prefixes hidden (design D5)', () => {
 
     const context = await show('column', { indicator: 'teatro_conteo', groupBy: 'rango' }, result(alike), [indicator('teatro_conteo', { columns: { rango: { stripPrefix: true } } })]);
 
-    expect(groupsOf(context)).toEqual(['1. Otro', '6. Otro', 'Sí']);
+    expect(await groupsOf(context)).toEqual(['1. Otro', '6. Otro', 'Sí']);
   });
 
   it('keeps the numbers when the column hides nothing (Numbered labels kept)', async () => {
@@ -355,7 +355,7 @@ describe('colors follow a declared category order (design D10)', () => {
       indicator('households_visited'),
     ]);
 
-    expect(titles(all(context.root, 'pie-slice')).map((t) => t.split(':')[0])).toEqual(['River', 'Well', 'Piped']);
+    expect((await tips(context, 'pie')).map((t) => t.split(':')[0])).toEqual(['River', 'Well', 'Piped']);
     expect(all(context.root, 'pie-slice').map(colorOf)).toEqual([pal(1), pal(2), pal(3)]);
   });
 
@@ -365,7 +365,7 @@ describe('colors follow a declared category order (design D10)', () => {
 
     const context = await show('column', own, result(places), stores(undefined), palette('tamiza', [{ column: 'categoria', value: 'Centro de Duitama', color: 1 }]));
 
-    expect(groupsOf(context)).toEqual(['Vendedores ambulantes', 'Centro de Duitama', 'Almacenes del barrio']);
+    expect(await groupsOf(context)).toEqual(['Vendedores ambulantes', 'Centro de Duitama', 'Almacenes del barrio']);
     expect(marks(context).map(colorOf)).toEqual([pal(2), pal(1), pal(2)]);
   });
 });

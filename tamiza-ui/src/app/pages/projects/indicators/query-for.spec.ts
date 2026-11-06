@@ -1,5 +1,5 @@
-import { LikertStep, WidgetConfig, WidgetDisplay, WidgetReferenceLine, WidgetSort, WidgetTooltipItem, chartTypes, emptyConfig } from '../../../core/projects/indicators.service';
-import { offersDataLabels, overallFor, queryFor, referenceKindsFor, savedConfig } from './widget-view';
+import { ChartType, LikertStep, WidgetConfig, WidgetDisplay, WidgetReferenceLine, WidgetSort, WidgetTooltipItem, chartTypes, emptyConfig, takesMissingFooter } from '../../../core/projects/indicators.service';
+import { offersDataLabels, overallFor, queryFor, referenceKindsFor, savedConfig, unfilteredFor } from './widget-view';
 
 const byColumn: WidgetSort = { by: 'column', column: 'round', compareAs: 'number', direction: 'asc' };
 const byValue: WidgetSort = { by: 'value', column: null, compareAs: null, direction: 'desc' };
@@ -673,5 +673,149 @@ describe('savedConfig with an own order of values (add-declared-category-order, 
   it('leaves out an empty order, so a widget saved unchanged keeps its stored text', () => {
     expect(savedConfig('column', withOrder({ display: { order: { group: [], series: [] } } })).display).toBeUndefined();
     expect(savedConfig('column', withOrder({ display: { color: 2, order: { group: [] } }, seriesBy: undefined })).display).toEqual({ color: 2 });
+  });
+});
+
+describe('queryFor and savedConfig with the base settings (add-small-sample-warnings, design D6, D7)', () => {
+  const kindsThatTake: ChartType[] = ['bar', 'column', 'line', 'pie', 'heatmap', 'pyramid', 'likert', 'crosstab'];
+  const withSeries = (type: ChartType): Partial<WidgetConfig> => (['heatmap', 'pyramid', 'likert', 'crosstab'].includes(type) ? { seriesBy: 'respuesta' } : {});
+
+  it('names the eight kinds that can leave out the values that mean no data', () => {
+    expect(chartTypes.filter(takesMissingFooter)).toEqual(chartTypes.filter((type) => kindsThatTake.includes(type)));
+  });
+
+  it('sends missingFooter only when it is set and the kind takes it, a false as it was saved', () => {
+    for (const type of kindsThatTake) {
+      const base = { ...config(null), ...withSeries(type) };
+      expect(queryFor(type, { ...base, missingFooter: true }).missingFooter, type).toBe(true);
+      expect(queryFor(type, { ...base, missingFooter: false }).missingFooter, type).toBe(false);
+      expect('missingFooter' in queryFor(type, base), type).toBe(false);
+    }
+    for (const type of chartTypes.filter((type) => !kindsThatTake.includes(type))) {
+      expect('missingFooter' in queryFor(type, { ...config(null), missingFooter: true }), type).toBe(false);
+    }
+  });
+
+  it('gives the query of a widget without it byte for byte as before, and a different key when it is set', () => {
+    const plain = config(null);
+
+    expect(JSON.stringify(queryFor('column', plain))).toBe(JSON.stringify(queryFor('column', { ...plain, missingFooter: undefined })));
+    expect(JSON.stringify(queryFor('column', { ...plain, missingFooter: true }))).not.toBe(JSON.stringify(queryFor('column', plain)));
+  });
+
+  it('drops missingFooter when the chart type changes to a kind that does not take it, and keeps minN and showN', () => {
+    const own = { ...config(null), missingFooter: true, display: { minN: 0, showN: false } };
+
+    expect(savedConfig('column', own).missingFooter).toBe(true);
+    const stat = savedConfig('stat', own);
+    expect('missingFooter' in stat).toBe(false);
+    expect(stat.display).toEqual({ minN: 0, showN: false });
+    expect(savedConfig('histogram', own).display).toEqual({ minN: 0, showN: false });
+  });
+
+  it('keeps a threshold of 0 and a n line that is false as they were saved, on every kind, and saves no display for a widget with neither', () => {
+    for (const type of chartTypes) {
+      expect(savedConfig(type, { ...config(null), display: { minN: 0 } }).display, type).toEqual({ minN: 0 });
+      expect(savedConfig(type, { ...config(null), display: { showN: false } }).display, type).toEqual({ showN: false });
+      expect(savedConfig(type, { ...config(null), display: { minN: 30, showN: true } }).display, type).toEqual({ minN: 30, showN: true });
+    }
+    expect('display' in savedConfig('column', config(null))).toBe(false);
+  });
+
+  it('leaves minN and showN out of the query of every kind, so changing them never queries again', () => {
+    for (const type of chartTypes) {
+      expect(JSON.stringify(queryFor(type, { ...config(null), display: { minN: 30, showN: true } })), type).toBe(JSON.stringify(queryFor(type, config(null))));
+    }
+  });
+
+  it('saves minN and showN after the order, where the API writes them', () => {
+    const saved = savedConfig('column', { ...config(null), display: { showN: true, minN: 30, footnote: 'Nota', dataLabels: true } });
+
+    expect(Object.keys(saved.display!)).toEqual(['footnote', 'dataLabels', 'minN', 'showN']);
+  });
+});
+
+// The statistic is a query setting and the line without filters a flag of the request (improve-stat-cards, design D2 and D3). The cases are
+// those of `WidgetQueryTests` in tamiza-api (the twins `queryFor` / `WidgetQuery.For` and `unfilteredFor` / `WidgetQuery.Unfiltered`).
+describe('queryFor, unfilteredFor and savedConfig with a statistic and secondary lines (improve-stat-cards, design D2, D3)', () => {
+  const tile = (statistic?: WidgetConfig['statistic'], display?: WidgetDisplay): WidgetConfig => ({
+    ...emptyConfig('encuesta_hoy'),
+    measure: 'value',
+    groupBy: 'zona',
+    ...(statistic ? { statistic } : {}),
+    ...(display ? { display } : {}),
+  });
+  const lineSets: [string, ('n' | 'unfiltered')[]][] = [
+    ['n', ['n']],
+    ['unfiltered', ['unfiltered']],
+    ['n and unfiltered', ['n', 'unfiltered']],
+    ['unfiltered and n', ['unfiltered', 'n']],
+  ];
+
+  it('sends the statistic of a stat tile, leaves it out of a tile without one, and never groups', () => {
+    expect(queryFor('stat', tile('median')).statistic).toBe('median');
+    expect(queryFor('stat', tile('mean')).statistic).toBe('mean');
+    expect(queryFor('stat', tile('p25')).statistic).toBe('p25');
+    expect(queryFor('stat', tile()).statistic).toBeUndefined();
+    expect(JSON.stringify(queryFor('stat', tile()))).not.toContain('statistic');
+    expect(queryFor('stat', tile('median')).groupBy).toBeNull();
+  });
+
+  it('sends the statistic for a stat tile only, and the query of every other kind is what it was', () => {
+    for (const type of chartTypes.filter((kind) => kind !== 'stat')) {
+      expect(JSON.stringify(queryFor(type, tile('median'))), type).toBe(JSON.stringify(queryFor(type, tile())));
+    }
+  });
+
+  it.each(lineSets)('queries a tile with the lines %s as the same tile without them, and asks for the value without filters only with that line', (_name, lines) => {
+    const plain = tile('median');
+    const lined = tile('median', { secondary: lines });
+
+    expect(JSON.stringify(queryFor('stat', lined))).toBe(JSON.stringify(queryFor('stat', plain)));
+    expect(JSON.stringify(queryFor('stat', lined))).not.toContain('unfiltered');
+    expect(unfilteredFor('stat', lined)).toBe(lines.includes('unfiltered'));
+    expect(unfilteredFor('stat', plain)).toBe(false);
+  });
+
+  it('asks for the value without filters only for a stat tile that holds that line', () => {
+    expect(unfilteredFor('stat', tile(undefined, { secondary: ['unfiltered'] }))).toBe(true);
+    expect(unfilteredFor('stat', tile('p75', { secondary: ['n', 'unfiltered'] }))).toBe(true);
+    expect(unfilteredFor('stat', tile(undefined, { secondary: ['n'] }))).toBe(false);
+    expect(unfilteredFor('stat', tile(undefined, { color: 2 }))).toBe(false);
+    expect(unfilteredFor('stat', tile())).toBe(false);
+    expect(unfilteredFor('stat', tile(undefined, { secondary: [] }))).toBe(false);
+  });
+
+  it('never asks for the value without filters of another kind, whatever lines it carries', () => {
+    const stray = tile(undefined, { secondary: ['n', 'unfiltered'] });
+
+    for (const type of chartTypes) {
+      expect(unfilteredFor(type, stray), type).toBe(type === 'stat');
+    }
+  });
+
+  it('saves the statistic and the lines of a stat tile, in the order the lines were saved, and nothing for a tile without them', () => {
+    expect(savedConfig('stat', tile('median', { secondary: ['n', 'unfiltered'] }))).toMatchObject({ statistic: 'median', display: { secondary: ['n', 'unfiltered'] } });
+    expect(savedConfig('stat', tile(undefined, { secondary: ['unfiltered', 'n'] })).display?.secondary).toEqual(['unfiltered', 'n']);
+    expect(savedConfig('stat', tile('mean')).display).toBeUndefined();
+    expect('statistic' in savedConfig('stat', tile())).toBe(false);
+    expect('display' in savedConfig('stat', tile(undefined, { secondary: [] }))).toBe(false);
+  });
+
+  it('drops the statistic and the lines when a stat tile becomes any other kind (Stat tile turned into a bar chart)', () => {
+    const own = tile('median', { secondary: ['n', 'unfiltered'], footnote: 'Nota' });
+
+    for (const type of chartTypes.filter((kind) => kind !== 'stat')) {
+      const saved = savedConfig(type, own);
+      expect('statistic' in saved, type).toBe(false);
+      expect(saved.display?.secondary, type).toBeUndefined();
+      expect(saved.display?.footnote, type).toBe('Nota');
+    }
+  });
+
+  it('saves the lines after the base settings, where the API writes them', () => {
+    const saved = savedConfig('stat', { ...tile(), display: { secondary: ['n'], showN: true, minN: 30, footnote: 'Nota' } });
+
+    expect(Object.keys(saved.display!)).toEqual(['footnote', 'minN', 'showN', 'secondary']);
   });
 });

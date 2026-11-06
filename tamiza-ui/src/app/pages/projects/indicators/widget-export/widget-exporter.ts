@@ -26,6 +26,8 @@ export interface ImageJob {
   registration: ExportRegistration;
   /** The tile's own notes above its chart ("Not filtered by …", the row limit). */
   notesAbove: string[];
+  /** The tile's lines under its chart (add-small-sample-warnings, design D11): the small-base note, the base n line and the no-data line. */
+  notesBelow: string[];
   /** The map's shapes in the member's view when the widget is a map drawn as a chart; null otherwise. */
   mapPicture: MapPicture | null;
   /** "The basemap is not included in the image.", when the member shows a basemap under the map; else null. */
@@ -137,6 +139,7 @@ export async function makeImage(job: ImageJob, environment: ImageEnvironment, ra
       subtitle: job.subtitle,
       footnote: job.footnote,
       notesAbove: job.notesAbove,
+      notesBelow: job.notesBelow,
       parts,
       plot,
       notesExtra: job.basemapNote ? [job.basemapNote] : [],

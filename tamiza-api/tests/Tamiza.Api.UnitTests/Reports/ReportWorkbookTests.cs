@@ -305,4 +305,50 @@ public sealed class ReportWorkbookTests : IDisposable
         Assert.Equal("#,##0", CellFormat(2, "B2"));
         Assert.Contains("Agree (2)", Rows("2. Counts")[0].Keys);
     }
+
+    [Fact]
+    public void Workbook_cell_of_a_small_base_holds_the_number_alone_the_n_column_is_whole_and_the_summary_holds_the_note()
+    {
+        Write(Model([SmallBases(1, "2.1. Asistió, por comuna")]));
+
+        var rows = Rows("1. 2.1. Asistió, por comuna");
+        Assert.Equal(["COMUNA 1", "COMUNA 7", "SIN NOMBRE"], rows.Select(r => r["Comuna"]?.ToString()));
+        // The cell of COMUNA 7 holds 0.5, never the text with its mark, and it keeps its percent format.
+        Assert.Equal(0.5, Convert.ToDouble(rows[1]["Teatro hoy: numerator / denominator"]));
+        Assert.Equal("0.00%", CellFormat(1, "B3"));
+        // The n column is a whole number in the workbook as it is in the body.
+        Assert.Equal(16d, Convert.ToDouble(rows[1]["n"]));
+        Assert.Equal("#,##0", CellFormat(1, "C3"));
+
+        var summary = Rows("Summary").Select(r => r.Values.Select(v => v?.ToString() ?? "").ToArray()).ToList();
+        var notes = Assert.Single(summary, r => r[0] == "Notes: 2.1. Asistió, por comuna");
+        Assert.Equal("2 values have a base below 30, marked *. n = 157 Hogares que asistieron Sin dato: 50%", notes[1]);
+    }
+
+    [Fact]
+    public void An_n_column_header_does_not_take_the_format_of_a_group_column_named_n_on_another_sheet()
+    {
+        var other = Table(2, "Other", [new ReportColumn("n"), new ReportColumn("Value", "#,##0")], ["a", 1d]);
+
+        Write(Model([SmallBases(1, "First"), other]));
+
+        // The first sheet's n column holds numbers formatted "#,##0"; the later sheet's text column named n gets the position in brackets.
+        Assert.Equal(["Comuna", "Teatro hoy: numerator / denominator", "n"], Rows("1. First")[0].Keys);
+        Assert.Equal(["n (2)", "Value"], Rows("2. Other")[0].Keys);
+    }
+
+    [Fact]
+    public void The_summary_line_of_a_stat_tile_gives_its_lines_after_the_value()
+    {
+        var tile = Stat(1, "Asistieron", "46.85% de los hogares") with { StatLines = ["n = 476 Hogares", "Without filters: 50%"], Footnote = "Sin dato aparte (E5)." };
+
+        Write(Model([tile, Stat(2, "Total", "250")]));
+
+        var rows = Rows("Summary").Select(r => r.Values.Select(v => v?.ToString()).ToArray()).ToList();
+        Assert.Contains(rows, r => r.SequenceEqual(["Asistieron", "46.85% de los hogares; n = 476 Hogares; Without filters: 50%"]));
+        // A tile without lines keeps its line.
+        Assert.Contains(rows, r => r.SequenceEqual(["Total", "250"]));
+        // The lines are before the tile's footnote, which has its own line.
+        Assert.True(rows.FindIndex(r => r[0] == "Asistieron") < rows.FindIndex(r => r[0] == "Footnote: Asistieron"));
+    }
 }

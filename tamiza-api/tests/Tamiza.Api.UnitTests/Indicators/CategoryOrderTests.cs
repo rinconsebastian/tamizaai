@@ -412,6 +412,24 @@ public sealed class CategoryOrderTests
     }
 
     [Fact]
+    public void The_figures_of_a_cell_move_with_its_column_when_the_series_are_arranged()
+    {
+        // Each cell's figures are told apart by their n: the cell of column i has the n 100 + i (add-small-sample-warnings, design D2).
+        var grid = Grid() with
+        {
+            Rows = [.. Grid().Rows.Select(row => row with { Figures = [.. row.Cells.Select((_, i) => (CellFigures?)new CellFigures(null, null, 100 + i))] })],
+        };
+        var orders = new CategoryOrders(null, new PlaceOrder(["1. Sí", "2. No"], ["4. No sabe"], false), false, false);
+
+        var arranged = CategoryOrder.ArrangeTable(grid, orders);
+
+        // The columns move from positions 1, 3, 0, 2, 4, and the figures with them.
+        Assert.Equal<double?>([2, 4, 1, 3, 5], arranged.Rows[0].Cells);
+        Assert.Equal<double?>([101, 103, 100, 102, 104], arranged.Rows[0].Figures!.Select(f => f!.N));
+        Assert.Null(CategoryOrder.ArrangeTable(Grid(), orders).Rows[0].Figures);
+    }
+
+    [Fact]
     public void A_row_keeps_its_cells_and_total_when_the_groups_are_arranged_and_none_goes_last()
     {
         var orders = new CategoryOrders(new PlaceOrder(["COMUNA 1", "COMUNA 2"], ["Sin dato"], false), null, false, false);

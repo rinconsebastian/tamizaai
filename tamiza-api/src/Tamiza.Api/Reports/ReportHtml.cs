@@ -115,7 +115,7 @@ public static class ReportHtml
             foreach (var stat in chunk)
             {
                 var value = stat.StatValue is { } shown
-                    ? $"<p style=\"margin:4px 0;font-size:24px;font-weight:bold;color:#111827;\">{E(shown)}</p>"
+                    ? $"<p style=\"margin:4px 0;font-size:20px;font-weight:bold;color:#111827;\">{E(shown)}</p>"
                     : $"<p style=\"margin:4px 0;font-size:13px;{Muted}\">{E(stat.Reason)}</p>";
                 cells.Append("<td width=\"33%\" style=\"padding:8px;vertical-align:top;border:1px solid #e5e7eb;\">")
                     .Append($"<p style=\"margin:0;font-size:13px;color:#374151;\">{E(stat.Title)}</p>")
@@ -126,7 +126,9 @@ public static class ReportHtml
                     cells.Append($"<p style=\"margin:0;font-size:12px;{Muted}\">{E(stat.Caption)}</p>");
                 }
 
-                cells.Append(Notes(stat.Notes))
+                // The tile's lines come under what it plots, in the muted color, before its notes and its footnote (design D7 of improve-stat-cards).
+                cells.Append(string.Concat(stat.StatLines.Select(line => $"<p style=\"margin:2px 0 0;font-size:12px;{Muted}\">{E(line)}</p>")))
+                    .Append(Notes(stat.Notes))
                     .Append(Footnote(stat))
                     .Append("</td>");
             }
@@ -246,7 +248,8 @@ public static class ReportPlainText
             body.AppendLine().AppendLine(text["indicators"]);
             foreach (var stat in stats)
             {
-                body.AppendLine($"- {stat.Title}: {stat.StatValue ?? stat.Reason}{(stat.CaptionHidden ? "" : $" ({stat.Caption})")}");
+                // The value, then the tile's lines after it: "- Title: 50%; n = 156 Hogares (what it plots)".
+                body.AppendLine($"- {stat.Title}: {string.Join("; ", stat.StatLines.Prepend(stat.StatValue ?? stat.Reason ?? ""))}{(stat.CaptionHidden ? "" : $" ({stat.Caption})")}");
                 if (stat.Subtitle is { } subtitle)
                 {
                     body.AppendLine($"  {subtitle}");

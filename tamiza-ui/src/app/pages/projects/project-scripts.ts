@@ -28,7 +28,7 @@ import {
 import { Alert, ApiLang, Badge, Button, Card, ConfirmDialog, DropdownMenu, FormField, Input, MenuItem, Skeleton, ToastService, Tone, DateTimePipe, numberText } from '../../shared/ui';
 import { CodeEditor } from '../../shared/ui/code-editor';
 import { AddIndicatorData, AddIndicatorDialog, NewIndicator } from './add-indicator-dialog';
-import { columnsOf, draftsOf, sameColumns } from './column-names';
+import { columnsOf, draftsOf, hasAny, sameColumns } from './column-names';
 import { IndicatorMetadataFields } from './indicator-metadata-fields';
 import { PipelineRuns } from './pipeline-runs';
 import { valueFormatter } from './indicators/format';
@@ -191,6 +191,7 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
                         class="mt-3 block"
                         [value]="shownMetadata()"
                         [columns]="columnNames()"
+                        [numeric]="numericColumns()"
                         [offered]="valuesOffered()"
                         [errors]="fieldErrors()"
                         (valueChange)="editMetadata($event)"
@@ -212,11 +213,14 @@ function sameMetadata(a: IndicatorMetadata, b: IndicatorMetadata): boolean {
                               @for (entry of shownColumns(); track entry.column) {
                                 <li class="break-words" data-testid="indicator-meta-column">
                                   <code>{{ entry.column }}</code>{{ entry.label ? ': ' + entry.label : '' }}
-                                  @if (entry.order || entry.last || entry.strip) {
+                                  @if (entry.order || entry.last || entry.strip || entry.base || entry.missing.length || entry.categories) {
                                     <span class="text-body" data-testid="indicator-meta-column-order">
                                       @if (entry.order) { · {{ t('scripts.columns.order.summaryOrdered', { count: entry.order }) }} }
                                       @if (entry.last) { · {{ t('scripts.columns.order.summaryLast', { count: entry.last }) }} }
                                       @if (entry.strip) { · {{ t('scripts.columns.order.summaryStrip') }} }
+                                      @if (entry.base) { · {{ t('scripts.columns.facts.summaryBase') }} }
+                                      @if (entry.missing.length) { · {{ t('scripts.columns.facts.textMissing', { values: entry.missing.join(', ') }) }} }
+                                      @if (entry.categories) { · {{ t(entry.categories === 'single' ? 'scripts.columns.facts.summarySingle' : 'scripts.columns.facts.summaryMultiple') }} }
                                     </span>
                                   }
                                 </li>
@@ -506,19 +510,32 @@ export class ProjectScripts {
   protected readonly shownMetadata = computed(() => (this.viewing() ? metadataOf(this.viewing()!) : this.meta()));
   /** The columns of the selected indicator's published table, in the table's order; empty while it has not published. */
   private readonly publishedColumns = signal<string[]>([]);
+  /** The numeric columns of that table: the ones the Base group offers (add-small-sample-warnings, design D1). */
+  private readonly publishedNumeric = signal<string[]>([]);
   /**
    * The columns the Column names section offers (design D8): those of the latest test of the draft, or without one those of the
    * published table. A column with a saved label that this list lacks follows them in the section itself.
    */
   protected readonly columnNames = computed(() => this.testedColumns() ?? this.publishedColumns());
+  /** The numeric columns among them, from the same table. */
+  protected readonly numericColumns = computed(() => this.testedNumeric() ?? this.publishedNumeric());
   /**
    * The columns of the version on view or of the indicator that say anything (a name, an order, values kept at the end or hidden
    * prefixes), as text for whoever cannot edit them.
    */
   protected readonly shownColumns = computed(() =>
     Object.entries(this.shownMetadata().columns)
-      .filter(([, draft]) => draft.label.trim() || draft.order.length || draft.last.length || draft.stripPrefix)
-      .map(([column, draft]) => ({ column, label: draft.label.trim(), order: draft.order.length, last: draft.last.length, strip: draft.stripPrefix })),
+      .filter(([, draft]) => hasAny(draft))
+      .map(([column, draft]) => ({
+        column,
+        label: draft.label.trim(),
+        order: draft.order.length,
+        last: draft.last.length,
+        strip: draft.stripPrefix,
+        base: draft.base,
+        missing: draft.missing,
+        categories: draft.categories,
+      })),
   );
   /**
    * The values the latest test of the draft saw in each column of up to 50 values (the dashboard view of the test lists them), offered when
@@ -595,6 +612,15 @@ export class ProjectScripts {
 
   /** The columns of the table the latest test of the selected indicator returned, or null when it returned none. */
   private testedColumns(): string[] | null {
+    return this.testedTable()?.map((column) => column.name) ?? null;
+  }
+
+  /** The numeric columns of that table, or null when the test returned none. */
+  private testedNumeric(): string[] | null {
+    return this.testedTable()?.filter((column) => column.type === 'integer' || column.type === 'decimal').map((column) => column.name) ?? null;
+  }
+
+  private testedTable(): { name: string; type: string }[] | null {
     const test = this.latestTest();
     const name = this.indicatorName();
     if (!test || !name || test.kind !== 'indicator' || test.name !== name) {
@@ -602,7 +628,7 @@ export class ProjectScripts {
     }
     const step = [...test.steps].reverse().find((s) => s.step === 'indicator');
     const table = step?.tables.find((t) => t.name === name && t.columns) ?? step?.tables.find((t) => t.columns);
-    return table?.columns?.map((column) => column.name) ?? null;
+    return table?.columns ?? null;
   }
 
   /** Reads the columns of the selected indicator's published table, for its Column names. */
@@ -610,12 +636,18 @@ export class ProjectScripts {
     const name = this.indicatorName();
     if (!name || this.newIndicator()) {
       this.publishedColumns.set([]);
+      this.publishedNumeric.set([]);
       return;
     }
-    const keep = (columns: string[]) => this.indicatorName() === name && this.publishedColumns.set(columns);
+    const keep = (columns: string[], numeric: string[]) => {
+      if (this.indicatorName() === name) {
+        this.publishedColumns.set(columns);
+        this.publishedNumeric.set(numeric);
+      }
+    };
     this.indicatorTables.columns(this.projectId(), name).subscribe({
-      next: (result) => keep(result.published ? result.columns.map((column) => column.name) : []),
-      error: () => keep([]),
+      next: (result) => keep(result.published ? result.columns.map((column) => column.name) : [], result.published ? result.numeric : []),
+      error: () => keep([], []),
     });
   }
 
@@ -682,6 +714,7 @@ export class ProjectScripts {
     this.fieldErrors.set({});
     this.meta.set(metadata);
     this.publishedColumns.set([]);
+    this.publishedNumeric.set([]);
     this.draft.set(newIndicatorTemplate.source);
     // Explicit, because the editor's value input does not change when the previous script had the template as its code.
     this.editor()?.replace(newIndicatorTemplate.source);

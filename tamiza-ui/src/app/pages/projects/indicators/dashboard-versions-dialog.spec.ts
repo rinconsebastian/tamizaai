@@ -202,6 +202,15 @@ describe('DashboardVersionsDialog', () => {
     expect(dialog.changes(5)).toEqual([words]);
   });
 
+  it.each<[InterfaceLanguage, string]>([
+    ['en', 'Base sizes changed'],
+    ['es', 'Se cambiaron los tamaños de base'],
+  ])('says in %s that a version changed the base settings of the dashboard', async (lang, words) => {
+    const dialog = await open(listOf([version(5, { changes: [{ kind: 'basesChanged' }] })]), { lang });
+
+    expect(dialog.changes(5)).toEqual([words]);
+  });
+
   it.each<InterfaceLanguage>(['en', 'es'])('has words in %s for every kind of change the service lists', async (lang) => {
     const dialog = await open(
       listOf(dashboardChangeKinds.map((kind, i) => version(dashboardChangeKinds.length - i, { changes: [{ kind, widget: 'W', dashboard: 'D', version: 7 }] }))),

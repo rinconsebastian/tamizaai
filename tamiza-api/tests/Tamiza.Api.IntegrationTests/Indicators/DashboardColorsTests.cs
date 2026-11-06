@@ -698,6 +698,28 @@ public sealed class DashboardColorsTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_tile_keeps_its_statistic_and_its_secondary_lines_when_it_is_moved()
+    {
+        await using var h = await PublishedAsync();
+        var field = await h.AddDashboardAsync("Field");
+        var created = await h.AddWidgetAsync(new
+        {
+            title = "Median", chartType = "stat",
+            config = new { indicator = "households", measure = "value", statistic = "mean", display = new { secondary = new[] { "n", "unfiltered" } } },
+        });
+        var stored = await StoredConfigAsync(h, created);
+
+        var moved = await h.Analyst.PatchJsonAsync(h.WidgetUrl(created.GetProperty("id").GetGuid()), new { dashboardId = field });
+
+        Assert.Equal(HttpStatusCode.OK, moved.StatusCode);
+        var landed = ConfigOf((await h.GetWidgetsAsync(field))[0]);
+        Assert.Equal("mean", landed.GetProperty("statistic").GetString());
+        Assert.Equal("""["n","unfiltered"]""", landed.GetProperty("display").GetProperty("secondary").GetRawText());
+        Assert.Equal(stored, await StoredConfigAsync(h, created)); // the config is not even rewritten
+        Assert.Equal(0, (await h.GetWidgetsAsync()).GetArrayLength());
+    }
+
+    [Fact]
     public async Task Changing_the_palette_does_not_touch_the_widgets()
     {
         await using var h = await PublishedAsync();

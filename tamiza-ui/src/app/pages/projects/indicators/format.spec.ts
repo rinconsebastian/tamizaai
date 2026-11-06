@@ -1,6 +1,6 @@
 import { WidgetConfig, WidgetDisplay } from '../../../core/projects/indicators.service';
 import { ColumnMetadataMap } from '../../../core/projects/pipeline.service';
-import { IndicatorUnit, captionShown, columnLabels, isCurrencyCode, plotted, rawNames, textsCrowd, valueFormatter, withWidgetUnit } from './format';
+import { IndicatorUnit, captionShown, columnLabels, figureFormatter, isCurrencyCode, plotted, rawNames, textsCrowd, valueFormatter, withWidgetUnit } from './format';
 import columnCases from './testing/column-labels.json';
 
 const format = (indicator: IndicatorUnit) => valueFormatter(indicator, 'en-US');
@@ -263,5 +263,22 @@ describe('textsCrowd (add-widget-context, design D5)', () => {
 
   it('trims a text before it counts it', () => {
     expect(textsCrowd({ w: 4, h: 3 }, null, ` ${text(420)} `)).toBe(false);
+  });
+});
+
+describe('figureFormatter (add-small-sample-warnings, design D9)', () => {
+  it('writes a whole number with thousands separators and up to two decimals when it is not whole', () => {
+    const figure = figureFormatter('en-US');
+
+    expect(figure(16)).toBe('16');
+    expect(figure(12450)).toBe('12,450');
+    expect(figure(0.5)).toBe('0.5');
+    expect(figure(1.236)).toBe('1.24');
+    expect(figure(0)).toBe('0');
+  });
+
+  it('follows the locale, and never writes a percent or a unit', () => {
+    expect(figureFormatter('es-CO')(12450.5)).toBe('12.450,5');
+    expect(figureFormatter('en-US')(5600)).toBe('5,600');
   });
 });

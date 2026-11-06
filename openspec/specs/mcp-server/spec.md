@@ -243,6 +243,8 @@ Because scripts run without a strong sandbox and an AI client can be misled by t
 ### Requirement: Indicator queries and widget data
 `query_indicator` SHALL run a widget query (an indicator, a measure or a ratio, a column to group by, an optional series column, filters, and for histograms the ranges) without saving anything, and return what that widget would plot, formatted with the indicator's format and unit. `get_widget_data` SHALL return what one widget, or every widget of a dashboard, shows with the dashboard filters' default values or the values the call gives, including the message a widget shows when its indicator is not published or a column is gone. For a widget with a series, both SHALL return one value per pair of group and series value, the totals, the series in their order with "Other" when some were combined, and how many rows were left out. For a box plot, both SHALL return each box's group, number of values, minimum, first quartile, median, third quartile, maximum, mean, whisker ends and number of outliers, formatted, and SHALL NOT return a list of the outliers' values (a box's minimum and maximum are single figures, as a column profile's are). Both SHALL apply the row limit of widgets and say when it is reached.
 
+Both SHALL also return, for each value of a widget with no series and for each total, its base n and, for a ratio, the sums of its numerator and denominator; for each cell of a widget with a series, its base n; the widget's base n when it has one; and, for a widget that leaves out no-data values, those values and what they held (see `dashboard-indicators`). `get_widget_data` SHALL also say which values have a small base under the threshold in force.
+
 #### Scenario: Checking a widget before saving it
 - **WHEN** Claude calls `query_indicator` for the ratio of `numerator` to `denominator` of `piped_water_rate` grouped by `municipality`
 - **THEN** the result holds one value per municipality, formatted as a percent, and no widget is created
@@ -258,6 +260,14 @@ Because scripts run without a strong sandbox and an AI client can be misled by t
 #### Scenario: Checking a box plot
 - **WHEN** Claude calls `query_indicator` with the chart type box plot for `household_income` grouped by `municipality`
 - **THEN** the result holds one box per municipality with its number of values, its five figures from minimum to maximum, its mean, its whisker ends and its number of outliers, and no list of its outliers
+
+#### Scenario: Base figures of a widget
+- **WHEN** Claude calls `get_widget_data` for "2.1. Asistió, por comuna" on "Teatro", whose small-base threshold is 30
+- **THEN** each comuna has its value, numerator, denominator and n, and `COMUNA 7` and `SIN NOMBRE` are marked as small bases
+
+#### Scenario: Measure without a base through MCP
+- **WHEN** Claude calls `query_indicator` for the sum of `value` of `teatro_conteo`, which declares no base column
+- **THEN** its rows hold no numerator, denominator or n
 
 ### Requirement: Dashboards and widgets through MCP
 `create_dashboard`, `update_dashboard`, `duplicate_dashboard` and `remove_dashboard` SHALL add, rename, move to a position, change the filters of, change the colors of (palette and colors kept by value), duplicate and remove dashboards with the rules of the UI. `get_dashboard` SHALL return the dashboard's palette and colors kept by value. `create_widget` SHALL add a widget with a title, a chart type, a query and an optional position and size on the 12-column grid, placed under the dashboard's widgets when none is given; `update_widget` SHALL change any of them or move the widget to another dashboard. Both SHALL take every chart type and setting the widget form offers, including the series column, the layout of bars and columns, the sides of a population pyramid, the scale of a Likert widget, the order and the orientation of a box plot, and a widget's color and sequential scale, with the same validation. A dashboard's members SHALL see the change the next time their page reads the dashboard.
@@ -597,3 +607,59 @@ For a widget whose display has reference lines, `query_indicator` and `get_widge
 #### Scenario: Results of a widget that declares nothing
 - **WHEN** Claude calls `query_indicator` for a line chart whose indicator declares nothing for its group column
 - **THEN** the rows come in the same order as before declared orders existed
+
+### Requirement: Base settings through MCP
+`update_dashboard` SHALL set whether a dashboard shows its widgets' base n lines and its small-base threshold, 0 turning the threshold off, and `get_dashboard` and `get_dashboard_version` SHALL return both. `create_widget` and `update_widget` SHALL take a widget's own base n line and threshold and its option to leave out no-data values, with the rules of the UI.
+
+#### Scenario: Threshold through MCP
+- **WHEN** Claude calls `update_dashboard` on "Teatro" with the small-base threshold 30
+- **THEN** its members see its small bases dimmed, `get_dashboard` returns the threshold 30, and one version is made
+
+#### Scenario: No-data option on a stat tile through MCP
+- **WHEN** Claude calls `create_widget` for a stat tile that leaves out no-data values
+- **THEN** the call is refused with `mcp.validation` and the error on that option, and nothing is saved
+
+### Requirement: Base metadata through MCP
+`save_script` SHALL take an indicator's base column, values that mean no data and answer columns in `columns` with its column names, with the rules of the save form and the keep, replace and clear rules of `columns`. `list_indicators`, `get_script`, `get_indicator_columns` and `save_script`'s result SHALL return them.
+
+#### Scenario: Answers declared by Claude
+- **WHEN** Claude calls `save_script` for `comercio_lugar_compra` declaring `variable`, `orden` and `categoria` as the answers of single-choice questions and "Sin dato" as no data for `comuna`
+- **THEN** the new version holds both, and `get_script` returns them
+
+#### Scenario: Declarations replaced by labels alone
+- **WHEN** Claude calls `save_script` for `teatro_hoy`, whose current version declares `categoria` as answers, with `columns` = `{ "numerator": { "label": "Hogares que asistieron" } }`
+- **THEN** the new version declares no answers, since a given `columns` replaces the whole map
+
+#### Scenario: Two base columns through MCP
+- **WHEN** Claude calls `save_script` declaring both `hogares` and `personas` as the base
+- **THEN** the call is refused with `mcp.validation` and the error on `personas`, and no version is created
+
+### Requirement: Stat tiles through MCP
+`create_widget` and `update_widget` SHALL take a stat tile's statistic and secondary lines with the rules of the widget form, and SHALL refuse them on another chart type with `mcp.validation` and the error's key. `query_indicator` and `get_widget_data` SHALL return a stat tile's statistic with its value and n, and `get_widget_data` its value without the dashboard filters, formatted, while a filter in force narrows a tile that shows that line.
+
+#### Scenario: Median card through MCP
+- **WHEN** Claude calls `create_widget` for a stat tile with the statistic `median` over `teatro_precio_hogar` filtered to "Pagó por la última boleta (E7)"
+- **THEN** the widget is saved, and `get_widget_data` returns its statistic, the value 40000, `40,000 pesos` and the n 37
+
+#### Scenario: Statistic on a bar chart through MCP
+- **WHEN** Claude calls `create_widget` for a bar chart with the statistic `median`
+- **THEN** the call is refused with `mcp.validation` and the error on `config.statistic`, and nothing is saved
+
+#### Scenario: Value without the filters through MCP
+- **WHEN** Claude calls `get_widget_data` with "Comuna" set to `COMUNA 1` for a stat tile that shows the line without filters
+- **THEN** the result holds the tile's value for `COMUNA 1` and its value without the dashboard filters, each formatted
+
+#### Scenario: Chart type changed alone through MCP
+- **WHEN** Claude calls `update_widget` with only the chart type `bar` on a stat tile with a statistic
+- **THEN** the call is refused with `mcp.validation` and the error on `config.statistic`, and nothing is saved
+
+### Requirement: Ratio over declared categories through MCP
+`query_indicator` and `get_widget_data` SHALL return the figures the dashboard shows for a ratio over declared answers: the base counted once across the answers of a single-choice column in each value, total and cell and in the denominator returned with it, and, for a widget that would add up several answers of a multiple-choice column, the message the dashboard shows and no rows.
+
+#### Scenario: Card over several answers through MCP
+- **WHEN** Claude calls `query_indicator` for a stat tile over `cruces_intencion`, whose `categoria` is declared as the answers of a single-choice question, keeping `variable` "Componentes con sí o tal vez" and `categoria` in `1`, `2`, `3` and `4`
+- **THEN** the result holds its value formatted as `95.17% de los hogares`, not `23.79% de los hogares`
+
+#### Scenario: Refused card through MCP
+- **WHEN** Claude calls `get_widget_data` for a dashboard holding a stat tile over two reasons of `escuelas_razones_no`, whose `categoria` is declared as the answers of a multiple-choice question
+- **THEN** the result gives that widget no rows and the message naming `categoria`, and the other widgets' rows

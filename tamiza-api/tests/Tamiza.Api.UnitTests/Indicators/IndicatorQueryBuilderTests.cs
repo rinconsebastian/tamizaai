@@ -1053,4 +1053,604 @@ public sealed class IndicatorQueryBuilderTests
         Assert.Null(plan.Overall);
         Assert.Equal(["gone"], plan.MissingColumns);
     }
+
+    // The base n: figures appended to the select list, the widget's n window, and the answers counted once (design D5 of add-small-sample-warnings)
+
+    private static readonly TableColumn[] BaseColumns =
+    [
+        new("variable", DataColumnType.Text, null),
+        new("orden", DataColumnType.Text, null),
+        new("categoria", DataColumnType.Text, null),
+        new("comuna", DataColumnType.Text, null),
+        new("hogares", DataColumnType.Integer, null),
+        new("value", DataColumnType.Decimal, null),
+        new("numerator", DataColumnType.Decimal, null),
+        new("denominator", DataColumnType.Decimal, null),
+        new("geometry", DataColumnType.Text, null),
+    ];
+
+    private static IndicatorBases Declared(string? baseColumn = null, string[]? answers = null) =>
+        new(baseColumn, answers ?? [], new Dictionary<string, IReadOnlyList<string>>());
+
+    private static IndicatorQueryPlan Planned(
+        WidgetConfigInput input, IndicatorBases? bases = null, string? chartType = null, TableColumn[]? columns = null, bool perRow = false,
+        IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null) =>
+        IndicatorQueryBuilder.Plan(
+            input.Normalize(), columns ?? BaseColumns, "UTC", From, 5000, perRow, dashboardFilters, chartType, bases: bases);
+
+    private static WidgetConfigInput RatioBy(string? groupBy = "comuna") =>
+        new("coverage", Ratio: new WidgetRatio("numerator", "denominator"), GroupBy: groupBy);
+
+    private const string RatioAggregate = "sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)";
+
+    [Fact]
+    public void A_ratios_statement_is_todays_text_with_the_two_sums_appended_to_its_select_list()
+    {
+        var plan = Planned(RatioBy(), chartType: ChartTypes.Column);
+
+        Assert.StartsWith(
+            $"SELECT \"comuna\"::text, ({RatioAggregate}), NULL::text, sum(\"numerator\")::double precision, sum(\"denominator\")::double precision\nFROM {From}\n",
+            plan.Sql!.Sql);
+        Assert.Equal(new SqlFigures(3, 4, null, null), plan.Sql.Figures);
+        Assert.Null(plan.Counted);
+        // What follows the select list is what it was: the same groups, order, limit and parameters.
+        var without = Planned(RatioBy() with { Ratio = null, Measure = "value" }, chartType: ChartTypes.Column);
+        Assert.Null(without.Sql!.Figures);
+    }
+
+    [Fact]
+    public void A_ratios_figures_leave_every_other_clause_as_it_was()
+    {
+        var plan = Planned(RatioBy(), chartType: ChartTypes.Column);
+        var before = $"""
+            SELECT "comuna"::text, ({RatioAggregate}), NULL::text
+            FROM {From}
+            WHERE ("numerator" IS NOT NULL OR "denominator" IS NOT NULL)
+            GROUP BY "comuna"
+            HAVING ({RatioAggregate}) IS NOT NULL
+            ORDER BY {From}."comuna" NULLS LAST
+            LIMIT @limit
+            """;
+
+        Assert.Equal(before, plan.Sql!.Sql.Replace(", sum(\"numerator\")::double precision, sum(\"denominator\")::double precision", ""));
+    }
+
+    [Fact]
+    public void A_base_column_adds_its_sum_and_a_measure_with_one_has_only_that()
+    {
+        var ratio = Planned(RatioBy(), Declared("hogares"), ChartTypes.Column);
+        var measure = Planned(new WidgetConfigInput("coverage", Measure: "value", GroupBy: "comuna"), Declared("hogares"), ChartTypes.Column);
+
+        Assert.Contains("NULL::text, sum(\"numerator\")::double precision, sum(\"denominator\")::double precision, sum(\"hogares\")::double precision,", ratio.Sql!.Sql);
+        Assert.Equal(new SqlFigures(3, 4, 5, 6), ratio.Sql.Figures);
+        Assert.Contains("NULL::text, sum(\"hogares\")::double precision, (sum(sum(\"hogares\")) OVER ())::double precision\nFROM", measure.Sql!.Sql);
+        Assert.Equal(new SqlFigures(null, null, 3, 4), measure.Sql.Figures);
+    }
+
+    [Fact]
+    public void The_widget_n_window_appears_only_with_a_base_column_and_no_answer_column()
+    {
+        const string window = "(sum(sum(\"hogares\")) OVER ())::double precision";
+        var withBase = Planned(RatioBy(), Declared("hogares"), ChartTypes.Column);
+        var nothing = Planned(RatioBy(), null, ChartTypes.Column);
+        var answersOnly = Planned(RatioBy(), Declared(answers: ["categoria"]), ChartTypes.Column);
+        var both = Planned(RatioBy(), Declared("hogares", ["categoria"]), ChartTypes.Column);
+
+        Assert.Contains(window, withBase.Sql!.Sql);
+        Assert.DoesNotContain("OVER", nothing.Sql!.Sql);
+        Assert.DoesNotContain("OVER", answersOnly.Sql!.Sql);
+        Assert.DoesNotContain("OVER", both.Sql!.Sql);
+        Assert.Null(withBase.Counted);
+        // The window sees every plotted group: it runs after HAVING and before LIMIT.
+        Assert.True(withBase.Sql.Sql.IndexOf("OVER", StringComparison.Ordinal) < withBase.Sql.Sql.IndexOf("HAVING", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_histograms_statement_and_a_box_plots_are_todays_text_with_everything_declared()
+    {
+        var everything = Declared("hogares", ["categoria"]);
+        var histogram = new WidgetConfigInput("coverage", Measure: "value");
+        var box = new WidgetConfigInput("coverage", Measure: "value", GroupBy: "comuna");
+
+        var rows = Planned(histogram, everything, ChartTypes.Histogram, perRow: true);
+        var grouped = Planned(histogram with { GroupBy = "comuna", Ratio = new WidgetRatio("numerator", "denominator"), Measure = null }, everything, ChartTypes.Histogram);
+
+        Assert.Equal(Planned(histogram, null, ChartTypes.Histogram, perRow: true).Sql!.Sql, rows.Sql!.Sql);
+        Assert.Null(rows.Sql.Figures);
+        Assert.Null(grouped.Sql!.Figures);
+        Assert.Null(grouped.Counted);
+        Assert.Equal(Planned(box, null, ChartTypes.Boxplot).Boxes!.Sql, Planned(box, everything, ChartTypes.Boxplot).Boxes!.Sql);
+        Assert.Null(Planned(box, everything, ChartTypes.Boxplot).Boxes!.Figures);
+    }
+
+    [Fact]
+    public void A_maps_count_and_tooltip_outputs_keep_their_ordinals_and_the_figures_follow_them()
+    {
+        var map = (RatioBy() with { GeometryColumn = "geometry", Tooltip = [new WidgetTooltipItem("hogares")] });
+
+        var plan = Planned(map, Declared("hogares"), ChartTypes.Map);
+
+        // group, value, geometry, count(*), the tooltip column, then the figures.
+        Assert.StartsWith(
+            $"SELECT \"comuna\"::text, ({RatioAggregate}), min(\"geometry\"::text), count(*), sum(\"hogares\")::text, sum(\"numerator\")::double precision,",
+            plan.Sql!.Sql);
+        Assert.Equal(new SqlFigures(5, 6, 7, 8), plan.Sql.Figures);
+        Assert.Single(plan.Sql.TooltipTypes!);
+    }
+
+    [Fact]
+    public void A_stat_tile_takes_the_same_outputs_and_a_pie_and_a_series_free_widget_too()
+    {
+        var tile = Planned(RatioBy(groupBy: null), Declared("hogares"), ChartTypes.Stat);
+        var pie = Planned(RatioBy(), null, ChartTypes.Pie);
+
+        Assert.Contains("NULL::text, sum(\"numerator\")::double precision, sum(\"denominator\")::double precision, sum(\"hogares\")::double precision,", tile.Sql!.Sql);
+        Assert.Equal(new SqlFigures(3, 4, 5, 6), tile.Sql.Figures);
+        Assert.Equal(new SqlFigures(3, 4, null, null), pie.Sql!.Figures);
+        // The pie's domain statement is not changed by the figures.
+        Assert.DoesNotContain("numerator\")::double precision, sum", pie.Domain!.Sql);
+    }
+
+    [Fact]
+    public void An_indicator_without_metadata_plans_as_before()
+    {
+        var measure = new WidgetConfigInput("coverage", Measure: "value", GroupBy: "comuna");
+
+        Assert.Equal(Planned(measure).Sql!.Sql, Planned(measure, IndicatorBases.Resolve(null, BaseColumns)).Sql!.Sql);
+        Assert.Null(IndicatorBases.Resolve(new Dictionary<string, IndicatorColumnMetadata> { ["comuna"] = new("Comuna") }, BaseColumns));
+        Assert.Null(Planned(measure).Sql!.Figures);
+        Assert.Null(Planned(measure).Counted);
+    }
+
+    [Fact]
+    public void The_declarations_that_apply_are_resolved_against_the_published_columns()
+    {
+        var metadata = new Dictionary<string, IndicatorColumnMetadata>
+        {
+            ["hogares"] = new(Base: true),
+            ["categoria"] = new(Categories: "multiple"),
+            ["variable"] = new(Categories: "single", Missing: ["Sin dato"]),
+            ["comuna"] = new(Missing: ["Sin dato", "No sabe"]),
+            ["gone"] = new(Categories: "single", Missing: ["x"]),
+        };
+
+        var bases = IndicatorBases.Resolve(metadata, BaseColumns)!;
+
+        Assert.Equal("hogares", bases.BaseColumn);
+        Assert.Equal(["categoria", "variable"], bases.Answers);
+        Assert.Equal(["Sin dato", "No sabe"], bases.Missing["comuna"]);
+        Assert.Equal(["Sin dato"], bases.Missing["variable"]);
+        Assert.False(bases.Missing.ContainsKey("gone"));
+    }
+
+    [Fact]
+    public void A_base_held_as_text_and_answers_held_as_numbers_are_ignored()
+    {
+        var columns = BaseColumns.Select(c => c.Name switch
+        {
+            "hogares" => c with { Type = DataColumnType.Text },
+            "orden" => c with { Type = DataColumnType.Integer },
+            _ => c,
+        }).ToArray();
+        var metadata = new Dictionary<string, IndicatorColumnMetadata>
+        {
+            ["hogares"] = new(Base: true),
+            ["orden"] = new(Categories: "single", Missing: ["1"]),
+            ["value"] = new(Categories: "single"),
+        };
+
+        Assert.Null(IndicatorBases.Resolve(metadata, columns));
+    }
+
+    [Fact]
+    public void A_column_that_is_true_or_false_can_hold_answers_and_no_data_values()
+    {
+        var columns = new TableColumn[] { new("flag", DataColumnType.Boolean, null), new("value", DataColumnType.Decimal, null) };
+
+        var bases = IndicatorBases.Resolve(new Dictionary<string, IndicatorColumnMetadata> { ["flag"] = new(Categories: "single", Missing: ["false"]) }, columns)!;
+
+        Assert.Equal(["flag"], bases.Answers);
+        Assert.Equal(["false"], bases.Missing["flag"]);
+    }
+
+    private static string CountedOf(IndicatorQueryPlan plan) => plan.Counted!.Sql;
+
+    [Fact]
+    public void The_counted_statement_groups_by_every_declared_column_and_keeps_the_plotted_where_and_parameters()
+    {
+        var filter = new DataFilter("variable", "equals", Value: "Frecuencia (E2)");
+        var input = RatioBy() with { Filters = [filter] };
+        var dashboard = new[] { new AppliedDashboardFilter("comuna", "text", Values: ["COMUNA 1"]) };
+        var plan = Planned(input, Declared("hogares", ["variable", "orden", "categoria"]), ChartTypes.Column, dashboardFilters: dashboard);
+
+        Assert.NotNull(plan.Counted);
+        var sql = CountedOf(plan);
+        Assert.DoesNotContain("IS NOT DISTINCT FROM", sql);
+        // The WHERE of the plotted statement, whole: the row filter, the widget's filters and the dashboard's.
+        var plotted = plan.Sql!.Sql;
+        var where = plotted[(plotted.IndexOf("WHERE ", StringComparison.Ordinal) + 6)..plotted.IndexOf("\nGROUP BY", StringComparison.Ordinal)];
+        Assert.Contains("@f0", where);
+        Assert.Contains("@d0", where);
+        Assert.Equal(
+            $"""
+            SELECT 1 AS part, g, max(s) FROM (SELECT "comuna"::text AS g, "variable", "orden", "categoria", sum("hogares")::double precision AS s FROM {From} WHERE {where} GROUP BY 1, 2, 3, 4) x GROUP BY g
+            UNION ALL
+            SELECT 2, NULL::text, max(s) FROM (SELECT "variable", "orden", "categoria", sum("hogares")::double precision AS s FROM {From} WHERE {where} GROUP BY 1, 2, 3) y
+            """,
+            sql);
+        // The plotted statement's filter parameters, and not its limit.
+        Assert.Equal(plan.Sql!.Parameters.Where(p => p.Name != IndicatorSql.LimitParameter).Select(p => p.Name), plan.Counted!.Parameters.Select(p => p.Name));
+    }
+
+    [Fact]
+    public void The_counted_statement_sums_the_denominator_when_there_is_no_base_column_and_is_one_part_for_a_tile()
+    {
+        var plan = Planned(RatioBy(), Declared(answers: ["categoria"]), ChartTypes.Column);
+        var tile = Planned(RatioBy(groupBy: null), Declared(answers: ["categoria"]), ChartTypes.Stat);
+
+        Assert.Contains("sum(\"denominator\")::double precision AS s", CountedOf(plan));
+        Assert.StartsWith("SELECT 2, NULL::text, max(s) FROM (SELECT \"categoria\", sum(\"denominator\")", CountedOf(tile));
+        Assert.DoesNotContain("part", CountedOf(tile));
+    }
+
+    [Fact]
+    public void A_measure_with_no_base_column_has_no_n_so_nothing_is_counted()
+    {
+        var measure = new WidgetConfigInput("coverage", Measure: "value", GroupBy: "comuna");
+
+        Assert.Null(Planned(measure, Declared(answers: ["categoria"]), ChartTypes.Column).Counted);
+        Assert.Null(Planned(measure, Declared(answers: ["categoria"]), ChartTypes.Column).Sql!.Figures);
+        Assert.NotNull(Planned(measure, Declared("hogares", ["categoria"]), ChartTypes.Column).Counted);
+    }
+
+    [Fact]
+    public void Nothing_is_counted_without_an_answer_column()
+    {
+        Assert.Null(Planned(RatioBy(), Declared("hogares"), ChartTypes.Column).Counted);
+        Assert.Null(Planned(RatioBy(), null, ChartTypes.Column).Counted);
+    }
+
+    // The values that mean no data are left out of every plotted statement (design D6 of add-small-sample-warnings)
+
+    private const string SinDatoLeft = "(\"comuna\" IS NOT NULL AND \"comuna\"::text = ANY(@ng))";
+
+    private static IndicatorBases Missing(params (string Column, string[] Values)[] declared) =>
+        new(null, [], declared.ToDictionary(d => d.Column, d => (IReadOnlyList<string>)d.Values, StringComparer.Ordinal));
+
+    private static readonly IndicatorBases SinDato = Missing(("comuna", ["Sin dato"]));
+
+    private static WidgetConfigInput Leaving(WidgetConfigInput input) => input with { MissingFooter = true };
+
+    private static string[] Statements(IndicatorQueryPlan plan) =>
+        new[] { plan.Sql, plan.Domain, plan.Overall, plan.Counted, plan.NoData?.Sql }.OfType<IndicatorSql>().Select(Statement).ToArray();
+
+    [Theory]
+    [InlineData(ChartTypes.Bar)]
+    [InlineData(ChartTypes.Column)]
+    [InlineData(ChartTypes.Line)]
+    [InlineData(ChartTypes.Pie)]
+    public void Without_the_option_every_statement_is_the_text_it_was_whatever_the_indicator_declares(string chartType)
+    {
+        var input = RatioBy();
+        var declared = new IndicatorBases(null, ["categoria"], new Dictionary<string, IReadOnlyList<string>> { ["comuna"] = ["Sin dato"], ["categoria"] = ["No sabe"] });
+
+        var plain = IndicatorQueryBuilder.Plan(input.Normalize(), BaseColumns, "UTC", From, 5000, chartType: chartType, overall: chartType != ChartTypes.Pie, bases: declared);
+        var none = IndicatorQueryBuilder.Plan(input.Normalize(), BaseColumns, "UTC", From, 5000, chartType: chartType, overall: chartType != ChartTypes.Pie, bases: new IndicatorBases(null, ["categoria"], new Dictionary<string, IReadOnlyList<string>>()));
+
+        Assert.Equal(Statements(none), Statements(plain));
+        Assert.DoesNotContain("@ng", string.Concat(Statements(plain)));
+        Assert.Null(plain.NoData);
+    }
+
+    [Fact]
+    public void With_the_option_and_declared_values_the_plotted_statement_leaves_the_rows_out_and_keeps_a_null_group()
+    {
+        var plan = Planned(Leaving(RatioBy()), SinDato, ChartTypes.Column);
+        var without = Planned(RatioBy(), SinDato, ChartTypes.Column);
+
+        var left = $"AND NOT ({SinDatoLeft})";
+        Assert.Contains($"WHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL) {left}\n", plan.Sql!.Sql);
+        // The condition is the only difference, and it keeps a missing group: "(none)" is not a declared value.
+        Assert.Equal(without.Sql!.Sql.Replace("OR \"denominator\" IS NOT NULL)\n", $"OR \"denominator\" IS NOT NULL) {left}\n"), plan.Sql.Sql);
+        Assert.Contains("\"comuna\" IS NOT NULL AND", plan.Sql.Sql);
+        var parameter = Assert.Single(plan.Sql.Parameters, p => p.Name == "ng");
+        Assert.Equal(NpgsqlDbType.Array | NpgsqlDbType.Text, parameter.Type);
+        Assert.Equal(["Sin dato"], (string[])parameter.Value);
+        Assert.DoesNotContain(plan.Sql.Parameters, p => p.Name == "ns");
+    }
+
+    [Fact]
+    public void The_option_with_nothing_declared_for_the_columns_changes_nothing()
+    {
+        var nothing = Missing(("categoria", ["No sabe"]));
+
+        Assert.Equal(Statements(Planned(RatioBy(), nothing, ChartTypes.Column)), Statements(Planned(Leaving(RatioBy()), nothing, ChartTypes.Column)));
+        Assert.Equal(Statements(Planned(RatioBy(), null, ChartTypes.Column)), Statements(Planned(Leaving(RatioBy()), null, ChartTypes.Column)));
+        Assert.Null(Planned(Leaving(RatioBy()), nothing, ChartTypes.Column).NoData);
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Stat)]
+    [InlineData(ChartTypes.Histogram)]
+    [InlineData(ChartTypes.Map)]
+    [InlineData(ChartTypes.Boxplot)]
+    public void The_kinds_that_do_not_take_the_option_are_planned_as_they_were(string chartType)
+    {
+        var input = RatioBy() with { GeometryColumn = chartType == ChartTypes.Map ? "geometry" : null };
+
+        Assert.Equal(
+            Statements(Planned(input, SinDato, chartType)),
+            Statements(Planned(Leaving(input), SinDato, chartType)));
+    }
+
+    [Fact]
+    public void A_pies_domain_changes_only_with_the_option()
+    {
+        var without = Planned(RatioBy(), SinDato, ChartTypes.Pie).Domain!;
+        var with = Planned(Leaving(RatioBy()), SinDato, ChartTypes.Pie).Domain!;
+
+        Assert.DoesNotContain("@ng", without.Sql);
+        Assert.Contains($"AND NOT ({SinDatoLeft})", with.Sql);
+        Assert.Equal(without.Sql.Replace("\nGROUP BY", $" AND NOT ({SinDatoLeft})\nGROUP BY"), with.Sql);
+        Assert.Contains(with.Parameters, p => p.Name == "ng");
+        Assert.Contains(with.Parameters, p => p is { Name: SeriesQueryBuilder.CapParameter });
+    }
+
+    [Theory]
+    [InlineData(ChartTypes.Bar)]
+    [InlineData(ChartTypes.Column)]
+    [InlineData(ChartTypes.Line)]
+    public void The_overall_statement_carries_the_same_condition_as_the_plotted_one(string chartType)
+    {
+        var plan = IndicatorQueryBuilder.Plan(
+            Leaving(RatioBy()).Normalize(), BaseColumns, "UTC", From, 5000, chartType: chartType, overall: true, bases: SinDato);
+
+        Assert.Contains($"AND NOT ({SinDatoLeft})", plan.Sql!.Sql);
+        Assert.Contains($"AND NOT ({SinDatoLeft})", plan.Overall!.Sql);
+        Assert.DoesNotContain("GROUP BY", plan.Overall.Sql);
+        Assert.Contains(plan.Overall.Parameters, p => p.Name == "ng");
+        // A widget that does not leave them out has the overall statement it had.
+        var plain = IndicatorQueryBuilder.Plan(RatioBy().Normalize(), BaseColumns, "UTC", From, 5000, chartType: chartType, overall: true, bases: SinDato);
+        Assert.DoesNotContain("@ng", plain.Overall!.Sql);
+    }
+
+    [Fact]
+    public void The_counted_statement_reads_the_same_rows_as_the_plotted_one()
+    {
+        var plan = Planned(Leaving(RatioBy()), new IndicatorBases(null, ["categoria"], new Dictionary<string, IReadOnlyList<string>> { ["comuna"] = ["Sin dato"] }), ChartTypes.Column);
+
+        Assert.Contains($"AND NOT ({SinDatoLeft})", plan.Counted!.Sql);
+        Assert.Contains(plan.Counted.Parameters, p => p.Name == "ng");
+    }
+
+    [Fact]
+    public void A_series_leaves_out_both_columns_values_with_one_array_each()
+    {
+        var input = Leaving(RatioBy() with { SeriesBy = "categoria" });
+        var bases = Missing(("comuna", ["Sin dato"]), ("categoria", ["No sabe", "NS/NR"]));
+
+        var plan = Planned(input, bases, ChartTypes.Column);
+
+        var left = "(\"comuna\" IS NOT NULL AND \"comuna\"::text = ANY(@ng)) OR (\"categoria\" IS NOT NULL AND \"categoria\"::text = ANY(@ns))";
+        Assert.Contains($"AND NOT ({left})", plan.Series!.Domain!.Sql);
+        var cells = plan.Series.Cells(["Sí"]);
+        Assert.Contains($"AND NOT ({left})", cells.Sql);
+        Assert.Equal(["No sabe", "NS/NR"], (string[])cells.Parameters.Single(p => p.Name == "ns").Value);
+        Assert.Contains(plan.Series.Domain.Parameters, p => p.Name == "ns");
+    }
+
+    [Fact]
+    public void The_no_data_statement_reads_the_rows_without_the_condition_and_runs_only_for_the_option()
+    {
+        var ratio = Planned(Leaving(RatioBy()), SinDato, ChartTypes.Column).NoData!;
+        var measure = Planned(Leaving(new WidgetConfigInput("coverage", Measure: "value", GroupBy: "comuna")), SinDato, ChartTypes.Column).NoData!;
+
+        Assert.True(ratio.IsRatio);
+        Assert.False(measure.IsRatio);
+        Assert.DoesNotContain("NOT (", ratio.Sql.Sql);
+        Assert.Contains($"array_agg(DISTINCT \"comuna\"::text) FILTER (WHERE {SinDatoLeft[1..^1]})", ratio.Sql.Sql);
+        Assert.Contains($"(sum(\"numerator\") FILTER (WHERE {SinDatoLeft}))::double precision", ratio.Sql.Sql);
+        Assert.Contains("(sum(\"denominator\") FILTER", ratio.Sql.Sql);
+        Assert.Contains($"(sum(\"value\") FILTER (WHERE {SinDatoLeft}))::double precision", measure.Sql.Sql);
+        Assert.Contains("sum(\"value\")::double precision", measure.Sql.Sql);
+        Assert.Contains(ratio.Sql.Parameters, p => p.Name == "ng");
+        Assert.Null(Planned(RatioBy(), SinDato, ChartTypes.Column).NoData);
+    }
+
+    [Fact]
+    public void The_no_data_statement_counts_the_n_of_the_left_out_rows_per_answer_when_answers_are_declared()
+    {
+        var bases = new IndicatorBases("hogares", ["categoria"], new Dictionary<string, IReadOnlyList<string>> { ["comuna"] = ["Sin dato"] });
+
+        var statement = Planned(Leaving(RatioBy()), bases, ChartTypes.Column).NoData!.Sql.Sql;
+
+        Assert.Contains($"(SELECT max(s) FROM (SELECT \"categoria\", sum(\"hogares\")::double precision AS s FROM {From} WHERE", statement);
+        Assert.Contains($"AND ({SinDatoLeft}) GROUP BY 1) y)", statement);
+        var plain = Planned(Leaving(RatioBy()), Missing(("comuna", ["Sin dato"])), ChartTypes.Column).NoData!.Sql.Sql;
+        Assert.Contains("(sum(\"denominator\") FILTER", plain.Split('\n').Last(line => line.Contains("FILTER")));
+    }
+
+    // A stat tile's statistic and its value without the dashboard filters (design D2, D3 and D10 of improve-stat-cards)
+
+    private static IndicatorQueryPlan Tile(
+        WidgetConfigInput input, IndicatorBases? bases = null, IReadOnlyList<AppliedDashboardFilter>? dashboardFilters = null, bool unfiltered = false,
+        string? chartType = ChartTypes.Stat) =>
+        IndicatorQueryBuilder.Plan(input.Normalize(), BaseColumns, "UTC", From, 5000, false, dashboardFilters, chartType, false, bases, null, unfiltered);
+
+    private static WidgetConfigInput Median(string statistic = "median", string? measure = "value", WidgetRatio? ratio = null, string? groupBy = null, IReadOnlyList<DataFilter>? filters = null) =>
+        new("coverage", ratio is null ? measure : null, ratio, groupBy, filters, Statistic: statistic);
+
+
+    [Theory]
+    [InlineData("median", "percentile_cont(0.5) WITHIN GROUP (ORDER BY x)")]
+    [InlineData("p25", "percentile_cont(0.25) WITHIN GROUP (ORDER BY x)")]
+    [InlineData("p75", "percentile_cont(0.75) WITHIN GROUP (ORDER BY x)")]
+    [InlineData("mean", "sum(x) / count(*)")]
+    public void A_statistic_is_one_row_over_the_finite_values_of_the_rows(string statistic, string expected)
+    {
+        var plan = Tile(Median(statistic));
+
+        Assert.Null(plan.Errors);
+        var sql = plan.Sql!.Sql;
+        Assert.StartsWith($"SELECT NULL::text, {expected}, NULL::text, count(*)::double precision", sql);
+        Assert.Contains("FROM (SELECT (\"value\"::double precision) AS x FROM", sql);
+        Assert.Contains("WHERE \"value\" IS NOT NULL AND (\"value\"::double precision) > '-Infinity'::double precision AND (\"value\"::double precision) < 'Infinity'::double precision) v", sql);
+        Assert.EndsWith("HAVING count(*) > 0", sql.Trim());
+        Assert.DoesNotContain("GROUP BY", sql);
+        Assert.DoesNotContain("LIMIT", sql);
+        Assert.DoesNotContain("avg(", sql);
+        Assert.Empty(plan.Sql.Parameters);
+        Assert.Equal(new SqlFigures(null, null, 3, 3), plan.Sql.Figures);
+        Assert.Null(plan.Counted);
+        Assert.Null(plan.Unfiltered);
+    }
+
+    [Fact]
+    public void A_statistic_of_a_ratio_takes_each_rows_own_ratio_and_leaves_out_a_zero_denominator()
+    {
+        var sql = Tile(Median(ratio: CoverageRatio)).Sql!.Sql;
+
+        Assert.Contains("(\"numerator\"::double precision / nullif(\"denominator\", 0)) AS x", sql);
+        Assert.Contains("WHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL) AND (\"numerator\"::double precision / nullif(\"denominator\", 0)) > '-Infinity'::double precision", sql);
+        Assert.DoesNotContain("sum(\"numerator\")", sql);
+        Assert.DoesNotContain("sum(\"denominator\")", sql);
+    }
+
+    [Fact]
+    public void A_statistic_returns_the_value_and_the_n_and_never_the_sums_of_a_ratio()
+    {
+        var plan = Tile(Median(ratio: CoverageRatio), Declared(answers: ["categoria"]));
+
+        Assert.Null(plan.Sql!.Figures!.Numerator);
+        Assert.Null(plan.Sql.Figures.Denominator);
+        Assert.Equal(3, plan.Sql.Figures.Base);
+        Assert.Equal(3, plan.Sql.Figures.WidgetN);
+        Assert.Contains("count(*)::double precision", plan.Sql.Sql);
+        Assert.Null(plan.Counted);
+    }
+
+    [Fact]
+    public void The_n_of_a_statistic_is_the_sum_of_the_base_column_over_the_rows_it_keeps_when_the_indicator_declares_one()
+    {
+        var sql = Tile(Median(), Declared("hogares")).Sql!.Sql;
+
+        Assert.StartsWith("SELECT NULL::text, percentile_cont(0.5) WITHIN GROUP (ORDER BY x), NULL::text, sum(b)::double precision", sql);
+        Assert.Contains("FROM (SELECT (\"value\"::double precision) AS x, \"hogares\"::double precision AS b FROM", sql);
+        Assert.DoesNotContain("count(*)::double precision", sql);
+        Assert.Equal(new SqlFigures(null, null, 3, 3), Tile(Median(), Declared("hogares")).Sql!.Figures);
+    }
+
+    [Fact]
+    public void A_stray_group_column_never_groups_a_statistic_and_the_filters_apply_before_it()
+    {
+        var plan = Tile(Median(groupBy: "comuna", filters: [new DataFilter("variable", "equals", Value: "Asistió (E1)")]));
+
+        var sql = plan.Sql!.Sql;
+        Assert.DoesNotContain("GROUP BY", sql);
+        Assert.StartsWith("SELECT NULL::text, percentile_cont(0.5)", sql);
+        Assert.Contains("AND \"variable\"::text = @f0) v", sql.Replace("\n", " "));
+        Assert.Equal(["f0"], plan.Sql.Parameters.Select(p => p.Name));
+    }
+
+    [Fact]
+    public void A_dashboard_filter_narrows_a_statistic_beside_the_widget_filters()
+    {
+        AppliedDashboardFilter[] dashboard = [new("comuna", DashboardFilterKinds.Text, Values: ["COMUNA 1"])];
+
+        var plan = Tile(Median(filters: [new DataFilter("variable", "equals", Value: "Pagó")]), dashboardFilters: dashboard);
+
+        Assert.Contains("\"variable\"::text = @f0 AND \"comuna\"::text = ANY(@d0)) v", plan.Sql!.Sql.Replace("\n", " "));
+        Assert.Equal(["f0", "d0"], plan.Sql.Parameters.Select(p => p.Name));
+        Assert.Empty(plan.NotFiltered!);
+    }
+
+    [Fact]
+    public void A_dashboard_filter_the_table_lacks_is_listed_and_narrows_nothing_in_a_statistic()
+    {
+        var plan = Tile(Median(), dashboardFilters: [new("estrato", DashboardFilterKinds.Text, Values: ["Estrato 1"])]);
+
+        Assert.Equal(["estrato"], plan.NotFiltered);
+        Assert.DoesNotContain("estrato", plan.Sql!.Sql);
+    }
+
+    [Fact]
+    public void A_statistic_is_planned_only_for_a_stat_tile_and_a_tile_without_one_is_planned_as_before()
+    {
+        var withStatistic = Tile(Median());
+        var asBar = Tile(Median(groupBy: "comuna"), chartType: ChartTypes.Bar);
+        var plain = Tile(new WidgetConfigInput("coverage"));
+
+        Assert.Contains("percentile_cont", withStatistic.Sql!.Sql);
+        Assert.DoesNotContain("percentile_cont", asBar.Sql!.Sql);
+        Assert.Contains("GROUP BY \"comuna\"", asBar.Sql.Sql);
+        Assert.Contains("SELECT NULL::text, (sum(\"value\")::double precision), NULL::text", plain.Sql!.Sql);
+        Assert.Contains("LIMIT @limit", plain.Sql.Sql);
+    }
+
+    [Fact]
+    public void The_overall_statement_of_a_chart_never_takes_a_statistic()
+    {
+        var plan = IndicatorQueryBuilder.Plan(
+            (Median(groupBy: "comuna") with { Ratio = CoverageRatio, Measure = null }).Normalize(), BaseColumns, "UTC", From, 5000, false, null, ChartTypes.Column, true);
+
+        Assert.DoesNotContain("percentile_cont", plan.Overall!.Sql);
+        Assert.Contains("sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)", plan.Overall.Sql);
+    }
+
+    // The value without the dashboard filters
+
+    private static readonly AppliedDashboardFilter[] ByComuna = [new("comuna", DashboardFilterKinds.Text, Values: ["COMUNA 1"])];
+
+    [Fact]
+    public void The_unfiltered_statement_is_the_tile_without_the_dashboard_filters_and_the_tile_itself_is_unchanged()
+    {
+        var input = new WidgetConfigInput("coverage", Ratio: CoverageRatio, Filters: [new DataFilter("variable", "equals", Value: "Asistió (E1)")]);
+
+        var plan = Tile(input, dashboardFilters: ByComuna, unfiltered: true);
+        var alone = Tile(input);
+        var withFilter = Tile(input, dashboardFilters: ByComuna);
+
+        Assert.NotNull(plan.Unfiltered);
+        Assert.Equal(Statement(alone.Sql!), Statement(plan.Unfiltered));
+        Assert.DoesNotContain("@d0", plan.Unfiltered.Sql);
+        Assert.Contains("\"variable\"::text = @f0", plan.Unfiltered.Sql);
+        Assert.Equal(Statement(withFilter.Sql!), Statement(plan.Sql!));
+        Assert.Contains("@d0", plan.Sql!.Sql);
+        Assert.Null(withFilter.Unfiltered);
+    }
+
+    [Fact]
+    public void The_unfiltered_statement_of_a_statistic_is_the_statistic_without_the_dashboard_filters()
+    {
+        var plan = Tile(Median(), dashboardFilters: ByComuna, unfiltered: true);
+
+        Assert.Equal(Statement(Tile(Median()).Sql!), Statement(plan.Unfiltered!));
+        Assert.Contains("percentile_cont(0.5)", plan.Unfiltered!.Sql);
+        Assert.DoesNotContain("@d0", plan.Unfiltered.Sql);
+        Assert.Contains("@d0", plan.Sql!.Sql);
+    }
+
+    [Fact]
+    public void The_unfiltered_statement_is_planned_only_while_a_dashboard_filter_narrows_the_tile()
+    {
+        var input = new WidgetConfigInput("coverage", Measure: "value");
+
+        Assert.Null(Tile(input, unfiltered: true).Unfiltered);
+        Assert.Null(Tile(input, dashboardFilters: [], unfiltered: true).Unfiltered);
+        // A filter the table lacks, or has with another kind of type, narrows nothing.
+        Assert.Null(Tile(input, dashboardFilters: [new("estrato", DashboardFilterKinds.Text, Values: ["Estrato 1"])], unfiltered: true).Unfiltered);
+        Assert.Null(Tile(input, dashboardFilters: [new("comuna", DashboardFilterKinds.Number, Min: "1", Max: "2")], unfiltered: true).Unfiltered);
+        Assert.NotNull(Tile(input, dashboardFilters: ByComuna, unfiltered: true).Unfiltered);
+    }
+
+    [Fact]
+    public void Without_the_flag_or_for_another_kind_no_unfiltered_statement_is_planned()
+    {
+        var input = new WidgetConfigInput("coverage", Measure: "value", GroupBy: "comuna");
+
+        Assert.Null(Tile(input, dashboardFilters: ByComuna).Unfiltered);
+        Assert.Null(Tile(input, dashboardFilters: ByComuna, unfiltered: true, chartType: ChartTypes.Bar).Unfiltered);
+        Assert.Null(Tile(input, dashboardFilters: ByComuna, unfiltered: true, chartType: null).Unfiltered);
+        Assert.Null(Tile(Median(), dashboardFilters: ByComuna).Unfiltered);
+    }
 }

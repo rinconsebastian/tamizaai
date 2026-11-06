@@ -176,8 +176,8 @@ export function ordersFor(type: ChartType | null | undefined, config: Partial<Wi
 }
 
 /**
- * The grid of a widget with a series arranged (design D4): the rows in the order of the groups, and each column, with its cells, shares
- * and total, in the order of the series. A grid whose places have no declaration is returned as it is.
+ * The grid of a widget with a series arranged (design D4): the rows in the order of the groups, and each column, with its cells, shares,
+ * figures and total, in the order of the series. A grid whose places have no declaration is returned as it is.
  */
 export function arrangeColumns(table: SeriesTable, orders: CategoryOrders | null | undefined): SeriesTable {
   if (!orders || (!orders.groups && !orders.series)) {
@@ -192,6 +192,7 @@ export function arrangeColumns(table: SeriesTable, orders: CategoryOrders | null
     ...row,
     cells: columns.map((i) => row.cells[i]),
     shares: row.shares ? columns.map((i) => row.shares![i]) : null,
+    ...(row.figures ? { figures: columns.map((i) => row.figures![i]) } : {}),
   }));
   return { ...table, columns: columns.map((i) => table.columns[i]), rows };
 }

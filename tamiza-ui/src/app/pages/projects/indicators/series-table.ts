@@ -1,4 +1,4 @@
-import { ChartType, QueryResult, SeriesKind, SeriesLayout } from '../../../core/projects/indicators.service';
+import { ChartType, QueryFigures, QueryResult, SeriesKind, SeriesLayout } from '../../../core/projects/indicators.service';
 import { CategoryOrders, arrange, arrangeColumns, entryOf } from './category-order';
 import { naturalCompare } from './chart-scales';
 
@@ -14,7 +14,17 @@ export interface SeriesColumn {
   rows: number;
 }
 
-/** One group, in the order of `QueryResult.totals.groups`; `cells[i]` and `shares[i]` belong to `columns[i]`. */
+/**
+ * The base figures of one cell (add-small-sample-warnings, design D2, D9): a ratio's numerator and denominator sums and the cell's n, each
+ * null when the cell has none. A cell of a table of shares has only the n of its group (a share is over its row).
+ */
+export interface CellFigures {
+  numerator: number | null;
+  denominator: number | null;
+  n: number | null;
+}
+
+/** One group, in the order of `QueryResult.totals.groups`; `cells[i]`, `shares[i]` and `figures[i]` belong to `columns[i]`. */
 export interface SeriesRow {
   group: string | null;
   total: number | null;
@@ -23,6 +33,11 @@ export interface SeriesRow {
   cells: (number | null)[];
   /** Each cell over the sum of the row's non-negative cells; null unless the table has shares (see `hasShares`). */
   shares: (number | null)[] | null;
+  /**
+   * The figures of each cell, null for a cell that has none. Left out while no cell of the table has any (a measure with no base column),
+   * so the grid of an answer without figures is what it was.
+   */
+  figures?: (CellFigures | null)[];
 }
 
 export interface SeriesTable {
@@ -45,6 +60,14 @@ export function hasShares(type: ChartType, layout: SeriesLayout | null | undefin
   return type === 'likert' || ((type === 'bar' || type === 'column') && layout === 'percent');
 }
 
+/** The figures a response row or total carries, or null when it has none of the three. */
+export function figuresOf(source: QueryFigures | null | undefined): CellFigures | null {
+  const numerator = source?.numerator ?? null;
+  const denominator = source?.denominator ?? null;
+  const n = source?.n ?? null;
+  return numerator === null && denominator === null && n === null ? null : { numerator, denominator, n };
+}
+
 /** A cell's place among the series: a value by its text, the other two kinds by their kind. */
 const slotOf = (kind: SeriesKind | undefined, series: string | null | undefined): string => ((kind ?? 'value') === 'value' ? `value:${series ?? ''}` : (kind as string));
 
@@ -62,11 +85,13 @@ export function buildSeriesTable(answer: SeriesAnswer, type: ChartType, layout: 
   const groups = totals?.groups ?? [];
   const rowOf = new Map<string | null, number>(groups.map((entry, i) => [entry.group, i]));
   const rows: SeriesRow[] = groups.map((entry) => ({ group: entry.group, total: entry.value, rows: entry.rows, cells: columns.map(() => null), shares: null }));
+  const figures: (CellFigures | null)[][] = groups.map(() => columns.map(() => null));
   for (const cell of answer.rows) {
     const row = rowOf.get(cell.group);
     const column = columnOf.get(slotOf(cell.seriesKind, cell.series));
     if (row !== undefined && column !== undefined) {
       rows[row].cells[column] = cell.value;
+      figures[row][column] = figuresOf(cell);
     }
   }
   let negativeLeftOut = 0;
@@ -76,6 +101,14 @@ export function buildSeriesTable(answer: SeriesAnswer, type: ChartType, layout: 
       negativeLeftOut += row.cells.filter((cell) => cell !== null && cell < 0).length;
       row.shares = row.cells.map((cell) => (cell !== null && cell >= 0 && whole > 0 ? cell / whole : null));
     }
+    // A share is over its row, so its base is the row's: every cell of a table of shares takes the n of its group (design D2).
+    groups.forEach((entry, i) => {
+      const groupN = entry.n ?? null;
+      figures[i] = columns.map((_, c) => (rows[i].cells[c] !== null && groupN !== null ? { numerator: null, denominator: null, n: groupN } : null));
+    });
+  }
+  if (figures.some((row) => row.some((cell) => cell !== null))) {
+    rows.forEach((row, i) => (row.figures = figures[i]));
   }
   return {
     columns,

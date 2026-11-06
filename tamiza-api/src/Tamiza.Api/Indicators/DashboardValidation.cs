@@ -81,6 +81,22 @@ public static class DashboardValidation
         return valid ? source : null;
     }
 
+    /// <summary>
+    /// A dashboard's small-base threshold (design D8 of add-small-sample-warnings): null for off, else a whole number from 1 to
+    /// <see cref="WidgetDisplay.MaxMinN"/>, which the <c>ck_dashboards_min_n</c> check allows too. Anything else adds an error on
+    /// <c>minN</c>.
+    /// </summary>
+    public static int? Bases(int? minN, FieldErrors errors)
+    {
+        if (minN is { } value && (value < 1 || value > WidgetDisplay.MaxMinN))
+        {
+            errors.Add("minN", "The small-base threshold must be a whole number from 1 to 10,000; leave it empty to turn it off.");
+            return null;
+        }
+
+        return minN;
+    }
+
     /// <summary>The name as <c>dashboards.normalized_name</c> stores it: trimmed and in lower case.</summary>
     public static string Normalize(string name) => name.Trim().ToLowerInvariant();
 

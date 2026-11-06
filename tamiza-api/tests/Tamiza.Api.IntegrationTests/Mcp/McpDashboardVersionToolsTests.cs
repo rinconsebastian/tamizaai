@@ -399,4 +399,31 @@ public sealed class McpDashboardVersionToolsTests(PostgresFixture postgres)
         Assert.True(restored.GetProperty("restored").GetBoolean());
         Assert.Equal(source, await TestData.ScalarAsync<string>(h.Db, "SELECT source FROM tamiza.dashboards WHERE id = @d", ("d", teatro)));
     }
+    [Fact]
+    public async Task A_version_gives_the_base_settings_it_held_and_none_when_it_held_none_and_a_restore_brings_them_back()
+    {
+        await using var h = await CreateAsync();
+        var teatro = await AddDashboardInTamizaAsync(h, "Teatro");
+        Assert.Null((await h.CallAsync("analyst", "update_dashboard", new { dashboardId = teatro, minN = 30, showN = true, change = "Set the bases" })).Code());
+        Assert.Null((await h.CallAsync("analyst", "update_dashboard", new { dashboardId = teatro, minN = 0, showN = false, change = "Clear the bases" })).Code());
+
+        var list = Body(await h.CallAsync("analyst", "list_dashboard_versions", new { dashboardId = teatro }));
+        var set = Body(await h.CallAsync("analyst", "get_dashboard_version", new { dashboardId = teatro, version = 2 }));
+        var created = Body(await h.CallAsync("analyst", "get_dashboard_version", new { dashboardId = teatro, version = 1 }));
+        var cleared = Body(await h.CallAsync("analyst", "get_dashboard_version", new { dashboardId = teatro, version = 3 }));
+
+        Assert.Equal((30, true), (set.GetProperty("minN").GetInt32(), set.GetProperty("showN").GetBoolean()));
+        foreach (var version in new[] { created, cleared })
+        {
+            Assert.False(version.TryGetProperty("minN", out _));
+            Assert.False(version.TryGetProperty("showN", out _));
+        }
+
+        Assert.Equal(2, list.GetProperty("versions").EnumerateArray().Count(v => v.GetProperty("changes").EnumerateArray().Any(c => c.GetProperty("kind").GetString() == "basesChanged")));
+
+        var restored = Body(await RestoreAsync(h, teatro, 2, 3, "Bring the bases back"));
+
+        Assert.True(restored.GetProperty("restored").GetBoolean());
+        Assert.Equal((30, true), (await TestData.ScalarAsync<int>(h.Db, "SELECT min_n FROM tamiza.dashboards WHERE id = @d", ("d", teatro)), await TestData.ScalarAsync<bool>(h.Db, "SELECT show_n FROM tamiza.dashboards WHERE id = @d", ("d", teatro))));
+    }
 }

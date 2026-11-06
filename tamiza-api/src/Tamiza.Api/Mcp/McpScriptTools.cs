@@ -25,7 +25,12 @@ public sealed class McpScriptTools(
         "(for example numerator and denominator). Left out, the current version's labels are kept; {} clears them; given, it replaces them all. " +
         "A column that widgets group or split by can also take order (its values as full text, in the order to draw them, up to 100), last (up to 20 values kept at the end whatever the order or the sort, such as Otro, No sabe or Sin dato, none also in order) " +
         "and stripPrefix: true (hides a leading number such as \"1. \" in what widgets show; filters and colors kept by value still use the full text). A column may have only these. " +
-        "The map is replaced whole, so send each column's order, last and stripPrefix again with its name, or get_script shows what the current version has. A property that is not one of these is ignored.";
+        "A column can also declare what the widgets' counts of people (n) need: base: true (a numeric column that counts the units each row stands for, such as hogares; at most one column, never also missing or categories), " +
+        "missing (up to 20 values, as exact text, that mean no data, such as Sin dato or No sabe; a widget with missingFooter leaves them out and says what they held) " +
+        "and categories, single or multiple (the columns of a long table that name a question and its answers, such as variable, orden and categoria; multiple when any question of the column is multiple-choice; never a column that splits the households, such as comuna or estrato). " +
+        "Declared answers change a ratio over several of them: single counts the base once across the answers (each value divides its numerators by the largest per-answer denominator sum, per group), " +
+        "and multiple makes a widget that would add up several answers show a message instead of a figure, since it would count a person once per answer; declare multiple when in doubt. " +
+        "The map is replaced whole, so send each column's order, last and stripPrefix again with its name, and its base, missing and categories too (get_script shows what the current version has). A property that is not one of these is ignored.";
 
     [McpServerTool(Name = "get_authoring_guide", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Get the script authoring guide"),
      Description("The rules for writing a script in Tamiza: the function contract of each kind, the conventions of the data (labels not codes, nullable integers, select_multiple joined by '; '), " +
@@ -60,7 +65,7 @@ public sealed class McpScriptTools(
         });
 
     [McpServerTool(Name = "get_script", ReadOnly = true, Idempotent = true, OpenWorld = false, Title = "Get a script's code"),
-     Description("The code of a script and, for an indicator, its label, description, unit, format and column labels (columns). The current version unless you name one.")]
+     Description("The code of a script and, for an indicator, its label, description, unit, format and column labels (columns), with the base, no-data and answer columns it declares. The current version unless you name one.")]
     public Task<CallToolResult> GetScript(
         [Description("The project's id, from list_projects.")] Guid projectId,
         [Description(KindHelp)] string kind,
@@ -97,6 +102,7 @@ public sealed class McpScriptTools(
                  "Pass baseVersion = the version number you read with list_scripts or get_script (omit it for a script that does not exist yet): if someone saved in the meantime the call is refused with mcp.scriptChanged and nothing changes. " +
                  "An indicator needs a name (lowercase letters, digits, underscores; it becomes its table's name and cannot change), a label, a format (count, decimal, percent or currency) and optionally a description and a unit. " +
                  "It can also name columns of its table for people with columns = { column: { label } }, such as numerator and denominator, which widgets then show: unlike the label, description and unit, which each save replaces, columns left out keeps the current version's labels, {} clears them, and given it replaces them all. " +
+                 "The same columns can declare the base column (base), the values that mean no data (missing) and the answer columns of a long table (categories), so widgets can say how many people each value rests on. " +
                  "Code that imports os, subprocess, socket and similar, calls eval, exec or open, or holds a web address is refused.")]
     public Task<CallToolResult> SaveScript(
         [Description("The project's id, from list_projects.")] Guid projectId,

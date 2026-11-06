@@ -1,3 +1,5 @@
+using Tamiza.Api.Indicators;
+
 namespace Tamiza.Api.Reports;
 
 /// <summary>Everything a widget's own workbook says (design D13 of add-widget-export).</summary>
@@ -81,6 +83,8 @@ public static class WidgetWorkbook
 
         summary.Add(Line(text["indicator"], $"{model.IndicatorLabel} ({model.IndicatorName})"));
         summary.Add(Line(text["plotted"], widget.Caption));
+        // A stat tile's lines come after what it plots, one line each with the tile's own text (design D7 of improve-stat-cards).
+        summary.AddRange(widget.StatLines.Select(line => Line(StatLineItem(line, model), line)));
         if (widget.ReferenceLines.Count > 0)
         {
             summary.Add(Line(text["referenceLines"], string.Join(" · ", widget.ReferenceLines.Select(l => l.Line))));
@@ -114,6 +118,16 @@ public static class WidgetWorkbook
         formats.TryAdd(value, null);
         sheets[summaryName] = summary;
         return WorkbookSheets.Save(path, sheets, formats, maxBytes);
+    }
+
+    /// <summary>
+    /// What a stat tile's line is called on the Summary: "Without filters" for the line that starts with those words in the language of the
+    /// file, else "n". The value beside it is the tile's own text, "n = 476 Hogares" or "Without filters: 46.85% de los hogares".
+    /// </summary>
+    private static string StatLineItem(string line, WidgetWorkbookModel model)
+    {
+        var withoutFilters = model.Text.Format("withoutFilters", "").TrimEnd().TrimEnd(':');
+        return line.StartsWith(withoutFilters + ":", StringComparison.Ordinal) ? withoutFilters : BaseFigures.NColumn(model.Format);
     }
 
     /// <summary>The rows the data sheet lists: a stat tile's one, none when the sheet only gives the reason.</summary>

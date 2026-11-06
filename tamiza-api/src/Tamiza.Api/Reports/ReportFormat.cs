@@ -44,6 +44,13 @@ public sealed partial class ReportFormat(CultureInfo culture, TimeZoneInfo timeZ
     /// <summary>A whole number, such as a count of rows.</summary>
     public string Whole(double value) => value.ToString("N0", Culture);
 
+    /// <summary>
+    /// A base figure (design D9 of add-small-sample-warnings): a numerator, a denominator or an n, as a whole number with thousands
+    /// separators and up to two decimals when it is not whole (a decimal numerator, such as 0.5), never in the indicator's format or with
+    /// its unit. Twin of <c>figureFormatter</c> in tamiza-ui (<c>indicators/format.ts</c>).
+    /// </summary>
+    public string Figure(double value) => value.ToString("#,##0.##", Culture);
+
     /// <summary>A share of a total (a pie chart's), with at most one decimal.</summary>
     public string Share(double share) => PercentText(share, 1);
 

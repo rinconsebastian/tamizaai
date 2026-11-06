@@ -3701,3 +3701,135 @@ describe('ProjectScripts order of the column values (add-declared-category-order
     expect(byTestId(opened.root, 'meta-column-order')).toBeNull();
   });
 });
+
+describe('ProjectScripts base facts of the column names (add-small-sample-warnings, design D1)', () => {
+  const columnsUrl = (name: string) => `/api/v1/projects/${projectId}/indicators/${name}/columns`;
+  const typed = [
+    { name: 'variable', type: 'text' },
+    { name: 'categoria', type: 'text' },
+    { name: 'comuna', type: 'text' },
+    { name: 'numerator', type: 'decimal' },
+    { name: 'denominator', type: 'decimal' },
+  ];
+  const publishedTable = (columns = typed) => ({ published: true, columns, numeric: columns.filter((c) => c.type === 'decimal').map((c) => c.name), defaults: { measure: null, groupBy: null } });
+  const labelled = (name: string, number: number, columns: ScriptVersionDetails['columns'] = null) => indicatorVersion(name, number, { columns });
+  const factsOf = (root: ParentNode, column: string) => root.querySelector<HTMLElement>(`[data-testid="meta-column-facts"][data-column="${column}"]`)!;
+  const saveBody = (opened: Opened, name = 'teatro_hoy') => {
+    byTestId<HTMLButtonElement>(opened.root, 'save')!.click();
+    return opened.http.expectOne((r) => r.url === `${scriptsUrl}/indicators/${name}` && r.method === 'PUT').request.body;
+  };
+
+  async function choose(opened: Opened, current: ScriptVersionDetails, table = publishedTable()) {
+    await pickIndicator(opened, current.name!);
+    opened.http.expectOne(`${scriptsUrl}/indicators/${current.name}/versions`).flush([summary(current)]);
+    opened.http.expectOne(columnsUrl(current.name!)).flush(table);
+    await settle(opened.harness);
+  }
+
+  it('offers the numeric columns of the published table as the base, and the no-data values and answers for the others (Save form)', async () => {
+    const teatro = labelled('teatro_hoy', 4);
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await editDetails(opened);
+
+    const options = Array.from(opened.root.querySelectorAll<HTMLInputElement>('[data-testid="meta-base-option"]')).map((option) => option.dataset['column']);
+    expect(options).toEqual(['numerator', 'denominator']);
+    expect(factsOf(opened.root, 'comuna')).not.toBeNull();
+    expect(factsOf(opened.root, 'categoria')).not.toBeNull();
+    expect(byTestId(opened.root, 'unsaved')).toBeNull();
+  });
+
+  it('sends the base, the values that mean no data and the answers next to the names, and marks the details unsaved (Base declared)', async () => {
+    const teatro = labelled('teatro_hoy', 4, { comuna: { label: 'Comuna' } });
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await editDetails(opened);
+
+    const base = opened.root.querySelector<HTMLInputElement>('[data-testid="meta-base-option"][data-column="denominator"]')!;
+    base.checked = true;
+    base.dispatchEvent(new Event('change'));
+    await settle(opened.harness);
+    expect(byTestId(opened.root, 'unsaved')).not.toBeNull();
+
+    const chip = factsOf(opened.root, 'comuna').querySelector<HTMLInputElement>('[data-testid="chip-new"]')!;
+    typeInto(chip, 'Sin dato');
+    await settle(opened.harness);
+    factsOf(opened.root, 'comuna').querySelector<HTMLButtonElement>('[data-testid="chip-add"]')!.click();
+    await settle(opened.harness);
+    const answers = factsOf(opened.root, 'categoria').querySelector<HTMLSelectElement>('[data-testid="meta-column-answers"]')!;
+    typeInto(answers, 'multiple');
+    await settle(opened.harness);
+
+    expect(saveBody(opened).columns).toEqual({
+      comuna: { label: 'Comuna', missing: ['Sin dato'] },
+      denominator: { base: true },
+      categoria: { categories: 'multiple' },
+    });
+  });
+
+  it('shows what a version declared, and not what it did not, as the saved facts of the details', async () => {
+    const teatro = labelled('teatro_hoy', 4, { numerator: { base: true }, comuna: { missing: ['Sin dato', 'No sabe'] }, categoria: { categories: 'multiple' } });
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await editDetails(opened);
+
+    expect(opened.root.querySelector<HTMLInputElement>('[data-testid="meta-base-option"][data-column="numerator"]')!.checked).toBe(true);
+    expect(Array.from(factsOf(opened.root, 'comuna').querySelectorAll('[data-testid="chip-value"]')).map(textOf)).toEqual(['Sin dato', 'No sabe']);
+    expect(factsOf(opened.root, 'categoria').querySelector<HTMLSelectElement>('[data-testid="meta-column-answers"]')!.value).toBe('multiple');
+    expect(byTestId(opened.root, 'unsaved')).toBeNull();
+  });
+
+  it('lists the base, the values that mean no data and the answers of an older version as text, with no field to change them (Older version)', async () => {
+    const current = labelled('teatro_hoy', 4);
+    const older = labelled('teatro_hoy', 2, {
+      hogares: { base: true },
+      comuna: { label: 'Comuna', missing: ['Sin dato', 'No sabe'] },
+      categoria: { categories: 'multiple' },
+      variable: { categories: 'single', order: ['E1', 'E2'] },
+    });
+    const opened = await open('analyst', { scripts: withIndicators(current) });
+    await pickIndicator(opened, current.name!);
+    opened.http.expectOne(`${scriptsUrl}/indicators/teatro_hoy/versions`).flush([summary(current), summary(older)]);
+    opened.http.expectOne(columnsUrl('teatro_hoy')).flush(publishedTable());
+    await settle(opened.harness);
+    await openVersions(opened);
+    byTestId<HTMLButtonElement>(opened.root, 'version-2')!.click();
+    await settle(opened.harness);
+    opened.http.expectOne(`${scriptsUrl}/indicators/teatro_hoy/versions/2`).flush(older);
+    await settle(opened.harness);
+
+    const entries = Array.from(opened.root.querySelectorAll('[data-testid="indicator-meta-column"]')).map(textOf);
+    expect(entries).toEqual([
+      'hogares · Base column',
+      'comuna: Comuna · No data: Sin dato, No sabe',
+      'categoria · Answers: multiple choice',
+      'variable · Ordered: 2 · Answers: single choice',
+    ]);
+    expect(byTestId(opened.root, 'meta-column-facts')).toBeNull();
+    expect(byTestId(opened.root, 'meta-base')).toBeNull();
+  });
+
+  it('shows the API\'s refusals on the rows of their columns, not as a save error (Two base columns, Too many values)', async () => {
+    const teatro = labelled('teatro_hoy', 4, { comuna: { missing: ['Sin dato'] } });
+    const opened = await open('analyst', { scripts: withIndicators(teatro) });
+    await choose(opened, teatro);
+    await editDetails(opened);
+    typeInto(factsOf(opened.root, 'comuna').querySelector<HTMLInputElement>('[data-testid="chip-new"]')!, 'No sabe');
+    await settle(opened.harness);
+    factsOf(opened.root, 'comuna').querySelector<HTMLButtonElement>('[data-testid="chip-add"]')!.click();
+    await settle(opened.harness);
+
+    byTestId<HTMLButtonElement>(opened.root, 'save')!.click();
+    opened.http
+      .expectOne((r) => r.url === `${scriptsUrl}/indicators/teatro_hoy` && r.method === 'PUT')
+      .flush(
+        { errors: { 'columns.comuna.missing': ['A column lists at most 20 values that mean no data.'], 'columns.denominator.base': ['Only one column can be the base: numerator already is.'] } },
+        { status: 400, statusText: 'Bad Request' },
+      );
+    await settle(opened.harness);
+
+    expect(textOf(factsOf(opened.root, 'comuna').querySelector('[data-testid="missing-error"]'))).toBe('A column lists at most 20 values that mean no data.');
+    expect(textOf(opened.root.querySelector('[data-testid="base-error"]'))).toBe('Only one column can be the base: numerator already is.');
+    expect(byTestId(opened.root, 'save-error')).toBeNull();
+  });
+});

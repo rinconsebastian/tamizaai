@@ -1,7 +1,8 @@
-import { Component, ElementRef, computed, inject, input, viewChild } from '@angular/core';
+import { Component, ElementRef, LOCALE_ID, computed, effect, inject, input, output, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
+import { ChartBases, SeriesFigures, isSmallBase, noChartBases, seriesFigures, smallBaseDash, smallBaseOpacity, smallBaseStroke, summaryWithSmall } from './base-figures';
 import { observeSize } from './chart-data';
 import { ChartColors } from './chart-colors';
 import { registerExportParts } from './export-parts';
@@ -30,6 +31,8 @@ export interface PyramidPlot {
   marks: (MarkPoint | null)[][];
   /** The groups from the top: the last group of the table first, so the first group is at the bottom. */
   groups: (string | null)[];
+  /** How many bars have a small base (add-small-sample-warnings, design D10). */
+  small: number;
 }
 
 export interface PyramidPlotInput {
@@ -42,6 +45,8 @@ export interface PyramidPlotInput {
   colors: readonly [string, string];
   groupLabel: (group: string | null) => string;
   value: ValueFormatter;
+  /** The base figures of the tooltips and the threshold that dims small bases; a chart given none draws what it always did. */
+  figures?: SeriesFigures;
 }
 
 const top = 8;
@@ -89,6 +94,7 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
   const values: Label[] = [];
   const hits: Hit[] = [];
   const marks: (MarkPoint | null)[][] = rows.map(() => [null, null]);
+  let small = 0;
 
   for (const tick of axis.ticks) {
     const text = input.value.tick(tick);
@@ -115,7 +121,9 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
       const x = side === 0 ? center - length : center;
       const y = bands.start(visual) + (bands.bandwidth - thickness) / 2;
       const bar = { x, y, width: Math.max(1, length), height: thickness };
-      rectsOut.push({ ...bar, color: input.colors[side], title: '', at: { g: visual, s: side } });
+      const dim = isSmallBase(row.figures?.[column]?.n, input.figures?.minN);
+      small += dim ? 1 : 0;
+      rectsOut.push({ ...bar, color: input.colors[side], title: '', at: { g: visual, s: side }, ...(dim ? { dim } : {}) });
       // The hit area is the whole row's half, the gap above and below the bar included.
       hits.push({ x: side === 0 ? left : center, y: bands.start(visual) - (bands.step - bands.bandwidth) / 2, width: (w - right - left) / 2, height: bands.step, at: { g: visual, s: side } });
       if (writing) {
@@ -125,14 +133,15 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
           values.push({ x: side === 0 ? x - 4 : x + bar.width + 4, y: y + thickness / 2 + 4, text, anchor: side === 0 ? 'end' : 'start' });
         }
       }
+      const tip = input.figures?.tip(row.figures?.[column]) ?? { lines: [], footer: null };
       marks[visual][side] = {
-        content: { heading: input.groupLabel(row.group), lines: [{ label: input.names[side], value: input.value(cell), align: 'end', color: input.colors[side] }], footer: null },
+        content: { heading: input.groupLabel(row.group), lines: [{ label: input.names[side], value: input.value(cell), align: 'end', color: input.colors[side] }, ...tip.lines], footer: tip.footer },
         x: bar.x + bar.width / 2,
         y: y + thickness / 2,
       };
     });
   });
-  return { width: w, height: h, grid, ticks, labels, rects: rectsOut, values, hits, marks, groups: rows.map(({ row }) => row.group) };
+  return { width: w, height: h, grid, ticks, labels, rects: rectsOut, values, hits, marks, groups: rows.map(({ row }) => row.group), small };
 }
 
 /**
@@ -149,7 +158,7 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
     <ng-container *transloco="let t">
       <app-series-legend [entries]="legend()" />
       @if (asTable()) {
-        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [orders]="orders()" chartType="pyramid" />
+        <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [orders]="orders()" [bases]="bases()" chartType="pyramid" />
       } @else {
         <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
           <svg
@@ -191,7 +200,10 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
                 [style.fill]="rect.color"
                 [attr.opacity]="rect.at && marks.isLifted(rect.at.g, rect.at.s) ? 0.8 : null"
                 [class.stroke-heading]="rect.at && marks.active()?.g === rect.at.g && marks.active()?.s === rect.at.s"
-                [attr.stroke-width]="rect.at && marks.active()?.g === rect.at.g && marks.active()?.s === rect.at.s ? 2 : null"
+                [attr.stroke-width]="rect.at && marks.active()?.g === rect.at.g && marks.active()?.s === rect.at.s ? 2 : rect.dim ? smallStroke : null"
+                [attr.fill-opacity]="rect.dim ? smallOpacity : null"
+                [style.stroke]="rect.dim && !(rect.at && marks.active()?.g === rect.at.g && marks.active()?.s === rect.at.s) ? rect.color : null"
+                [attr.stroke-dasharray]="rect.dim ? smallDash : null"
                 data-testid="chart-mark"
               />
             }
@@ -225,6 +237,7 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
 })
 export class PyramidChart {
   private readonly transloco = inject(TranslocoService);
+  private readonly locale = inject(LOCALE_ID);
 
   readonly answer = input.required<QueryResult>();
   readonly config = input.required<WidgetConfig>();
@@ -238,6 +251,13 @@ export class PyramidChart {
   readonly asTable = input(false);
   /** The colors of the widget, from the dashboard's palette and its colors kept by value. */
   readonly colors = input.required<ChartColors>();
+  /** The threshold in force and the indicator's base column, for the figures and the small bases of the bars (add-small-sample-warnings). */
+  readonly bases = input<ChartBases>(noChartBases);
+  /** How many bars the chart draws dimmed for a small base, so the widget can explain the dimming under it (design D10, D11). */
+  readonly dimmed = output<number>();
+  protected readonly smallStroke = smallBaseStroke;
+  protected readonly smallDash = smallBaseDash;
+  protected readonly smallOpacity = smallBaseOpacity;
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private readonly svg = viewChild<ElementRef<SVGElement>>('chartSvg');
@@ -292,6 +312,7 @@ export class PyramidChart {
       colors: this.sideColors(),
       groupLabel: (group) => shown(this.groupText(), group) ?? this.tr('indicators.chart.noGroup'),
       value: this.format(),
+      figures: seriesFigures(this.config(), this.names(), this.bases(), this.locale, this.tr),
     }),
   );
 
@@ -299,6 +320,7 @@ export class PyramidChart {
 
   // What an image of the pyramid says around its bars (add-widget-export): the two sides' legend and the rows it left out.
   constructor() {
+    effect(() => this.dimmed.emit(this.plot().small));
     registerExportParts({
       plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
       settle: () => this.marks.reset(),
@@ -326,7 +348,7 @@ export class PyramidChart {
     }
     const best = bars.reduce((top, bar) => (bar.value > top.value ? bar : top));
     const groups = new Set(bars.map((bar) => bar.group)).size;
-    return t('indicators.pyramid.summary', {
+    const words = t('indicators.pyramid.summary', {
       what: this.what(),
       group: this.groupShown(),
       left,
@@ -335,5 +357,6 @@ export class PyramidChart {
       max: this.format()(best.value),
       top: `${shown(this.groupText(), best.group)}, ${best.side === 0 ? left : right}`,
     });
+    return summaryWithSmall(words, this.plot().small, t);
   }
 }

@@ -1,8 +1,9 @@
-import { Component, DestroyRef, ElementRef, LOCALE_ID, computed, effect, inject, input, untracked, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, LOCALE_ID, computed, effect, inject, input, output, untracked, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { BoxOrientation, QueryBox, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartTooltip, ChartTooltipContent, ChartTooltips } from '../../../shared/ui';
+import { ChartBases, isSmallBase, noChartBases, smallBaseDash, smallBaseTooltip, summaryWithSmall } from './base-figures';
 import { CategoryOrders, arrange, entryOf, shown, shownValues } from './category-order';
 import { ChartColors } from './chart-colors';
 import { registerExportParts } from './export-parts';
@@ -38,6 +39,8 @@ export interface BoxShape {
   mean: BoxSeg[];
   /** The stems from the box to the whisker ends, and the caps across them. */
   whiskers: BoxSeg[];
+  /** A box of fewer values than the threshold is drawn lighter with a dashed outline (add-small-sample-warnings, design D2, D10). */
+  small: boolean;
 }
 
 export interface OutlierDot {
@@ -65,6 +68,8 @@ export interface BoxplotPlot {
   marks: (MarkPoint | null)[][];
   /** How many outliers the boxes did not draw because they have more than the API sends. */
   notDrawn: number;
+  /** How many boxes have a small base. */
+  small: number;
 }
 
 /** The words of a box's tooltip and of the key, already translated. */
@@ -98,6 +103,9 @@ export interface BoxplotPlotInput {
   words: BoxplotWords;
   /** How far a flat domain (every figure equal) is padded when the figure is 0: 0.01 for a percent, 1 otherwise. */
   zeroPad: number;
+  /** The threshold in force (a box's n is its number of values), and the note a box under it says; left out for no small base. */
+  minN?: number | null;
+  smallNote?: (n: number) => string | null;
 }
 
 const top = 8;
@@ -207,6 +215,7 @@ export function boxplotPlot(input: BoxplotPlotInput): BoxplotPlot {
   const along = (start: number, length: number) => (length >= minHit ? { start, length } : { start: start - (minHit - length) / 2, length: minHit });
 
   let notDrawn = 0;
+  let small = 0;
   boxes.forEach((box, g) => {
     const color = input.color(box);
     const bandStart = bands.start(g);
@@ -239,7 +248,9 @@ export function boxplotPlot(input: BoxplotPlotInput): BoxplotPlot {
       // A box of one value is its median line alone: its mean is the same point.
       mean: box.values > 1 ? [seg(meanAt - arm, center - arm, meanAt + arm, center + arm), seg(meanAt - arm, center + arm, meanAt + arm, center - arm)] : [],
       whiskers,
+      small: isSmallBase(box.values, input.minN),
     });
+    small += isSmallBase(box.values, input.minN) ? 1 : 0;
 
     // The hit area covers the box and its whiskers across the box's width; an outlier's own hit area is drawn after it.
     const nearest = Math.min(upper, lower, q1, q3, meanAt);
@@ -276,12 +287,12 @@ export function boxplotPlot(input: BoxplotPlotInput): BoxplotPlot {
         line(words.minimum, input.value(box.min)),
         line(words.outliers, input.whole(box.outlierCount)),
       ],
-      footer: hidden > 0 ? words.notDrawn(hidden) : null,
+      footer: [hidden > 0 ? words.notDrawn(hidden) : null, input.smallNote?.(box.values) ?? null].filter((note): note is string => !!note).join(' · ') || null,
     };
     marks[g][0] = { content, x: horizontal ? median : center, y: horizontal ? center : median };
   });
 
-  return { width: w, height: h, axis, grid, ticks, labels, boxes: boxesOut, outliers, hits, marks, notDrawn };
+  return { width: w, height: h, axis, grid, ticks, labels, boxes: boxesOut, outliers, hits, marks, notDrawn, small };
 }
 
 /**
@@ -358,7 +369,7 @@ export function boxTableModel(
               </text>
             }
             @for (shape of plot().boxes; track shape.g) {
-              <g data-testid="chart-mark" [attr.data-group]="shape.group">
+              <g data-testid="chart-mark" [attr.data-group]="shape.group" [attr.data-small]="shape.small ? 'true' : null">
                 @for (whisker of shape.whiskers; track $index) {
                   <line [attr.x1]="whisker.x1" [attr.y1]="whisker.y1" [attr.x2]="whisker.x2" [attr.y2]="whisker.y2" [style.stroke]="shape.color" stroke-width="1.5" />
                 }
@@ -370,9 +381,10 @@ export function boxTableModel(
                     [attr.width]="rect.width"
                     [attr.height]="rect.height"
                     [style.fill]="shape.color"
-                    fill-opacity="0.2"
+                    [attr.fill-opacity]="shape.small ? 0.07 : 0.2"
                     [style.stroke]="shape.color"
                     [attr.stroke-width]="marks.isLifted(shape.g, 0) ? 2.5 : 1.5"
+                    [attr.stroke-dasharray]="shape.small ? smallDash : null"
                     data-testid="box-rect"
                   />
                 }
@@ -473,6 +485,11 @@ export class BoxplotChart {
   readonly percent = input(false);
   /** The colors of the widget, from the dashboard's palette and its colors kept by value. */
   readonly colors = input.required<ChartColors>();
+  /** The threshold in force (a box's n is its number of values), for the small bases of the boxes (add-small-sample-warnings). */
+  readonly bases = input<ChartBases>(noChartBases);
+  /** How many boxes the chart draws dimmed for a small base, so the widget can explain the dimming under it (design D10, D11). */
+  readonly dimmed = output<number>();
+  protected readonly smallDash = smallBaseDash;
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private readonly svg = viewChild<ElementRef<SVGElement>>('chartSvg');
@@ -525,6 +542,8 @@ export class BoxplotChart {
       whole: this.whole,
       words: this.words(),
       zeroPad: this.percent() ? 0.01 : 1,
+      minN: this.bases().minN,
+      smallNote: (n) => smallBaseTooltip(n, this.bases().minN, this.locale, this.tr),
     }),
   );
 
@@ -536,6 +555,7 @@ export class BoxplotChart {
   private watch: AbortController | null = null;
 
   constructor() {
+    effect(() => this.dimmed.emit(this.plot().small));
     // What an image of the box plot says around its boxes (add-widget-export): the key of its marks, and the outliers it did not draw.
     registerExportParts({
       plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
@@ -629,6 +649,10 @@ export class BoxplotChart {
   }
 
   protected summary(t: Translate): string {
+    return summaryWithSmall(this.summaryWords(t), this.plot().small, t);
+  }
+
+  private summaryWords(t: Translate): string {
     const boxes = this.boxes();
     if (!boxes.length) {
       return t('indicators.chart.summaryEmpty', { what: this.what() });

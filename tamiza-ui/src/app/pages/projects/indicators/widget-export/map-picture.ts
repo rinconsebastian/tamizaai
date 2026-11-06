@@ -7,6 +7,9 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const polygonWeight = 1;
 const markerWeight = 2;
 const markerRadius = 6;
+// A small base keeps its fill and gets a dashed outline, as on screen (add-small-sample-warnings, design D10): the engine's smallStyle.
+const smallDash = '4 3';
+const smallWeight = 2;
 
 /** A coordinate with one decimal: more adds nothing to a picture. */
 const round = (value: number) => Math.round(value * 10) / 10;
@@ -38,12 +41,12 @@ export function mapPictureToSvg(picture: MapPicture, resolve: (css: string) => s
   for (const shape of picture.shapes) {
     const fill = resolve(`var(--tmz-seq-${shape.step})`);
     if (shape.point) {
-      group.appendChild(make('circle', { cx: round(shape.point.x), cy: round(shape.point.y), r: markerRadius, fill, stroke: surface, 'stroke-width': markerWeight }));
+      group.appendChild(make('circle', { cx: round(shape.point.x), cy: round(shape.point.y), r: markerRadius, fill, stroke: surface, 'stroke-width': shape.small ? smallWeight : markerWeight, ...(shape.small ? { 'stroke-dasharray': smallDash } : {}) }));
       continue;
     }
     // All the rings of a region in one path, so a hole is a hole whichever way it winds.
     const d = shape.polygons.flatMap((rings) => rings.map((ring) => `M${ring.map(at).join('L')}Z`)).join('');
-    group.appendChild(make('path', { d, 'fill-rule': 'evenodd', fill, stroke: surface, 'stroke-width': polygonWeight, 'stroke-linejoin': 'round' }));
+    group.appendChild(make('path', { d, 'fill-rule': 'evenodd', fill, stroke: surface, 'stroke-width': shape.small ? smallWeight : polygonWeight, 'stroke-linejoin': 'round', ...(shape.small ? { 'stroke-dasharray': smallDash } : {}) }));
   }
   root.appendChild(group);
   return root;

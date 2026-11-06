@@ -245,6 +245,7 @@ public static class CategoryOrder
             {
                 Cells = columns.Select(i => row.Cells[i]).ToList(),
                 Shares = row.Shares is { } shares ? columns.Select(i => shares[i]).ToList() : null,
+                Figures = row.Figures is { } figures ? columns.Select(i => figures[i]).ToList() : null,
             })
             .ToList();
         return table with { Columns = columns.Select(i => table.Columns[i]).ToList(), Rows = rows };

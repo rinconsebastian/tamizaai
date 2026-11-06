@@ -66,6 +66,37 @@ describe('map engine', () => {
       expect(host.querySelector('[data-testid="map-region"]')!.getAttribute('d')!.match(/M/g)).toHaveLength(2);
     });
 
+    it('draws a small base with a dashed outline and keeps its class and its fill (add-small-sample-warnings, design D10)', async () => {
+      await open([{ ...shape(square(-77, 3, 1), 7), small: true }, { ...shape('POINT (-76.5 3.5)', 2), small: true }, shape(square(-75, 3, 1), 4)]);
+
+      const [region, point, plain] = [...host.querySelectorAll('[data-testid="map-region"], [data-testid="map-point"]')];
+      expect(region.classList.contains('tmz-seq-7')).toBe(true);
+      expect(region.getAttribute('stroke-dasharray')).toBe('4 3');
+      expect(region.getAttribute('stroke-width')).toBe('2');
+      expect(region.getAttribute('fill-opacity')).toBe('1');
+      expect(point.classList.contains('tmz-seq-2')).toBe(true);
+      expect(point.getAttribute('stroke-dasharray')).toBe('4 3');
+      expect(plain.getAttribute('stroke-dasharray')).toBeNull();
+      expect(plain.getAttribute('stroke-width')).toBe('1');
+    });
+
+    it('marks and unmarks small bases in place, without drawing the shapes again', async () => {
+      const engine = await open([shape(square(-77, 3, 1), 7), shape('POINT (-76.5 3.5)', 2)]);
+      const before = [...host.querySelectorAll('[data-testid="map-region"], [data-testid="map-point"]')];
+
+      engine.setSmall([true, false]);
+      const marked = [...host.querySelectorAll('[data-testid="map-region"], [data-testid="map-point"]')];
+      expect(marked).toEqual(before);
+      expect(marked[0].getAttribute('stroke-dasharray')).toBe('4 3');
+      expect(marked[1].getAttribute('stroke-dasharray')).toBeNull();
+
+      engine.setSmall([false, true]);
+      expect(marked[0].getAttribute('stroke-dasharray')).toBeNull();
+      expect(marked[0].getAttribute('stroke-width')).toBe('1');
+      expect(marked[1].getAttribute('stroke-dasharray')).toBe('4 3');
+      expect(marked[1].getAttribute('stroke-width')).toBe('2');
+    });
+
     it('lowers the fill when there is a basemap under the shapes, and raises it again', async () => {
       const engine = await open([shape(square(-77, 3, 1))]);
 
@@ -250,6 +281,15 @@ describe('map engine picture (add-widget-export, design D10)', () => {
     created = await MapEngine.create(host, { kind: 'degrees', shapes, view: null, reducedMotion: true, events: none });
     return created;
   }
+
+  it('tells in its picture which shapes have a small base, from their input and from setSmall', async () => {
+    const engine = await open([{ ...shape(square(-77, 3, 1), 7), small: true }, shape('POINT (-76.5 3.5)', 2)]);
+
+    expect(engine.picture().shapes.map((s) => s.small === true)).toEqual([true, false]);
+
+    engine.setSmall([false, true]);
+    expect(engine.picture().shapes.map((s) => s.small === true)).toEqual([false, true]);
+  });
 
   it('projects the shapes into the container, in its size, with their steps', async () => {
     const engine = await open([shape(square(-77, 3, 1), 7), shape('POINT (-76.5 3.5)', 2)]);

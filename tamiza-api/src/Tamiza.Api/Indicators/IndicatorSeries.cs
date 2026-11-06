@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 
 namespace Tamiza.Api.Indicators;
@@ -18,14 +19,30 @@ public static class SeriesKinds
 /// <summary>One series of a widget, in display order. <paramref name="Value"/> is null for <see cref="SeriesKinds.None"/> and <see cref="SeriesKinds.Other"/>.</summary>
 public sealed record SeriesInfo(string? Value, string Kind);
 
-/// <summary>A group's total over every series, computed from its rows (a ratio's total is the ratio of the sums). <paramref name="Value"/> is null when it has none.</summary>
-public sealed record GroupTotal(string? Group, double? Value, long Rows);
+/// <summary>
+/// A group's total over every series, computed from its rows (a ratio's total is the ratio of the sums). <paramref name="Value"/> is null
+/// when it has none. <paramref name="Numerator"/>, <paramref name="Denominator"/> and <paramref name="N"/> are the figures of
+/// <see cref="IndicatorRow"/> over the total's rows, and are left out as they are there.
+/// </summary>
+public sealed record GroupTotal(
+    string? Group, double? Value, long Rows,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), Description("The sum of the numerator of a ratio over the total's rows.")] double? Numerator = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), Description("The sum of the denominator of a ratio over the total's rows.")] double? Denominator = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), Description("The base n of the total: the sum of the indicator's base column over its rows, else a ratio's denominator; counted once across answers when the indicator declares answer columns.")] double? N = null);
 
 /// <summary>A series' total over every group of the widget, in the order of the response's <c>series</c>; null value and 0 rows for a series with no rows.</summary>
-public sealed record SeriesTotal(string? Series, string Kind, double? Value, long Rows);
+public sealed record SeriesTotal(
+    string? Series, string Kind, double? Value, long Rows,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), Description("The sum of the numerator of a ratio over the total's rows.")] double? Numerator = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), Description("The sum of the denominator of a ratio over the total's rows.")] double? Denominator = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), Description("The base n of the total: the sum of the indicator's base column over its rows, else a ratio's denominator; counted once across answers when the indicator declares answer columns.")] double? N = null);
 
 /// <summary>The total over every row the widget matches.</summary>
-public sealed record GrandTotal(double? Value, long Rows);
+public sealed record GrandTotal(
+    double? Value, long Rows,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), Description("The sum of the numerator of a ratio over the total's rows.")] double? Numerator = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), Description("The sum of the denominator of a ratio over the total's rows.")] double? Denominator = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), Description("The base n of the total: the sum of the indicator's base column over its rows, else a ratio's denominator; counted once across answers when the indicator declares answer columns.")] double? N = null);
 
 /// <summary>The totals of a widget with a series (see design D12).</summary>
 public sealed record SeriesTotals(IReadOnlyList<GroupTotal> Groups, IReadOnlyList<SeriesTotal> Series, GrandTotal All);

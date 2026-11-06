@@ -1,4 +1,5 @@
 import { SeriesLayout } from '../../../core/projects/indicators.service';
+import { SeriesFigures, isSmallBase } from './base-figures';
 import { ChartTooltipContent } from '../../../shared/ui';
 import { CategoryOrders } from './category-order';
 import { MarkAt, MarkGrid, MarkPoint } from './mark-tooltips';
@@ -50,6 +51,8 @@ export interface Rect {
   title: string;
   /** A mark of a chart with a series: the place its tooltip and the keyboard know it by. */
   at?: MarkAt;
+  /** A mark with a small base (add-small-sample-warnings, design D10): drawn lighter, with a dashed outline in its own color. */
+  dim?: boolean;
 }
 export interface Path {
   d: string;
@@ -61,6 +64,8 @@ export interface Dot {
   cy: number;
   color: string;
   title: string;
+  /** A point with a small base is hollow with a dashed ring (design D10). */
+  hollow?: boolean;
 }
 /** The area that answers a pointer for a mark: larger than the mark, with the gap between marks included (design D5, interaction). */
 export interface Hit {
@@ -96,6 +101,8 @@ export interface SeriesPlotInput {
   steps?: boolean;
   /** Writes each bar, column or point's value on it (design D7). A stacked and a 100% layout have none whatever this says. */
   dataLabels?: boolean;
+  /** The base figures of the tooltips and the threshold that dims small bases (add-small-sample-warnings); a chart given none draws what it always did. */
+  figures?: SeriesFigures;
 }
 
 export interface SeriesPlot {
@@ -113,6 +120,8 @@ export interface SeriesPlot {
   referenceLabels: Label[];
   /** The values written on the marks (design D7). Empty for a chart without data labels. */
   dataLabels: Label[];
+  /** How many marks have a small base: what the chart's summary says and whether it explains the dimming (design D10). */
+  small: number;
 }
 
 /** The top margin of a plain chart; a chart with reference lines or data labels grows it by the room their texts need. */
@@ -125,6 +134,11 @@ export const stackedThickness = 28;
 export const surfaceGap = 2;
 /** A hit area is at least this long along a bar. */
 const minHit = 12;
+
+/** The span of a hit area along the value axis: the mark's own, at least `minHit` long, centered on the mark. */
+export function hitSpan(start: number, length: number): { start: number; length: number } {
+  return length >= minHit ? { start, length } : { start: start + (length - minHit) / 2, length: minHit };
+}
 const maxLinePoints = 40;
 
 /** One segment of a stack, in value units, from `a` to `b`. */
@@ -212,17 +226,25 @@ export function seriesPlot(input: SeriesPlotInput): SeriesPlot {
   /** Writes a data label unless it would cover a text already placed. */
   const writeLabel = (label: TextAt) => writeDataLabel(label, taken, dataLabels);
 
-  const content = (row: SeriesRow, s: number, value: number, share: number | null): ChartTooltipContent => ({
-    heading: input.groupLabel(row.group),
-    lines:
-      share !== null
-        ? [
-            { label: input.names[s], value: input.share(share), align: 'end', color: input.colors[s] },
-            { label: input.what, value: input.value(value), align: 'end' },
-          ]
-        : [{ label: input.names[s], value: input.value(value), align: 'end', color: input.colors[s] }],
-    footer: null,
-  });
+  const smallOf = (row: SeriesRow, s: number) => isSmallBase(row.figures?.[s]?.n, input.figures?.minN);
+  const content = (row: SeriesRow, s: number, value: number, share: number | null): ChartTooltipContent => {
+    // After the value: the numerator, the denominator and the n under their names, and the note of a small base (design D9).
+    const tip = input.figures?.tip(row.figures?.[s]) ?? { lines: [], footer: null };
+    return {
+      heading: input.groupLabel(row.group),
+      lines: [
+        ...(share !== null
+          ? [
+              { label: input.names[s], value: input.share(share), align: 'end' as const, color: input.colors[s] },
+              { label: input.what, value: input.value(value), align: 'end' as const },
+            ]
+          : [{ label: input.names[s], value: input.value(value), align: 'end' as const, color: input.colors[s] }]),
+        ...tip.lines,
+      ],
+      footer: tip.footer,
+    };
+  };
+  let small = 0;
 
   if (kind === 'line') {
     return linePlot(input, rows, categories, axis, { grid, ticks, labels, rects, lines, dots, hits, marks, dataLabels, taken, top, refs });
@@ -282,12 +304,14 @@ export function seriesPlot(input: SeriesPlotInput): SeriesPlot {
   const place = (g: number, s: number, value: number, rect: { x: number; y: number; width: number; height: number }, hit: { x: number; y: number; width: number; height: number }) => {
     const share = percent ? valueOf(rows[g], s) : null;
     const cell = rows[g].cells[s] ?? value;
-    rects.push({ ...rect, color: input.colors[s], title: '', at: { g, s } });
+    const dim = smallOf(rows[g], s);
+    small += dim ? 1 : 0;
+    rects.push({ ...rect, color: input.colors[s], title: '', at: { g, s }, ...(dim ? { dim } : {}) });
     hits.push({ ...hit, at: { g, s } });
     marks[g][s] = { content: content(rows[g], s, cell, share), x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
   };
   /** A hit area at least `minHit` long along the value axis, centered on the mark. */
-  const along = (start: number, length: number) => (length >= minHit ? { start, length } : { start: start + (length - minHit) / 2, length: minHit });
+  const along = hitSpan;
 
   rows.forEach((row, g) => {
     const bandStart = bands.start(g);
@@ -348,7 +372,7 @@ export function seriesPlot(input: SeriesPlotInput): SeriesPlot {
     }
   });
 
-  return { grid, ticks, labels, rects, lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
+  return { grid, ticks, labels, rects, lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, dataLabels, small };
 }
 
 /** The thickness of a bar drawn side by side with the others of its group (design D5): at most 24 px, with the surface between them. */
@@ -408,6 +432,7 @@ function linePlot(
     }
   });
 
+  let small = 0;
   table.columns.forEach((_, s) => {
     // The runs of groups that have a value: a gap in the data is a gap in the line, and a lone point is a dot with no segment.
     const runs: Point[][] = [[]];
@@ -421,8 +446,11 @@ function linePlot(
       }
       const point = { x: centerOf(g), y: y(value) };
       runs.at(-1)!.push(point);
-      if (count <= maxLinePoints) {
-        dots.push({ cx: point.x, cy: point.y, color: input.colors[s], title: '' });
+      // A point with a small base is hollow with a dashed ring, and is drawn whatever the number of points (design D10).
+      const dim = isSmallBase(row.figures?.[s]?.n, input.figures?.minN);
+      small += dim ? 1 : 0;
+      if (count <= maxLinePoints || dim) {
+        dots.push({ cx: point.x, cy: point.y, color: input.colors[s], title: '', ...(dim ? { hollow: true } : {}) });
       }
       if (input.dataLabels) {
         // Series by series and point by point, left to right: a label that would cover one already placed is left out, as is one off the plot.
@@ -440,11 +468,14 @@ function linePlot(
   rows.forEach((row, g) => {
     const present = row.cells.flatMap((cell, s) => (cell === null ? [] : [{ s, cell }]));
     const x = centerOf(g);
+    // A tooltip that lists several series gives each one's n only, and one note when any of them has a small base (design D9).
+    const withN = (s: number, text: string) => (input.figures ? input.figures.withN(text, row.figures?.[s]?.n) : text);
+    const anySmall = present.some(({ s }) => isSmallBase(row.figures?.[s]?.n, input.figures?.minN));
     marks[g][0] = {
       content: {
         heading: categories[g],
-        lines: present.map(({ s, cell }) => ({ label: input.names[s], value: input.value(cell), align: 'end' as const, color: input.colors[s] })),
-        footer: null,
+        lines: present.map(({ s, cell }) => ({ label: input.names[s], value: withN(s, input.value(cell)), align: 'end' as const, color: input.colors[s] })),
+        footer: anySmall ? (input.figures?.some ?? null) : null,
       },
       x,
       y: Math.min(...present.map(({ cell }) => y(cell)), h - bottom),
@@ -452,5 +483,5 @@ function linePlot(
     hits.push({ x: bands.start(g) - (bands.step - bands.bandwidth) / 2, y: top, width: bands.step, height: h - bottom - top, at: { g, s: 0 }, guide: { x1: x, y1: top, x2: x, y2: h - bottom, zero: false } });
   });
 
-  return { grid, ticks, labels, rects: [], lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
+  return { grid, ticks, labels, rects: [], lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, dataLabels, small };
 }

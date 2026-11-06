@@ -564,3 +564,79 @@ A widget's table in a scheduled email's body and in its workbook SHALL list its 
 #### Scenario: Nothing declared
 - **WHEN** a scheduled email holds widgets that declare no order, no values kept last and no hidden prefixes
 - **THEN** their tables list the same rows, in the same order and with the same text, as before declared orders existed
+
+### Requirement: Base n and no-data lines in a scheduled email
+A scheduled email SHALL apply each widget's base settings and its dashboard's, as the dashboard does with its filters at their defaults. A widget's base n line and no-data line SHALL be among its notes, in the body ahead of its footnote and on the workbook's "Summary", and a widget with no series whose values have a base n and whose base n line or threshold is in force SHALL have the n column of its "Show as table" view, in the body and in its sheet.
+
+#### Scenario: Base n line in the email
+- **WHEN** "Teatro" shows its base n lines and one of its widgets has the n 223 with its denominator named "Hogares que asistieron"
+- **THEN** that widget's notes in the body and on the "Summary" read "n = 223 Hogares que asistieron"
+
+#### Scenario: n column in the email
+- **WHEN** "Teatro" has the threshold 30 and its scheduled email holds a column chart by `comuna`
+- **THEN** the chart's table in the body and in its sheet has an n column after the value, holding 16 for `COMUNA 7` as a whole number
+
+#### Scenario: No-data line in the email
+- **WHEN** a widget leaves out "Sin dato", which held 1 household of 476
+- **THEN** its notes say what "Sin dato" held, as the line under the widget does
+
+#### Scenario: Lines before the footnote
+- **WHEN** "Teatro" shows its base n lines and its email holds the bar chart "2.4. En qué lugares", which has the footnote "No suman 100 %: respuesta múltiple."
+- **THEN** its block shows the n line among the notes above the table and the footnote after the table
+
+#### Scenario: Email of a dashboard without base settings
+- **WHEN** a dashboard and its widgets have no base settings
+- **THEN** its scheduled email has the tables and notes it had before base settings existed
+
+### Requirement: Small bases in a scheduled email
+In a scheduled email, a value with a small base SHALL be followed by a mark in the body's table, and the widget's notes SHALL explain the mark and say how many values have a small base, in the body and on the workbook's "Summary". The workbook's cells SHALL hold the numbers alone.
+
+#### Scenario: Marked value
+- **WHEN** `COMUNA 7`, with the n 16, and `SIN NOMBRE`, with the n 20, are under the threshold 30
+- **THEN** their values in the body's table carry the mark, and the widget's notes say that 2 values have a base below 30
+
+#### Scenario: Workbook cell of a small base
+- **WHEN** the workbook holds the value of `COMUNA 7`, 0.5
+- **THEN** its cell holds the number 0.5 alone, and the "Summary" holds the note
+
+### Requirement: Stat tile in a scheduled email
+In the body of a scheduled email, a stat tile's value SHALL be written at 20 px, under its title and subtitle, followed by what it plots, naming its statistic when it has one and left out when the widget hides its caption, and by the secondary lines the tile asks for, computed with the dashboard filters at their defaults, before the tile's notes and footnote. The plain-text version and the tile's line on the workbook's "Summary" sheet SHALL carry the same secondary lines after the value.
+
+#### Scenario: Smaller value
+- **WHEN** the "Teatro" email shows the stat tile `46.85% de los hogares`
+- **THEN** its value is written at 20 px, not at 24 px
+
+#### Scenario: Median in the email
+- **WHEN** a stat tile of the email has the statistic median
+- **THEN** what the body says it plots starts with "Median of", and its value is the median over the rows the dashboard filters' defaults keep
+
+#### Scenario: Line without filters with a default
+- **WHEN** the dashboard filter "Comuna" has the default `COMUNA 1` and a stat tile shows the line without filters
+- **THEN** the body shows the tile's value for `COMUNA 1` and, under it, its value without the dashboard filters
+
+#### Scenario: Line without filters and no default
+- **WHEN** no dashboard filter has a default and a stat tile shows the line without filters
+- **THEN** the body shows no "Without filters" line for it
+
+#### Scenario: Lines above the footnote
+- **WHEN** the stat tile "Fuera de Duitama" of the email has the footnote "Sin dato aparte (E5)." and shows `n = 476 Hogares`
+- **THEN** its cell shows the value, what it plots, the n line and then the footnote
+
+#### Scenario: Lines in the plain text and the workbook
+- **WHEN** a stat tile of the email shows `n = 476 Hogares`
+- **THEN** the plain-text version and the tile's "Summary" line give `n = 476 Hogares` after the value
+
+### Requirement: Ratio over declared categories in a scheduled email
+A widget that shows a message instead of its figures because it would add up several answers of a column declared as the answers of a multiple-choice question SHALL appear in a scheduled email as a widget whose settings no longer fit its table, with a reason in the email's language that names the column and says why. Its totals that would add up several of those answers SHALL be missing values. A ratio over several answers of a single-choice column SHALL be the figure the dashboard shows.
+
+#### Scenario: Refused card in the email
+- **WHEN** the email of "Escuelas" holds a stat tile over two reasons of `escuelas_razones_no`, whose `categoria` is declared as the answers of a multiple-choice question
+- **THEN** the body shows the tile's title with the reason naming `categoria`, and the other widgets as usual
+
+#### Scenario: Corrected card in the email
+- **WHEN** the email holds the stat tile over `cruces_intencion` that keeps `categoria` in `1`, `2`, `3` and `4`, and its `categoria` is declared as the answers of a single-choice question
+- **THEN** the body shows `95.17% de los hogares`
+
+#### Scenario: Total row of a declared column
+- **WHEN** the email holds a heat map grouped by `categoria`, declared as the answers of a multiple-choice question, with the series `comuna`
+- **THEN** its "Total" row reads "—" in the body and is empty in the workbook

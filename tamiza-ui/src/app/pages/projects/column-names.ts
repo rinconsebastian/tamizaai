@@ -1,31 +1,44 @@
-import { ColumnDraft, ColumnMetadata, ColumnMetadataMap } from '../../core/projects/pipeline.service';
+import { ColumnDraft, ColumnMetadata, ColumnMetadataMap, answerKinds } from '../../core/projects/pipeline.service';
 
 // The column names of an indicator as the details form handles them (add-indicator-column-metadata, design D8): the saved map of the
 // version, the rows being typed, and what a save sends. Later changes of the program add their properties to each of the three; the
 // declared category order (add-declared-category-order, design D9) added the order of a column's values, the values kept at the end and
-// the choice to hide numbered prefixes.
+// the choice to hide numbered prefixes, and the base facts (add-small-sample-warnings, design D1) added the base column, the values that
+// mean no data and the kind of answers.
 // Built with `Object.fromEntries`, which defines own properties, so a column called `__proto__` is a column like any other.
 
-/** A row of the form that says nothing: no label, no order, no value kept last and prefixes shown. */
-export const emptyDraft = (): ColumnDraft => ({ label: '', order: [], last: [], stripPrefix: false });
+/** A row of the form that says nothing: no label, no order, no value kept last, prefixes shown and no base fact. */
+export const emptyDraft = (): ColumnDraft => ({ label: '', order: [], last: [], stripPrefix: false, base: false, missing: [], categories: '' });
 
 /** Whether a row says anything once its label is trimmed. */
-function hasAny(draft: ColumnDraft): boolean {
-  return !!draft.label.trim() || draft.order.length > 0 || draft.last.length > 0 || draft.stripPrefix;
+export function hasAny(draft: ColumnDraft): boolean {
+  return !!draft.label.trim() || draft.order.length > 0 || draft.last.length > 0 || draft.stripPrefix || draft.base || draft.missing.length > 0 || !!draft.categories;
 }
 
 /** The rows of the details form for the facts a version was saved with: one per column that has a label or any other fact. */
 export function draftsOf(columns: ColumnMetadataMap | null | undefined): Record<string, ColumnDraft> {
   return Object.fromEntries(
     Object.entries(columns ?? {})
-      .map(([column, facts]): [string, ColumnDraft] => [column, { label: facts?.label ?? '', order: [...(facts?.order ?? [])], last: [...(facts?.last ?? [])], stripPrefix: facts?.stripPrefix === true }])
+      .map(([column, facts]): [string, ColumnDraft] => [
+        column,
+        {
+          label: facts?.label ?? '',
+          order: [...(facts?.order ?? [])],
+          last: [...(facts?.last ?? [])],
+          stripPrefix: facts?.stripPrefix === true,
+          base: facts?.base === true,
+          missing: [...(facts?.missing ?? [])],
+          categories: facts?.categories && answerKinds.includes(facts.categories) ? facts.categories : '',
+        },
+      ])
       .filter(([, draft]) => hasAny(draft)),
   );
 }
 
 /**
- * What a save sends for every row that says something: its label once trimmed, and its order, values kept last and prefix choice when it
- * has them. A property that is not set is left out, and so are empty lists and an unticked box. The order of the keys means nothing.
+ * What a save sends for every row that says something: its label once trimmed, and its order, values kept last, prefix choice and base
+ * facts when it has them. A property that is not set is left out, and so are empty lists and an unticked box. The order of the keys means
+ * nothing.
  */
 export function columnsOf(drafts: Record<string, ColumnDraft>): ColumnMetadataMap {
   return Object.fromEntries(
@@ -40,6 +53,9 @@ export function columnsOf(drafts: Record<string, ColumnDraft>): ColumnMetadataMa
             ...(draft.order.length ? { order: [...draft.order] } : {}),
             ...(draft.last.length ? { last: [...draft.last] } : {}),
             ...(draft.stripPrefix ? { stripPrefix: true } : {}),
+            ...(draft.base ? { base: true } : {}),
+            ...(draft.missing.length ? { missing: [...draft.missing] } : {}),
+            ...(draft.categories ? { categories: draft.categories } : {}),
           },
         ];
       }),

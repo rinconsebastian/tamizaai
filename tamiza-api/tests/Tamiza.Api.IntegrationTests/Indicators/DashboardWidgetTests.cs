@@ -948,6 +948,32 @@ public sealed class DashboardWidgetTests(PostgresFixture postgres)
         Assert.DoesNotContain("\"overall\":", (await h.StoredWidgetsAsync()).Single());
     }
 
+    [Fact]
+    public async Task The_unfiltered_flag_of_a_stat_tile_is_not_a_setting_of_a_widget_and_is_not_stored()
+    {
+        await using var h = await PublishedBySourceAsync();
+
+        // The value without the dashboard filters is a flag of the query request, derived from display.secondary: an unknown key is dropped as today.
+        var response = await h.PostWidgetAsync(new
+        {
+            title = "Tile",
+            chartType = "stat",
+            config = new
+            {
+                indicator = BySource, ratio = Ratio, unfiltered = true, statistic = "median",
+                display = new { secondary = new[] { "n", "unfiltered" }, unfiltered = true },
+            },
+        });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var config = (await ReadAsync(response)).GetProperty("config");
+        Assert.False(config.TryGetProperty("unfiltered", out _));
+        Assert.False(config.GetProperty("display").TryGetProperty("unfiltered", out _));
+        Assert.Equal("median", config.GetProperty("statistic").GetString());
+        Assert.Equal(["n", "unfiltered"], config.GetProperty("display").GetProperty("secondary").EnumerateArray().Select(l => l.GetString()));
+        Assert.DoesNotContain("\"unfiltered\":", (await h.StoredWidgetsAsync()).Single());
+    }
+
     // Full dashboard
 
     [Fact]

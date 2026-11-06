@@ -155,6 +155,212 @@ public sealed class SeriesQueryBuilderTests
         Assert.DoesNotContain("DROP TABLE", plan.Cells(["Fem'ale; DROP TABLE x"]).Sql);
         Assert.DoesNotContain("Rain", plan.Cells([]).Sql);
     }
+
+    // The base n: figures appended to every branch of the cells statement, and the counted statement (design D5 of add-small-sample-warnings)
+
+    private static readonly Dictionary<string, TableColumn> BaseColumns = new[]
+    {
+        new TableColumn("comuna", DataColumnType.Text, null), new TableColumn("categoria", DataColumnType.Text, null),
+        new TableColumn("variable", DataColumnType.Text, null), new TableColumn("hogares", DataColumnType.Integer, null),
+        new TableColumn("numerator", DataColumnType.Decimal, null), new TableColumn("denominator", DataColumnType.Decimal, null),
+        new TableColumn("value", DataColumnType.Decimal, null),
+    }.ToDictionary(c => c.Name, StringComparer.Ordinal);
+
+    private const string RatioAggregate = "sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)";
+
+    private static WidgetConfig RatioConfig() =>
+        new WidgetConfigInput("teatro", Ratio: new WidgetRatio("numerator", "denominator"), GroupBy: "comuna", SeriesBy: "categoria").Normalize();
+
+    private static SeriesQueryPlan BuildBase(string? chartType, WidgetConfig config, IndicatorBases? bases, string rowFilter = "(\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL)") =>
+        SeriesQueryBuilder.Build(config, chartType, BaseColumns, From, RatioAggregate, rowFilter, Own, Dashboard, maxRows: 5000, bases);
+
+    /// <summary>How many columns each branch of a cells statement selects: the top-level commas of its select list, counted outside quotes and brackets.</summary>
+    private static List<int> ColumnsOfEveryBranch(string sql)
+    {
+        var counts = new List<int>();
+        var at = 0;
+        while ((at = sql.IndexOf("(SELECT ", at, StringComparison.Ordinal)) >= 0)
+        {
+            // A branch starts a line: the CTE bodies' own selects are indented inside their parentheses.
+            if (at > 0 && sql[at - 1] != '\n')
+            {
+                at += 8;
+                continue;
+            }
+
+            var depth = 0;
+            var columns = 1;
+            var i = at + 8;
+            for (; i < sql.Length; i++)
+            {
+                var c = sql[i];
+                if (c == '"')
+                {
+                    i = sql.IndexOf('"', i + 1);
+                }
+                else if (c == '\'')
+                {
+                    i = sql.IndexOf('\'', i + 1);
+                }
+                else if (c == '(')
+                {
+                    depth++;
+                }
+                else if (c == ')')
+                {
+                    depth--;
+                }
+                else if (c == ',' && depth == 0)
+                {
+                    columns++;
+                }
+                else if (depth == 0 && (string.CompareOrdinal(sql, i, " FROM ", 0, 6) == 0 || string.CompareOrdinal(sql, i, "\nFROM ", 0, 6) == 0 || string.CompareOrdinal(sql, i, "\n FROM ", 0, 7) == 0))
+                {
+                    break;
+                }
+            }
+
+            counts.Add(columns);
+            at = i;
+        }
+
+        return counts;
+    }
+
+    [Fact]
+    public void Every_branch_of_a_ratios_cells_statement_selects_the_same_columns()
+    {
+        var fixedDomain = BuildBase(ChartTypes.Likert, new WidgetConfigInput("teatro", Ratio: new WidgetRatio("numerator", "denominator"), GroupBy: "comuna", SeriesBy: "categoria",
+            Scale: [new LikertStep("Sí", "positive"), new LikertStep("No", "negative")]).Normalize(), null).Cells(["Sí", "No"]).Sql;
+        var open = BuildBase(ChartTypes.Column, RatioConfig(), null).Cells(["Sí"]).Sql;
+
+        Assert.Equal([9, 9, 9, 9, 9], ColumnsOfEveryBranch(fixedDomain));
+        Assert.Equal([9, 9, 9, 9], ColumnsOfEveryBranch(open));
+    }
+
+    [Fact]
+    public void A_ratios_cells_statement_adds_both_sums_after_its_seven_columns_in_every_branch()
+    {
+        var sql = BuildBase(ChartTypes.Column, RatioConfig(), null).Cells(["Sí"]);
+
+        Assert.Equal(new SqlFigures(7, 8, null, null), sql.Figures);
+        Assert.Contains("row_number() OVER (", sql.Sql);
+        Assert.Contains(", sum(\"numerator\")::double precision AS fn, sum(\"denominator\")::double precision AS fd\n", sql.Sql);
+        Assert.Contains("grp.rk, cell.fn, cell.fd\n", sql.Sql);
+        Assert.Contains("NULL::bigint, sum(\"numerator\")::double precision, sum(\"denominator\")::double precision\n FROM src GROUP BY", sql.Sql);
+        Assert.Contains("NULL::bigint, sum(\"numerator\")::double precision, sum(\"denominator\")::double precision FROM src)", sql.Sql);
+    }
+
+    [Fact]
+    public void A_base_column_adds_its_sum_to_every_branch_and_the_left_out_branch_takes_nulls()
+    {
+        var config = new WidgetConfigInput("teatro", Ratio: new WidgetRatio("numerator", "denominator"), GroupBy: "comuna", SeriesBy: "categoria",
+            Pyramid: new WidgetPyramid("Sí", "No")).Normalize();
+
+        var sql = BuildBase(ChartTypes.Pyramid, config, new IndicatorBases("hogares", [], new Dictionary<string, IReadOnlyList<string>>())).Cells(["Sí", "No"]);
+
+        Assert.Equal(new SqlFigures(7, 8, 9, null), sql.Figures);
+        Assert.Contains("AS fn, sum(\"denominator\")::double precision AS fd, sum(\"hogares\")::double precision AS fb", sql.Sql);
+        Assert.Contains("NULL::bigint, NULL::double precision, NULL::double precision, NULL::double precision\n FROM", sql.Sql);
+        Assert.Equal([10, 10, 10, 10, 10], ColumnsOfEveryBranch(sql.Sql));
+    }
+
+    [Fact]
+    public void A_measure_with_no_base_column_has_the_cells_statement_it_had_before()
+    {
+        var measure = new WidgetConfigInput("households", Measure: "value", GroupBy: "comuna", SeriesBy: "categoria").Normalize();
+
+        var without = SeriesQueryBuilder.Build(measure, ChartTypes.Column, BaseColumns, From, Aggregate, "\"value\" IS NOT NULL", Own, Dashboard, maxRows: 5000);
+        var declared = SeriesQueryBuilder.Build(
+            measure, ChartTypes.Column, BaseColumns, From, Aggregate, "\"value\" IS NOT NULL", Own, Dashboard, 5000,
+            new IndicatorBases(null, ["categoria"], new Dictionary<string, IReadOnlyList<string>>()));
+
+        Assert.Equal(without.Cells(["Sí"]).Sql, declared.Cells(["Sí"]).Sql);
+        Assert.Null(without.Cells(["Sí"]).Figures);
+        Assert.DoesNotContain("fn", without.Cells(["Sí"]).Sql);
+        Assert.Equal([7, 7, 7, 7], ColumnsOfEveryBranch(without.Cells(["Sí"]).Sql));
+        Assert.Null(declared.Counted);
+    }
+
+    [Fact]
+    public void The_counted_statement_reads_the_cells_statements_rows_and_groups_by_every_declared_column()
+    {
+        var plan = BuildBase(ChartTypes.Column, RatioConfig(), new IndicatorBases("hogares", ["variable", "categoria"], new Dictionary<string, IReadOnlyList<string>>()));
+
+        var counted = plan.Counted!(["Sí", "No"]);
+        var cells = plan.Cells(["Sí", "No"]);
+
+        Assert.DoesNotContain("IS NOT DISTINCT FROM", counted.Sql);
+        Assert.Contains($"SELECT {From}.*", counted.Sql);
+        Assert.Contains("WHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL) AND \"water_source\" <> @f0 AND \"sex\" = @d0", counted.Sql);
+        Assert.Contains("GROUP BY 1, 2, 3) x GROUP BY g", counted.Sql); // a group: its text and the two declared columns
+        Assert.Contains("GROUP BY 1, 2, 3, 4, 5) x GROUP BY g, k, sv", counted.Sql); // a cell: group, kind, series text and the two columns
+        Assert.Contains("GROUP BY 1, 2, 3, 4) x GROUP BY k, sv", counted.Sql); // a series: kind, series text and the two columns
+        Assert.Contains("FROM src GROUP BY 1, 2) x", counted.Sql); // the whole widget
+        Assert.Equal(cells.Parameters.Where(p => p.Name != IndicatorSql.LimitParameter).Select(p => p.Name), counted.Parameters.Select(p => p.Name));
+        Assert.Equal(["Sí", "No"], (string[])counted.Parameters.Single(p => p.Name == SeriesQueryBuilder.KeptParameter).Value);
+    }
+
+    [Fact]
+    public void No_counted_statement_is_built_without_answer_columns()
+    {
+        Assert.Null(BuildBase(ChartTypes.Column, RatioConfig(), null).Counted);
+        Assert.Null(BuildBase(ChartTypes.Column, RatioConfig(), new IndicatorBases("hogares", [], new Dictionary<string, IReadOnlyList<string>>())).Counted);
+    }
+
+    // The values that mean no data are left out of every statement of a series (design D6 of add-small-sample-warnings)
+
+    private static string Quote(string name) => "\"" + name + "\"";
+
+    private static NoDataExclusion? LeavingOut(WidgetConfig config, string chartType) => NoDataExclusion.For(
+        config with { MissingFooter = true }, chartType, new IndicatorBases(null, [], new Dictionary<string, IReadOnlyList<string>>
+        {
+            ["municipality"] = ["Sin dato"], ["water_source"] = ["No sabe"],
+        }), Quote);
+
+    private const string LeftBoth =
+        "(\"municipality\" IS NOT NULL AND \"municipality\"::text = ANY(@ng)) OR (\"water_source\" IS NOT NULL AND \"water_source\"::text = ANY(@ns))";
+
+    [Fact]
+    public void Without_an_exclusion_the_statements_are_the_text_they_were()
+    {
+        var config = Config();
+        var plain = SeriesQueryBuilder.Build(config, ChartTypes.Column, Columns, From, Aggregate, RowFilter, Own, Dashboard, maxRows: 5000);
+        var none = SeriesQueryBuilder.Build(config, ChartTypes.Column, Columns, From, Aggregate, RowFilter, Own, Dashboard, 5000, null, null);
+
+        Assert.Equal(plain.Domain!.Sql, none.Domain!.Sql);
+        Assert.Equal(plain.Cells(["Piped"]).Sql, none.Cells(["Piped"]).Sql);
+        Assert.DoesNotContain("@ng", plain.Domain.Sql + plain.Cells(["Piped"]).Sql);
+        Assert.Null(LeavingOut(config with { MissingFooter = null }, ChartTypes.Stat));
+    }
+
+    [Fact]
+    public void An_exclusion_is_in_the_domain_both_branches_the_cells_and_the_totals_and_binds_both_arrays()
+    {
+        var config = Config();
+        var plan = SeriesQueryBuilder.Build(config, ChartTypes.Column, Columns, From, Aggregate, RowFilter, Own, Dashboard, 5000, null, LeavingOut(config, ChartTypes.Column));
+
+        // The domain reads the widget's own filters and the exclusion, in both its branches: a left-out series takes no slot.
+        Assert.Equal(2, plan.Domain!.Sql.Split($"AND NOT ({LeftBoth})").Length - 1);
+        Assert.Contains(plan.Domain.Parameters, p => p.Name == "ng");
+        Assert.Equal(["No sabe"], (string[])plan.Domain.Parameters.Single(p => p.Name == "ns").Value);
+        Assert.DoesNotContain("@d0", plan.Domain.Sql);
+        var cells = plan.Cells(["Piped"]);
+        Assert.Contains($"WHERE {RowFilter} AND \"water_source\" <> @f0 AND \"sex\" = @d0 AND NOT ({LeftBoth})", cells.Sql);
+        Assert.Contains(cells.Parameters, p => p.Name == "ng");
+        Assert.Contains(cells.Parameters, p => p.Name == "ns");
+    }
+
+    [Fact]
+    public void A_pyramids_left_out_count_does_not_count_the_rows_the_widget_leaves_out()
+    {
+        var config = Config(pyramid: new WidgetPyramid("Female", "Male"));
+        var plan = SeriesQueryBuilder.Build(config, ChartTypes.Pyramid, Columns, From, Aggregate, RowFilter, Own, Dashboard, 5000, null, LeavingOut(config, ChartTypes.Pyramid));
+
+        var cells = plan.Cells(["Female", "Male"]).Sql;
+
+        Assert.Contains($"AND NOT ({LeftBoth}) AND NOT (", cells[cells.IndexOf("count(*), NULL::bigint", StringComparison.Ordinal)..]);
+    }
 }
 
 public sealed class SeriesDomainTests

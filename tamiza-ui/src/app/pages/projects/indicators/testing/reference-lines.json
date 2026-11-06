@@ -1,5 +1,5 @@
 {
- "_comment": "Shared by the API's ReferenceLinesTests and the UI's reference-lines spec (add-chart-annotations, design D3). Each case gives the widget's chart type and config, the answer of its query (rows, the overall value of a widget with no series, the totals of one with a series) and the lines that are drawn, in the widget's order: kind, the widget's own label (null for the kind's default) and value. The values are worked out by hand and compared to 12 decimals: mean is the sum of the rows' values added in the answer's order over their count, median is the middle value (the mean of the two middle ones for an even count, as pandas computes it), overall is the answer's overall or, with a series, the grand total, a value line keeps its number, and a line with no value is left out. \"Answers of one question\" is three bars over one shared base (30 of 100, 50 of 100 and 70 of 100): its overall value is the mean of the bars, not a total.",
+ "_comment": "Shared by the API's ReferenceLinesTests and the UI's reference-lines spec (add-chart-annotations, design D3). Each case gives the widget's chart type and config, the answer of its query (rows, the overall value of a widget with no series, the totals of one with a series) and the lines that are drawn, in the widget's order: kind, the widget's own label (null for the kind's default) and value. The values are worked out by hand and compared to 12 decimals: mean is the sum of the rows' values added in the answer's order over their count, median is the middle value (the mean of the two middle ones for an even count, as pandas computes it), overall is the answer's overall or, with a series, the grand total, a value line keeps its number, and a line with no value is left out. \"Answers of one question\" is three bars over one shared base (30 of 100, 50 of 100 and 70 of 100): its overall value is the mean of the bars, not a total. A case may give \"answerColumns\", the columns its indicator declares as answers (add-small-sample-warnings, design D16): the overall line is left out while the widget groups or splits by one of them, and the other lines are drawn as before; without it the indicator declares none.",
  "tolerance": 1e-12,
  "cases": [
   {
@@ -911,6 +911,169 @@
     "overall": 0.35
    },
    "expected": []
+  },
+  {
+   "name": "Overall line over declared answers",
+   "answerColumns": [
+    "variable",
+    "categoria"
+   ],
+   "chartType": "bar",
+   "config": {
+    "indicator": "encuesta_lugares",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "categoria",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "overall"
+      },
+      {
+       "kind": "value",
+       "value": 0.4,
+       "label": "Meta"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "Teatro",
+      "value": 0.3
+     },
+     {
+      "group": "Cine",
+      "value": 0.5
+     },
+     {
+      "group": "Biblioteca",
+      "value": 0.7
+     }
+    ],
+    "overall": 0.5
+   },
+   "expected": [
+    {
+     "kind": "mean",
+     "label": null,
+     "value": 0.5
+    },
+    {
+     "kind": "value",
+     "label": "Meta",
+     "value": 0.4
+    }
+   ]
+  },
+  {
+   "name": "Overall line over a column that is not an answer",
+   "answerColumns": [
+    "variable",
+    "categoria"
+   ],
+   "chartType": "bar",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "comuna",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "mean"
+      },
+      {
+       "kind": "overall"
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "COMUNA 1",
+      "value": 0.4
+     },
+     {
+      "group": "COMUNA 7",
+      "value": 0.5
+     }
+    ],
+    "overall": 0.46
+   },
+   "expected": [
+    {
+     "kind": "mean",
+     "label": null,
+     "value": 0.45
+    },
+    {
+     "kind": "overall",
+     "label": null,
+     "value": 0.46
+    }
+   ]
+  },
+  {
+   "name": "Overall line of a widget with a series split by a declared answer",
+   "answerColumns": [
+    "categoria"
+   ],
+   "chartType": "column",
+   "config": {
+    "indicator": "encuesta_hoy",
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "comuna",
+    "seriesBy": "categoria",
+    "display": {
+     "referenceLines": [
+      {
+       "kind": "overall"
+      },
+      {
+       "kind": "value",
+       "value": 0.4
+      }
+     ]
+    }
+   },
+   "answer": {
+    "rows": [
+     {
+      "group": "COMUNA 1",
+      "series": "Si",
+      "seriesKind": "value",
+      "value": 0.7
+     }
+    ],
+    "totals": {
+     "groups": [],
+     "series": [],
+     "all": {
+      "value": 0.46,
+      "rows": 12
+     }
+    }
+   },
+   "expected": [
+    {
+     "kind": "value",
+     "label": null,
+     "value": 0.4
+    }
+   ]
   }
  ]
 }

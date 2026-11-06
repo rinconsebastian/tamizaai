@@ -2,8 +2,9 @@ import { CdkDrag, CdkDragEnd, CdkDragHandle, CdkDragMove } from '@angular/cdk/dr
 import { NgTemplateOutlet } from '@angular/common';
 import { Component, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
-import { DashboardColors, IndicatorEntry, Layout, Widget } from '../../../core/projects/indicators.service';
+import { DashboardBases, DashboardColors, IndicatorEntry, Layout, Widget } from '../../../core/projects/indicators.service';
 import { ChartTooltips, DropdownMenu, MenuGroup, MenuItem } from '../../../shared/ui';
+import { noBaseSettings } from './base-figures';
 import { defaultColors } from './chart-colors';
 import { ActiveDashboardFilter } from './dashboard-filters';
 import { DashboardPrint } from './dashboard-print';
@@ -120,6 +121,7 @@ const fallbackWidth = 1200;
                 [asTable]="shownAsTable(widget)"
                 [dashboardFilters]="filtersOf().get(widget.id) ?? none"
                 [colors]="colors()"
+                [bases]="bases()"
                 [tileRows]="spanOf(widget)"
                 (tableAvailable)="setDrawable(widget.id, $event)"
               />
@@ -235,6 +237,8 @@ export class WidgetGrid {
   readonly dashboardFilters = input<ActiveDashboardFilter[]>([]);
   /** The palette and the colors kept by value of the dashboard shown, or of the version shown: each widget is drawn in them (add-dashboard-palettes, design D7). */
   readonly colors = input<DashboardColors>(defaultColors);
+  /** The base settings of the dashboard shown, or of the version shown: each widget applies its own over them (add-small-sample-warnings, design D7, D8). */
+  readonly bases = input<DashboardBases>(noBaseSettings);
   /** The widgets whose export is being prepared, by id, with the format: only their menu is busy, and only their formats are unavailable. */
   readonly exporting = input<Record<string, WidgetFileExtension>>({});
 

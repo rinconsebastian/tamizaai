@@ -8,7 +8,7 @@ import { chooseInWidgetMenu, clearOverlay, indicator, isColumns, isPatch, open, 
 import { ordersFor } from './category-order';
 import { loadLeaflet } from './map-engine';
 import fixture from './testing/production-shapes.json';
-import { overallFor, queryFor, savedConfig } from './widget-view';
+import { overallFor, queryFor, savedConfig, unfilteredFor } from './widget-view';
 
 // The shapes of widget that a real project's dashboards use (add-indicator-column-metadata, design D13), against goldens written from
 // the code before the changes of the widget and dashboard program. The API's ProductionShapesTests reads the same file. Every later
@@ -63,6 +63,28 @@ const orderShapes = [
   'column chart sorted by orden as text over a numbered question column',
   '100% bar over counts with a numbered series column',
   'heat map of two numbered columns',
+];
+
+/**
+ * The shapes the base settings add (add-small-sample-warnings, task 8.1) to the fixture, after the others: a ratio column chart with a
+ * small-base threshold and the n line of its own, and one that leaves out the values that mean no data. The API's ProductionShapesTests pins
+ * their stored text, query and plan; each has its `saved`, `uiQuery` and `formSaved` goldens, so the widget form is checked to send the
+ * settings back when it is saved without a change.
+ */
+const baseShapes = [
+  'ratio column chart with a small-base threshold and the n line',
+  'ratio column chart that leaves out the values that mean no data',
+];
+
+/**
+ * The shapes the stat tiles add (improve-stat-cards, task 1.5) to the fixture, last: a tile of a ratio with equals filters on a question
+ * column and an answer column, and a tile with a median and both secondary lines. The API's ProductionShapesTests pins the stored text,
+ * query and plan of both; each has its `saved`, `uiQuery` and `formSaved` goldens (the second's added by task 6.2), so the widget form is
+ * checked to send the statistic and the lines back when it is saved without a change.
+ */
+const statShapes = [
+  'stat tile of a ratio with equals filters on a question and an answer column',
+  'stat tile with a median and both secondary lines',
 ];
 
 /**
@@ -139,13 +161,22 @@ describe('the production shapes', () => {
   afterEach(clearOverlay);
 
   it('lists the shapes the design names, once each', () => {
-    expect(shapes).toHaveLength(28);
-    expect(new Set(shapes.map((s) => s.name)).size).toBe(28);
+    expect(shapes).toHaveLength(32);
+    expect(new Set(shapes.map((s) => s.name)).size).toBe(32);
     expect(shapes.every(hasQueryGoldens)).toBe(true);
   });
 
   it('has a widget form golden for every shape, none is skipped', () => {
     expect(shapes.filter((s) => !hasFormGolden(s)).map((s) => s.name)).toEqual([]);
+  });
+
+  it('has the stat tile shapes last, and only the last holds a statistic or secondary lines', () => {
+    expect(shapes.slice(30).map((s) => s.name)).toEqual(statShapes);
+    const holding = shapes.filter((s) => {
+      const config = JSON.parse(s.stored);
+      return 'statistic' in config || 'secondary' in (config.display ?? {});
+    });
+    expect(holding.map((s) => s.name)).toEqual([statShapes[1]]);
   });
 
   it('has the shapes of the widget context, and only they hold its texts', () => {
@@ -159,7 +190,7 @@ describe('the production shapes', () => {
   });
 
   it('has the shapes of the declared category order, last, and the columns of the indicators that label their columns only', () => {
-    expect(shapes.slice(25).map((s) => s.name)).toEqual(orderShapes);
+    expect(shapes.slice(25, 28).map((s) => s.name)).toEqual(orderShapes);
     const labelled = shapes.filter((s) => s.indicatorColumns);
     expect(labelled.map((s) => s.name).sort()).toEqual([...labelledShapes].sort());
     for (const shape of labelled) {
@@ -170,6 +201,54 @@ describe('the production shapes', () => {
         expect(Object.keys(shape.indicatorColumns![column] ?? {}), `${shape.name}: ${column}`).toEqual(['label']);
       }
     }
+  });
+
+  it('has the shapes of the base settings, last, and only they hold its settings', () => {
+    expect(shapes.slice(28, 30).map((s) => s.name)).toEqual(baseShapes);
+    const holding = shapes.filter((s) => {
+      const config = JSON.parse(s.stored);
+      return 'missingFooter' in config || 'minN' in (config.display ?? {}) || 'showN' in (config.display ?? {});
+    });
+    expect(holding.map((s) => s.name)).toEqual(baseShapes);
+  });
+
+  describe('the stat tile with a median and both secondary lines (improve-stat-cards, task 6.2)', () => {
+    const shape = shapes[31];
+
+    it('queries with its statistic and without its lines, and asks for the value without filters', () => {
+      const query = wire(queryFor('stat', configOf(shape))) as Record<string, unknown>;
+      expect(query['statistic']).toBe('median');
+      expect(query).not.toHaveProperty('display');
+      expect(unfilteredFor('stat', configOf(shape))).toBe(true);
+      expect(configOf(shape).display?.secondary).toEqual(['n', 'unfiltered']);
+    });
+
+    it('is the one shape that asks for the value without filters', () => {
+      expect(shapes.filter((s) => unfilteredFor(s.chartType, configOf(s))).map((s) => s.name)).toEqual([shape.name]);
+    });
+
+    it('drops the statistic and the lines when it becomes a column chart', () => {
+      const saved = wire(savedConfig('column', configOf(shape))) as WidgetConfig;
+      expect(saved).not.toHaveProperty('statistic');
+      expect(saved).not.toHaveProperty('display');
+    });
+  });
+
+  describe.each(shapes.slice(28, 30).map((s) => [s.name, s] as const))('%s (base settings)', (_name, shape) => {
+    it('saves its settings as they are stored', () => {
+      const stored = configOf(shape);
+      const saved = wire(savedConfig(shape.chartType, stored)) as WidgetConfig;
+      expect(saved.display?.minN).toEqual(stored.display?.minN);
+      expect(saved.display?.showN).toEqual(stored.display?.showN);
+      expect(saved.missingFooter).toEqual(stored.missingFooter);
+    });
+
+    it('queries what the same shape without its settings queries, apart from the option that leaves rows out', () => {
+      const without = { ...configOf(shape), display: undefined, missingFooter: undefined };
+      const { missingFooter, ...asked } = wire(queryFor(shape.chartType, configOf(shape))) as Record<string, unknown>;
+      expect(asked).toEqual(wire(queryFor(shape.chartType, without)));
+      expect(missingFooter).toEqual(configOf(shape).missingFooter);
+    });
   });
 
   describe.each(shapes.filter(withTexts).map((s) => [s.name, s] as const))('%s (widget context)', (_name, shape) => {

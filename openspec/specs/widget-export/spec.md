@@ -455,3 +455,67 @@ A widget's PNG or SVG image SHALL show its values in the order and with the text
 #### Scenario: Workbook of a version
 - **WHEN** an `analyst` exports the workbook of a widget of version 9 of "2. Teatro", where that widget had its own order of groups that it no longer has
 - **THEN** the data sheet lists the groups in the order the widget had in version 9
+
+### Requirement: Base n and small bases in widget images
+A widget's PNG or SVG image SHALL draw its marks dimmed as the screen does, and SHALL show under its chart, before its footnote, the small-base note, the base n line and the no-data line that the widget shows.
+
+#### Scenario: Dimmed columns in an image
+- **WHEN** a member exports as a PNG image "2.1. Asistió, por comuna", whose `COMUNA 7` and `SIN NOMBRE` columns are dimmed
+- **THEN** the image shows those two columns lighter with their dashed outline, and the note that marks with a base below 30 are dimmed
+
+#### Scenario: Lines in an image
+- **WHEN** a member exports as an SVG image a widget that shows "n = 223 Hogares que asistieron" and "No sabe: 2.24%" under its chart
+- **THEN** the image shows both lines under its chart
+
+#### Scenario: Lines before the footnote in an image
+- **WHEN** a member exports as a PNG image "2.4. En qué lugares", which shows "n = 223 Hogares que asistieron" and has the footnote "No suman 100 %: respuesta múltiple."
+- **THEN** the image shows the n line under the chart and the footnote under the n line, above the footer
+
+### Requirement: Base n and small bases in a widget workbook
+A widget's workbook SHALL apply the base n line and the small-base threshold that the member's screen applies to the widget, which the page sends with the request, and SHALL leave out no-data values as the widget does. Its data sheet and "Summary" SHALL then be the widget's table and notes in a scheduled email. A request without base settings SHALL give the workbook given before they existed.
+
+#### Scenario: Threshold in force on screen
+- **WHEN** a member exports the workbook of "2.1. Asistió, por comuna" on "Teatro", whose threshold is 30
+- **THEN** its data sheet has an n column, and its "Summary" says that 2 values have a base below 30
+
+#### Scenario: Version without a threshold
+- **WHEN** "Teatro" has the threshold 30 now and an `analyst` exports a widget while its version 9, which had none, is shown
+- **THEN** the workbook has no n column and no small-base note
+
+#### Scenario: Request without base settings
+- **WHEN** a page from a release before base settings asks for a widget's workbook
+- **THEN** the workbook is the one that release gave
+
+### Requirement: Stat tile in a widget image
+An image of a stat tile SHALL draw its value at the size its tile gives it on screen, at most 30 px and at least 18 px, broken only between words; a word wider than the image SHALL widen the image instead of being cut. Under the value it SHALL show what the tile plots, naming its statistic, unless the widget hides its caption, then the secondary lines the tile shows at that moment, as the tile words them, before the notes, the footnote and the footer.
+
+#### Scenario: Smaller value
+- **WHEN** a member exports the stat tile `46.85% de los hogares`, 3 columns wide, as an SVG image
+- **THEN** the image draws its value at no more than 30 px, not at 36 px, with its title and what it plots
+
+#### Scenario: Secondary lines in the image
+- **WHEN** a member exports as a PNG image a stat tile that shows `n = 476 Hogares` and `Without filters: 46.85% de los hogares` under the dashboard filter "Comuna"
+- **THEN** the image shows both lines under what the tile plots
+
+#### Scenario: Statistic in the image
+- **WHEN** a member exports a stat tile with the statistic median
+- **THEN** what the image says the tile plots starts with "Median of"
+
+#### Scenario: Lines above the footnote
+- **WHEN** a member exports as a PNG image a stat tile that has a footnote and shows `n = 476 Hogares`
+- **THEN** the image shows the value, what the tile plots, the n line, the footnote and the footer, in that order
+
+#### Scenario: Long figure
+- **WHEN** a member exports a stat tile 1 column wide that shows `1,016,279 pesos`
+- **THEN** the image shows `1,016,279` whole, on one line, and is as wide as it needs
+
+### Requirement: Stat tile lines in a widget workbook
+A stat tile's widget workbook SHALL keep one column and one row holding its value on its data sheet. Its "Summary" sheet SHALL name the tile's statistic in what it plots, and SHALL have one more line for each secondary line the tile shows, after what it plots, with the same text as the tile.
+
+#### Scenario: Median tile's workbook
+- **WHEN** a member exports the workbook of a stat tile with the statistic median
+- **THEN** its data sheet holds one number, the median, and what its "Summary" sheet says the tile plots starts with "Median of"
+
+#### Scenario: Secondary lines in the Summary
+- **WHEN** a member exports, with "Comuna" set to `COMUNA 1`, the workbook of a stat tile that shows both secondary lines
+- **THEN** its "Summary" sheet has a line with the tile's n and a line with its value without the dashboard filters, as the tile shows them

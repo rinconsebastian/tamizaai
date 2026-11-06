@@ -54,6 +54,8 @@ export interface ShapeInput {
   geometry: Geometry;
   /** The step (1 to 7) of the sequential scale, as a class. */
   step: number;
+  /** A shape with a small base keeps its class and gets a dashed outline (add-small-sample-warnings, design D10). */
+  small?: boolean;
 }
 
 /** What happens on the map, told to the widget. Every call is made after Leaflet has settled its own state. */
@@ -107,6 +109,8 @@ export interface PictureShape {
   point: MapPoint | null;
   /** A region's polygons, each its outline and then its holes, with the vertices closer than half a pixel to the last one dropped. */
   polygons: MapPoint[][][];
+  /** True for a shape with a small base, drawn with a dashed outline as on screen (add-small-sample-warnings, design D10). */
+  small?: boolean;
 }
 
 /** The shapes in view, projected into the container, for a picture that has no tiles. */
@@ -125,11 +129,18 @@ interface Shape {
   geometry: Geometry;
   /** The pixel half-size added around a marker, which has a radius and no extent. */
   point: boolean;
+  /** True while the shape's base is small: its outline is dashed. */
+  small: boolean;
 }
 
 const maxTileZoom = 20;
 const polygonStyle = { weight: 1, fillOpacity: 1 };
 const markerStyle = { radius: 6, weight: 2, fillOpacity: 1 };
+/**
+ * A small base is a dashed outline (design D10): Leaflet owns its renderer, so hatching a path would need patterns inside it. The shade is
+ * the step's class, kept, so the scale reads the same.
+ */
+const smallStyle = { dashArray: '4 3', weight: 2 };
 /** Over a basemap the fill lets the streets show through. */
 const backdropOpacity = 0.7;
 /** The room kept between a shape brought into view and the edge of the view. */
@@ -210,14 +221,14 @@ export class MapEngine {
       const fillOpacity = this.backdrop ? backdropOpacity : 1;
       if (shape.geometry.type === 'point') {
         const [x, y] = shape.geometry.position;
-        const layer = L.circleMarker([y, x], { ...markerStyle, fillOpacity, className, bubblingMouseEvents: false });
-        this.shapes.push({ layer, point: true, step: shape.step, geometry: shape.geometry });
+        const layer = L.circleMarker([y, x], { ...markerStyle, ...(shape.small ? smallStyle : {}), fillOpacity, className, bubblingMouseEvents: false });
+        this.shapes.push({ layer, point: true, small: shape.small === true, step: shape.step, geometry: shape.geometry });
         layers.push(layer);
       } else {
         const polygons = shape.geometry.type === 'polygon' ? [shape.geometry.rings] : shape.geometry.polygons;
         const toLatLngs = (ring: Position[]) => ring.map(([x, y]) => L.latLng(y, x));
-        const layer = L.polygon(polygons.map((rings) => rings.map(toLatLngs)), { ...polygonStyle, fillOpacity, className, bubblingMouseEvents: false });
-        this.shapes.push({ layer, point: false, step: shape.step, geometry: shape.geometry });
+        const layer = L.polygon(polygons.map((rings) => rings.map(toLatLngs)), { ...polygonStyle, ...(shape.small ? smallStyle : {}), fillOpacity, className, bubblingMouseEvents: false });
+        this.shapes.push({ layer, point: false, small: shape.small === true, step: shape.step, geometry: shape.geometry });
         layers.push(layer);
       }
     }
@@ -292,6 +303,18 @@ export class MapEngine {
 
   isDragging(): boolean {
     return this.map.dragging.enabled();
+  }
+
+  /**
+   * Marks the shapes whose entry is true as small bases, and takes the mark off the others, with no change of view: a threshold that
+   * changes redraws the outlines, not the map (design D10).
+   */
+  setSmall(flags: readonly boolean[]): void {
+    this.shapes.forEach((shape, index) => {
+      const base = shape.point ? markerStyle : polygonStyle;
+      shape.small = flags[index] === true;
+      shape.layer.setStyle(shape.small ? smallStyle : { dashArray: '', weight: base.weight });
+    });
   }
 
   /** Over a basemap the fill is 0.7, so the streets show through the shapes. */
@@ -443,7 +466,7 @@ export class MapEngine {
         const at = project(shape.geometry.position);
         const reach = markerStyle.radius + markerStyle.weight;
         if (at.x >= -reach && at.x <= size.x + reach && at.y >= -reach && at.y <= size.y + reach) {
-          shapes.push({ step: shape.step, point: at, polygons: [] });
+          shapes.push({ step: shape.step, point: at, polygons: [], ...(shape.small ? { small: true } : {}) });
         }
         continue;
       }
@@ -460,7 +483,7 @@ export class MapEngine {
         )
         .filter((rings) => rings.length > 0);
       if (polygons.length) {
-        shapes.push({ step: shape.step, point: null, polygons });
+        shapes.push({ step: shape.step, point: null, polygons, ...(shape.small ? { small: true } : {}) });
       }
     }
     return { width: size.x, height: size.y, shapes };

@@ -1,5 +1,5 @@
 import { ExportParts } from '../export-parts';
-import { ImageInput, ImageTheme, composeImage, wrap } from './image-layout';
+import { ImageInput, ImageTheme, composeImage, wrap, wrapWords } from './image-layout';
 import { fitText, maxImageRows, maxImageWidth } from './svg-table';
 
 // 6.5 pixels a character, as the design's tests do: the layout is the same in any environment.
@@ -11,6 +11,8 @@ const tableLabels = {
   inWorkbook: 'The Excel workbook has them all.',
 };
 const empty: ExportParts = { caption: null, legend: null, notes: [], stat: null, table: null };
+/** A stat tile's parts: the figure's size as its tile gave it on screen (improve-stat-cards, design D1), and no secondary lines. */
+const stat = (value: string, description: string | null, size = 24, secondary: string[] = []): NonNullable<ExportParts['stat']> => ({ value, description, size, secondary });
 
 function compose(overrides: Partial<ImageInput> = {}, parts: Partial<ExportParts> = {}) {
   const layout = composeImage({
@@ -19,6 +21,7 @@ function compose(overrides: Partial<ImageInput> = {}, parts: Partial<ExportParts
     subtitle: null,
     footnote: null,
     notesAbove: [],
+    notesBelow: [],
     parts: { ...empty, ...parts },
     plot: null,
     notesExtra: [],
@@ -48,6 +51,21 @@ describe('wrap', () => {
   it('breaks a word wider than a line at a letter', () => {
     expect(wrap('abcdefghij', 32.5, at).join('')).toBe('abcdefghij');
     expect(wrap('abcdefghij', 32.5, at).every((line) => at(line) <= 32.5)).toBe(true);
+  });
+});
+
+describe('wrapWords', () => {
+  const at = (text: string) => measure(text);
+
+  it('breaks between words like wrap', () => {
+    expect(wrapWords('aaa bbb ccc', 26, at)).toEqual(['aaa', 'bbb', 'ccc']);
+    expect(wrapWords('46.85% de los hogares', 400, at)).toEqual(['46.85% de los hogares']);
+  });
+
+  it('never cuts a word wider than a line: it stays whole on a line of its own', () => {
+    expect(wrapWords('abcdefghij', 32.5, at)).toEqual(['abcdefghij']);
+    expect(wrapWords('1,016,279 pesos', 32.5, at)).toEqual(['1,016,279', 'pesos']);
+    expect(wrapWords('', 100, at)).toEqual(['']);
   });
 });
 
@@ -218,17 +236,64 @@ describe('composeImage', () => {
   });
 
   it('writes a stat tile\'s figure large with what it measures under it', () => {
-    const { texts } = compose({}, { stat: { value: '1,234', description: 'Households visited' } });
+    const { texts } = compose({}, { stat: stat('1,234', 'Households visited') });
 
-    expect(texts[1]).toMatchObject({ text: '1,234', size: 36 });
+    expect(texts[1]).toMatchObject({ text: '1,234', size: 24 });
     expect(texts[2]).toMatchObject({ text: 'Households visited', size: 14 });
   });
 
+  it('writes the figure at the size its tile has on screen, never at 36 px, and keeps it between 18 and 30 px (Smaller value)', () => {
+    const sizes = [22.5, 30, 18].map((size) => compose({}, { stat: stat('46.85% de los hogares', 'Teatro hoy', size) }).texts[1].size);
+    const guarded = [48, 36, 4, NaN].map((size) => compose({}, { stat: stat('46.85%', null, size) }).texts[1].size);
+
+    expect(sizes).toEqual([22.5, 30, 18]);
+    expect(guarded).toEqual([30, 30, 18, 24]);
+    expect([...sizes, ...guarded]).not.toContain(36);
+    expect(compose({}, { stat: stat('46.85%', null, 30) }).markup).not.toContain('font-size="36"');
+  });
+
+  it('breaks the figure between words and never inside one: a word wider than the picture widens it (Long figure)', () => {
+    // 1,016,279 at 18 px is 9 characters of 9.75 px: 87.75 px, wider than the 68 px of a picture 100 px wide.
+    const narrow = compose({ width: 100 }, { stat: stat('1,016,279 pesos', 'Gasto', 18) });
+
+    const lines = narrow.texts.filter((t) => t.size === 18).map((t) => t.text);
+    expect(lines).toEqual(['1,016,279', 'pesos']);
+    expect(narrow.width).toBe(Math.ceil(measure('1,016,279', 18)) + 32);
+    expect(narrow.width).toBeGreaterThan(100);
+    expect(names(narrow.texts).at(-1)).toBe('Gasto');
+    // A picture wide enough keeps both words on one line and its width.
+    const wide = compose({ width: 400 }, { stat: stat('1,016,279 pesos', 'Gasto', 18) });
+    expect(wide.texts.filter((t) => t.size === 18).map((t) => t.text)).toEqual(['1,016,279 pesos']);
+    expect(wide.width).toBe(400);
+  });
+
+  it('writes a figure of several words on lines of their own, moving what follows down (value wrapped between words)', () => {
+    const one = compose({ width: 400 }, { stat: stat('46.85% de los hogares', 'Teatro hoy', 30) });
+    const two = compose({ width: 160 }, { stat: stat('46.85% de los hogares', 'Teatro hoy', 30) });
+
+    const figure = (layout: ReturnType<typeof compose>) => layout.texts.filter((t) => t.size === 30);
+    expect(figure(one).map((t) => t.text)).toEqual(['46.85% de los hogares']);
+    expect(figure(two).length).toBeGreaterThan(1);
+    expect(figure(two).map((t) => t.text).join(' ')).toBe('46.85% de los hogares');
+    expect(figure(two).every((t) => measure(t.text, 30) <= 160 - 32 || !t.text.includes(' '))).toBe(true);
+    expect(two.texts.find((t) => t.text === 'Teatro hoy')!.y).toBeGreaterThan(one.texts.find((t) => t.text === 'Teatro hoy')!.y);
+  });
+
+  it('writes the secondary lines at 12 px under the description, or under the figure when the caption is hidden, before the notes below and the footnote (Lines above the footnote)', () => {
+    const lines = ['n = 476 Hogares', 'Without filters: 46.85% de los hogares'];
+    const shown = compose({ footnote: 'Sin ponderar.', notesBelow: ['A note.'], footer: ['Tamiza'] }, { stat: stat('46.85%', 'Teatro hoy', 24, lines) });
+    const hidden = compose({}, { stat: stat('46.85%', null, 24, lines) });
+
+    expect(names(shown.texts)).toEqual(['Coverage by municipality', '46.85%', 'Teatro hoy', ...lines, 'A note.', 'Sin ponderar.', 'Tamiza']);
+    expect(shown.texts.slice(3, 5).every((t) => t.size === 12)).toBe(true);
+    expect(names(hidden.texts)).toEqual(['Coverage by municipality', '46.85%', ...lines]);
+  });
+
   it('draws the figure of a stat tile alone when its description is null (Caption hidden)', () => {
-    const { texts } = compose({}, { stat: { value: '1,234', description: null } });
+    const { texts } = compose({}, { stat: stat('1,234', null) });
 
     expect(names(texts)).toEqual(['Coverage by municipality', '1,234']);
-    expect(texts[1]).toMatchObject({ text: '1,234', size: 36 });
+    expect(texts[1]).toMatchObject({ text: '1,234', size: 24 });
   });
 
   it('puts the chart where the text leaves room, and counts its height', () => {
@@ -316,5 +381,69 @@ describe('an image in a declared order', () => {
 
     const written = names(texts).filter((text) => text.startsWith('COMUNA') || text === 'Sin dato');
     expect(written).toEqual(['COMUNA 2', 'COMUNA 1', 'Sin dato']);
+  });
+});
+
+describe('an image with small bases (add-small-sample-warnings, design D10, D11)', () => {
+  it('draws the lines of the bases after the chart\'s own notes and before the footnote, which stays last (Lines in an image)', () => {
+    const { texts } = compose(
+      {
+        footnote: 'No suman 100 %: respuesta múltiple.',
+        notesAbove: ['Not filtered by: Round'],
+        notesBelow: ['Marks with a base below 30 are dimmed.', 'n = 223 Hogares que asistieron', 'No sabe: 2.24%'],
+        notesExtra: ['The basemap is not included in the image.'],
+        footer: ['Census 2026 · Housing'],
+      },
+      { caption: 'Coverage: value', notes: ['2 rows were left out.'] },
+    );
+
+    expect(names(texts)).toEqual([
+      'Coverage by municipality',
+      'Not filtered by: Round',
+      'Coverage: value',
+      '2 rows were left out.',
+      'The basemap is not included in the image.',
+      'Marks with a base below 30 are dimmed.',
+      'n = 223 Hogares que asistieron',
+      'No sabe: 2.24%',
+      'No suman 100 %: respuesta múltiple.',
+      'Census 2026 · Housing',
+    ]);
+    const ys = texts.map((t) => t.y);
+    expect(ys).toEqual([...ys].sort((a, b) => a - b));
+  });
+
+  it('draws the lines at 12 px, whole, in the body color', () => {
+    const long = 'n = 223 ' + 'Hogares que asistieron '.repeat(6).trim();
+    const { texts, markup } = compose({ notesBelow: [long] });
+
+    const lines = texts.filter((t) => t.size === 12);
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.map((t) => t.text).join(' ')).toBe(long);
+    expect(markup).toContain('fill="#444"');
+  });
+
+  it('adds nothing when the widget has no line', () => {
+    const plain = compose({}, { caption: 'Coverage: value' });
+    const none = compose({ notesBelow: [] }, { caption: 'Coverage: value' });
+
+    expect(names(none.texts)).toEqual(names(plain.texts));
+    expect(none.height).toBe(plain.height);
+  });
+
+  it('writes the figure of a stat tile with a small base at the reduced opacity of the page, and a whole one as it was (Dimmed stat figure)', () => {
+    const dimmed = compose({}, { stat: { ...stat('40%', 'Teatro hoy', 24), dimmed: true } });
+    const whole = compose({}, { stat: stat('40%', 'Teatro hoy', 24) });
+
+    const figure = (svg: SVGSVGElement) => Array.from(svg.querySelectorAll('text')).find((node) => node.textContent === '40%')!;
+    expect(figure(dimmed.svg).getAttribute('fill-opacity')).toBe('0.35');
+    expect(figure(whole.svg).hasAttribute('fill-opacity')).toBe(false);
+    expect(figure(whole.svg).getAttribute('font-size')).toBe('24');
+  });
+
+  it('keeps the note of a table with small bases among the notes below it', () => {
+    const { texts } = compose({}, { table: { headers: ['Comuna', 'Teatro hoy', 'n'], rows: [['COMUNA 7', '50% *', '16']] }, notes: ['* Base below 30.'] });
+
+    expect(names(texts)).toEqual(expect.arrayContaining(['50% *', '* Base below 30.']));
   });
 });

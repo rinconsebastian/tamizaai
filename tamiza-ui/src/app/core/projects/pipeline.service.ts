@@ -46,6 +46,10 @@ export interface ScriptVersionSummary {
  * and, for a column that widgets group or split by (add-declared-category-order, design D1), the order of its values (up to
  * `maxOrderValues`), the values kept at the end whatever the order or the sort (up to `maxKeptLast`) and whether a leading number such as
  * "1. " is hidden. A property that is not set is left out; an empty list and `false` are never saved.
+ *
+ * The base facts (add-small-sample-warnings, design D1): `base` marks the numeric column that counts the people each row stands for (at
+ * most one column of the indicator; only `true` is stored), `missing` lists up to `maxMissingValues` values of a text column that mean no
+ * data, and `categories` says the column names a question or its answers in a long table, of single or multiple choice.
  */
 export interface ColumnMetadata {
   label?: string;
@@ -53,20 +57,33 @@ export interface ColumnMetadata {
   last?: string[];
   /** Only `true` is stored: an unticked box is left out. */
   stripPrefix?: boolean;
+  base?: boolean;
+  missing?: string[];
+  categories?: AnswerKind;
 }
+
+/** The kinds of answers a column can declare (`AnswerKinds` in tamiza-api): one answer per unit, or several. */
+export type AnswerKind = 'single' | 'multiple';
+
+export const answerKinds: readonly AnswerKind[] = ['single', 'multiple'];
 
 /** The column facts of an indicator version, keyed by the column's name as its table publishes it. The keys' order means nothing. */
 export type ColumnMetadataMap = Record<string, ColumnMetadata>;
 
 /**
  * The row of the details form for one column, as it is typed (design D8): the label, and for a column that widgets group or split by the
- * order of its values, the values kept at the end and whether numbered prefixes are hidden (add-declared-category-order, design D9).
+ * order of its values, the values kept at the end and whether numbered prefixes are hidden (add-declared-category-order, design D9), and
+ * the base facts (add-small-sample-warnings, design D1): whether it is the base column, its values that mean no data, and its kind of
+ * answers (an empty text for none).
  */
 export interface ColumnDraft {
   label: string;
   order: string[];
   last: string[];
   stripPrefix: boolean;
+  base: boolean;
+  missing: string[];
+  categories: AnswerKind | '';
 }
 
 /** An indicator's metadata, saved with each version of its script. */

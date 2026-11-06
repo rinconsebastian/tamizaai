@@ -40,7 +40,16 @@ export interface ExportParts {
   /** What the widget says under its chart: rows left out, negatives set aside, outliers or groups not drawn. */
   notes: string[];
   /** A stat tile's figure and what it measures; the description is null in a picture of a widget that hides its caption (add-widget-context, design D8). */
-  stat: { value: string; description: string | null } | null;
+  stat: {
+    value: string;
+    description: string | null;
+    /** The figure's size in pixels as the page draws it, between 18 and 30 (improve-stat-cards, design D1): the picture writes it at that size. */
+    size: number;
+    /** The tile's secondary lines as it shows them, in order; an image writes them under the description, whether or not the caption is hidden. */
+    secondary: string[];
+    /** The figure has a small base: an image draws it at reduced opacity (add-small-sample-warnings, design D10). */
+    dimmed?: boolean;
+  } | null;
   /** The table the widget shows instead of a chart (a cross table always); null while it draws a chart. */
   table: TableModel | null;
 }

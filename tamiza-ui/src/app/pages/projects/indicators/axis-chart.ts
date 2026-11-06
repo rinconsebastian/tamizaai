@@ -1,4 +1,4 @@
-import { LOCALE_ID, Component, ElementRef, computed, inject, input, viewChild } from '@angular/core';
+import { LOCALE_ID, Component, ElementRef, computed, effect, inject, input, output, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { QueryResult, QueryRow, WidgetConfig, defaultBuckets } from '../../../core/projects/indicators.service';
 
@@ -6,17 +6,19 @@ import { CategoryOrders, arrangeColumns, groupTexts, seriesTexts, shown } from '
 import { histogram, observeSize, pivot } from './chart-data';
 import { bandScale, charWidth, compactNumber, linePath, linearScale, niceAxis, stepPath, truncate, Point } from './chart-scales';
 import { Box, ReferenceMark, dashOf, dataLabelMargin, labelGap, minLabelBar, placeReferences, pointGap, referenceMargin, textWidth, boxOf } from './chart-annotations';
+import { ChartBases, overOnAnswers, figureNames, figureTooltip, hasNColumn, histogramTooltip, isSmallBase, markSmall, nCell, noChartBases, seriesFigures, smallBaseStroke, smallBaseDash, smallBaseOpacity, summaryWithSmall } from './base-figures';
 import { ChartColors } from './chart-colors';
 import { CrosstabWidget, crossTableModel } from './crosstab-widget';
 import { registerExportParts } from './export-parts';
 import { ColumnNamer, ValueFormatter, captionShown, named, ownCaption, plotted, rawNames } from './format';
-import { MarkGrid, markTooltips } from './mark-tooltips';
+import { MarkGrid, MarkPoint, markTooltips } from './mark-tooltips';
 import { referenceLineValues } from './reference-lines';
 import { LegendEntry, ReferenceEntry, ReferenceKey, ReferenceList, SeriesLegend, SeriesNotes, seriesName, seriesNoteTexts } from './series-legend';
-import { Dot, Hit, Label, Line, Path, Rect, SeriesPlot, seriesPlot, writeDataLabel } from './series-plot';
+import { Dot, Hit, Label, Line, Path, Rect, SeriesPlot, hitSpan, seriesPlot, writeDataLabel } from './series-plot';
 import { SeriesTable, buildSeriesTable, isSeriesAnswer } from './series-table';
 import { TableModel, WidgetTable } from './widget-table';
 import { countKey, isSingular } from '../../../core/i18n/plural';
+import { ChartTooltipContent } from '../../../shared/ui';
 
 export type AxisKind = 'bar' | 'column' | 'line' | 'histogram';
 
@@ -24,13 +26,13 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
 
 const maxThickness = 40;
 const minSlot = 14;
-const noMarks: MarkGrid = [];
 
 /**
  * Bar (horizontal), column (vertical), line and histogram charts as inline SVG (design D5). Without a series they draw one series: the
  * widget's indicator. Values are written with the indicator's format and unit (design D6). The SVG is drawn at the pixel size of its
- * box, so text keeps one size however the widget is resized; `role="img"` with a computed summary and a table of the same numbers
- * stand in for it to assistive technology.
+ * box, so text keeps one size however the widget is resized. Every mark has a tooltip on hover, on a tap and on the keyboard, and the
+ * chart is one Tab stop (`role="application"`, add-small-sample-warnings, design D9): with a series or without; a computed summary and a
+ * table of the same numbers stand in for it to assistive technology.
  *
  * A bar, column or line widget with a series (design D5) is drawn grouped, stacked or stacked to 100%, or as one line per series,
  * under a legend of its series; each mark has a tooltip on hover and on the keyboard, and the chart is one Tab stop
@@ -55,27 +57,30 @@ const noMarks: MarkGrid = [];
       }
       @if (asTable()) {
         @if (seriesTable()) {
-          <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()!" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [orders]="orders()" [chartType]="kind()" />
+          <app-crosstab-widget class="min-h-0 flex-1" [answer]="answer()!" [config]="config()" [label]="label()" [format]="format()" [names]="names()" [orders]="orders()" [bases]="bases()" [chartType]="kind()" />
         } @else {
           <app-widget-table class="flex-1 overflow-auto" [model]="table(t)" />
         }
         @if (referenceEntries().length) {
           <app-reference-list [entries]="referenceEntries()" />
         }
+        @if (overallLeftOut()) {
+          <p class="shrink-0 text-xs text-body" data-testid="overall-note">{{ t('indicators.referenceLines.noOverall') }}</p>
+        }
       } @else {
         <!-- With a key under it the plot is cut at its own box, never the key (design D5): the clip margin keeps the focus ring and stays inside the gap. -->
         <div #box class="relative min-h-0 flex-1" [style.overflow]="referenceEntries().length > 0 ? 'clip' : null" [style.overflow-clip-margin]="referenceEntries().length > 0 ? '4px' : null" data-testid="chart-box">
           <svg
             #chartSvg
-            [attr.role]="seriesTable() ? 'application' : 'img'"
+            role="application"
             class="tmz-chart-svg absolute inset-0 block focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-medium"
             [attr.width]="layout().width"
             [attr.height]="layout().height"
             [attr.viewBox]="'0 0 ' + layout().width + ' ' + layout().height"
             [attr.aria-label]="summary(t)"
-            [attr.tabindex]="seriesTable() ? 0 : null"
-            [attr.aria-roledescription]="seriesTable() ? t('indicators.series.roleDescription') : null"
-            [attr.aria-describedby]="seriesTable() ? marks.helpId : null"
+            tabindex="0"
+            [attr.aria-roledescription]="t('indicators.series.roleDescription')"
+            [attr.aria-describedby]="marks.helpId"
             (keydown)="marks.keydown($event)"
             (focusout)="marks.focusout($event)"
             data-testid="chart-svg"
@@ -105,7 +110,10 @@ const noMarks: MarkGrid = [];
                 [style.fill]="rect.color"
                 [attr.opacity]="rect.at && marks.isLifted(rect.at.g, rect.at.s) ? 0.8 : null"
                 [class.stroke-heading]="rect.at && marks.active()?.g === rect.at.g && marks.active()?.s === rect.at.s"
-                [attr.stroke-width]="rect.at && marks.active()?.g === rect.at.g && marks.active()?.s === rect.at.s ? 2 : null"
+                [attr.stroke-width]="rect.at && marks.active()?.g === rect.at.g && marks.active()?.s === rect.at.s ? 2 : rect.dim ? smallStroke : null"
+                [attr.fill-opacity]="rect.dim ? smallOpacity : null"
+                [style.stroke]="rect.dim && !(rect.at && marks.active()?.g === rect.at.g && marks.active()?.s === rect.at.s) ? rect.color : null"
+                [attr.stroke-dasharray]="rect.dim ? smallDash : null"
                 data-testid="chart-mark"
               >
                 @if (rect.title) {
@@ -119,7 +127,7 @@ const noMarks: MarkGrid = [];
               </path>
             }
             @for (dot of layout().dots; track $index) {
-              <circle r="4" stroke-width="2" class="stroke-neutral-primary-soft" [attr.cx]="dot.cx" [attr.cy]="dot.cy" [style.fill]="dot.color" data-testid="chart-dot">
+              <circle r="4" stroke-width="2" class="stroke-neutral-primary-soft" [attr.cx]="dot.cx" [attr.cy]="dot.cy" [style.fill]="dot.hollow ? 'none' : dot.color" [style.stroke]="dot.hollow ? dot.color : null" [attr.stroke-dasharray]="dot.hollow ? '2 2' : null" [attr.data-small]="dot.hollow ? 'true' : null" data-testid="chart-dot">
                 @if (dot.title) {
                   <title>{{ dot.title }}</title>
                 }
@@ -167,14 +175,15 @@ const noMarks: MarkGrid = [];
               />
             }
           </svg>
-          @if (seriesTable()) {
-            <p [id]="marks.helpId" class="sr-only">{{ t(keyHelp()) }}</p>
-            <p class="sr-only" role="status" aria-live="polite" data-testid="marks-announcement">{{ marks.announcement() }}</p>
-          }
+          <p [id]="marks.helpId" class="sr-only">{{ t(keyHelp()) }}</p>
+          <p class="sr-only" role="status" aria-live="polite" data-testid="marks-announcement">{{ marks.announcement() }}</p>
         </div>
         <!-- The key belongs to the chart: it takes its room from the plot as the caption does, above the widget's footnote (design D5). -->
         @if (referenceEntries().length) {
           <app-reference-key [entries]="referenceEntries()" />
+        }
+        @if (overallLeftOut()) {
+          <p class="shrink-0 text-xs text-body" data-testid="overall-note">{{ t('indicators.referenceLines.noOverall') }}</p>
         }
         @if (seriesTable(); as table) {
           <app-series-notes [negativeLeftOut]="table.negativeLeftOut" />
@@ -202,6 +211,13 @@ export class AxisChart {
   readonly names = input<ColumnNamer>(rawNames);
   /** What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D8). */
   readonly orders = input<CategoryOrders | null>(null);
+  /** The threshold in force and the indicator's base column, for the figures and the small bases of the marks (add-small-sample-warnings). */
+  readonly bases = input<ChartBases>(noChartBases);
+  /** How many marks the chart draws dimmed for a small base, so the widget can explain the dimming under it (design D10, D11). */
+  readonly dimmed = output<number>();
+  protected readonly smallStroke = smallBaseStroke;
+  protected readonly smallDash = smallBaseDash;
+  protected readonly smallOpacity = smallBaseOpacity;
   readonly asTable = input(false);
   /** The colors of the widget, from the dashboard's palette and the widget's own color. */
   readonly colors = input.required<ChartColors>();
@@ -247,7 +263,7 @@ export class AxisChart {
       return [];
     }
     const answer = this.answer();
-    const lines = referenceLineValues(kind, config, { rows: this.rows(), overall: answer?.overall, totals: answer?.totals });
+    const lines = referenceLineValues(kind, config, { rows: this.rows(), overall: answer?.overall, totals: answer?.totals }, this.bases().answerColumns ?? []);
     const format = this.format();
     const asShare = kind !== 'line' && !!this.seriesTable() && (config.layout ?? 'grouped') === 'percent';
     const share = new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 });
@@ -256,6 +272,24 @@ export class AxisChart {
       const figure = asShare ? share.format(line.value) : format(line.value);
       return { value: line.value, place: line.place, label, figure, text: `${label}: ${figure}` };
     });
+  });
+  /**
+   * Whether the widget lists an overall line that it does not draw because it groups or splits by a column its indicator declares as answers
+   * (add-small-sample-warnings, design D16): the chart says so under it, in a note. A line the widget could not have anyway (a measure, a
+   * stacked or 100% layout) is not this note's business.
+   */
+  protected readonly overallLeftOut = computed(() => {
+    const config = this.config();
+    const kind = this.kind();
+    const layout = config.seriesBy && (kind === 'bar' || kind === 'column') ? (config.layout ?? 'grouped') : 'grouped';
+    return (
+      (kind === 'bar' || kind === 'column' || kind === 'line') &&
+      !!config.ratio &&
+      layout !== 'stacked' &&
+      layout !== 'percent' &&
+      !!config.display?.referenceLines?.some((line) => line?.kind === 'overall') &&
+      overOnAnswers(config, this.bases().answerColumns)
+    );
   });
   /** The key under the plot and the list under the table: every line drawn, with its text and the dash it is drawn in. */
   protected readonly referenceEntries = computed<ReferenceEntry[]>(() => this.references().map((mark) => ({ text: mark.text, dash: dashOf(mark.place) })));
@@ -288,17 +322,28 @@ export class AxisChart {
       references: this.references(),
       steps: this.steps(),
       dataLabels: this.dataLabels(),
+      figures: seriesFigures(this.config(), this.names(), this.bases(), this.locale, (key, params) => this.transloco.translate(key, params)),
     });
+  });
+
+  /** How many marks have a small base: the cells of a chart with a series, the bars, columns or points of one without (a histogram has none). */
+  protected readonly smallCount = computed(() => {
+    if (this.kind() === 'histogram') {
+      return 0;
+    }
+    const marks = this.seriesMarks();
+    return marks ? marks.small : this.data().figures.filter((figures) => isSmallBase(figures?.n, this.bases().minN)).length;
   });
   /** The tooltips and the keyboard of the marks of a chart with a series. */
   protected readonly marks = markTooltips({
     host: () => this.svg()?.nativeElement,
-    marks: () => this.seriesMarks()?.marks ?? noMarks,
+    marks: () => this.seriesMarks()?.marks ?? this.plain().marks,
     groupsAcross: () => this.kind() !== 'bar',
   });
 
   // What an image of the chart says around its plot (add-widget-export): the series legend in the caption's place, or the caption.
   constructor() {
+    effect(() => this.dimmed.emit(this.smallCount()));
     registerExportParts({
       plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
       settle: () => this.marks.reset(),
@@ -310,6 +355,8 @@ export class AxisChart {
         // The reference lines (add-chart-annotations, design D9): in the legend, after the series, while the chart is drawn, and in the notes,
         // after the table's own, while it is shown as a table. A chart without lines registers what it always did.
         const lines = this.references();
+        // The note that says an overall line is not drawn over the answers of one question is part of what an image says under the chart.
+        const overall = this.overallLeftOut() ? [t('indicators.referenceLines.noOverall')] : [];
         const entries = [
           ...(withLegend ? legend.map((entry) => ({ label: entry.name, color: entry.color, swatch: this.kind() === 'line' ? ('line' as const) : ('square' as const) })) : []),
           ...(this.asTable() ? [] : lines.map((mark) => ({ label: mark.text, color: 'var(--color-heading, #111827)', swatch: 'dashed' as const, dash: mark.place }))),
@@ -321,11 +368,11 @@ export class AxisChart {
         };
         if (this.asTable()) {
           const table = series
-            ? crossTableModel(series, { type: this.kind(), config: this.config(), format: this.format(), locale: this.locale, t, names: this.names(), orders: this.orders() })
+            ? crossTableModel(series, { type: this.kind(), config: this.config(), format: this.format(), locale: this.locale, t, names: this.names(), orders: this.orders(), minN: this.bases().minN })
             : this.table(t);
-          return { ...shared, notes: lines.map((mark) => mark.text), table };
+          return { ...shared, notes: [...lines.map((mark) => mark.text), ...(table.note ? [table.note] : []), ...overall], table };
         }
-        const notes = series ? seriesNoteTexts({ negativeLeftOut: series.negativeLeftOut, leftOut: 0, kind: null }, t, this.transloco.getActiveLang()) : [];
+        const notes = [...(series ? seriesNoteTexts({ negativeLeftOut: series.negativeLeftOut, leftOut: 0, kind: null }, t, this.transloco.getActiveLang()) : []), ...overall];
         return { ...shared, notes, table: null };
       },
     });
@@ -347,16 +394,23 @@ export class AxisChart {
         values: buckets.map((b) => b.count),
         // A range is no group value, so no color kept by value can match it.
         groups: buckets.map(() => null),
+        // A bar of a histogram has no n (design D2): its tooltip gives its range and its count.
+        figures: buckets.map(() => null),
       };
     }
     const empty = this.transloco.translate('indicators.chart.noGroup');
     return { ranges: false, ...pivot(this.rows(), empty, kind === 'line' ? 'natural' : 'listed', this.orders()) };
   });
 
-  /** What the chart draws, one series or many: the plot of a widget with a series, else the plain layout, which has no hit areas. */
+  /** What the chart draws, one series or many: the plot of a widget with a series, else the plain layout. */
   protected readonly layout = computed(() => {
     const marks = this.seriesMarks();
-    return marks ? { width: Math.max(160, this.size().width), height: Math.max(120, this.size().height), ...marks } : { ...this.plain(), hits: [] as Hit[] };
+    if (marks) {
+      return { width: Math.max(160, this.size().width), height: Math.max(120, this.size().height), ...marks };
+    }
+    // The plain layout has hit areas and marks of one series too (design D9); the marks stay out of what it draws.
+    const { marks: _marks, ...plain } = this.plain();
+    return plain;
   });
 
   private readonly plain = computed(() => {
@@ -382,6 +436,9 @@ export class AxisChart {
     const lines: Path[] = [];
     const dots: Dot[] = [];
     const dataLabels: Label[] = [];
+    /** The areas that answer the pointer, and the one mark of each category for the tooltips and the keyboard (design D9). */
+    const hits: Hit[] = [];
+    const marks: MarkGrid = categories.map((_, i): (MarkPoint | null)[] => [{ content: this.tipContent(i, values[i]), x: 0, y: 0 }]);
     /** The boxes of the texts already placed, which no later text may cover: the reference labels first, then the data labels. */
     const taken: Box[] = [];
     // The widget's own color; a bar or a column whose group value has a color kept for it is drawn in that one (spec "One bar
@@ -390,7 +447,12 @@ export class AxisChart {
     const color = colors.accent;
     const groupBy = this.config().groupBy ?? '';
     const markColor = (i: number) => (kind === 'bar' || kind === 'column' ? (colors.kept(groupBy, groups[i]) ?? color) : color);
-    const titleOf = (category: string, value: number) => `${category}: ${valueText(value)}`;
+    /** Whether the mark of a category has a small base: a histogram's bar has no n, so never. */
+    const small = (i: number) => !ranges && isSmallBase(this.data().figures[i]?.n, this.bases().minN);
+    const place = (i: number, at: { x: number; y: number }) => {
+      (marks[i] as (MarkPoint | null)[])[0]!.x = at.x;
+      (marks[i] as (MarkPoint | null)[])[0]!.y = at.y;
+    };
     const top = 8 + (references.length ? referenceMargin : 0) + (labelsOn && kind !== 'bar' ? dataLabelMargin : 0);
     const right = 14;
 
@@ -417,14 +479,11 @@ export class AxisChart {
         }
         const zero = x(0);
         const end = x(values[i]);
-        rects.push({
-          x: Math.min(zero, end),
-          y: bands.start(i) + (bands.bandwidth - thickness) / 2,
-          width: Math.max(1, Math.abs(end - zero)),
-          height: thickness,
-          color: markColor(i),
-          title: titleOf(category, values[i]),
-        });
+        const bar = { x: Math.min(zero, end), y: bands.start(i) + (bands.bandwidth - thickness) / 2, width: Math.max(1, Math.abs(end - zero)), height: thickness };
+        rects.push({ ...bar, color: markColor(i), title: '', at: { g: i, s: 0 }, ...(small(i) ? { dim: true } : {}) });
+        const span = hitSpan(bar.x, bar.width);
+        hits.push({ x: span.start, y: bands.start(i) - (bands.step - bands.bandwidth) / 2, width: span.length, height: bands.step, at: { g: i, s: 0 } });
+        place(i, { x: bar.x + bar.width / 2, y: bar.y + bar.height / 2 });
         if (barLabels) {
           const at = { x: values[i] >= 0 ? Math.max(zero, end) + labelGap : Math.min(zero, end) - labelGap, y: bands.start(i) + bands.bandwidth / 2 + 4, text: valueText(values[i]), anchor: values[i] >= 0 ? ('start' as const) : ('end' as const) };
           // A negative bar that reaches the axis minimum has no room on its left: its label would cover the category names.
@@ -433,7 +492,7 @@ export class AxisChart {
           }
         }
       });
-      return { width: w, height: h, grid, ticks, labels, rects, lines, dots, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
+      return { width: w, height: h, grid, ticks, labels, rects, lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
     }
 
     const tickTexts = axis.ticks.map((tick) => tickText(tick));
@@ -458,9 +517,14 @@ export class AxisChart {
     if (kind === 'line') {
       const points: Point[] = values.map((value, i) => ({ x: bands.start(i) + bands.bandwidth / 2, y: y(value) }));
       points.forEach((point, i) => {
-        if (count <= 40) {
-          dots.push({ cx: point.x, cy: point.y, color, title: titleOf(categories[i], values[i]) });
+        // A point with a small base is hollow with a dashed ring, and is drawn whatever the number of points (design D10).
+        if (count <= 40 || small(i)) {
+          dots.push({ cx: point.x, cy: point.y, color, title: '', ...(small(i) ? { hollow: true } : {}) });
         }
+        // A line's hit areas are bands around its points, with a hairline at the one the pointer or the keyboard is on (design D9).
+        const center = bands.start(i) + bands.bandwidth / 2;
+        hits.push({ x: bands.start(i), y: top, width: bands.bandwidth, height: h - bottom - top, at: { g: i, s: 0 }, guide: { x1: center, y1: top, x2: center, y2: h - bottom, zero: false } });
+        place(i, { x: center, y: point.y });
         if (labelsOn) {
           // Above each point, left to right: a label off the plot or covering one already placed is left out.
           const at = { x: point.x, y: point.y - pointGap, text: valueText(values[i]), anchor: 'middle' as const };
@@ -472,21 +536,18 @@ export class AxisChart {
       });
       const path = this.steps() ? stepPath : linePath;
       lines.push({ d: points.length > 1 ? path(points) : '', color, name: ownCaption(this.config()) ?? this.label() });
-      return { width: w, height: h, grid, ticks, labels, rects, lines, dots, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
+      return { width: w, height: h, grid, ticks, labels, rects, lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
     }
 
     const thickness = Math.min(maxThickness, Math.max(1, bands.bandwidth));
     categories.forEach((category, i) => {
       const zero = y(0);
       const end = y(values[i]);
-      rects.push({
-        x: bands.start(i) + (bands.bandwidth - thickness) / 2,
-        y: Math.min(zero, end),
-        width: thickness,
-        height: Math.max(1, Math.abs(end - zero)),
-        color: markColor(i),
-        title: titleOf(category, values[i]),
-      });
+      const column = { x: bands.start(i) + (bands.bandwidth - thickness) / 2, y: Math.min(zero, end), width: thickness, height: Math.max(1, Math.abs(end - zero)) };
+      rects.push({ ...column, color: markColor(i), title: '', at: { g: i, s: 0 }, ...(small(i) ? { dim: true } : {}) });
+      const span = hitSpan(column.y, column.height);
+      hits.push({ x: bands.start(i) - (bands.step - bands.bandwidth) / 2, y: span.start, width: bands.step, height: span.length, at: { g: i, s: 0 } });
+      place(i, { x: column.x + column.width / 2, y: column.y + column.height / 2 });
       // A column label sits above its end, or below a negative column, and is left out when it is wider than the column slot.
       if (labelsOn && textWidth(valueText(values[i])) <= bands.step) {
         const at = { x: bands.start(i) + bands.bandwidth / 2, y: values[i] >= 0 ? Math.min(zero, end) - labelGap : Math.max(zero, end) + labelGap + 10, text: valueText(values[i]), anchor: 'middle' as const };
@@ -496,8 +557,23 @@ export class AxisChart {
         }
       }
     });
-    return { width: w, height: h, grid, ticks, labels, rects, lines, dots, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
+    return { width: w, height: h, grid, ticks, labels, rects, lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
   });
+
+  /**
+   * What a mark of a chart with no series says (design D9): its group as the heading, then the plotted value under the widget's own caption
+   * text or the indicator's label, then the numerator, the denominator and the n under their names, and for a small base its note. A
+   * histogram's bar says its range and its count only.
+   */
+  private tipContent(i: number, value: number): ChartTooltipContent {
+    const { categories, figures, ranges } = this.data();
+    const t: Translate = (key, params) => this.transloco.translate(key, params);
+    if (ranges) {
+      return histogramTooltip(categories[i], value, this.locale, t);
+    }
+    const tip = figureTooltip(figures[i], { names: figureNames(this.config(), this.names(), this.bases().baseColumn), locale: this.locale, t }, this.bases().minN);
+    return { heading: categories[i], lines: [{ label: ownCaption(this.config()) ?? this.label(), value: this.format()(value), align: 'end' }, ...tip.lines], footer: tip.footer };
+  }
 
   protected caption(t: Translate): string {
     const config = this.config();
@@ -508,6 +584,10 @@ export class AxisChart {
   }
 
   protected keyHelp(): string {
+    // A chart with no series has no series to move between: only the groups (design D9).
+    if (!this.seriesTable()) {
+      return this.kind() === 'bar' ? 'indicators.series.keyHelpGroupsDown' : 'indicators.series.keyHelpGroups';
+    }
     return this.kind() === 'line' ? 'indicators.series.keyHelpGroups' : this.kind() === 'bar' ? 'indicators.series.keyHelpDown' : 'indicators.series.keyHelpAcross';
   }
 
@@ -538,7 +618,7 @@ export class AxisChart {
 
   /** The chart's words for assistive technology, then the reference lines it draws with their values (design D5). */
   protected summary(t: Translate): string {
-    const words = this.chartSummary(t);
+    const words = summaryWithSmall(this.chartSummary(t), this.smallCount(), t);
     const references = this.references();
     return references.length ? `${words} ${t('indicators.referenceLines.summary', { lines: references.map((reference) => `${reference.label} ${reference.figure}`).join(', ') })}` : words;
   }
@@ -567,12 +647,15 @@ export class AxisChart {
   }
 
   protected table(t: Translate): TableModel {
-    const { categories, values, ranges } = this.data();
+    const { categories, values, ranges, figures } = this.data();
     const what = plotted(this.config(), this.label(), this.names());
     const format = this.format();
-    return {
-      headers: [ranges ? t('indicators.chart.range') : this.names()(this.config().groupBy ?? ''), ranges ? t('indicators.chart.rowsOf', { what }) : what],
-      rows: categories.map((category, i) => [category, ranges ? this.whole.format(values[i]) : format(values[i])]),
+    // While the n line shows or a threshold is in force, the values that have an n get a column for it, after the value (design D11).
+    const withN = !ranges && hasNColumn(this.bases(), figures);
+    const model: TableModel = {
+      headers: [ranges ? t('indicators.chart.range') : this.names()(this.config().groupBy ?? ''), ranges ? t('indicators.chart.rowsOf', { what }) : what, ...(withN ? [t('indicators.bases.nColumn')] : [])],
+      rows: categories.map((category, i) => [category, ranges ? this.whole.format(values[i]) : format(values[i]), ...(withN ? [nCell(figures[i], this.locale)] : [])]),
     };
+    return ranges ? model : markSmall(model, 1, categories.map((_, i) => isSmallBase(figures[i]?.n, this.bases().minN)), this.bases().minN, this.locale, t);
   }
 }

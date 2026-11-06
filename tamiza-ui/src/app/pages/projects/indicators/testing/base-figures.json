@@ -1,0 +1,175 @@
+{
+  "about": "Cases of the base figures of a widget (add-small-sample-warnings, design D7, D9, D11, D13), worked out by hand with invented names and numbers, read by base-figures.spec.ts (tamiza-ui) and by BaseFiguresTests.cs (tamiza-api). The twins are base-figures.ts and BaseFigures.cs. Each case has the expected English ('en', locale en-US) and Spanish ('es', locale es-CO) texts. A case with 'apiOnly' true is for the server's twin only (the UI never writes that sentence). Sections: 'settings' (settingsInForce / BaseFigures.InForce: the widget's display and the dashboard's settings, then the settings in force), 'small' (isSmallBase / Small), 'tooltips' (figureTooltip / Tooltip: 'columns' gives the name shown for a column, 'ratio' says the widget plots the ratio of its 'numerator' to its 'denominator' columns, 'baseColumn' is the declared base column, 'figures' the numerator, denominator and n of the mark; 'lines' are [label, value] pairs), 'nLines' (nLine: the n and the name of the column it counts), 'noDataLines' (noDataLine: 'format' and 'unit' are the indicator's, or the widget's own unit), 'sentences' (the notes about small bases; 'kind' names the function and 'args' its arguments; a null expectation is a sentence that is not written).",
+  "locales": { "en": "en-US", "es": "es-CO" },
+  "settings": [
+    { "name": "Comunas below 30", "display": null, "dashboard": { "minN": 30, "showN": true }, "expected": { "minN": 30, "showN": true } },
+    { "name": "Follows the dashboard for what the widget does not set", "display": {}, "dashboard": { "minN": 30 }, "expected": { "minN": 30, "showN": false } },
+    { "name": "Turned off for a widget", "display": { "minN": 0 }, "dashboard": { "minN": 30, "showN": false }, "expected": { "minN": null, "showN": false } },
+    { "name": "Own threshold", "display": { "minN": 10 }, "dashboard": { "minN": 30, "showN": false }, "expected": { "minN": 10, "showN": false } },
+    { "name": "Own threshold on a dashboard with no settings", "display": { "minN": 10 }, "dashboard": null, "expected": { "minN": 10, "showN": false } },
+    { "name": "Hidden n line", "display": { "showN": false }, "dashboard": { "minN": null, "showN": true }, "expected": { "minN": null, "showN": false } },
+    { "name": "Shown n line", "display": { "showN": true }, "dashboard": { "minN": null, "showN": false }, "expected": { "minN": null, "showN": true } },
+    { "name": "Both own settings over the dashboard's", "display": { "minN": 50, "showN": true }, "dashboard": { "minN": 30, "showN": false }, "expected": { "minN": 50, "showN": true } },
+    { "name": "No settings anywhere", "display": null, "dashboard": null, "expected": { "minN": null, "showN": false } },
+    { "name": "A dashboard with the threshold off", "display": {}, "dashboard": { "minN": null, "showN": false }, "expected": { "minN": null, "showN": false } }
+  ],
+  "small": [
+    { "name": "COMUNA 7 under 30", "n": 16, "minN": 30, "expected": true },
+    { "name": "SIN NOMBRE under 30", "n": 20, "minN": 30, "expected": true },
+    { "name": "COMUNA 1 over 30", "n": 121, "minN": 30, "expected": false },
+    { "name": "Never at the threshold itself", "n": 30, "minN": 30, "expected": false },
+    { "name": "No threshold in force", "n": 16, "minN": null, "expected": false },
+    { "name": "Value with no n", "n": null, "minN": 30, "expected": false },
+    { "name": "Own threshold 10 makes COMUNA 7 a normal base", "n": 16, "minN": 10, "expected": false }
+  ],
+  "tooltips": [
+    {
+      "name": "Rate of a comuna",
+      "columns": { "numerator": "Hogares que asistieron", "denominator": "Hogares" },
+      "ratio": true, "baseColumn": null, "minN": 30,
+      "figures": { "numerator": 56, "denominator": 121, "n": 121 },
+      "en": { "lines": [["Hogares que asistieron", "56"], ["Hogares", "121"]], "footer": null },
+      "es": { "lines": [["Hogares que asistieron", "56"], ["Hogares", "121"]], "footer": null }
+    },
+    {
+      "name": "Figures of a percent indicator",
+      "indicator": { "format": "percent", "unit": "de los hogares" },
+      "columns": { "numerator": "Hogares que asistieron", "denominator": "Hogares" },
+      "ratio": true, "baseColumn": null, "minN": null,
+      "figures": { "numerator": 56, "denominator": 121, "n": 121 },
+      "en": { "lines": [["Hogares que asistieron", "56"], ["Hogares", "121"]], "footer": null },
+      "es": { "lines": [["Hogares que asistieron", "56"], ["Hogares", "121"]], "footer": null }
+    },
+    {
+      "name": "Small base of a comuna",
+      "columns": { "numerator": "Hogares que asistieron", "denominator": "Hogares" },
+      "ratio": true, "baseColumn": null, "minN": 30,
+      "figures": { "numerator": 8, "denominator": 16, "n": 16 },
+      "en": { "lines": [["Hogares que asistieron", "8"], ["Hogares", "16"]], "footer": "Small base: n = 16 (below 30)" },
+      "es": { "lines": [["Hogares que asistieron", "8"], ["Hogares", "16"]], "footer": "Base pequeña: n = 16 (menos de 30)" }
+    },
+    {
+      "name": "Declared base in a tooltip",
+      "columns": { "hogares": "hogares" },
+      "ratio": false, "baseColumn": "hogares", "minN": null,
+      "figures": { "n": 154 },
+      "en": { "lines": [["n (hogares)", "154"]], "footer": null },
+      "es": { "lines": [["n (hogares)", "154"]], "footer": null }
+    },
+    {
+      "name": "A declared base that is not the denominator",
+      "columns": { "numerator": "Hogares que asistieron", "denominator": "Hogares", "hogares": "hogares" },
+      "ratio": true, "baseColumn": "hogares", "minN": null,
+      "figures": { "numerator": 80, "denominator": 160, "n": 154 },
+      "en": { "lines": [["Hogares que asistieron", "80"], ["Hogares", "160"], ["n (hogares)", "154"]], "footer": null },
+      "es": { "lines": [["Hogares que asistieron", "80"], ["Hogares", "160"], ["n (hogares)", "154"]], "footer": null }
+    },
+    {
+      "name": "A ratio counted once across answers",
+      "columns": { "numerator": "Hogares que asistieron", "denominator": "Hogares" },
+      "ratio": true, "baseColumn": null, "minN": null,
+      "figures": { "numerator": 20, "denominator": 57, "n": 19 },
+      "en": { "lines": [["Hogares que asistieron", "20"], ["Hogares", "57"], ["n (Hogares)", "19"]], "footer": null },
+      "es": { "lines": [["Hogares que asistieron", "20"], ["Hogares", "57"], ["n (Hogares)", "19"]], "footer": null }
+    },
+    {
+      "name": "Figures with decimals and thousands",
+      "columns": { "numerator": "Hogares que asistieron", "denominator": "Hogares" },
+      "ratio": true, "baseColumn": null, "minN": null,
+      "figures": { "numerator": 0.5, "denominator": 12450, "n": 12450 },
+      "en": { "lines": [["Hogares que asistieron", "0.5"], ["Hogares", "12,450"]], "footer": null },
+      "es": { "lines": [["Hogares que asistieron", "0,5"], ["Hogares", "12.450"]], "footer": null }
+    },
+    {
+      "name": "A mark with no figures",
+      "columns": { "numerator": "Hogares que asistieron", "denominator": "Hogares" },
+      "ratio": true, "baseColumn": null, "minN": 30,
+      "figures": {},
+      "en": { "lines": [], "footer": null },
+      "es": { "lines": [], "footer": null }
+    },
+    {
+      "name": "Columns with no name of their own are written as they are",
+      "columns": {},
+      "ratio": true, "baseColumn": null, "minN": null,
+      "figures": { "numerator": 8, "denominator": 16, "n": 16 },
+      "en": { "lines": [["numerator", "8"], ["denominator", "16"]], "footer": null },
+      "es": { "lines": [["numerator", "8"], ["denominator", "16"]], "footer": null }
+    }
+  ],
+  "nLines": [
+    { "name": "Line shown", "n": 223, "label": "Hogares que asistieron", "en": "n = 223 Hogares que asistieron", "es": "n = 223 Hogares que asistieron" },
+    { "name": "Thousands separators", "n": 1234, "label": "Hogares", "en": "n = 1,234 Hogares", "es": "n = 1.234 Hogares" },
+    { "name": "A column with no name", "n": 476, "label": null, "en": "n = 476", "es": "n = 476" },
+    { "name": "Widget without a base n", "n": null, "label": "Hogares", "en": null, "es": null }
+  ],
+  "noDataLines": [
+    {
+      "name": "Rate of the left-out rows",
+      "noData": { "values": ["No sabe"], "value": 0.02242152466367713, "numerator": 5, "denominator": 223, "n": 223 },
+      "format": "percent", "unit": null, "showN": false,
+      "en": "No sabe: 2.24%", "es": "No sabe: 2,24%"
+    },
+    {
+      "name": "Share of a count",
+      "noData": { "values": ["4. No sabe"], "value": 11, "n": 11, "share": 0.023109243697478993 },
+      "format": "count", "unit": "hogares", "showN": false,
+      "en": "4. No sabe: 11 hogares (2.3%)", "es": "4. No sabe: 11 hogares (2,3%)"
+    },
+    {
+      "name": "Share of a count with the n line",
+      "noData": { "values": ["4. No sabe"], "value": 11, "n": 11, "share": 0.023109243697478993 },
+      "format": "count", "unit": "hogares", "showN": true,
+      "en": "4. No sabe: 11 hogares (2.3%) · n = 11", "es": "4. No sabe: 11 hogares (2,3%) · n = 11"
+    },
+    {
+      "name": "Rate with the n line",
+      "noData": { "values": ["Sin dato"], "value": 0.042, "n": 20 },
+      "format": "percent", "unit": null, "showN": true,
+      "en": "Sin dato: 4.2% · n = 20", "es": "Sin dato: 4,2% · n = 20"
+    },
+    {
+      "name": "Three values named",
+      "noData": { "values": ["a", "b", "c"], "value": 1 },
+      "format": "count", "unit": "hogares", "showN": false,
+      "en": "a, b, c: 1 hogares", "es": "a, b, c: 1 hogares"
+    },
+    {
+      "name": "More than three values end with an ellipsis",
+      "noData": { "values": ["a", "b", "c", "d"], "value": 1 },
+      "format": "count", "unit": "hogares", "showN": false,
+      "en": "a, b, c, …: 1 hogares", "es": "a, b, c, …: 1 hogares"
+    },
+    {
+      "name": "A value with its own unit",
+      "noData": { "values": ["Sin dato"], "value": 4, "share": 0.5 },
+      "format": "count", "unit": "personas", "showN": false,
+      "en": "Sin dato: 4 personas (50%)", "es": "Sin dato: 4 personas (50%)"
+    },
+    {
+      "name": "Values alone when they hold no value",
+      "noData": { "values": ["Sin dato"], "value": null },
+      "format": "percent", "unit": null, "showN": false,
+      "en": "Sin dato", "es": "Sin dato"
+    },
+    { "name": "Nothing left out", "noData": null, "format": "percent", "unit": null, "showN": false, "en": null, "es": null },
+    { "name": "A list of no values", "noData": { "values": [] }, "format": "percent", "unit": null, "showN": false, "en": null, "es": null }
+  ],
+  "sentences": [
+    { "name": "Note under a chart", "kind": "smallNote", "args": { "minN": 30 }, "en": "Marks with a base below 30 are dimmed.", "es": "Las marcas con una base menor que 30 aparecen atenuadas." },
+    { "name": "Note under a chart with thousands", "kind": "smallNote", "args": { "minN": 1000 }, "en": "Marks with a base below 1,000 are dimmed.", "es": "Las marcas con una base menor que 1.000 aparecen atenuadas." },
+    { "name": "Note under a table", "kind": "tableNote", "args": { "minN": 30 }, "en": "* Base below 30.", "es": "* Base menor que 30." },
+    { "name": "Summary of a chart with two dimmed marks", "kind": "summaryCount", "args": { "count": 2 }, "en": ", 2 with a small base", "es": ", 2 con base pequeña" },
+    { "name": "Summary of a chart with none", "kind": "summaryCount", "args": { "count": 0 }, "en": "", "es": "" },
+    { "name": "Tooltip of a small base", "kind": "smallTooltip", "args": { "n": 16, "minN": 30 }, "en": "Small base: n = 16 (below 30)", "es": "Base pequeña: n = 16 (menos de 30)" },
+    { "name": "Tooltip of a base that is not small", "kind": "smallTooltip", "args": { "n": 121, "minN": 30 }, "en": null, "es": null },
+    { "name": "Tooltip of a value with no n", "kind": "smallTooltip", "args": { "n": null, "minN": 30 }, "en": null, "es": null },
+    { "name": "Tooltip that lists several series", "kind": "smallSome", "args": { "minN": 30 }, "en": "Small base in some series (below 30)", "es": "Base pequeña en algunas series (menos de 30)" },
+    { "name": "Value of a series with its n", "kind": "seriesValueWithN", "args": { "value": "50%", "n": 16 }, "en": "50% (n = 16)", "es": "50% (n = 16)" },
+    { "name": "Value of a series with no n", "kind": "seriesValueWithN", "args": { "value": "50%", "n": null }, "en": "50%", "es": "50%" },
+    { "name": "Count of a histogram bar", "kind": "histogramRows", "args": {}, "en": "Rows", "es": "Filas" },
+    { "name": "Email note for two values", "kind": "emailNote", "apiOnly": true, "args": { "count": 2, "minN": 30 }, "en": "2 values have a base below 30, marked *.", "es": "2 valores tienen una base menor que 30, marcados con *." },
+    { "name": "Email note for one value", "kind": "emailNote", "apiOnly": true, "args": { "count": 1, "minN": 30 }, "en": "1 value has a base below 30, marked *.", "es": "1 valor tiene una base menor que 30, marcado con *." },
+    { "name": "Email note for none", "kind": "emailNote", "apiOnly": true, "args": { "count": 0, "minN": 30 }, "en": null, "es": null }
+  ]
+}

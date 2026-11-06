@@ -1,6 +1,6 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { TranslocoTestingModule } from '@jsverse/transloco';
+import { TranslocoService, TranslocoTestingModule } from '@jsverse/transloco';
 import en from '../../../../public/i18n/en.json';
 import es from '../../../../public/i18n/es.json';
 import { ColumnDraft, IndicatorMetadata } from '../../core/projects/pipeline.service';
@@ -12,15 +12,16 @@ import { IndicatorMetadataFields } from './indicator-metadata-fields';
 const base: IndicatorMetadata = { label: 'Teatro hoy', description: '', unit: '', format: 'percent', columns: {} };
 
 /** A row of the form: a label, and the order, values kept last and prefix choice it says nothing of unless given. */
-const row = (label: string, extra: Partial<ColumnDraft> = {}): ColumnDraft => ({ label, order: [], last: [], stripPrefix: false, ...extra });
+const row = (label: string, extra: Partial<ColumnDraft> = {}): ColumnDraft => ({ label, order: [], last: [], stripPrefix: false, base: false, missing: [], categories: '', ...extra });
 
 @Component({
   imports: [IndicatorMetadataFields],
-  template: `<app-indicator-metadata-fields [value]="value()" [columns]="columns()" [offered]="offered()" [errors]="errors()" [readonly]="readonly()" (valueChange)="value.set($event)" />`,
+  template: `<app-indicator-metadata-fields [value]="value()" [columns]="columns()" [numeric]="numeric()" [offered]="offered()" [errors]="errors()" [readonly]="readonly()" (valueChange)="value.set($event)" />`,
 })
 class Host {
   readonly value = signal<IndicatorMetadata>(base);
   readonly columns = signal<string[]>(['variable', 'comuna', 'numerator']);
+  readonly numeric = signal<string[]>([]);
   readonly offered = signal<Record<string, readonly string[]>>({});
   readonly errors = signal<Record<string, string>>({});
   readonly readonly = signal(false);
@@ -290,5 +291,350 @@ describe('the rows of the order of the column names (add-declared-category-order
     const saved = { a: { label: 'Respuesta', order: ['x', 'y'], last: ['z'], stripPrefix: true as const } };
 
     expect(columnsOf(draftsOf(saved))).toEqual(saved);
+  });
+});
+
+describe('the rows of the base facts of the column names (add-small-sample-warnings, design D1)', () => {
+  it('keeps a row that has only a base, only values that mean no data or only a kind of answers', () => {
+    expect(draftsOf({ hogares: { base: true }, comuna: { missing: ['Sin dato'] }, categoria: { categories: 'multiple' }, otra: { base: false, missing: [] } })).toEqual({
+      hogares: row('', { base: true }),
+      comuna: row('', { missing: ['Sin dato'] }),
+      categoria: row('', { categories: 'multiple' }),
+    });
+  });
+
+  it('sends the base facts of a row with the label, leaving out the ones that are not set', () => {
+    expect(
+      columnsOf({
+        hogares: row('Hogares', { base: true }),
+        comuna: row('', { missing: ['Sin dato', 'No sabe'] }),
+        categoria: row('Respuesta', { categories: 'single' }),
+        vacia: row('', { base: false, missing: [], categories: '' }),
+      }),
+    ).toEqual({
+      hogares: { label: 'Hogares', base: true },
+      comuna: { missing: ['Sin dato', 'No sabe'] },
+      categoria: { label: 'Respuesta', categories: 'single' },
+    });
+  });
+
+  it('counts each base fact as a change, and a row with none as no row', () => {
+    expect(sameColumns({ a: row('', { base: true }) }, { a: row('') })).toBe(false);
+    expect(sameColumns({ a: row('', { missing: ['x'] }) }, { a: row('', { missing: ['x', 'y'] }) })).toBe(false);
+    expect(sameColumns({ a: row('', { categories: 'single' }) }, { a: row('', { categories: 'multiple' }) })).toBe(false);
+    expect(sameColumns({ a: row('', { missing: ['x'] }) }, { a: row('', { missing: ['x'] }) })).toBe(true);
+    expect(sameColumns({}, { a: row('', { base: false, missing: [], categories: '' }) })).toBe(true);
+  });
+
+  it('reads back what was saved, and ignores a kind of answers it does not know', () => {
+    const saved = { hogares: { label: 'Hogares', base: true as const }, comuna: { missing: ['Sin dato'] }, categoria: { categories: 'multiple' as const } };
+
+    expect(columnsOf(draftsOf(saved))).toEqual(saved);
+    expect(draftsOf({ a: { label: 'x', categories: 'ranking' as never } })['a'].categories).toBe('');
+  });
+});
+
+describe('the base facts in the column names (add-small-sample-warnings, design D1)', () => {
+  beforeEach(() =>
+    TestBed.configureTestingModule({
+      imports: [Host, TranslocoTestingModule.forRoot({ langs: { en, es }, translocoConfig: { availableLangs: ['en', 'es'], defaultLang: 'en' }, preloadLangs: true })],
+    }),
+  );
+
+  async function render() {
+    const fixture = TestBed.createComponent(Host);
+    fixture.componentInstance.columns.set(['variable', 'categoria', 'comuna', 'numerator', 'denominator', 'value']);
+    fixture.componentInstance.numeric.set(['numerator', 'denominator', 'value']);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    const text = (element: Element | null) => element?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+    const facts = (column: string) => root.querySelector<HTMLElement>(`[data-testid="meta-column-facts"][data-column="${column}"]`);
+    const baseOptions = () => Array.from(root.querySelectorAll<HTMLInputElement>('[data-testid="meta-base-option"]'));
+    const none = () => root.querySelector<HTMLInputElement>('[data-testid="meta-base-none"]')!;
+    const chips = (column: string) => Array.from(facts(column)!.querySelectorAll('[data-testid="chip-value"]')).map((chip) => text(chip));
+    const settle = async () => {
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+    };
+    const choose = async (input: HTMLInputElement) => {
+      input.checked = true;
+      input.dispatchEvent(new Event('change'));
+      await settle();
+    };
+    const addChip = async (column: string, value: string, how: 'button' | 'enter' = 'button') => {
+      const field = facts(column)!.querySelector<HTMLInputElement>('[data-testid="chip-new"]')!;
+      field.value = value;
+      field.dispatchEvent(new Event('input'));
+      await settle();
+      if (how === 'enter') {
+        field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      } else {
+        facts(column)!.querySelector<HTMLButtonElement>('[data-testid="chip-add"]')!.click();
+      }
+      await settle();
+    };
+    return { fixture, host: fixture.componentInstance, root, text, facts, baseOptions, none, chips, settle, choose, addChip };
+  }
+
+  it('offers the numeric columns as the base, None first, and the no-data values and answers for the others (Save form)', async () => {
+    const { root, baseOptions, none, text, facts } = await render();
+
+    expect(text(root.querySelector('[data-testid="meta-base"] legend'))).toBe('Base column');
+    expect(baseOptions().map((option) => option.dataset['column'])).toEqual(['numerator', 'denominator', 'value']);
+    expect(none().checked).toBe(true);
+    expect(root.querySelector('[data-testid="meta-base"]')!.compareDocumentPosition(root.querySelector('[data-testid="meta-column-label"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const column of ['variable', 'categoria', 'comuna']) {
+      expect(facts(column)).not.toBeNull();
+      expect(text(facts(column)!.querySelector('summary'))).toContain('Base and answers');
+      expect(facts(column)!.querySelector('[data-testid="chip-new"]')).not.toBeNull();
+      expect(facts(column)!.querySelector<HTMLSelectElement>('[data-testid="meta-column-answers"]')!.value).toBe('');
+    }
+    for (const column of ['numerator', 'denominator', 'value']) {
+      expect(facts(column)).toBeNull();
+    }
+    expect(text(facts('comuna')!.querySelector('summary'))).toContain('Not set');
+  });
+
+  it('offers no base group while the table has no numeric column, and every column the other two facts', async () => {
+    const { fixture, host, root, facts } = await render();
+
+    host.numeric.set([]);
+    fixture.detectChanges();
+
+    expect(root.querySelector('[data-testid="meta-base"]')).toBeNull();
+    expect(facts('numerator')).not.toBeNull();
+  });
+
+  it('says which columns to declare as answers, and never a column that splits the households', async () => {
+    const { text, facts } = await render();
+
+    const help = text(facts('categoria')!);
+    expect(help).toContain('variable, orden and categoria');
+    expect(help).toContain('Never for a column that splits the households, such as comuna or estrato');
+    expect(help).toContain('multiple choice');
+  });
+
+  it('says what each kind of answers does to a ratio over several of them, and nothing for none (Save form)', async () => {
+    const { host, fixture, facts, text, settle } = await render();
+    const effect = () => facts('categoria')!.querySelector('[data-testid="meta-column-answers-effect"]');
+    expect(effect()).toBeNull();
+
+    host.value.set({ ...base, columns: { categoria: row('', { categories: 'single' }) } });
+    fixture.detectChanges();
+    await settle();
+    expect(text(effect()!)).toBe('Single choice: a ratio over several answers counts the base once across them, not once per answer, so a share over several answers is not too small.');
+
+    host.value.set({ ...base, columns: { categoria: row('', { categories: 'multiple' }) } });
+    fixture.detectChanges();
+    await settle();
+    expect(text(effect()!)).toContain('Multiple choice: a ratio that would add up several answers shows a message instead of a figure');
+
+    host.value.set({ ...base, columns: { categoria: row('') } });
+    fixture.detectChanges();
+    await settle();
+    expect(effect()).toBeNull();
+  });
+
+  it('declares one column as the base, takes it from the other, and leaves None to clear it', async () => {
+    const { host, fixture, baseOptions, none, choose, settle } = await render();
+    host.value.set({ ...base, columns: { numerator: row('', { base: true }), comuna: row('Comuna') } });
+    fixture.detectChanges();
+    expect(baseOptions().map((option) => option.checked)).toEqual([true, false, false]);
+
+    await choose(baseOptions()[2]);
+    expect(Object.entries(host.value().columns).filter(([, draft]) => draft.base).map(([column]) => column)).toEqual(['value']);
+    expect(host.value().columns['comuna']).toEqual(row('Comuna'));
+
+    await choose(none());
+    await settle();
+    expect(Object.values(host.value().columns).some((draft) => draft.base)).toBe(false);
+  });
+
+  it('gives up the answers and the no-data values of a column made the base, which the API refuses together', async () => {
+    const { host, fixture, baseOptions, choose } = await render();
+    host.value.set({ ...base, columns: { value: row('Hogares', { missing: ['x'], categories: 'single' }) } });
+    fixture.detectChanges();
+
+    await choose(baseOptions()[2]);
+
+    expect(host.value().columns['value']).toEqual(row('Hogares', { base: true }));
+  });
+
+  it('adds a value that means no data with the button or Enter, and emits the column with its other facts', async () => {
+    const { host, fixture, addChip, chips } = await render();
+    host.value.set({ ...base, columns: { comuna: row('Comuna') } });
+    fixture.detectChanges();
+
+    await addChip('comuna', 'Sin dato');
+    await addChip('comuna', 'No sabe', 'enter');
+
+    expect(chips('comuna')).toEqual(['Sin dato', 'No sabe']);
+    expect(host.value().columns['comuna']).toEqual(row('Comuna', { missing: ['Sin dato', 'No sabe'] }));
+  });
+
+  it('keeps a value as typed, spaces included, and ignores an empty value and one already listed', async () => {
+    const { host, addChip, chips } = await render();
+
+    await addChip('comuna', ' Sin dato ');
+    await addChip('comuna', ' Sin dato ');
+    await addChip('comuna', '');
+
+    expect(chips('comuna')).toEqual(['Sin dato']);
+    expect(host.value().columns['comuna'].missing).toEqual([' Sin dato ']);
+  });
+
+  it('limits a column to 20 values and says so', async () => {
+    const { host, fixture, facts, text, addChip } = await render();
+    host.value.set({ ...base, columns: { comuna: row('', { missing: Array.from({ length: 19 }, (_, i) => `Valor ${i + 1}`) }) } });
+    fixture.detectChanges();
+    expect(facts('comuna')!.querySelector('[data-testid="chips-full"]')).toBeNull();
+
+    await addChip('comuna', 'Valor 20');
+    expect(host.value().columns['comuna'].missing).toHaveLength(20);
+    expect(text(facts('comuna')!.querySelector('[data-testid="chips-full"]'))).toBe('At most 20 values.');
+    expect(facts('comuna')!.querySelector<HTMLButtonElement>('[data-testid="chip-add"]')!.disabled).toBe(true);
+
+    await addChip('comuna', 'Valor 21', 'enter');
+    expect(host.value().columns['comuna'].missing).toHaveLength(20);
+  });
+
+  it('removes a value with its button, named by the value, and the column keeps no row when nothing is left', async () => {
+    const { host, fixture, facts, settle } = await render();
+    host.value.set({ ...base, columns: { comuna: row('', { missing: ['Sin dato', 'No sabe'] }) } });
+    fixture.detectChanges();
+    const remove = facts('comuna')!.querySelectorAll<HTMLButtonElement>('[data-testid="chip-remove"]');
+    expect(Array.from(remove).map((button) => button.getAttribute('aria-label'))).toEqual(['Remove Sin dato', 'Remove No sabe']);
+
+    remove[0].click();
+    await settle();
+
+    expect(host.value().columns['comuna'].missing).toEqual(['No sabe']);
+  });
+
+  it('chooses single or multiple choice for a column, and none again', async () => {
+    const { host, facts, settle } = await render();
+    const select = () => facts('categoria')!.querySelector<HTMLSelectElement>('[data-testid="meta-column-answers"]')!;
+    expect(Array.from(select().options).map((option) => option.textContent!.trim())).toEqual(['No', 'Yes, single choice', 'Yes, multiple choice']);
+
+    select().value = 'multiple';
+    select().dispatchEvent(new Event('change'));
+    await settle();
+    expect(host.value().columns['categoria']).toEqual(row('', { categories: 'multiple' }));
+
+    select().value = '';
+    select().dispatchEvent(new Event('change'));
+    await settle();
+    expect(host.value().columns['categoria'].categories).toBe('');
+  });
+
+  it('says in the closed disclosure what is set', async () => {
+    const { host, fixture, facts, text } = await render();
+    host.value.set({ ...base, columns: { comuna: row('', { missing: ['Sin dato', 'No sabe'] }), categoria: row('', { categories: 'multiple' }) } });
+    fixture.detectChanges();
+
+    expect(text(facts('comuna')!.querySelector('summary'))).toContain('No data: 2');
+    expect(text(facts('categoria')!.querySelector('summary'))).toContain('Answers: multiple choice');
+    expect(facts('comuna')!.querySelector('details')!.open).toBe(false);
+  });
+
+  it('shows the interface in Spanish', async () => {
+    TestBed.inject(TranslocoService).setActiveLang('es');
+    const { text, facts, root } = await render();
+
+    expect(text(root.querySelector('[data-testid="meta-base"] legend'))).toBe('Columna de base');
+    expect(text(facts('comuna')!.querySelector('summary'))).toContain('Base y respuestas');
+  });
+
+  it('follows a declared base the table lacks, marked as not in the table, and clears it with None (a column no longer in the table)', async () => {
+    const { host, fixture, baseOptions, none, text, root, choose } = await render();
+    host.value.set({ ...base, columns: { hogares: row('', { base: true }) } });
+    fixture.detectChanges();
+
+    expect(baseOptions().map((option) => option.dataset['column'])).toEqual(['numerator', 'denominator', 'value', 'hogares']);
+    expect(text(baseOptions()[3].closest('label'))).toBe('hogares (Not in the table)');
+    expect(baseOptions()[3].checked).toBe(true);
+    expect(root.querySelectorAll('[data-testid="meta-column-label"]')).toHaveLength(7);
+
+    await choose(none());
+
+    expect(Object.values(host.value().columns).some((draft) => draft.base)).toBe(false);
+    expect(baseOptions().map((option) => option.dataset['column'])).toEqual(['numerator', 'denominator', 'value']);
+  });
+
+  it('follows a column with no-data values that the table lacks, open, with a way to clear them', async () => {
+    const { host, fixture, facts, chips, settle } = await render();
+    host.value.set({ ...base, columns: { estrato_hogar: row('', { missing: ['Sin dato'] }) } });
+    fixture.detectChanges();
+
+    expect(facts('estrato_hogar')!.querySelector('details')!.open).toBe(true);
+    expect(chips('estrato_hogar')).toEqual(['Sin dato']);
+    facts('estrato_hogar')!.querySelector<HTMLButtonElement>('[data-testid="chip-remove"]')!.click();
+    await settle();
+    expect(host.value().columns['estrato_hogar'].missing).toEqual([]);
+  });
+
+  describe('a refusal of the API', () => {
+    it('shows an error of the values that mean no data on the row of its column, and opens it', async () => {
+      const { host, fixture, facts, text } = await render();
+      host.value.set({ ...base, columns: { comuna: row('', { missing: ['Sin dato', 'Sin dato'] }) } });
+      host.errors.set({ 'columns.comuna.missing[1]': "'Sin dato' is listed twice.", 'columns.categoria.missing': 'A column lists at most 20 values that mean no data.' });
+      fixture.detectChanges();
+
+      expect(text(facts('comuna')!.querySelector('[data-testid="missing-error"]'))).toBe("'Sin dato' is listed twice.");
+      expect(facts('comuna')!.querySelector('details')!.open).toBe(true);
+      expect(text(facts('categoria')!.querySelector('[data-testid="missing-error"]'))).toBe('A column lists at most 20 values that mean no data.');
+      expect(facts('variable')!.querySelector('[data-testid="missing-error"]')).toBeNull();
+    });
+
+    it('shows an error of the kind of answers under its select', async () => {
+      const { host, fixture, facts, text } = await render();
+      host.errors.set({ 'columns.categoria.categories': "Answers are 'single' or 'multiple'." });
+      fixture.detectChanges();
+
+      expect(text(facts('categoria')!.querySelector('[data-testid="answers-error"]'))).toBe("Answers are 'single' or 'multiple'.");
+      expect(facts('categoria')!.querySelector('details')!.open).toBe(true);
+    });
+
+    it('shows the error of a second base under the base group', async () => {
+      const { host, fixture, root, text } = await render();
+      host.errors.set({ 'columns.denominator.base': 'Only one column can be the base: numerator already is.' });
+      fixture.detectChanges();
+
+      expect(text(root.querySelector('[data-testid="meta-base"] [data-testid="base-error"]'))).toBe('Only one column can be the base: numerator already is.');
+      expect(root.querySelector('[data-testid="meta-base"]')!.getAttribute('aria-describedby')).toBe('meta-base-error');
+    });
+
+    it('shows an error of a column as a whole next to its row', async () => {
+      const { host, fixture, root, text } = await render();
+      host.errors.set({ 'columns.value': 'A base column counts units: it holds no answers and no values that mean no data.' });
+      fixture.detectChanges();
+
+      expect(text(root.querySelector('[data-testid="column-error"]'))).toBe('A base column counts units: it holds no answers and no values that mean no data.');
+    });
+  });
+
+  it('shows what is set without editors, and disables the base choice, for a version that cannot be edited', async () => {
+    const { host, fixture, facts, baseOptions, none, root } = await render();
+    host.value.set({ ...base, columns: { comuna: row('', { missing: ['Sin dato'] }), numerator: row('', { base: true }) } });
+    host.readonly.set(true);
+    fixture.detectChanges();
+
+    expect(facts('comuna')!.querySelector('[data-testid="chip-new"]')).toBeNull();
+    expect(facts('comuna')!.querySelector('[data-testid="chip-remove"]')).toBeNull();
+    expect(facts('comuna')!.querySelector('[data-testid="meta-column-answers"]')).toBeNull();
+    expect(root.querySelector('[data-testid="chip-add"]')).toBeNull();
+    expect(baseOptions().every((option) => option.disabled)).toBe(true);
+    expect(none().disabled).toBe(true);
+  });
+
+  it('is reached with the keyboard: radios, chips and the select are native controls in the reading order', async () => {
+    const { facts, baseOptions, none } = await render();
+
+    for (const control of [none(), ...baseOptions(), facts('comuna')!.querySelector<HTMLElement>('[data-testid="chip-new"]')!, facts('comuna')!.querySelector<HTMLElement>('[data-testid="meta-column-answers"]')!]) {
+      expect(control.tabIndex).toBe(0);
+    }
+    expect(new Set([none(), ...baseOptions()].map((radio) => radio.name)).size).toBe(1);
   });
 });

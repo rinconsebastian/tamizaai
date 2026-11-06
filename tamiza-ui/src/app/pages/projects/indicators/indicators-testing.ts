@@ -5,6 +5,7 @@ import { Downloader } from '../../../core/download.service';
 import {
   AppliedDashboardFilter,
   Dashboard,
+  DashboardBases,
   DashboardColors,
   DashboardFilter,
   IndicatorColumns,
@@ -21,7 +22,8 @@ import {
 } from '../../../core/projects/indicators.service';
 import { DashboardEntry, ProjectDetails, ProjectRole } from '../../../core/projects/projects.service';
 import { InterfaceLanguage } from '../../../core/i18n/interface-language';
-import { openProjectSection, projectId, settle } from '../../../../testing/project-harness';
+import { pressKey } from '../../../../testing/cdk';
+import { byTestId, openProjectSection, projectId, settle } from '../../../../testing/project-harness';
 import { ProjectIndicators } from '../project-indicators';
 import { ChartColors } from './chart-colors';
 import { DashboardPrint } from './dashboard-print';
@@ -138,8 +140,11 @@ export function result(rows: QueryRow[], overrides: Partial<QueryResult> = {}): 
   return { published: true, rows, rowLimitReached: false, missing: { indicator: false, columns: [] }, ...overrides };
 }
 
-/** A row of an answer; a map's carry how many table rows they combine (`rows`) and the values of the tooltip columns (`tooltip`). */
-export function row(group: string | null, value: number, geometry: string | null = null, extra: Pick<QueryRow, 'rows' | 'tooltip'> = {}): QueryRow {
+/**
+ * A row of an answer; a map's carry how many table rows they combine (`rows`) and the values of the tooltip columns (`tooltip`), and a ratio's
+ * its base figures (`numerator`, `denominator`, `n`: add-small-sample-warnings, design D5).
+ */
+export function row(group: string | null, value: number, geometry: string | null = null, extra: Pick<QueryRow, 'rows' | 'tooltip' | 'numerator' | 'denominator' | 'n'> = {}): QueryRow {
   return { group, value, geometry, ...extra };
 }
 
@@ -192,6 +197,8 @@ export interface OpenAt {
   colors?: DashboardColors;
   /** The dashboard's source (add-widget-context, design D7); none when left out. */
   source?: string;
+  /** The dashboard's base settings (add-small-sample-warnings, design D8); none when left out. */
+  bases?: Partial<DashboardBases>;
   query?: string;
   project?: Partial<ProjectDetails>;
   lang?: InterfaceLanguage;
@@ -203,7 +210,7 @@ export async function open(role: ProjectRole, widgets: Widget[], answer: Answer 
   const address = `dashboards/${id}${at.query ? `?${at.query}` : ''}`;
   const project = { ...(at.dashboards ? { dashboards: at.dashboards } : {}), ...at.project };
   const context = await openProjectSection(address, role, project, [{ provide: Downloader, useValue: downloader }], at.lang);
-  await answerLoad(context, widgets, extra, id, at.filters, at.colors, at.source);
+  await answerLoad(context, widgets, extra, id, at.filters, at.colors, at.source, at.bases);
   if (answer) {
     await answerQueries(context, answer);
   }
@@ -221,9 +228,10 @@ export async function answerLoad(
   filters: DashboardFilter[] = [],
   colors?: DashboardColors,
   source?: string,
+  bases?: Partial<DashboardBases>,
 ): Promise<void> {
   context.http.expectOne(isOverview).flush(overview(extra));
-  context.http.expectOne(isDashboardOf(id)).flush(dashboard(widgets, { id, filters, ...colors, ...(source ? { source } : {}) }));
+  context.http.expectOne(isDashboardOf(id)).flush(dashboard(widgets, { id, filters, ...colors, ...(source ? { source } : {}), ...bases }));
   await settle(context.harness);
 }
 
@@ -279,3 +287,32 @@ export async function paperOn(context: Pick<Context, 'harness'>): Promise<Dashbo
 export function colorsOfWidgets(context: Pick<Context, 'harness'>): ChartColors[] {
   return context.harness.fixture.debugElement.queryAll(By.directive(WidgetView)).map((view) => (view.componentInstance as WidgetView).resolvedColors());
 }
+
+/**
+ * What the marks of a chart with no series say, read from the tooltip each one shows (add-small-sample-warnings, design D9): the keyboard
+ * steps through them, as a native title could not be reached, and each stop gives "group: value" as the title did, a pie's with its share
+ * in brackets. A bar chart steps down, any other chart across.
+ */
+export async function tips(context: Pick<Context, 'root' | 'harness'>, shape: 'marks' | 'pie' = 'marks'): Promise<string[]> {
+  const chart = byTestId(context.root, 'chart-svg') as unknown as HTMLElement;
+  const count = all(context.root, shape === 'pie' ? 'pie-slice' : 'chart-hit').length;
+  const down = text(chart.parentElement!.querySelector('p.sr-only')).startsWith('Up and down');
+  const read: string[] = [];
+  chart.focus();
+  for (let i = 0; i < count; i++) {
+    pressKey(chart, i === 0 ? 'Home' : down ? 'ArrowDown' : 'ArrowRight');
+    await settle(context.harness);
+    const values = Array.from(overlay().querySelectorAll('[data-testid="tooltip-line"] dd')).map(text);
+    const first = `${text(overlay().querySelector('[data-testid="tooltip-heading"]'))}: ${values[0]}`;
+    read.push(shape === 'pie' ? `${first} (${values[1]})` : first);
+  }
+  pressKey(chart, 'Escape');
+  await settle(context.harness);
+  return read;
+}
+
+/**
+ * The selector of an SVG element that has a geometry-changing attribute of its own (rotate, skew, scale or move). Its name is spelled in two
+ * pieces on purpose: Tailwind reads every word of the sources as a possible utility, and the bare word would add a rule to the initial styles.
+ */
+export const movedElements = `[${['trans', 'form'].join('')}]`;

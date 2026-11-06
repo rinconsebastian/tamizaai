@@ -4,7 +4,7 @@ import { MapStub, stubMap } from '../../../../testing/leaflet';
 import { byTestId, settle } from '../../../../testing/project-harness';
 import { ChartType, DashboardColors, QueryBox, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { DashboardPrint, printDeadlineMs, printTitle, printingClass } from './dashboard-print';
-import { all, cell, clearOverlay, config, indicator, isQuery, open, paperOn, result, row, seriesResult, text, wait, toggleTable, widget } from './indicators-testing';
+import { all, cell, clearOverlay, config, indicator, isQuery, movedElements, open, paperOn, result, row, seriesResult, text, wait, toggleTable, widget } from './indicators-testing';
 import { boxOf as boxOfText, overlaps } from './chart-annotations';
 import { loadLeaflet } from './map-engine';
 
@@ -732,5 +732,179 @@ describe('the declared category order on paper (add-declared-category-order, "De
     const rows = all(context.root, 'widget-table-row').map((r) => text(r.children[0]));
     expect(rows.slice(0, 3)).toEqual(['COMUNA 2', 'COMUNA 1', 'Sin dato']);
     expect(Array.from(context.root.querySelectorAll('[data-testid="widget-table"] th[scope="col"]')).map(text).slice(0, 3)).toEqual(['comuna', 'Sí', 'No']);
+  });
+});
+
+describe('small bases on paper (add-small-sample-warnings, "Small bases on paper")', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearOverlay();
+    document.documentElement.classList.remove(printingClass);
+    document.getElementById('tmz-print-page')?.remove();
+  });
+
+  const ratio = { numerator: 'numerator', denominator: 'denominator' };
+  const teatro = indicator('teatro_hoy', {
+    label: 'Teatro hoy',
+    format: 'percent',
+    columns: { numerator: { label: 'Hogares que asistieron' }, denominator: { label: 'Hogares' } },
+  });
+  const comunas = () => [
+    row('COMUNA 7', 0.5, null, { numerator: 8, denominator: 16, n: 16 }),
+    row('COMUNA 1', 56 / 121, null, { numerator: 56, denominator: 121, n: 121 }),
+    row('SIN NOMBRE', 0.25, null, { numerator: 5, denominator: 20, n: 20 }),
+  ];
+  const footnote = 'No suman 100 %: respuesta múltiple.';
+
+  async function show(chartType: ChartType, settings: Partial<WidgetConfig>, answer: QueryResult = result(comunas(), { n: 157 })) {
+    const context = await open('viewer', [widget('w1', { chartType, config: config({ indicator: 'teatro_hoy', ratio, groupBy: 'comuna', ...settings }) })], null, { indicators: [teatro] });
+    const requests = context.http.match(isQuery);
+    expect(requests).toHaveLength(1);
+    requests[0].flush(answer);
+    await settle(context.harness);
+    return context;
+  }
+
+  it('prints the dashes of the dimmed columns and the lines under the chart, whole, before the footnote (Printed in black and white)', async () => {
+    const context = await show('column', { display: { minN: 30, showN: true, footnote } }, result(comunas(), { n: 157, noData: { values: ['No sabe'], value: 0.0224 } }));
+
+    await paperOn(context);
+
+    // Black and white keeps what reads without color: the dashed outline, and the lighter fill.
+    const marks = all(context.root, 'chart-mark');
+    expect(marks.map((mark) => mark.getAttribute('stroke-dasharray'))).toEqual(['3 2', null, '3 2']);
+    expect(marks.map((mark) => mark.getAttribute('fill-opacity'))).toEqual(['0.35', null, '0.35']);
+    // The lines print whole, in their order, above the footnote.
+    const lines = ['widget-small-note', 'widget-n-line', 'widget-no-data-line', 'widget-footnote'].map((id) => byTestId(context.root, id)!);
+    expect(lines.map(text)).toEqual(['Marks with a base below 30 are dimmed.', 'n = 157 Hogares', 'No sabe: 2.24%', footnote]);
+    for (const line of lines) {
+      expect(line.classList).toContain('paper:line-clamp-none');
+      expect(line.closest('.paper\:hidden')).toBeNull();
+    }
+    lines.slice(1).forEach((line, i) => expect(lines[i].compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy());
+    expect(byTestId(context.root, 'chart-svg')!.querySelector(movedElements)).toBeNull();
+  });
+
+  it('cuts the chart at its own box when a line leaves it too little room, never over the line', async () => {
+    const context = await show('column', { display: { showN: true } });
+
+    await paperOn(context);
+
+    const box = byTestId(context.root, 'widget-n-line')!.previousElementSibling as HTMLElement;
+    expect(box.classList).toContain('overflow-hidden');
+    expect(box.contains(byTestId(context.root, 'chart-svg'))).toBe(true);
+    expect(box.contains(byTestId(context.root, 'widget-n-line'))).toBe(false);
+  });
+
+  it('prints the hatch of a heat map inside the chart\'s own SVG, so it prints with the chart', async () => {
+    const cells = [
+      { ...cell('A', 'x', 0.1), numerator: 1, denominator: 10, n: 10 },
+      { ...cell('A', 'y', 0.5), numerator: 50, denominator: 100, n: 100 },
+    ];
+    const context = await show('heatmap', { seriesBy: 'categoria', display: { minN: 30 } }, seriesResult(cells, ['x', 'y']));
+
+    await paperOn(context);
+
+    const svg = byTestId(context.root, 'chart-svg')!;
+    const small = svg.querySelector('[data-testid="heat-small"]')!;
+    expect(small).not.toBeNull();
+    const pattern = small.getAttribute('fill')!.match(/url\(#(.+)\)/)![1];
+    expect(svg.querySelector(`pattern[id="${pattern}"]`)).not.toBeNull();
+    expect(small.getAttribute('stroke-dasharray')).toBe('3 2');
+    expect(text(byTestId(context.root, 'widget-small-note'))).toBe('Marks with a base below 30 are dimmed.');
+  });
+
+  it('prints the table of a widget with its n column, its marks and the note that explains them', async () => {
+    const context = await show('column', { display: { minN: 30 } });
+    await toggleTable(context);
+    await settle(context.harness);
+
+    await paperOn(context);
+
+    expect(Array.from(context.root.querySelectorAll('[data-testid="widget-table"] th[scope="col"]')).map(text).at(-1)).toBe('n');
+    expect(all(context.root, 'widget-table-row').map((tableRow) => text(tableRow.children[1]))).toEqual(['50% * small base', '46.28%', '25% * small base']);
+    expect(text(byTestId(context.root, 'widget-table-note'))).toBe('* Base below 30.');
+    expect(byTestId(context.root, 'widget-table-note')!.closest('.paper\:hidden')).toBeNull();
+  });
+});
+
+describe('stat tiles on paper (improve-stat-cards, "Stat tile on paper")', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearOverlay();
+    document.documentElement.classList.remove(printingClass);
+    document.getElementById('tmz-print-page')?.remove();
+  });
+
+  // The sizes of Teatro's tiles: 3 or 4 columns wide, 2 or 3 rows high. jsdom lays nothing out, so this checks the figure's rule and the box that
+  // gives it room; the sheets themselves are checked in a real browser (tasks 2.1 and 8.3).
+  const places = [
+    { x: 0, y: 0, w: 3, h: 2 },
+    { x: 3, y: 0, w: 4, h: 2 },
+    { x: 0, y: 2, w: 3, h: 3 },
+    { x: 3, y: 2, w: 4, h: 3 },
+  ];
+
+  it('prints the figure of each tile whole in its box by the rule of the screen: at most 30 px, between words, with its whole value in the title (Tiles of a long dashboard)', async () => {
+    const widgets = places.map((layout, index) => widget(`w${index}`, { chartType: 'stat', layout, config: config({ indicator: 'households_visited', groupBy: null }) }));
+    const context = await open('viewer', widgets, null, { indicators: [indicator('households_visited')] });
+    const requests = context.http.match(isQuery);
+    expect(requests).toHaveLength(4);
+    requests.forEach((request) => request.flush(result([row(null, 1016279)])));
+    await settle(context.harness);
+
+    await paperOn(context);
+
+    const figures = all(context.root, 'stat-value');
+    expect(figures).toHaveLength(4);
+    for (const figure of figures) {
+      expect(text(figure)).toBe('1,016,279 households');
+      expect(figure.style.fontSize).toBe('clamp(1.125rem, min(9cqi, 38cqh), 1.875rem)');
+      expect(figure.getAttribute('style')).toContain('overflow-x: clip');
+      expect(figure.classList).not.toContain('break-all');
+      expect(figure.classList.value).not.toMatch(/text-(4xl|3xl|5xl)/);
+      expect(figure.getAttribute('title')).toBe('1,016,279 households');
+      expect(figure.closest('[data-testid="stat"]')!.getAttribute('style')).toContain('container-type: size');
+      // The tile is not hidden on paper, and its box keeps the grid's own height for the container units to read.
+      expect(figure.closest('.paper\:hidden')).toBeNull();
+      expect(figure.closest('li')!.getAttribute('style')).toContain('grid-row');
+    }
+  });
+
+  it('prints the secondary lines inside the box of the tile, under what it plots, and its statistic (Secondary lines on paper)', async () => {
+    const ratio = { numerator: 'numerator', denominator: 'denominator' };
+    const display = { subtitle: 'Hogares', footnote: 'Sin ponderar.', secondary: ['n' as const, 'unfiltered' as const] };
+    const tile = widget('w0', { chartType: 'stat', layout: places[0], config: config({ indicator: 'households_visited', groupBy: null, ratio, statistic: 'median', display }) });
+    const context = await open('viewer', [tile], null, { indicators: [indicator('households_visited', { columns: { denominator: { label: 'Hogares' } } })] });
+    const [request] = context.http.match(isQuery);
+    request.flush(result([row(null, 0.31)], { n: 121, unfiltered: 0.4685 }));
+    await settle(context.harness);
+
+    await paperOn(context);
+
+    const column = byTestId(context.root, 'stat')!;
+    expect(text(byTestId(context.root, 'stat-label'))).toBe('Median of Households visited: numerator / Hogares');
+    expect(all(context.root, 'stat-line').map(text)).toEqual(['n = 121', expect.stringMatching(/^Without filters: /)]);
+    for (const line of all(context.root, 'stat-line')) {
+      expect(column.contains(line)).toBe(true);
+      expect(line.closest('.paper\:hidden')).toBeNull();
+    }
+    expect(text(byTestId(context.root, 'widget-footnote'))).toBe('Sin ponderar.');
+  });
+
+  it('prints the message of a widget that would add up several answers in place of its figure (Card over two reasons)', async () => {
+    const ratio = { numerator: 'numerator', denominator: 'denominator' };
+    const tile = widget('w0', { chartType: 'stat', layout: places[0], config: config({ indicator: 'households_visited', groupBy: null, ratio }) });
+    const context = await open('viewer', [tile], null, { indicators: [indicator('households_visited')] });
+    context.http.match(isQuery)[0].flush(result([], { combinedCategories: 'categoria' }));
+    await settle(context.harness);
+
+    await paperOn(context);
+
+    const alert = byTestId(context.root, 'widget-combined')!;
+    expect(alert).not.toBeNull();
+    expect(alert.closest('.paper\:hidden')).toBeNull();
+    expect(text(byTestId(context.root, 'combined-text'))).toContain('categoria holds the answers of a multiple-choice question');
+    expect(byTestId(context.root, 'stat')).toBeNull();
   });
 });

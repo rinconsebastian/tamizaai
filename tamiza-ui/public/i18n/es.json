@@ -631,6 +631,35 @@
         "summaryLast": "Al final: {{ count }}",
         "summaryStrip": "Números ocultos",
         "summaryNone": "Sin definir"
+      },
+      "base": {
+        "legend": "Columna de base",
+        "help": "La columna numérica que cuenta las personas que cada fila representa, como los hogares. El n de un widget es la suma de esta columna en sus filas. Elige una como máximo; deja Ninguna cuando las filas de la tabla no son conteos, o cuando el n es el denominador de una tasa.",
+        "none": "Ninguna"
+      },
+      "facts": {
+        "title": "Base y respuestas",
+        "missing": "Valores que significan sin dato",
+        "missingHelp": "Hasta {{ max }} valores, como «Sin dato» o «No sabe», escritos exactamente como están en los datos. Un widget puede dejarlos fuera y decir qué contenían.",
+        "answers": "Respuestas de una pregunta",
+        "answersNone": "No",
+        "answersSingle": "Sí, de respuesta única",
+        "answersMultiple": "Sí, de respuesta múltiple",
+        "answersHelp": "Elígela en las columnas de una tabla larga que nombran una pregunta y sus respuestas, como variable, orden y categoria, donde cada hogar se cuenta bajo cada respuesta. Nunca en una columna que divide a los hogares, como comuna o estrato, ni en una tabla con una base propia para cada respuesta. Elige respuesta múltiple cuando alguna pregunta de la columna admite varias respuestas.",
+        "summaryBase": "Columna de base",
+        "summaryMissing": "Sin dato: {{ count }}",
+        "summarySingle": "Respuestas: única",
+        "summaryMultiple": "Respuestas: múltiple",
+        "textMissing": "Sin dato: {{ values }}",
+        "answersSingleEffect": "Respuesta única: una razón sobre varias respuestas cuenta la base una sola vez entre ellas, y no una vez por respuesta, así que la proporción sobre varias respuestas no sale demasiado pequeña.",
+        "answersMultipleEffect": "Respuesta múltiple: una razón que sumaría varias respuestas muestra un mensaje en lugar de una cifra, porque contaría a cada persona una vez por respuesta. Deja una sola respuesta, o agrupa o divide el widget por esta columna."
+      },
+      "chips": {
+        "addLabel": "Agregar un valor",
+        "addPlaceholder": "Otro valor",
+        "add": "Agregar",
+        "remove": "Quitar {{ value }}",
+        "full": "Como máximo {{ count }} valores."
       }
     },
     "nameErrors": {
@@ -1599,7 +1628,8 @@
         "overall": "Valor general",
         "value": "Referencia"
       },
-      "summary": "Líneas de referencia: {{ lines }}."
+      "summary": "Líneas de referencia: {{ lines }}.",
+      "noOverall": "Sin línea de valor general: las barras son las respuestas de una pregunta."
     },
     "chart": {
       "noGroup": "(ninguno)",
@@ -1747,7 +1777,8 @@
         "scaleNeutral": "Una escala tiene como máximo un valor neutral.",
         "scaleSide": "Una escala tiene como máximo {{ max }} valores en un lado.",
         "likertRatio": "Un widget Likert muestra proporciones de una medida, no una razón.",
-        "seriesSame": "Elija una columna de series distinta de la columna de grupo."
+        "seriesSame": "Elija una columna de series distinta de la columna de grupo.",
+        "minN": "El umbral de base pequeña debe ser un número entero de 1 a {{ max }}."
       },
       "filtersCount": "Filtros ({{ count }})",
       "tooltip": {
@@ -1923,7 +1954,56 @@
           "indicator": "Orden predeterminado (el del indicador)",
           "chart": "Orden predeterminado (el del gráfico)"
         }
-      }
+      },
+      "bases": {
+        "legend": "Base",
+        "help": "Cuántas personas respaldan cada valor y qué hacer con las bases pequeñas.",
+        "showN": {
+          "label": "n de base bajo el widget",
+          "dashboardShown": "Como indique el tablero (se muestra)",
+          "dashboardHidden": "Como indique el tablero (se oculta)",
+          "show": "Mostrar",
+          "hide": "Ocultar"
+        },
+        "minN": {
+          "label": "Bases pequeñas",
+          "dashboardBelow": "Como indique el tablero (menos de {{ min }})",
+          "dashboardOff": "Como indique el tablero (desactivado)",
+          "off": "Desactivado",
+          "own": "Menos de",
+          "valueLabel": "Base menor que",
+          "hint": "Los valores con un n menor se dibujan atenuados. Un número entero de 1 a {{ max }}."
+        },
+        "missing": {
+          "label": "Dejar fuera los valores que significan sin dato y decir bajo el gráfico qué contenían",
+          "named": "Se dejan fuera: {{ values }}.",
+          "none": "El indicador no declara valores que signifiquen sin dato para las columnas de grupo y de serie. Decláralos en sus detalles."
+        },
+        "noN": {
+          "kind": "Un diagrama de caja no tiene n de base: cada caja da el número de valores que contiene.",
+          "undeclared": "Este widget no tiene un n de base que mostrar: su indicador debe declarar su columna de base o sus columnas de respuesta.",
+          "measure": "Este widget no tiene n de base: una medida solo lo tiene cuando su indicador declara una columna de base."
+        }
+      },
+      "ratioHelpStatistic": "El numerador de cada fila se divide por su propio denominador, y la estadística se toma sobre esos valores.",
+      "statistic": {
+        "label": "Estadística",
+        "hint": "Una estadística toma cada fila como un valor, así que necesita una tabla con una fila por unidad, por ejemplo una fila por hogar. Deja la opción predeterminada para sumar las filas.",
+        "defaultMeasure": "Suma de las filas",
+        "defaultRatio": "Razón de sumas",
+        "median": "Mediana",
+        "p25": "Primer cuartil (percentil 25)",
+        "p75": "Tercer cuartil (percentil 75)",
+        "mean": "Promedio"
+      },
+      "secondary": {
+        "legend": "Líneas bajo la cifra",
+        "help": "Cada línea que marques se muestra bajo lo que grafica el widget, empezando por la base.",
+        "n": "Base (n)",
+        "unfiltered": "Valor sin los filtros del tablero",
+        "room": "Un widget de 3 filas de alto tiene espacio para las líneas. En uno más bajo se cortan la descripción y las líneas antes que la cifra."
+      },
+      "answersHint": "Este widget suma {{ count }} valores de {{ column }}. Si son respuestas de una misma pregunta, cada persona se cuenta una vez por respuesta y la proporción sale demasiado pequeña: deja un solo valor, agrupa por {{ column }}, o declara {{ column }} como las respuestas de una pregunta en los nombres de columna del indicador."
     },
     "series": {
       "legend": "Series",
@@ -2042,6 +2122,32 @@
       "addPlaceholder": "Otro valor",
       "add": "Agregar",
       "full": "Un orden lista como máximo {{ count }} valores."
+    },
+    "bases": {
+      "numerator": "Numerador",
+      "denominator": "Denominador",
+      "nName": "n ({{ name }})",
+      "rows": "Filas",
+      "smallTooltip": "Base pequeña: n = {{ n }} (menos de {{ min }})",
+      "smallSome": "Base pequeña en algunas series (menos de {{ min }})",
+      "smallNote": "Las marcas con una base menor que {{ min }} aparecen atenuadas.",
+      "summaryCount": ", {{ count }} con base pequeña",
+      "tableNote": "* Base menor que {{ min }}.",
+      "tableMark": "base pequeña",
+      "nColumn": "n"
+    },
+    "stat": {
+      "of": {
+        "median": "Mediana de {{ what }}",
+        "p25": "Primer cuartil de {{ what }}",
+        "p75": "Tercer cuartil de {{ what }}",
+        "mean": "Promedio de {{ what }}"
+      },
+      "withoutFilters": "Sin filtros: {{ value }}"
+    },
+    "combined": {
+      "title": "Esta cifra contaría a las personas más de una vez",
+      "text": "{{ column }} contiene las respuestas de una pregunta de selección múltiple. Sumar varias de ellas cuenta a cada persona una vez por respuesta. Deja una sola respuesta, agrupa o divide el widget por {{ column }}, o grafica una fila que el indicador publique para cualquiera de ellas."
     }
   },
   "dashboards": {
@@ -2060,7 +2166,8 @@
       "colors": "Colores",
       "source": "Fuente",
       "report": "Envío programado…",
-      "versions": "Historial de versiones"
+      "versions": "Historial de versiones",
+      "bases": "Tamaños de base"
     },
     "unavailable": {
       "limit": "Un proyecto puede tener como máximo {{ max }} tableros.",
@@ -2191,7 +2298,8 @@
         "widgetMovedIn": "El widget “{{ widget }}” llegó de “{{ dashboard }}”",
         "layoutChanged": "Se cambió la posición o el tamaño de los widgets",
         "restored": "Se restauró la versión {{ number }}",
-        "unrecorded": "Cambios conservados antes de una restauración"
+        "unrecorded": "Cambios conservados antes de una restauración",
+        "basesChanged": "Se cambiaron los tamaños de base"
       },
       "viewing": "Estás viendo la versión {{ number }}, guardada por {{ author }} el {{ time }}. Es de solo lectura.",
       "backToCurrent": "Volver a la versión actual",
@@ -2370,6 +2478,20 @@
         "7": "carmesí",
         "8": "naranja"
       }
+    }
+  },
+  "dashboardBases": {
+    "title": "Tamaños de base de {{ name }}",
+    "intro": "Cómo muestran los widgets de este tablero su n de base. Cada widget puede seguir estos ajustes o tener los suyos.",
+    "where": "El n de un valor es la suma de la columna de base de su indicador en sus filas o, en una tasa, la suma de su denominador. Un widget muestra la línea de n solo cuando su indicador declara una columna de base o sus columnas de respuesta.",
+    "showN": "Mostrar bajo cada widget su n de base",
+    "minN": "Atenuar las marcas con una base menor que",
+    "minHint": "Déjalo vacío para no atenuar. Valores comunes son 30 o 50.",
+    "save": "Guardar tamaños de base",
+    "saving": "Guardando…",
+    "saved": "Tamaños de base guardados.",
+    "errors": {
+      "range": "El umbral de base pequeña debe ser un número entero de 1 a {{ max }}; déjalo vacío para desactivarlo."
     }
   }
 }

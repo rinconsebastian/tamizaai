@@ -41,7 +41,8 @@ public static class ReportWorkbook
 
         foreach (var stat in model.Stats)
         {
-            summary.Add(Line(stat.Title, stat.StatValue ?? stat.Reason ?? ""));
+            // The value, then the tile's lines after it (design D7 of improve-stat-cards).
+            summary.Add(Line(stat.Title, string.Join("; ", stat.StatLines.Prepend(stat.StatValue ?? stat.Reason ?? ""))));
         }
 
         // A widget's subtitle and footnote, then its reference lines, come before its notes, each under the widget's title.

@@ -1032,6 +1032,39 @@ public sealed class DashboardTests(PostgresFixture postgres)
             ("original", h.DashboardId), ("copy", copyId)));
     }
 
+    // A tile's statistic and secondary lines duplicated (custom-dashboards: Duplicating a dashboard)
+
+    [Fact]
+    public async Task A_duplicate_holds_the_statistic_and_the_secondary_lines_of_the_originals_tiles_as_they_are_stored()
+    {
+        await using var h = await PublishedAsync();
+        await h.AddWidgetAsync(new
+        {
+            title = "Median", chartType = "stat",
+            config = new { indicator = "coverage", measure = "value", statistic = "median", display = new { secondary = new[] { "unfiltered", "n" } } },
+        });
+        await h.AddWidgetAsync(new { title = "Total", chartType = "stat", config = new { indicator = "coverage", measure = "value" } });
+
+        var response = await DuplicateAsync(h, h.DashboardId, "Housing (copy)");
+        var copyId = (await ReadAsync(response)).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var widgets = (await h.GetWidgetsAsync(copyId)).EnumerateArray().ToArray();
+        var median = widgets.Single(w => w.GetProperty("title").GetString() == "Median").GetProperty("config");
+        Assert.Equal("median", median.GetProperty("statistic").GetString());
+        Assert.Equal("""["unfiltered","n"]""", median.GetProperty("display").GetProperty("secondary").GetRawText());
+        var total = widgets.Single(w => w.GetProperty("title").GetString() == "Total").GetProperty("config");
+        Assert.False(total.TryGetProperty("statistic", out _));
+        Assert.False(total.TryGetProperty("display", out _));
+        Assert.Equal(2L, await TestData.ScalarAsync<long>(h.Db,
+            """
+            SELECT count(*) FROM tamiza.dashboard_widgets AS c
+            JOIN tamiza.dashboard_widgets AS o ON o.title = c.title AND o.dashboard_id = @original AND o.config = c.config
+            WHERE c.dashboard_id = @copy
+            """,
+            ("original", h.DashboardId), ("copy", copyId)));
+    }
+
     // Source duplicated (custom-dashboards: Dashboard source in a copy)
 
     private const string SurveySource = "Encuesta de ejemplo, 120 respuestas, primera ronda";
@@ -1236,6 +1269,7 @@ public sealed class DashboardTests(PostgresFixture postgres)
                 "/dashboards post",
                 "/dashboards/order put",
                 "/dashboards/{dashboardId} delete get patch",
+                "/dashboards/{dashboardId}/bases put",
                 "/dashboards/{dashboardId}/colors put",
                 "/dashboards/{dashboardId}/copies post",
                 "/dashboards/{dashboardId}/filters put",
@@ -1259,7 +1293,7 @@ public sealed class DashboardTests(PostgresFixture postgres)
         var filters = paths.GetProperty(project + "/dashboards/{dashboardId}/filters");
         var colors = paths.GetProperty(project + "/dashboards/{dashboardId}/colors");
         Assert.Equal(
-            ["filters", "id", "name", "palette", "source", "valueColors", "version", "widgets"],
+            ["filters", "id", "minN", "name", "palette", "showN", "source", "valueColors", "version", "widgets"],
             Properties(Component(document, Answer(dashboard.GetProperty("get"), "200"))));
         Assert.Equal(["filters"], Properties(Component(document, Body(filters.GetProperty("put")))));
         Assert.Equal(["filters"], Properties(Component(document, Answer(filters.GetProperty("put"), "200"))));
@@ -1273,13 +1307,17 @@ public sealed class DashboardTests(PostgresFixture postgres)
         Assert.Equal(["source"], Properties(Component(document, Body(source.GetProperty("put")))));
         Assert.Equal(["source"], Properties(Component(document, Answer(source.GetProperty("put"), "200"))));
         Assert.Contains("300", Component(document, Body(source.GetProperty("put"))).GetProperty("properties").GetProperty("source").GetProperty("description").GetString());
+        // The base settings are saved and answered whole: the threshold and whether the widgets show their n.
+        var bases = paths.GetProperty(project + "/dashboards/{dashboardId}/bases");
+        Assert.Equal(["minN", "showN"], Properties(Component(document, Body(bases.GetProperty("put")))));
+        Assert.Equal(["minN", "showN"], Properties(Component(document, Answer(bases.GetProperty("put"), "200"))));
         Assert.Contains("dashboardId", Properties(Component(document, Answer(widgets.GetProperty("post"), "201"))));
         Assert.Contains("dashboardId", Properties(Component(document, Answer(widget.GetProperty("patch"), "200"))));
         Assert.Contains("dashboardId", Properties(Component(document, Body(widget.GetProperty("patch")))));
         Assert.Equal(["dashboardIds", "expectedIds"], Properties(Component(document, Body(order.GetProperty("put")))));
         // A widget export is sent the settings and filters on the page, and answers with the link and what the file read.
         var export = paths.GetProperty(project + "/dashboards/{dashboardId}/widget-exports");
-        Assert.Equal(["chartType", "config", "filters", "format", "locale", "title", "version"], Properties(Component(document, Body(export.GetProperty("post")))));
+        Assert.Equal(["chartType", "config", "filters", "format", "locale", "minN", "showN", "title", "version"], Properties(Component(document, Body(export.GetProperty("post")))));
         Assert.Equal(["downloadUrl", "expiresAt", "fileName", "publishedAt", "rowCount"], Properties(Component(document, Answer(export.GetProperty("post"), "200"))));
         Assert.Contains("dashboards", Properties(document.GetProperty("components").GetProperty("schemas").GetProperty("ProjectDetails")));
     }
@@ -1309,7 +1347,7 @@ public sealed class DashboardTests(PostgresFixture postgres)
         Assert.Equal(shown.Append("filterCount").Append("widgetCount").Order(StringComparer.Ordinal),
             Properties(Component(document, Items(versions.GetProperty("properties").GetProperty("versions")))));
         var versionDetails = Component(document, Answer(details, "200"));
-        Assert.Equal(shown.Append("filters").Append("palette").Append("source").Append("valueColors").Append("widgets").Order(StringComparer.Ordinal), Properties(versionDetails));
+        Assert.Equal(shown.Append("filters").Append("minN").Append("palette").Append("showN").Append("source").Append("valueColors").Append("widgets").Order(StringComparer.Ordinal), Properties(versionDetails));
         Assert.Equal(["color", "column", "value"], Properties(Component(document, Items(versionDetails.GetProperty("properties").GetProperty("valueColors")))));
         var origin = versionDetails.GetProperty("properties").GetProperty("origin");
         origin = origin.TryGetProperty("$ref", out _) ? Component(document, origin) : origin;
@@ -1350,5 +1388,58 @@ public sealed class DashboardTests(PostgresFixture postgres)
             ? branches.EnumerateArray().Single(b => b.TryGetProperty("$ref", out _)).GetProperty("$ref")
             : schema.GetProperty("$ref");
         return document.GetProperty("components").GetProperty("schemas").GetProperty(reference.GetString()!["#/components/schemas/".Length..]);
+    }
+
+    // Base settings duplicated (custom-dashboards: Base settings of a duplicated dashboard)
+
+    private static (int? MinN, bool ShowN) BasesOf(JsonElement dashboard) =>
+        (dashboard.TryGetProperty("minN", out var minN) ? minN.GetInt32() : null, dashboard.TryGetProperty("showN", out var showN) && showN.GetBoolean());
+
+    [Fact]
+    public async Task Base_settings_copied()
+    {
+        await using var h = await PublishedAsync();
+        await h.SaveBasesAsync(30, true);
+
+        var response = await DuplicateAsync(h, h.DashboardId, "Housing (copy)");
+        var copyId = (await ReadAsync(response)).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal((30, true), BasesOf(await h.GetDashboardAsync(copyId, h.Viewer)));
+        Assert.Equal((30, true), BasesOf(await h.GetDashboardAsync(client: h.Viewer)));
+        Assert.Equal(30, await TestData.ScalarAsync<int>(h.Db, "SELECT min_n FROM tamiza.dashboards WHERE id = @id", ("id", copyId)));
+        Assert.True(await TestData.ScalarAsync<bool>(h.Db, "SELECT show_n FROM tamiza.dashboards WHERE id = @id", ("id", copyId)));
+    }
+
+    [Fact]
+    public async Task A_duplicate_of_a_dashboard_with_no_base_settings_has_none()
+    {
+        await using var h = await PublishedAsync();
+
+        var copyId = (await ReadAsync(await DuplicateAsync(h, h.DashboardId, "Housing (copy)"))).GetProperty("id").GetGuid();
+
+        var copy = await h.GetDashboardAsync(copyId, h.Viewer);
+        Assert.Equal((null, false), BasesOf(copy));
+        Assert.DoesNotContain("minN", copy.GetRawText());
+        Assert.DoesNotContain("showN", copy.GetRawText());
+    }
+
+    [Fact]
+    public async Task Base_settings_of_copies_independent()
+    {
+        await using var h = await PublishedAsync();
+        await h.SaveBasesAsync(30, true);
+        var copyId = (await ReadAsync(await DuplicateAsync(h, h.DashboardId, "Housing (copy)"))).GetProperty("id").GetGuid();
+
+        await h.SaveBasesAsync(null, false, dashboardId: copyId);
+
+        Assert.Equal((null, false), BasesOf(await h.GetDashboardAsync(copyId, h.Viewer)));
+        Assert.Equal((30, true), BasesOf(await h.GetDashboardAsync(client: h.Viewer)));
+
+        await h.SaveBasesAsync(50, false, dashboardId: copyId);
+        await h.SaveBasesAsync(10, true);
+
+        Assert.Equal((50, false), BasesOf(await h.GetDashboardAsync(copyId, h.Viewer)));
+        Assert.Equal((10, true), BasesOf(await h.GetDashboardAsync(client: h.Viewer)));
     }
 }

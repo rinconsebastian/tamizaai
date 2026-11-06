@@ -19,9 +19,12 @@ public static class ReferenceLines
     /// <item><c>value</c> is its own number.</item>
     /// </list>
     /// A line with no value (no bars, an overall of no rows) is left out, and so is a mean or a median of a widget with a series, which
-    /// validation refuses. A null line or a line of an unknown kind is left out too.
+    /// validation refuses. A null line or a line of an unknown kind is left out too. So is an <c>overall</c> line over the answers of one
+    /// question: while the widget groups or splits by a column the indicator declares as answers (<paramref name="answerColumns"/>, design
+    /// D16 of add-small-sample-warnings) its bars are the answers, and the line would only be their mean.
     /// </summary>
-    public static IReadOnlyList<ReferenceLineValue> Of(string chartType, WidgetConfig config, IndicatorQueryResponse response)
+    public static IReadOnlyList<ReferenceLineValue> Of(
+        string chartType, WidgetConfig config, IndicatorQueryResponse response, IReadOnlyCollection<string>? answerColumns = null)
     {
         if (chartType is not (ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line) || config.Display?.ReferenceLines is not { Count: > 0 } lines)
         {
@@ -29,11 +32,12 @@ public static class ReferenceLines
         }
 
         var withSeries = config.SeriesBy is not null;
+        var overAnswers = OverAnswers(config, answerColumns);
         List<double> values = withSeries ? [] : [.. response.Rows.Select(row => row.Value)];
         var kept = new List<ReferenceLineValue>();
         foreach (var line in lines)
         {
-            if (line is null || ValueOf(line, withSeries, values, response) is not { } value)
+            if (line is null || (overAnswers && line.Kind == ReferenceLineKinds.Overall) || ValueOf(line, withSeries, values, response) is not { } value)
             {
                 continue;
             }
@@ -42,6 +46,26 @@ public static class ReferenceLines
         }
 
         return kept;
+    }
+
+    /// <summary>Whether the widget groups or splits by a column its indicator declares as answers. Twin of <c>overOnAnswers</c>.</summary>
+    public static bool OverAnswers(WidgetConfig config, IReadOnlyCollection<string>? answerColumns) =>
+        answerColumns is { Count: > 0 }
+        && ((config.GroupBy is { } group && answerColumns.Contains(group)) || (config.SeriesBy is { } series && answerColumns.Contains(series)));
+
+    /// <summary>
+    /// Whether the widget lists an <c>overall</c> line that is not drawn because it is over the answers of one question: the chart, the
+    /// image, the email and MCP then say so in a note. A line the widget could not have anyway (a measure, a stacked or 100% layout) is not
+    /// this note's business. Twin of <c>overallLeftOut</c> in the UI's <c>axis-chart.ts</c>.
+    /// </summary>
+    public static bool OverallLeftOut(string chartType, WidgetConfig config, IReadOnlyCollection<string>? answerColumns)
+    {
+        var layout = config.SeriesBy is not null && (chartType is ChartTypes.Bar or ChartTypes.Column) ? config.Layout ?? SeriesLayouts.Grouped : SeriesLayouts.Grouped;
+        return chartType is ChartTypes.Bar or ChartTypes.Column or ChartTypes.Line
+            && config.Ratio is not null
+            && layout is not (SeriesLayouts.Stacked or SeriesLayouts.Percent)
+            && config.Display?.ReferenceLines?.Any(line => line?.Kind == ReferenceLineKinds.Overall) == true
+            && OverAnswers(config, answerColumns);
     }
 
     private static double? ValueOf(WidgetReferenceLine line, bool withSeries, List<double> values, IndicatorQueryResponse response) => line.Kind switch

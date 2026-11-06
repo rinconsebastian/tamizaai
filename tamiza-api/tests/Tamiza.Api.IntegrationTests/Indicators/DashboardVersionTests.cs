@@ -1967,6 +1967,69 @@ public sealed class DashboardVersionTests(PostgresFixture postgres)
         Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
     }
 
+    // A tile's statistic and secondary lines (dashboard-indicators: Stat tiles saved before statistics and secondary lines)
+
+    [Fact]
+    public async Task A_statistic_and_secondary_lines_added_to_a_tile_are_restored_away_with_the_version_before_it_and_back_with_the_one_that_held_them()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var id = await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+        var tile = new { indicator = "coverage", measure = "value", statistic = "median", display = new { secondary = new[] { "n", "unfiltered" } } };
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { chartType = "stat", config = tile })).StatusCode);
+        Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
+        Assert.Equal("""3 grace app [{"kind": "widgetChanged", "widget": "Coverage"}]""", (await VersionsAsync(h, housing))[^1]);
+        var held = (await ContentAsync(h, housing, 3)).GetProperty("widgets")[0].GetProperty("config");
+        Assert.Equal("median", held.GetProperty("statistic").GetString());
+        Assert.Equal(["n", "unfiltered"], held.GetProperty("display").GetProperty("secondary").EnumerateArray().Select(l => l.GetString()));
+
+        var restore = await RestoredAsync(h, housing, 2);
+
+        var restoredConfig = restore.GetProperty("dashboard").GetProperty("widgets")[0].GetProperty("config");
+        Assert.False(restoredConfig.TryGetProperty("statistic", out _));
+        Assert.False(restoredConfig.TryGetProperty("display", out _));
+        Assert.Equal(new[] { 1, 2, 3, 4 }, await NumbersAsync(h, housing));
+        Assert.True(await SameContentAsync(h, housing, 2, 4));
+        // And the version that held them brings them back whole, as stored.
+        await RestoredAsync(h, housing, 3);
+        var config = (await h.GetWidgetsAsync(housing))[0].GetProperty("config");
+        Assert.Equal("median", config.GetProperty("statistic").GetString());
+        Assert.Equal("""["n","unfiltered"]""", config.GetProperty("display").GetProperty("secondary").GetRawText());
+        Assert.True(await SameContentAsync(h, housing, 3, 5));
+    }
+
+    [Fact]
+    public async Task Tile_with_a_statistic_and_secondary_lines_saved_unchanged_makes_no_version_and_a_tile_without_them_makes_none_either()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var withSettings = await AddWidgetAsync(h, "Median", housing, Layout(0, 0));
+        var plain = await AddWidgetAsync(h, "Total", housing, Layout(6, 0));
+        var tile = new { indicator = "coverage", measure = "value", statistic = "p75", display = new { secondary = new[] { "unfiltered", "n" } } };
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(withSettings, housing), new { chartType = "stat", config = tile })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(plain, housing), new { chartType = "stat", config = new { indicator = "coverage", measure = "value" } })).StatusCode);
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await AllVersionsAsync(h);
+
+        foreach (var read in (await h.GetWidgetsAsync(housing)).EnumerateArray())
+        {
+            var form = await h.Analyst.PatchJsonAsync(h.WidgetUrl(read.GetProperty("id").GetGuid(), housing), new
+            {
+                title = read.GetProperty("title").GetString(),
+                chartType = read.GetProperty("chartType").GetString(),
+                config = read.GetProperty("config"),
+            });
+
+            Assert.Equal(HttpStatusCode.OK, form.StatusCode);
+        }
+
+        // The order the user chose is kept as it is, and nothing is rewritten or versioned.
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+        Assert.Contains("\"statistic\": \"p75\"", stored.Single(row => row.StartsWith("Median|", StringComparison.Ordinal)));
+        Assert.DoesNotContain("statistic", stored.Single(row => row.StartsWith("Total|", StringComparison.Ordinal)));
+    }
+
     [Fact]
     public async Task Unit_changed_alone_makes_a_version_that_says_the_widget_changed_and_holds_the_unit()
     {
@@ -2429,5 +2492,159 @@ public sealed class DashboardVersionTests(PostgresFixture postgres)
         Assert.True(restored.Restored);
         Assert.Equal(FirstSource, restored.Dashboard.Source);
         Assert.Equal(FirstSource, await StoredSourceAsync(h, housing));
+    }
+
+    // The base settings (dashboard-versions: Base settings in dashboard versions)
+
+    private static async Task<(int? MinN, bool ShowN)> StoredBasesAsync(IndicatorsHarness h, Guid dashboardId) =>
+        (await TestData.ScalarAsync<int?>(h.Db, "SELECT min_n FROM tamiza.dashboards WHERE id = @id", ("id", dashboardId)),
+         await TestData.ScalarAsync<bool>(h.Db, "SELECT show_n FROM tamiza.dashboards WHERE id = @id", ("id", dashboardId)));
+
+    [Fact]
+    public async Task Threshold_changed()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+
+        await h.SaveBasesAsync(30, null, dashboardId: housing);
+
+        Assert.Equal(new[] { 1, 2 }, await NumbersAsync(h, housing));
+        Assert.Equal("""2 grace app [{"kind": "basesChanged"}]""", (await VersionsAsync(h, housing))[^1]);
+        var content = await ContentAsync(h, housing, 2);
+        Assert.Equal(30, content.GetProperty("minN").GetInt32());
+        // showN is written only when it is on, and the version before holds neither.
+        Assert.False(content.TryGetProperty("showN", out _));
+        Assert.False((await ContentAsync(h, housing, 1)).TryGetProperty("minN", out _));
+        Assert.Equal("""[{"kind":"basesChanged"}]""", (await HistoryAsync(h, housing)).GetProperty("versions")[0].GetProperty("changes").GetRawText());
+
+        // The line is a change too, and both are in the content (jsonb keeps the keys in its own order; the unit tests pin the text's).
+        await h.SaveBasesAsync(30, true, dashboardId: housing);
+        Assert.Equal(["filters", "minN", "name", "showN", "widgets"], (await ContentAsync(h, housing, 3)).EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal("""3 grace app [{"kind": "basesChanged"}]""", (await VersionsAsync(h, housing))[^1]);
+    }
+
+    [Fact]
+    public async Task Base_settings_saved_unchanged_make_no_version()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        await h.SaveBasesAsync(30, true, dashboardId: housing);
+        var dashboards = await h.StoredDashboardsAsync();
+        var versions = await AllVersionsAsync(h);
+
+        await h.SaveBasesAsync(30, true, dashboardId: housing);
+
+        Assert.Equal(new[] { 1, 2 }, await NumbersAsync(h, housing));
+        Assert.Equal(dashboards, await h.StoredDashboardsAsync());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+    }
+
+    [Fact]
+    public async Task Base_settings_restored()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        await h.SaveBasesAsync(30, true, dashboardId: housing);
+        await h.SaveBasesAsync(50, false, dashboardId: housing);
+        Assert.Equal(new[] { 1, 2, 3 }, await NumbersAsync(h, housing));
+
+        // The version before the first change: no threshold again, recorded as a new version.
+        var restore = await RestoredAsync(h, housing, 1);
+
+        Assert.False(restore.GetProperty("dashboard").TryGetProperty("minN", out _));
+        Assert.False(restore.GetProperty("dashboard").TryGetProperty("showN", out _));
+        Assert.Equal((null, false), await StoredBasesAsync(h, housing));
+        Assert.Equal("""4 grace app [{"kind": "restored", "version": 1}]""", (await VersionsAsync(h, housing))[^1]);
+        Assert.True(await SameContentAsync(h, housing, 1, 4));
+        // The settings of an older version come back whole, the line included.
+        var back = await RestoredAsync(h, housing, 2);
+        Assert.Equal((30, true), (back.GetProperty("dashboard").GetProperty("minN").GetInt32(), back.GetProperty("dashboard").GetProperty("showN").GetBoolean()));
+        Assert.Equal((30, true), await StoredBasesAsync(h, housing));
+        Assert.True(await SameContentAsync(h, housing, 2, 5));
+        // Restoring it again changes nothing.
+        var again = await RestoreAsync(h, housing, 2);
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        Assert.False((await again.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("restored").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Version_viewed_with_its_threshold()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        await h.SaveBasesAsync(30, true, dashboardId: housing);
+        await h.SaveBasesAsync(null, false, dashboardId: housing);
+
+        var version = await h.Analyst.GetFromJsonAsync<JsonElement>(VersionsUrl(h, housing) + "/2");
+        var none = await h.Analyst.GetFromJsonAsync<JsonElement>(VersionsUrl(h, housing) + "/3");
+
+        // The dashboard has none now, and version 2 draws with its own.
+        Assert.False((await h.GetDashboardAsync(housing, h.Viewer)).TryGetProperty("minN", out _));
+        Assert.Equal((30, true), (version.GetProperty("minN").GetInt32(), version.GetProperty("showN").GetBoolean()));
+        Assert.Equal("showN", version.EnumerateObject().Last().Name);
+        Assert.Equal("minN", version.EnumerateObject().Reverse().ElementAt(1).Name);
+        // A version that has none returns what a version returned before them.
+        Assert.Equal("savedAt", none.EnumerateObject().Last().Name);
+        Assert.DoesNotContain("minN", none.GetRawText());
+        Assert.DoesNotContain("showN", none.GetRawText());
+    }
+
+    [Fact]
+    public async Task Version_recorded_before_base_settings()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.InsertDashboardAsync("Housing");
+        await h.ExecuteAsync("DELETE FROM tamiza.dashboard_versions WHERE dashboard_id = @id", ("id", housing));
+        await RecordVersionFrom0021Async(h, housing);
+        // The dashboard shows its n lines now; the version recorded before base settings knows nothing of them.
+        await h.SaveBasesAsync(30, true, dashboardId: housing);
+        Assert.Equal(new[] { 1, 2 }, await NumbersAsync(h, housing));
+
+        var restore = await RestoredAsync(h, housing, 1);
+
+        Assert.False(restore.GetProperty("dashboard").TryGetProperty("showN", out _));
+        Assert.False(restore.GetProperty("dashboard").TryGetProperty("minN", out _));
+        Assert.Equal((null, false), await StoredBasesAsync(h, housing));
+        Assert.Equal("""3 grace app [{"kind": "restored", "version": 1}]""", (await VersionsAsync(h, housing))[^1]);
+    }
+
+    [Fact]
+    public async Task Dashboard_without_base_settings()
+    {
+        await using var h = await PublishedAsync();
+        var housing = await h.InsertDashboardAsync("Housing");
+        await h.SaveColorsAsync("earth", FemaleInColor5, dashboardId: housing);
+        await h.ExecuteAsync("DELETE FROM tamiza.dashboard_versions WHERE dashboard_id = @id", ("id", housing));
+        await RecordVersionFrom0021Async(h, housing);
+        var versions = await AllVersionsAsync(h);
+        var dashboards = await h.StoredDashboardsAsync();
+
+        // Saved unchanged after the upgrade: the content built today is the one version 1 holds, so nothing is recorded.
+        await h.SaveBasesAsync(null, false, dashboardId: housing);
+        var numbers = await FlushAsync(h, DashboardVersionOrigin.App, null, (housing, new DashboardChange(DashboardChangeKinds.BasesChanged)));
+
+        Assert.Equal([new DashboardVersionNumber(housing, 1)], numbers);
+        Assert.Equal(new[] { 1 }, await NumbersAsync(h, housing));
+        Assert.Equal(versions, await AllVersionsAsync(h));
+        Assert.Equal(dashboards, await h.StoredDashboardsAsync());
+        using var scope = h.Factory.Services.CreateScope();
+        var built = await DashboardVersions.ContentAsync(scope.ServiceProvider.GetRequiredService<TamizaDbContext>(), h.ProjectId, housing, CancellationToken.None);
+        Assert.DoesNotContain("minN", built!);
+        Assert.DoesNotContain("showN", built!);
+    }
+
+    [Fact]
+    public async Task A_copy_starts_its_history_with_the_base_settings_of_the_original()
+    {
+        await using var h = await PublishedAsync();
+        await h.SaveBasesAsync(30, true);
+
+        var response = await h.Analyst.PostAsJsonAsync(h.DashboardUrl() + "/copies", new { name = "Housing (copy)" });
+        var copyId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var content = await ContentAsync(h, copyId, 1);
+        Assert.Equal(30, content.GetProperty("minN").GetInt32());
+        Assert.True(content.GetProperty("showN").GetBoolean());
     }
 }

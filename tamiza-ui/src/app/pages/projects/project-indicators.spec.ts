@@ -2600,6 +2600,7 @@ describe('ProjectIndicators dashboard colors (add-dashboard-palettes, design D9)
       'dashboard-filters',
       'dashboard-colors',
       'dashboard-source',
+      'dashboard-bases',
       'dashboard-versions',
       'dashboard-remove',
     ]);
@@ -3061,6 +3062,235 @@ describe('ProjectIndicators dashboard source (add-widget-context, design D7)', (
   });
 });
 
+describe('ProjectIndicators base sizes (add-small-sample-warnings, design D8)', () => {
+  beforeEach(() => downloader.start.mockClear());
+  afterEach(clearOverlay);
+
+  const basesUrl = `${dashboardUrlOf('d1')}/bases`;
+  const isExport = (r: { method: string; url: string }) => r.method === 'POST' && r.url.endsWith('/widget-exports');
+  const exported = { downloadUrl: '/api/v1/data-exports/x', fileName: 'x.xlsx', rowCount: 3, publishedAt: null, expiresAt: '2026-10-02T12:05:00Z' };
+  const ratio = { numerator: 'numerator', denominator: 'denominator' };
+  /** "2.1. Asistió, por comuna": a rate of two comunas, one of them on 16 households. */
+  const rate = widget('w1', { title: '2.1. Asistió, por comuna', config: config({ ratio }) });
+  const comunas = result([row('COMUNA 7', 0.5, null, { numerator: 8, denominator: 16, n: 16 }), row('COMUNA 1', 56 / 121, null, { numerator: 56, denominator: 121, n: 121 })], { n: 137 });
+  const item = (testId: string) => document.querySelector<HTMLElement>(`[role="menu"] [data-testid="${testId}"]`);
+  const form = () => document.querySelector<HTMLElement>('[data-testid="dashboard-bases-dialog"]');
+  const menuItems = () => Array.from(document.querySelectorAll<HTMLElement>('[cdkmenuitem]')).map((i) => i.dataset['testid']);
+  const toasts = () => TestBed.inject(ToastService).toasts().map((t) => t.message);
+  const smallNote = (context: Pick<Context, 'root'>) => byTestId(context.root, 'widget-small-note');
+  const nLine = (context: Pick<Context, 'root'>) => byTestId(context.root, 'widget-n-line');
+
+  async function openMenu(context: Context): Promise<HTMLElement> {
+    const trigger = byTestId(context.root, 'dashboard-menu')!;
+    trigger.click();
+    await settle(context.harness);
+    return trigger;
+  }
+
+  /** Chooses Base sizes from the dashboard's actions; returns the actions button. */
+  async function openBases(context: Context): Promise<HTMLElement> {
+    const trigger = await openMenu(context);
+    item('dashboard-bases')!.click();
+    await settle(context.harness);
+    return trigger;
+  }
+
+  const typeThreshold = async (context: Context, value: string) => {
+    typeInto(byTestId(form()!, 'dashboard-bases-min')!, value);
+    await settle(context.harness);
+  };
+  const save = async (context: Context) => {
+    byTestId(form()!, 'dashboard-bases-save')!.click();
+    await settle(context.harness);
+  };
+  async function exportWorkbook(context: Context): Promise<Record<string, unknown>> {
+    all(context.root, 'widget-menu')[0].click();
+    await settle(context.harness);
+    document.querySelector<HTMLElement>('[data-testid="widget-export-xlsx"]')!.click();
+    await settle(context.harness);
+    const request = context.http.expectOne(isExport);
+    const body = request.request.body as Record<string, unknown>;
+    request.flush(exported);
+    await settle(context.harness);
+    return body;
+  }
+
+  it.each<ProjectRole>(['analyst', 'admin'])('offers Base sizes right after Source to an %s (Base settings of a dashboard)', async (role) => {
+    const context = await open(role, [rate], comunas, {}, { dashboards: indicatorsAndField });
+
+    await openMenu(context);
+
+    expect(menuItems().slice(4, 8)).toEqual(['dashboard-filters', 'dashboard-colors', 'dashboard-source', 'dashboard-bases']);
+    expect(text(item('dashboard-bases'))).toBe('Base sizes');
+    context.http.expectNone(basesUrl); // nothing is sent until it is saved
+  });
+
+  it('names the action in Spanish', async () => {
+    const context = await open('analyst', [rate], comunas, {}, { lang: 'es' });
+
+    await openMenu(context);
+
+    expect(text(item('dashboard-bases'))).toBe('Tamaños de base');
+  });
+
+  it('offers a viewer no Base sizes action (Viewer cannot change base settings, UI part)', async () => {
+    const context = await open('viewer', [rate], comunas, {}, { bases: { minN: 30, showN: true } });
+
+    expect(byTestId(context.root, 'dashboard-menu')).toBeNull();
+    expect(item('dashboard-bases')).toBeNull();
+    // The dashboard's settings still reach what a viewer sees.
+    expect(text(smallNote(context))).toBe('Marks with a base below 30 are dimmed.');
+  });
+
+  it('shows no n line and no small base on a dashboard without base settings (Widgets and dashboards without base settings)', async () => {
+    const context = await open('analyst', [rate], comunas);
+
+    expect(smallNote(context)).toBeNull();
+    expect(nLine(context)).toBeNull();
+  });
+
+  it('opens with the settings the dashboard has', async () => {
+    const context = await open('analyst', [rate], comunas, {}, { bases: { minN: 50, showN: true } });
+
+    await openBases(context);
+
+    expect(text(form()!.querySelector('h2'))).toBe('Base sizes of Indicators');
+    expect(byTestId(form()!, 'dashboard-bases-min')).toHaveProperty('value', '50');
+    expect(byTestId(form()!, 'dashboard-bases-show')).toHaveProperty('checked', true);
+  });
+
+  it('draws the small bases and the n lines at once, without asking for the rows again, once saved (Analyst sets the threshold, UI part)', async () => {
+    const context = await open('analyst', [rate], comunas);
+    expect(smallNote(context)).toBeNull();
+
+    const trigger = await openBases(context);
+    await typeThreshold(context, '30');
+    const show = byTestId(form()!, 'dashboard-bases-show') as HTMLInputElement;
+    show.checked = true;
+    show.dispatchEvent(new Event('change'));
+    await settle(context.harness);
+    await save(context);
+
+    const request = context.http.expectOne(basesUrl);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.body).toEqual({ minN: 30, showN: true });
+    request.flush({ minN: 30, showN: true });
+    await settle(context.harness);
+
+    expect(form()).toBeNull();
+    expect(text(smallNote(context))).toBe('Marks with a base below 30 are dimmed.');
+    expect(text(nLine(context)).startsWith('n = 137')).toBe(true);
+    expect(context.http.match(isQuery)).toHaveLength(0);
+    expect(toasts()).toContain('Base sizes saved.');
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('turns the settings off again when they are saved empty', async () => {
+    const context = await open('analyst', [rate], comunas, {}, { bases: { minN: 30, showN: true } });
+    expect(smallNote(context)).not.toBeNull();
+
+    await openBases(context);
+    await typeThreshold(context, '');
+    const show = byTestId(form()!, 'dashboard-bases-show') as HTMLInputElement;
+    show.checked = false;
+    show.dispatchEvent(new Event('change'));
+    await settle(context.harness);
+    await save(context);
+
+    const request = context.http.expectOne(basesUrl);
+    expect(request.request.body).toEqual({ minN: null, showN: false });
+    request.flush({ showN: false });
+    await settle(context.harness);
+
+    expect(smallNote(context)).toBeNull();
+    expect(nLine(context)).toBeNull();
+  });
+
+  it('sends no request when it is saved unchanged (Base settings saved unchanged, UI part)', async () => {
+    const context = await open('analyst', [rate], comunas, {}, { bases: { minN: 30, showN: false } });
+
+    await openBases(context);
+    await save(context);
+
+    context.http.expectNone(basesUrl);
+    expect(form()).toBeNull();
+    expect(toasts()).toEqual([]);
+  });
+
+  it('leaves the settings as they were when the form is cancelled', async () => {
+    const context = await open('analyst', [rate], comunas, {}, { bases: { minN: 30, showN: false } });
+
+    await openBases(context);
+    await typeThreshold(context, '90');
+    byTestId(form()!, 'dashboard-bases-cancel')!.click();
+    await settle(context.harness);
+
+    context.http.expectNone(basesUrl);
+    expect(text(smallNote(context))).toBe('Marks with a base below 30 are dimmed.');
+  });
+
+  it('reads the settings of the dashboard that opens, not those of the one left', async () => {
+    const context = await open('analyst', [rate], comunas, {}, { dashboards: indicatorsAndField, bases: { minN: 30, showN: true } });
+    expect(smallNote(context)).not.toBeNull();
+
+    await go(context, 'd2');
+    await answerLoad(context, [], {}, 'd2');
+
+    expect(smallNote(context)).toBeNull();
+    expect(nLine(context)).toBeNull();
+  });
+
+  describe('what a widget does with them', () => {
+    it('sends the threshold in force with its workbook request (Threshold in force on screen, UI part)', async () => {
+      const context = await open('analyst', [rate], comunas, {}, { bases: { minN: 30, showN: true } });
+
+      expect(await exportWorkbook(context)).toMatchObject({ minN: 30, showN: true });
+    });
+
+    it('sends the widget\'s own threshold over the dashboard\'s', async () => {
+      const own = widget('w1', { title: 'Own', config: config({ ratio, display: { minN: 10 } }) });
+      const context = await open('analyst', [own], comunas, {}, { bases: { minN: 30, showN: true } });
+
+      expect(await exportWorkbook(context)).toMatchObject({ minN: 10, showN: true });
+    });
+
+    it('sends 0 when the widget turns the threshold off, and its own n line choice', async () => {
+      const off = widget('w1', { title: 'Off', config: config({ ratio, display: { minN: 0, showN: false } }) });
+      const context = await open('analyst', [off], comunas, {}, { bases: { minN: 30, showN: true } });
+
+      expect(await exportWorkbook(context)).toMatchObject({ minN: 0, showN: false });
+    });
+
+    it('sends neither setting when the dashboard and the widget say nothing, so the request is what it was (Request without base settings)', async () => {
+      const context = await open('analyst', [rate], comunas);
+
+      const body = await exportWorkbook(context);
+
+      expect(body).not.toHaveProperty('minN');
+      expect(body).not.toHaveProperty('showN');
+    });
+
+    it('dims a widget that moved here with no threshold of its own under this dashboard\'s threshold (Moved to a dashboard with a threshold)', async () => {
+      const moved = widget('w9', { dashboardId: 'd2', title: 'Moved', config: config({ ratio }) });
+      const context = await open('analyst', [moved], comunas, {}, { dashboardId: 'd2', dashboards: indicatorsAndField, bases: { minN: 30, showN: false } });
+
+      expect(text(smallNote(context))).toBe('Marks with a base below 30 are dimmed.');
+    });
+
+    it('keeps the n line a widget hides when it moves to a dashboard that shows it (Own setting kept by a move)', async () => {
+      const hides = widget('w9', { dashboardId: 'd2', title: 'Hides', config: config({ ratio, display: { showN: false } }) });
+      const shows = widget('w8', { dashboardId: 'd2', title: 'Follows', config: config({ ratio }), layout: { x: 6, y: 0, w: 6, h: 4 } });
+      const context = await open('analyst', [hides, shows], comunas, {}, { dashboardId: 'd2', dashboards: indicatorsAndField, bases: { minN: null, showN: true } });
+
+      const lines = Array.from(context.root.querySelectorAll<HTMLElement>('[data-widget-id]')).map((tile) => ({ id: tile.dataset['widgetId'], line: !!tile.querySelector('[data-testid="widget-n-line"]') }));
+      expect(lines).toEqual([
+        { id: 'w9', line: false },
+        { id: 'w8', line: true },
+      ]);
+    });
+  });
+});
+
 describe('ProjectIndicators scheduled email (dashboard reports, design D14)', () => {
   beforeEach(() => downloader.start.mockClear());
   afterEach(clearOverlay);
@@ -3107,6 +3337,7 @@ describe('ProjectIndicators scheduled email (dashboard reports, design D14)', ()
       'dashboard-filters',
       'dashboard-colors',
       'dashboard-source',
+      'dashboard-bases',
       'dashboard-report',
       'dashboard-versions',
       'dashboard-remove',
@@ -3259,7 +3490,7 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
 
     await openMenu(context);
 
-    expect(menuItems()).toEqual(['dashboard-rename', 'dashboard-duplicate', 'dashboard-move-left', 'dashboard-move-right', 'dashboard-filters', 'dashboard-colors', 'dashboard-source', 'dashboard-versions', 'dashboard-remove']);
+    expect(menuItems()).toEqual(['dashboard-rename', 'dashboard-duplicate', 'dashboard-move-left', 'dashboard-move-right', 'dashboard-filters', 'dashboard-colors', 'dashboard-source', 'dashboard-bases', 'dashboard-versions', 'dashboard-remove']);
     expect(text(item('dashboard-versions'))).toBe('Version history');
     expect(item('dashboard-versions')!.getAttribute('aria-disabled')).toBeNull();
     // Nothing is read until it is chosen.
@@ -3567,6 +3798,79 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
       const [blob, name] = downloader.save.mock.calls[0] as [Blob, string];
       expect(name).toMatch(/^[a-z0-9-]+_water_coverage-by-municipality_v9_\d{4}-\d{2}-\d{2}\.svg$/);
       expect(await blob.text()).toContain('Version 9, saved by Ana Pérez');
+    });
+
+    describe('base sizes of a version (add-small-sample-warnings, design D8)', () => {
+      const ratio = { numerator: 'numerator', denominator: 'denominator' };
+      const rated = widget('w1', { title: 'Coverage by municipality', config: config({ ratio }) });
+      const comunas = result([row('COMUNA 7', 0.5, null, { numerator: 8, denominator: 16, n: 16 }), row('COMUNA 1', 56 / 121, null, { numerator: 56, denominator: 121, n: 121 })], { n: 137 });
+      const smallNote = (context: Pick<Context, 'root'>) => byTestId(context.root, 'widget-small-note');
+      const nLine = (context: Pick<Context, 'root'>) => byTestId(context.root, 'widget-n-line');
+      const exportBody = async (context: Context) => {
+        all(context.root, 'widget-menu')[0].click();
+        await settle(context.harness);
+        document.querySelector<HTMLElement>('[data-testid="widget-export-xlsx"]')!.click();
+        await settle(context.harness);
+        const request = context.http.expectOne((r) => r.method === 'POST' && r.url.endsWith('/widget-exports'));
+        const body = request.request.body as Record<string, unknown>;
+        request.flush({ downloadUrl: '/api/v1/data-exports/x', fileName: 'x.xlsx', rowCount: 3, publishedAt: null, expiresAt: '2026-10-02T12:05:00Z' });
+        await settle(context.harness);
+        return body;
+      };
+
+      it('draws the version with its own threshold and n line while the dashboard has none, and the dashboard\'s own once back (Version viewed with its threshold, UI part)', async () => {
+        const context = await open('analyst', [rated], comunas);
+        expect(smallNote(context)).toBeNull();
+
+        await view(context, historyOf([12, 9]), versionOf(9, [rated], { minN: 30, showN: true }));
+        await answerQueries(context, comunas);
+
+        expect(text(smallNote(context))).toBe('Marks with a base below 30 are dimmed.');
+        expect(text(nLine(context)).startsWith('n = 137')).toBe(true);
+        // Nothing of the version is a setting to change: the actions are gone with the rest of the editing.
+        expect(byTestId(context.root, 'dashboard-menu')).toBeNull();
+
+        byTestId(context.root, 'dashboard-version-back')!.click();
+        await settle(context.harness);
+        await answerQueries(context, comunas);
+        expect(smallNote(context)).toBeNull();
+        expect(nLine(context)).toBeNull();
+      });
+
+      it('draws a version recorded before base settings with none, whatever the dashboard has now (Version without a threshold, UI part)', async () => {
+        const context = await open('analyst', [rated], comunas, {}, { bases: { minN: 30, showN: true } });
+        expect(smallNote(context)).not.toBeNull();
+
+        await view(context, historyOf([12, 4]), versionOf(4, [rated]));
+        await answerQueries(context, comunas);
+
+        expect(smallNote(context)).toBeNull();
+        expect(nLine(context)).toBeNull();
+
+        byTestId(context.root, 'dashboard-version-back')!.click();
+        await settle(context.harness);
+        await answerQueries(context, comunas);
+        expect(text(smallNote(context))).toBe('Marks with a base below 30 are dimmed.');
+      });
+
+      it('sends the settings of the version shown with a workbook request, and none for a version without them (Threshold in force on screen and Version without a threshold, UI parts)', async () => {
+        const context = await open('analyst', [rated], comunas, {}, { bases: { minN: 50, showN: true } });
+        await view(context, historyOf([12, 9]), versionOf(9, [rated], { minN: 30 }));
+        await answerQueries(context, comunas);
+
+        expect(await exportBody(context)).toMatchObject({ version: 9, minN: 30 });
+
+        byTestId(context.root, 'dashboard-version-back')!.click();
+        await settle(context.harness);
+        await answerQueries(context, comunas);
+        await view(context, historyOf([12, 4]), versionOf(4, [rated]));
+        await answerQueries(context, comunas);
+
+        const body = await exportBody(context);
+        expect(body).toMatchObject({ version: 4 });
+        expect(body).not.toHaveProperty('minN');
+        expect(body).not.toHaveProperty('showN');
+      });
     });
 
     it('names the columns of the widgets of a version with the current labels of the indicator and the labels of the version (Indicator labels in a version)', async () => {
@@ -3907,6 +4211,24 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
       await answerLoad(context, [coverage]);
       await answerQueries(context, answer);
       expect(byTestId(context.root, 'dashboard-source')).toBeNull();
+    });
+
+    it('takes the base settings the restore brought back before the dashboard is read again, and none for a version recorded before them (Base settings restored and Version recorded before base settings, UI part)', async () => {
+      const rated = widget('w1', { title: 'Coverage by municipality', config: config({ ratio: { numerator: 'numerator', denominator: 'denominator' } }) });
+      const comunas = result([row('COMUNA 7', 0.5, null, { numerator: 8, denominator: 16, n: 16 })], { n: 16 });
+      const note = (c: Context) => byTestId(c.root, 'widget-small-note');
+      const context = await open('analyst', [rated], comunas, {}, { bases: { minN: 30, showN: true } });
+      expect(note(context)).not.toBeNull();
+
+      await restore(context, historyOf([8, 7]), 7, restoreOf(9, 7, [rated], { dashboard: dashboard([rated], { version: 9 }) }));
+      await answerLoad(context, [rated]);
+      await answerQueries(context, comunas);
+      expect(note(context)).toBeNull();
+
+      await restore(context, historyOf([10, 3]), 3, restoreOf(11, 3, [rated], { dashboard: dashboard([rated], { version: 11, minN: 50, showN: true }) }));
+      await answerLoad(context, [rated], {}, 'd1', [], undefined, undefined, { minN: 50, showN: true });
+      await answerQueries(context, comunas);
+      expect(text(note(context))).toBe('Marks with a base below 50 are dimmed.');
     });
 
     it('asks first, then restores, reads the dashboard again and says so in one message, with focus on the heading (Removed widget brought back)', async () => {

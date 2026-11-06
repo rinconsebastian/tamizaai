@@ -1,6 +1,7 @@
 import { DataColumnType, DataValue } from '../../../core/projects/data.service';
-import { QueryRow, WidgetTooltipItem } from '../../../core/projects/indicators.service';
+import { QueryRow, WidgetRatio, WidgetTooltipItem } from '../../../core/projects/indicators.service';
 import { ChartTooltipContent, dateText, timestampText } from '../../../shared/ui';
+import { ChartBases, figureNames, figureTooltip } from './base-figures';
 import { shown } from './category-order';
 import { ColumnNamer, ValueFormatter, rawNames, valueFormatter } from './format';
 
@@ -24,6 +25,12 @@ export interface TooltipContext {
   names?: ColumnNamer;
   /** The text each group value is shown with when its column hides numbered prefixes (add-declared-category-order, design D5). */
   groupText?: ReadonlyMap<string, string> | null;
+  /**
+   * The widget's ratio and the threshold in force with the indicator's base column (add-small-sample-warnings, design D9): after the value
+   * the tooltip gives the numerator, the denominator and the n that are not among its own columns, and the note of a small base.
+   */
+  ratio?: WidgetRatio | null;
+  bases?: ChartBases;
 }
 
 const numeric = (type: DataColumnType | undefined) => type === 'integer' || type === 'decimal';
@@ -67,13 +74,22 @@ export function tooltipValues(row: QueryRow, context: TooltipContext): string[] 
 export function tooltipContent(row: QueryRow, context: TooltipContext): ChartTooltipContent {
   const { items, types, t } = context;
   const values = tooltipValues(row, context);
+  // A numerator or a denominator that is one of the widget's own tooltip columns is shown there, once; the n when it is the denominator is not repeated.
+  const own = new Set(items.map((item) => item.column));
+  const figures = context.bases
+    ? figureTooltip(row, { names: figureNames({ ratio: context.ratio ?? null }, context.names ?? rawNames, context.bases.baseColumn), locale: context.locale, t }, context.bases.minN, {
+        omit: { numerator: !!context.ratio && own.has(context.ratio.numerator), denominator: !!context.ratio && own.has(context.ratio.denominator) },
+      })
+    : { lines: [], footer: null };
+  const combines = (row.rows ?? 1) > 1 ? t('indicators.map.combines', { count: row.rows }) : null;
   return {
     heading: shown(context.groupText, row.group) ?? t('indicators.chart.noGroup'),
     lines: [
       { label: context.label, value: context.format(row.value), align: 'end' },
+      ...figures.lines,
       ...items.map((item, i) => ({ label: tooltipLabel(item, context.names), value: values[i], align: numeric(types?.[i]) || typeof row.tooltip?.[i] === 'number' ? ('end' as const) : ('start' as const) })),
     ],
-    footer: (row.rows ?? 1) > 1 ? t('indicators.map.combines', { count: row.rows }) : null,
+    footer: [combines, figures.footer].filter((note): note is string => !!note).join(' · ') || null,
   };
 }
 

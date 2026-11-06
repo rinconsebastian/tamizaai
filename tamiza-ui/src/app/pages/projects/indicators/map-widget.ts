@@ -5,6 +5,7 @@ import { BasemapCredits, BasemapEntry, Basemaps, CreditsArea } from '../../../co
 import { DataColumnType } from '../../../core/projects/data.service';
 import { BasemapKind, QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartTooltip, ChartTooltips } from '../../../shared/ui';
+import { ChartBases, hasNColumn, isSmallBase, markSmall, nCell, noChartBases } from './base-figures';
 import { ChartColors } from './chart-colors';
 import { registerExportParts } from './export-parts';
 import { sequentialStep, sequentialSteps } from './chart-scales';
@@ -185,6 +186,10 @@ export class MapWidget {
   readonly asTable = input(false);
   /** The colors of the widget: its sequential scale, from the widget or from its dashboard's palette. */
   readonly colors = input.required<ChartColors>();
+  /** The threshold in force and the indicator's base column, for the figures and the small bases of the shapes (add-small-sample-warnings). */
+  readonly bases = input<ChartBases>(noChartBases);
+  /** How many shapes the map draws with a dashed outline for a small base, so the widget can explain it under the map (design D10, D11). */
+  readonly dimmed = output<number>();
   /**
    * Whether the map can be saved as an image now (add-widget-export, design D3): `drawing` until the engine is made and while the map
    * moves, `nothing` when every row was left out. The widget's Export menu reads it.
@@ -225,6 +230,9 @@ export class MapWidget {
       .filter((entry): entry is { row: QueryRow; geometry: Geometry } => entry.geometry !== null)
       .map(({ row, geometry }, index) => ({ index, row, geometry, step: sequentialStep(row.value, min, max) }));
   });
+
+  /** Whether each shape has a small base, in the order of the shapes. Apart from `drawn`, so a new threshold never resets the view. */
+  private readonly smallFlags = computed(() => this.drawn().map((entry) => isSmallBase(entry.row.n, this.bases().minN)));
 
   /** Degrees are drawn on Web Mercator and can take a basemap; any other coordinates are drawn flat. */
   private readonly kind = computed(() => (this.drawn().length ? kindOf(this.drawn().flatMap((entry) => positionsOf(entry.geometry))) : null));
@@ -351,7 +359,8 @@ export class MapWidget {
         const t: Translate = (key, params) => this.transloco.translate(key, params);
         const caption = t('indicators.map.caption', { what: this.what(), group: this.groupShown() });
         if (this.asTable()) {
-          return { caption, legend: null, notes: [], stat: null, table: this.table(t) };
+          const table = this.table(t);
+          return { caption, legend: null, notes: table.note ? [table.note] : [], stat: null, table };
         }
         const range = this.range();
         const left = this.leftOut();
@@ -478,7 +487,7 @@ export class MapWidget {
       });
       this.drawnOnEngine = drawn;
       this.viewOf = drawn;
-      MapEngine.create(host, { kind, shapes: shapesOf(drawn), view: restore, reducedMotion: prefersReducedMotion(), events: this.events }).then(
+      MapEngine.create(host, { kind, shapes: shapesOf(drawn, untracked(() => this.smallFlags())), view: restore, reducedMotion: prefersReducedMotion(), events: this.events }).then(
         (engine) => {
           if (!live) {
             engine.destroy();
@@ -506,8 +515,15 @@ export class MapWidget {
         this.viewerBasemap.set(undefined);
         this.failed.set(false);
         this.closeTip();
-        engine.setData(shapesOf(drawn));
+        engine.setData(shapesOf(drawn, this.smallFlags()));
       });
+    });
+
+    // A new threshold redraws the outlines and nothing else.
+    effect(() => {
+      const flags = this.smallFlags();
+      this.engine()?.setSmall(flags);
+      this.dimmed.emit(flags.filter(Boolean).length);
     });
 
     // The basemap layer: rebuilt when the kind, the provider or the room for it changes.
@@ -617,16 +633,20 @@ export class MapWidget {
     const items = this.config().tooltip ?? [];
     const types = this.tooltipTypes();
     const context = this.context();
-    return {
-      headers: [this.names()(this.config().groupBy ?? ''), this.what(), ...items.map((item) => tooltipLabel(item, this.names())), t('indicators.map.geometry')],
-      align: ['start', 'end', ...items.map((_, i) => (types?.[i] === 'integer' || types?.[i] === 'decimal' ? ('end' as const) : ('start' as const))), 'start'],
+    // The n column comes after the value, while the n line shows or a threshold is in force (add-small-sample-warnings, design D11).
+    const withN = hasNColumn(this.bases(), this.parsed().map(({ row }) => row));
+    const model: TableModel = {
+      headers: [this.names()(this.config().groupBy ?? ''), this.what(), ...(withN ? [t('indicators.bases.nColumn')] : []), ...items.map((item) => tooltipLabel(item, this.names())), t('indicators.map.geometry')],
+      align: ['start', 'end', ...(withN ? ['end' as const] : []), ...items.map((_, i) => (types?.[i] === 'integer' || types?.[i] === 'decimal' ? ('end' as const) : ('start' as const))), 'start'],
       rows: this.parsed().map(({ row, geometry }) => [
         shown(this.groupText(), row.group) ?? t('indicators.chart.noGroup'),
         this.format()(row.value),
+        ...(withN ? [nCell(row, this.locale)] : []),
         ...tooltipValues(row, context),
         geometry === null ? t('indicators.map.kind.none') : t(`indicators.map.kind.${geometry.type === 'point' ? 'point' : 'polygon'}`),
       ]),
     };
+    return markSmall(model, 1, this.parsed().map(({ row }) => isSmallBase(row.n, this.bases().minN)), this.bases().minN, this.locale, t);
   }
 
   // --- Controls ---------------------------------------------------------------------------------------------------------
@@ -804,6 +824,8 @@ export class MapWidget {
       t: (key, params) => this.transloco.translate(key, params),
       names: this.names(),
       groupText: this.groupText(),
+      ratio: this.config().ratio,
+      bases: this.bases(),
     };
   }
 
@@ -1020,8 +1042,8 @@ export class MapWidget {
   }
 }
 
-function shapesOf(drawn: readonly Drawn[]): ShapeInput[] {
-  return drawn.map(({ geometry, step }) => ({ geometry, step }));
+function shapesOf(drawn: readonly Drawn[], small: readonly boolean[]): ShapeInput[] {
+  return drawn.map(({ geometry, step }, index) => ({ geometry, step, ...(small[index] ? { small: true } : {}) }));
 }
 
 function prefersReducedMotion(): boolean {
