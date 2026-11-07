@@ -49,7 +49,7 @@ A dashboard draws all its widgets in one palette: `tamiza` (the default), `insti
 A widget's title is one short line. Put the rest in its `display`, in the widget's `config`, on any kind of widget:
 
 - Put the question the chart answers in `subtitle` and notes such as "no suman 100 %" in `footnote`, rather than in the title. A subtitle is 1 to 200 characters and a footnote 1 to 500, with no line break.
-- Use `caption` and `unit` when the indicator's name or unit does not fit the widget's base: `caption` = `{ text }` replaces the indicator's name where the widget names what it plots, or `{ hidden: true }` leaves the line out of sight (not both); `unit` replaces the indicator's unit for this widget only. `showDescription` = `true` adds a button that shows the indicator's description.
+- Use `caption` and `unit` when the indicator's name or unit does not fit the widget's base: `caption` = `{ text }` replaces the indicator's name where the widget names what it plots, `{ hidden: true }` leaves the line out of sight (not with a text) or `{ hidden: false }` keeps it in sight under the subtitle. A bar, column, line or pie widget with a subtitle shows its caption's own text in its foot, not above the chart, and the result of `create_widget` or `update_widget` says so in `notes`; set `hidden: false` only when the caption must be read without opening the foot; `unit` replaces the indicator's unit for this widget only. `showDescription` = `true` adds a button that shows the indicator's description.
 - Set the dashboard's `source`, where its data comes from, once, with `update_dashboard`; an empty text removes it.
 - `update_widget` replaces the whole `config`, so send the `display` again, texts included, when you change the query.
 

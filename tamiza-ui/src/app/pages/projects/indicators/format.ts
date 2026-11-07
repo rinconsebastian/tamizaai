@@ -1,5 +1,5 @@
 import { ColumnMetadataMap, IndicatorFormat } from '../../../core/projects/pipeline.service';
-import { Layout, WidgetConfig, WidgetDisplay } from '../../../core/projects/indicators.service';
+import { ChartType, Layout, WidgetConfig, WidgetDisplay } from '../../../core/projects/indicators.service';
 import { gap, rowHeight } from './grid-layout';
 
 // How an indicator's values are written (design D6): the indicator says what a number is, so a stat tile, an axis, a legend, a
@@ -179,6 +179,53 @@ export function plotted(config: Pick<WidgetConfig, 'measure' | 'ratio' | 'displa
  */
 export function captionShown(config: Pick<WidgetConfig, 'display'>): boolean {
   return config.display?.caption?.hidden !== true;
+}
+
+/**
+ * Whether the caption line of a bar, column or line chart with no series, or of a pie, is seen above the chart (improve-widget-text-hierarchy,
+ * design D2): not when the caption is hidden, yes when it is kept in sight (`hidden: false`), and, left unset, not while the widget has a
+ * subtitle, which says what the line said. The line stays in the page for screen readers while it has no own text to show elsewhere, and
+ * tooltips, tables and exports keep naming what is plotted. A map, heat map, cross table, histogram and stat tile keep `captionShown`.
+ */
+export function captionInSight(config: Pick<WidgetConfig, 'display'>): boolean {
+  const hidden = config.display?.caption?.hidden;
+  if (hidden !== undefined) {
+    return hidden === false;
+  }
+  return !config.display?.subtitle?.trim();
+}
+
+/**
+ * The title of the value axis of a bar, column or line chart whose caption line is out of sight (improve-widget-text-hierarchy, design D3):
+ * the unit as values write it, with "%" before it for a `percent` indicator ("% de los hogares"). A unit of "%" or none gives nothing, since
+ * the ticks of a percent already read "%". The widget's own caption text is not the title: it is the foot's caption chip.
+ */
+export function valueAxisTitle(indicator: IndicatorUnit): string | null {
+  const unit = indicator.unit?.trim();
+  if (!unit || unit === '%') {
+    return null;
+  }
+  return indicator.format === 'percent' ? `% ${unit}` : unit;
+}
+
+/**
+ * Whether the caption line of a widget of `type` is seen above its plot: `captionInSight` for the kinds that give it up under a subtitle
+ * (bar, column, line and pie), `captionShown` for every other kind, which keeps its line (improve-widget-text-hierarchy, design D2). The
+ * image and the print follow the same rule as the page.
+ */
+export function captionSeen(type: ChartType, config: Pick<WidgetConfig, 'display'>): boolean {
+  return type === 'bar' || type === 'column' || type === 'line' || type === 'pie' ? captionInSight(config) : captionShown(config);
+}
+
+/**
+ * Whether a widget's own caption text is out of sight under its subtitle and shown in its foot instead (design D2): a bar, column or line
+ * chart with no series, or a pie, that has a subtitle and an own caption text and leaves `hidden` unset. The caption chip of the foot, the
+ * widget form's warning and the MCP note follow this one rule. Twin of `WidgetCaption.InFoot` in tamiza-api, tested against
+ * `testing/caption-in-foot.json`.
+ */
+export function captionInFoot(type: ChartType, config: Pick<WidgetConfig, 'display' | 'seriesBy'>): boolean {
+  const onChart = type === 'pie' || ((type === 'bar' || type === 'column' || type === 'line') && !config.seriesBy);
+  return onChart && config.display?.caption?.hidden === undefined && !!ownCaption(config) && !!config.display?.subtitle?.trim();
 }
 
 /**

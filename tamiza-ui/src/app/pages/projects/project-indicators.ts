@@ -38,7 +38,7 @@ import { DashboardPrint, isoDay, printTitle } from './indicators/dashboard-print
 import { DashboardReportData, DashboardReportDialog, DashboardReportResult } from './indicators/dashboard-report-dialog';
 import { DashboardSourceData, DashboardSourceDialog, DashboardSourceResult } from './indicators/dashboard-source-dialog';
 import { DashboardVersionsData, DashboardVersionsDialog, DashboardVersionsResult, VersionToRestore } from './indicators/dashboard-versions-dialog';
-import { captionShown } from './indicators/format';
+import { captionSeen } from './indicators/format';
 import { Placed } from './indicators/grid-layout';
 import { WidgetDialog, WidgetDialogData, WidgetDialogResult } from './indicators/widget-dialog';
 import { WidgetFileExtension, widgetFileName } from './indicators/widget-export/file-name';
@@ -816,7 +816,7 @@ export class ProjectIndicators {
         title: widget.title,
         subtitle: widget.config.display?.subtitle ?? null,
         footnote: widget.config.display?.footnote ?? null,
-        captionHidden: !captionShown(widget.config),
+        captionHidden: !captionSeen(widget.chartType, widget.config),
         bodyWidth: view.bodyWidth(),
         registration,
         notesAbove: view.exportNotesAbove(),

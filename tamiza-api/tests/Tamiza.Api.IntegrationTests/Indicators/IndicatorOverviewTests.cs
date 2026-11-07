@@ -528,6 +528,7 @@ public sealed class IndicatorOverviewTests(PostgresFixture postgres)
         Assert.Equal(["hidden", "text"], caption.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
         Assert.Contains("200", caption.GetProperty("text").GetProperty("description").GetString());
         Assert.Contains("true", caption.GetProperty("hidden").GetProperty("description").GetString());
+        Assert.Contains("false", caption.GetProperty("hidden").GetProperty("description").GetString());
     }
 
     [Fact]

@@ -525,3 +525,22 @@ describe('Checks on every palette', () => {
     });
   });
 });
+
+// The subtitle's text color (improve-widget-text-hierarchy, design D1, task 2.1): `--color-body-strong`, a gray darker than the body text,
+// defined next to Flowbite's own text tokens so it swaps with `.dark`. Tailwind's grays are the ones the design names: gray-700 on the white
+// tile in the light theme (about 10.3:1; today's body gray-600 is 7.6:1) and gray-300 on the gray-900 tile in the dark theme.
+describe('the subtitle color token', () => {
+  const grays = { 'gray-300': '#d1d5db', 'gray-600': '#4b5563', 'gray-700': '#374151', 'gray-900': '#111827', white: '#ffffff' };
+  const theme = tokens('@theme');
+
+  it('is gray-700 in the light theme and gray-300 in the dark one', () => {
+    expect(theme['--color-body-strong']).toBe('var(--color-gray-700)');
+    expect(dark['--color-body-strong']).toBe('var(--color-gray-300)');
+  });
+
+  it('reads at 9:1 or more on the tile in both themes, and darker than the body text in the light one', () => {
+    expect(contrast(grays['gray-700'], grays.white)).toBeGreaterThanOrEqual(9);
+    expect(contrast(grays['gray-300'], grays['gray-900'])).toBeGreaterThanOrEqual(9);
+    expect(contrast(grays['gray-700'], grays.white)).toBeGreaterThan(contrast(grays['gray-600'], grays.white));
+  });
+});

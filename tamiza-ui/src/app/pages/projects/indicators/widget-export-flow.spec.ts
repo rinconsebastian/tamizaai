@@ -254,6 +254,77 @@ describe('exporting a widget from the dashboard', () => {
       expect(svg).not.toContain('Coverage by municipality');
     });
 
+    it('draws no caption line above the chart of a widget whose subtitle took it out of sight, and the own text whole as the first line of its foot (Caption hidden, Own caption text)', async () => {
+      const subtitle = 'E1, % de los hogares de cada estrato que asistieron en el último año';
+      const own = widget('w1', { title: 'Coverage by municipality', config: config({ display: { subtitle, caption: { text: '% de los hogares que asistieron' }, footnote: 'No suman 100 %.' } }) });
+      const context = await open('viewer', [own], rows);
+      expect(all(context.root, 'chart-caption')).toHaveLength(0);
+
+      const svg = await savedSvg(context);
+
+      const line = '>% de los hogares que asistieron by municipality<';
+      expect(svg.split(line).length - 1).toBe(1);
+      // The chart's own texts end with its ticks; the line comes after them, before the footnote, which comes before the footer.
+      expect(svg.indexOf(line)).toBeGreaterThan(svg.indexOf('>Cali<'));
+      expect(svg.indexOf(line)).toBeLessThan(svg.indexOf('No suman 100 %.'));
+      expect(svg.indexOf('No suman 100 %.')).toBeLessThan(svg.indexOf('Data published'));
+      expect(svg).not.toMatch(/data-testid|class=|<script|href=/);
+    });
+
+    it('keeps the caption line above the chart of a widget whose caption is kept in sight under its subtitle, and none in the foot', async () => {
+      const kept = widget('w1', { title: 'Coverage by municipality', config: config({ display: { subtitle: 'Pregunta', caption: { text: '% de quienes asistieron', hidden: false } } }) });
+      const context = await open('viewer', [kept], rows);
+
+      const svg = await savedSvg(context);
+
+      expect(svg.split('>% de quienes asistieron by municipality<').length - 1).toBe(1);
+      expect(svg.indexOf('>% de quienes asistieron by municipality<')).toBeLessThan(svg.indexOf('>Cali<'));
+    });
+
+    it('writes the texts the foot opens as lines under the chart, whole, and no chip or panel (Dimmed columns in an image, Chip open)', async () => {
+      const dim = result([row('COMUNA 7', 0.5, null, { numerator: 8, denominator: 16, n: 16 }), row('COMUNA 1', 0.46, null, { numerator: 56, denominator: 121, n: 121 }), row('SIN NOMBRE', 0.25, null, { numerator: 5, denominator: 20, n: 20 })], {
+        n: 157,
+        noData: { values: ['No sabe'], value: 0.0224 },
+      });
+      const labelled = widget('w1', { title: 'Coverage by municipality', config: config({ indicator: 'teatro_hoy', ratio: { numerator: 'numerator', denominator: 'denominator' }, groupBy: 'comuna', display: { footnote: 'No suman 100 %.' } }) });
+      const context = await open('viewer', [labelled], dim, { indicators: [indicator('teatro_hoy', { label: 'Teatro hoy', format: 'percent', columns: { denominator: { label: 'Hogares' } } })] }, { bases: { minN: 30, showN: true } });
+      // A chip is open when the member exports: the image holds its text as a line and no panel.
+      (context.root.querySelector('[data-testid="foot-chip-small"]') as HTMLButtonElement).click();
+      await settle(context.harness);
+      expect(document.querySelector('[data-testid="foot-panel"]')).not.toBeNull();
+
+      const svg = await savedSvg(context);
+
+      const small = 'Small base (below 30): COMUNA 7 (n = 16), SIN NOMBRE (n = 20). Their marks are drawn dimmed.';
+      // A long line wraps over several texts of the picture, so the lines are read as one run of its texts.
+      const flat = Array.from(svg.matchAll(/<text [^>]*>([^<]*)</g)).map((m) => m[1]).join(' ');
+      const order = ['n = 157 Hogares', small, 'No sabe: 2.24%', 'No suman 100 %.'].map((text) => flat.indexOf(text));
+      expect(order.every((at) => at > 0)).toBe(true);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+      expect(svg).not.toMatch(/foot-chip|foot-panel|aria-expanded|<button/);
+      expect(svg).not.toContain('2 with a small base');
+    });
+
+    it('draws a stat tile at full contrast with its line without filters, then the n as the first line of its foot, the footnote and the footer (Secondary lines in the image, Small base in the image)', async () => {
+      const tile = widget('w1', {
+        title: 'Mediana de lo que pagan hoy al mes',
+        chartType: 'stat',
+        layout: { x: 0, y: 0, w: 3, h: 3 },
+        config: config({ indicator: 'teatro_precio_hogar', measure: 'value', groupBy: null, statistic: 'median', display: { minN: 30, secondary: ['n', 'unfiltered'], footnote: 'Sin ponderar.' } }),
+      });
+      const context = await open('viewer', [tile], result([row(null, 60000, null, { n: 26 })], { n: 26, unfiltered: 65000 }), { indicators: [indicator('teatro_precio_hogar', { label: 'Teatro precio hogar', format: 'count', unit: 'pesos' })] });
+
+      const svg = await savedSvg(context);
+
+      const flat = Array.from(svg.matchAll(/<text [^>]*>([^<]*)</g)).map((m) => m[1]).join(' ');
+      const figure = /<text [^>]*>60,000 pesos</.exec(svg)![0];
+      expect(figure).not.toContain('fill-opacity');
+      const order = ['60,000 pesos', 'Median of', 'Without filters: 65,000 pesos', 'Small base: the figure rests on n = 26, below the 30 this dashboard asks for. Read it with caution.', 'Sin ponderar.', 'Data published'].map((text) => flat.indexOf(text));
+      expect(order.every((at) => at >= 0)).toBe(true);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+      expect(svg).not.toContain('Marks with a base below');
+    });
+
     it('holds no description of the indicator in the image, though the widget shows its button (Not printed or exported)', async () => {
       const described = [indicator('coverage', { description: 'Share of households that visited a theatre in the last year.' })];
       const shown = widget('w1', { title: 'Coverage by municipality', config: config({ display: { showDescription: true } }) });
@@ -275,7 +346,7 @@ describe('exporting a widget from the dashboard', () => {
     });
 
     // The chart annotations (add-chart-annotations, Chart annotations in widget images).
-    it('lists a reference line in the legend, above the footnote, which is above the footer (Mean line in an image, Lines above the footnote)', async () => {
+    it('draws each reference line with its text on its box in the plot, above the footnote, which is above the footer (Mean line in an image, Lines above the footnote)', async () => {
       const lined = widget('w1', {
         title: 'Coverage by municipality',
         config: config({ display: { footnote: 'No suman 100 %.', referenceLines: [{ kind: 'mean' }, { kind: 'value', value: 50, label: 'Meta' }] } }),
@@ -286,24 +357,27 @@ describe('exporting a widget from the dashboard', () => {
 
       expect(svg).toContain('>Mean: 58<');
       expect(svg).toContain('>Meta: 50<');
-      expect(svg).toMatch(/<line [^>]*stroke-dasharray="6 4"[^>]*\/>/);
-      expect(svg).toMatch(/<line [^>]*stroke-dasharray="2 3"[^>]*\/>/);
+      // Each text is drawn on its box (a rounded rect 16 px high) in the plot (jsdom has no style sheet, so the dash of the lines and the
+      // color of the box are checked in the stack verification); no legend entry repeats the texts (improve-widget-text-hierarchy, design D10).
+      expect(svg.match(/<rect [^>]*height="16"[^>]*rx="3"/g)).toHaveLength(2);
+      expect(svg.match(/>Mean: 58</g)).toHaveLength(1);
+      expect(svg.match(/>Meta: 50</g)).toHaveLength(1);
       expect(svg.indexOf('>Meta: 50<')).toBeLessThan(svg.indexOf('No suman 100 %.'));
       expect(svg.indexOf('No suman 100 %.')).toBeLessThan(svg.indexOf('Data published'));
       expect(svg).not.toMatch(/data-testid|class=|<script|href=/);
     });
 
-    it('draws the reference lines of the plot, their labels and the data labels in the image, the legend among them (Data labels in an image)', async () => {
+    it('draws the reference lines of the plot, their labels and the data labels in the image, and no legend entry for the line (Data labels in an image)', async () => {
       const labelled = widget('w1', { title: 'Coverage by municipality', config: config({ display: { dataLabels: true, referenceLines: [{ kind: 'mean', label: 'Promedio' }] } }) });
       const context = await open('viewer', [labelled], rows);
 
       const svg = await savedSvg(context);
       const texts = Array.from(svg.matchAll(/<text [^>]*>([^<]*)</g)).map((m) => m[1]);
 
-      // The plot's own texts (jsdom has no style sheet, so the halo's stroke is checked in svg-clean.spec.ts) and the legend's entry.
+      // The plot's own texts (jsdom has no style sheet, so the halo's stroke is checked in svg-clean.spec.ts).
       expect(texts.filter((t) => t === '75')).toHaveLength(1); // Cali's label; 75 is no tick of the axis
       expect(texts.filter((t) => t === '40')).toHaveLength(2); // Pasto's label and the axis tick
-      expect(texts.filter((t) => t === 'Promedio: 58')).toHaveLength(2);
+      expect(texts.filter((t) => t === 'Promedio: 58')).toHaveLength(1);
     });
 
     it('leaves out of the image the data labels the chart left out: bars thinner than their text (Data labels in an image)', async () => {

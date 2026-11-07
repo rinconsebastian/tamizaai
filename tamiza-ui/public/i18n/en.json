@@ -1836,7 +1836,10 @@
           "text": "Own text",
           "hidden": "Hidden",
           "textLabel": "Caption text",
-          "line": "Reads: {{ line }}"
+          "line": "Reads: {{ line }}",
+          "keep": "Keep in sight under the subtitle",
+          "keepHelp": "With a subtitle, this line is out of sight and its text shows in the widget's foot.",
+          "inFoot": "This text will not show above the chart, since the widget has a subtitle: it shows in the widget's foot. Check \"Keep in sight under the subtitle\" to show it above."
         },
         "unit": {
           "label": "Unit",
@@ -2148,6 +2151,18 @@
     "combined": {
       "title": "This figure would count people more than once",
       "text": "{{ column }} holds the answers of a multiple-choice question. Adding up several of them counts a respondent once for each answer. Keep one answer, group or split the widget by {{ column }}, or plot a row the indicator publishes for any of them."
+    },
+    "foot": {
+      "small": "{{count}} with a small base",
+      "smallText": "Small base (below {{min}}): {{marks}}. Their marks are drawn dimmed.",
+      "more": "and {{count}} more",
+      "noData": "No data {{figure}}",
+      "lines": "Reference lines",
+      "detail": "Detail",
+      "note": "Note",
+      "smallStat": "Small base: the figure rests on n = {{n}}, below the {{min}} this dashboard asks for. Read it with caution.",
+      "smallStatShort": "Small base: n = {{n}}, below {{min}}.",
+      "smallChart": "Small base: the figures rest on n = {{n}}, below the {{min}} this dashboard asks for. Read them with caution."
     }
   },
   "dashboards": {

@@ -214,35 +214,30 @@ describe('what a widget registers for an image', () => {
     const lined = (lines: NonNullable<WidgetConfig['display']>['referenceLines'], extra: Partial<WidgetConfig> = {}) =>
       config({ indicator: 'piped_water_rate', ratio, display: { referenceLines: lines }, ...extra });
 
-    it('lists each line in the legend of a chart with no series, after the caption, with a dashed swatch in its own pattern (Mean line in an image)', async () => {
+    it('lists no line in the legend of a chart with no series: the texts are in the plot the image draws (Mean line in an image)', async () => {
       const { parts } = await render('column', lined([{ kind: 'mean' }, { kind: 'overall', label: 'General' }]), groups, false, [], rate);
 
       expect(parts.caption).not.toBeNull();
-      expect(parts.legend).toEqual({
-        kind: 'entries',
-        entries: [
-          { label: 'Mean: 42.5% de los hogares', color: 'var(--color-heading, #111827)', swatch: 'dashed', dash: 0 },
-          { label: 'General: 45.99% de los hogares', color: 'var(--color-heading, #111827)', swatch: 'dashed', dash: 1 },
-        ],
-      });
+      expect(parts.legend).toBeNull();
       expect(parts.notes).toEqual([]);
     });
 
-    it('keeps the pattern of a line when the line before it has no value to draw', async () => {
-      const { parts } = await render('column', lined([{ kind: 'overall' }, { kind: 'value', value: 0.5, label: 'Meta' }]), result(groups.rows), false, [], rate);
+    it('draws the lines of a chart with no series in the plot, each text on its box, as the page does', async () => {
+      const { registration } = await render('column', lined([{ kind: 'mean' }, { kind: 'overall', label: 'General' }]), groups, false, [], rate);
 
-      expect(parts.legend).toMatchObject({ entries: [{ label: 'Meta: 50% de los hogares', swatch: 'dashed', dash: 1 }] });
+      const plot = registration.plot()!;
+      expect(plot.querySelectorAll('[data-testid="reference-line"]')).toHaveLength(2);
+      expect(plot.querySelectorAll('[data-testid="reference-box"]').length).toBeGreaterThan(0);
+      expect(Array.from(plot.querySelectorAll('[data-testid="reference-label"]')).map((label: Element) => label.textContent?.trim())).toContain('Mean: 42.5% de los hogares');
     });
 
-    it('lists the lines after the series of a chart with a series', async () => {
+    it('lists only the series in the legend of a chart with a series, and no line (Mean line in an image)', async () => {
       const grouped = seriesResult([cell('Cali', 'Piped', 5), cell('Cali', 'Well', 3)], ['Piped', 'Well']);
       const { parts } = await render('column', config({ seriesBy: 'water_source', display: { referenceLines: [{ kind: 'value', value: 4, label: 'Meta' }] } }), grouped);
 
       expect(parts.caption).toBeNull();
-      expect(parts.legend).toMatchObject({
-        kind: 'entries',
-        entries: [{ label: 'Piped', swatch: 'square' }, { label: 'Well', swatch: 'square' }, { label: 'Meta: 4', swatch: 'dashed', dash: 0 }],
-      });
+      expect(parts.legend).toMatchObject({ kind: 'entries', entries: [{ label: 'Piped', swatch: 'square' }, { label: 'Well', swatch: 'square' }] });
+      expect((parts.legend as { entries: unknown[] }).entries).toHaveLength(2);
     });
 
     it('puts the lines in the notes while the chart is shown as a table, after the notes of the table itself (Shown as a table)', async () => {
@@ -391,15 +386,17 @@ describe('what a widget registers for an image', () => {
     const ratio = { numerator: 'numerator', denominator: 'denominator' };
     const small = (n: number) => row('Cali', 50, null, { numerator: n / 2, denominator: n, n });
 
-    it('marks the figure of a stat tile with a small base as dimmed, for an image to draw it lighter (Dimmed stat figure)', async () => {
+    it('does not mark the figure of a stat tile with a small base: an image draws it at full contrast (Small base in the image)', async () => {
       const { parts } = await render('stat', config({ groupBy: null, ratio, display: { minN: 30 } }), result([small(16)]));
 
-      expect(parts.stat).toMatchObject({ value: '50', description: 'Coverage: numerator / denominator', secondary: [], dimmed: true });
+      expect(parts.stat).toMatchObject({ value: '50', description: 'Coverage: numerator / denominator', secondary: [] });
+      expect(parts.stat).not.toHaveProperty('dimmed');
     });
 
-    it('does not mark the figure of a tile whose base is large, nor one with no threshold in force', async () => {
-      const large = await render('stat', config({ groupBy: null, ratio, display: { minN: 30 } }), result([small(121)]));
-      expect(large.parts.stat).not.toHaveProperty('dimmed');
+    it('holds only the line without filters as the secondary lines of a tile, the n being a note of its foot', async () => {
+      const { parts } = await render('stat', config({ groupBy: null, ratio, display: { secondary: ['n'] } }), result([small(121)], { n: 121 }));
+
+      expect(parts.stat!.secondary).toEqual([]);
     });
 
     it('gives a table the note that explains its marks among the notes under it', async () => {
@@ -421,11 +418,12 @@ describe('what a widget registers for an image', () => {
     it('says in a note that an overall line is not drawn over the answers of one question (Overall line over places)', async () => {
       const entry = indicator('coverage', { columns: { municipality: { categories: 'single' } } });
       const lines = [{ kind: 'mean' as const }, { kind: 'overall' as const }];
-      const { parts } = await render('bar', config({ ratio, display: { referenceLines: lines } }), { ...result([small(16)]), overall: 0.5 }, false, [], entry);
+      const { parts, registration } = await render('bar', config({ ratio, display: { referenceLines: lines } }), { ...result([small(16)]), overall: 0.5 }, false, [], entry);
 
       expect(parts.notes).toEqual(['No overall line: the bars are the answers of one question.']);
-      // The mean line is still drawn and listed in the legend; only the overall line is not.
-      expect(parts.legend).toMatchObject({ kind: 'entries', entries: [{ label: 'Mean: 50' }] });
+      // The mean line is still drawn, at its line; only the overall line is not.
+      expect(parts.legend).toBeNull();
+      expect(registration.plot()!.querySelectorAll('[data-testid="reference-line"]')).toHaveLength(1);
     });
   });
 });

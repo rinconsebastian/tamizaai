@@ -5,7 +5,7 @@ import { BasemapCredits, BasemapEntry, Basemaps, CreditsArea } from '../../../co
 import { DataColumnType } from '../../../core/projects/data.service';
 import { BasemapKind, QueryRow, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartTooltip, ChartTooltips } from '../../../shared/ui';
-import { ChartBases, hasNColumn, isSmallBase, markSmall, nCell, noChartBases } from './base-figures';
+import { ChartBases, SmallMark, hasNColumn, isSmallBase, markSmall, nCell, noChartBases } from './base-figures';
 import { ChartColors } from './chart-colors';
 import { registerExportParts } from './export-parts';
 import { sequentialStep, sequentialSteps } from './chart-scales';
@@ -189,7 +189,7 @@ export class MapWidget {
   /** The threshold in force and the indicator's base column, for the figures and the small bases of the shapes (add-small-sample-warnings). */
   readonly bases = input<ChartBases>(noChartBases);
   /** How many shapes the map draws with a dashed outline for a small base, so the widget can explain it under the map (design D10, D11). */
-  readonly dimmed = output<number>();
+  readonly dimmed = output<SmallMark[]>();
   /**
    * Whether the map can be saved as an image now (add-widget-export, design D3): `drawing` until the engine is made and while the map
    * moves, `nothing` when every row was left out. The widget's Export menu reads it.
@@ -523,7 +523,12 @@ export class MapWidget {
     effect(() => {
       const flags = this.smallFlags();
       this.engine()?.setSmall(flags);
-      this.dimmed.emit(flags.filter(Boolean).length);
+      const t = (key: string, params?: Record<string, unknown>) => untracked(() => this.transloco.translate(key, params));
+      this.dimmed.emit(
+        this.drawn().flatMap((entry, i) =>
+          flags[i] ? [{ name: shown(this.groupText(), entry.row.group) ?? t('indicators.chart.noGroup'), n: entry.row.n ?? 0 }] : [],
+        ),
+      );
     });
 
     // The basemap layer: rebuilt when the kind, the provider or the room for it changes.

@@ -4122,6 +4122,230 @@
      ]
     }
    }
+  },
+  {
+   "name": "column chart with a subtitle and a caption kept in sight",
+   "chartType": "column",
+   "columns": [
+    {
+     "name": "zona",
+     "type": "text"
+    },
+    {
+     "name": "conteo",
+     "type": "integer"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":\"conteo\",\"ratio\":null,\"groupBy\":\"zona\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":null,\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"subtitle\":\"\\u00BFCu\\u00E1ntas respuestas hubo por zona? (P1)\",\"caption\":{\"hidden\":false}},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"zona\"::text, (sum(\"conteo\")::double precision), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE \"conteo\" IS NOT NULL\nGROUP BY \"zona\"\nHAVING (sum(\"conteo\")::double precision) IS NOT NULL\nORDER BY \"p_x_indicators\".\"encuesta_hoy\".\"zona\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "subtitle": "¿Cuántas respuestas hubo por zona? (P1)",
+     "caption": {
+      "hidden": false
+     }
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": "conteo",
+    "ratio": null,
+    "groupBy": "zona",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": null,
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "subtitle": "¿Cuántas respuestas hubo por zona? (P1)",
+     "caption": {
+      "hidden": false
+     }
+    }
+   }
+  },
+  {
+   "name": "bar chart with a subtitle and an own caption text kept in sight",
+   "chartType": "bar",
+   "columns": [
+    {
+     "name": "categoria",
+     "type": "text"
+    },
+    {
+     "name": "value",
+     "type": "decimal"
+    },
+    {
+     "name": "numerator",
+     "type": "decimal"
+    },
+    {
+     "name": "denominator",
+     "type": "decimal"
+    }
+   ],
+   "stored": "{\"indicator\":\"encuesta_hoy\",\"measure\":null,\"ratio\":{\"numerator\":\"numerator\",\"denominator\":\"denominator\"},\"groupBy\":\"categoria\",\"filters\":[],\"geometryColumn\":null,\"buckets\":null,\"sort\":{\"by\":\"value\",\"column\":null,\"compareAs\":null,\"direction\":\"desc\"},\"basemap\":null,\"seriesBy\":null,\"layout\":null,\"pyramid\":null,\"display\":{\"subtitle\":\"\\u00BFQu\\u00E9 canal usa para informarse sobre la zona? (P4)\",\"caption\":{\"text\":\"% de las viviendas\",\"hidden\":false}},\"tooltip\":[],\"ignoredDashboardFilters\":[],\"scale\":[]}",
+   "query": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "categoria",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "seriesBy": null,
+    "layout": null,
+    "pyramid": null,
+    "scale": []
+   },
+   "plan": {
+    "main": {
+     "sql": "SELECT \"categoria\"::text, (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)), NULL::text\nFROM \"p_x_indicators\".\"encuesta_hoy\"\nWHERE (\"numerator\" IS NOT NULL OR \"denominator\" IS NOT NULL)\nGROUP BY \"categoria\"\nHAVING (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) IS NOT NULL\nORDER BY (sum(\"numerator\")::double precision / nullif(sum(\"denominator\"), 0)) DESC NULLS LAST, \"p_x_indicators\".\"encuesta_hoy\".\"categoria\" NULLS LAST\nLIMIT @limit",
+     "parameters": [
+      "limit"
+     ]
+    }
+   },
+   "saved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "categoria",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "subtitle": "¿Qué canal usa para informarse sobre la zona? (P4)",
+     "caption": {
+      "text": "% de las viviendas",
+      "hidden": false
+     }
+    }
+   },
+   "uiQuery": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "categoria",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": []
+   },
+   "formSaved": {
+    "indicator": "encuesta_hoy",
+    "measure": null,
+    "ratio": {
+     "numerator": "numerator",
+     "denominator": "denominator"
+    },
+    "groupBy": "categoria",
+    "filters": [],
+    "geometryColumn": null,
+    "buckets": null,
+    "sort": {
+     "by": "value",
+     "column": null,
+     "compareAs": null,
+     "direction": "desc"
+    },
+    "tooltip": [],
+    "basemap": null,
+    "ignoredDashboardFilters": [],
+    "display": {
+     "subtitle": "¿Qué canal usa para informarse sobre la zona? (P4)",
+     "caption": {
+      "text": "% de las viviendas",
+      "hidden": false
+     }
+    }
+   }
   }
  ],
  "dashboard": {

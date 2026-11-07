@@ -302,6 +302,58 @@ public sealed class ReportHtmlTests
     }
 
     [Fact]
+    public void A_caption_under_a_subtitle_is_still_the_caption_line_of_a_block_in_the_body_and_the_plain_text()
+    {
+        // improve-widget-text-hierarchy, task 1.5 (dashboard-reports "Caption under a subtitle in the email"): the page moves the line out of
+        // sight under a subtitle, the email shows tables with no foot of chips and keeps it.
+        const string subtitle = "E1, % de los hogares de cada estrato que asistieron";
+        var model = Model([Bars(1, "2.1. Asistió, por estrato", 2) with { Subtitle = subtitle, Caption = "% de los hogares que asistieron" }]);
+
+        var (html, shown) = ReportHtml.Write(model, true, Options);
+        var text = ReportPlainText.Write(model, true, shown, Options);
+
+        Assert.Contains(subtitle, html);
+        Assert.Contains(">% de los hogares que asistieron</p>", html);
+        Assert.Contains($"2.1. Asistió, por estrato{Environment.NewLine}{subtitle}{Environment.NewLine}% de los hogares que asistieron{Environment.NewLine}", text);
+    }
+
+    [Fact]
+    public void The_notes_and_the_footnote_the_page_puts_in_its_foot_are_written_whole_with_no_chip_text()
+    {
+        // dashboard-reports "Notes worded as before": the foot's chips are the page's; the email says each text in the words it always used.
+        const string footnote = "No suman 100 %: respuesta múltiple.";
+        var model = Model([Bars(1, "2.1. Asistió, por comuna", 2) with
+        {
+            Notes = ["2 values have a base below 30, marked *.", "n = 475 Hogares"], Footnote = footnote,
+        }]);
+
+        var (html, shown) = ReportHtml.Write(model, true, Options);
+        var text = ReportPlainText.Write(model, true, shown, Options);
+
+        foreach (var body in new[] { html, text })
+        {
+            Assert.Contains("2 values have a base below 30, marked *.", body);
+            Assert.Contains("n = 475 Hogares", body);
+            Assert.Contains(footnote, body);
+            Assert.DoesNotContain("with a small base", body);
+            Assert.DoesNotContain("indicators.foot", body);
+            Assert.DoesNotContain("aria-expanded", body);
+        }
+    }
+
+    [Fact]
+    public void A_stat_tile_with_a_small_base_is_written_with_no_opacity_and_no_chip()
+    {
+        var model = Model([Tile() with { Notes = [] }]);
+
+        var (html, _) = ReportHtml.Write(model, true, Options);
+
+        Assert.DoesNotContain("opacity", html);
+        Assert.DoesNotContain("indicators.foot", html);
+        Assert.Contains("n = 476 Hogares", html);
+    }
+
+    [Fact]
     public void A_footnote_follows_the_table_and_the_lines_that_say_what_the_body_leaves_out()
     {
         const string footnote = "No suman 100 %: respuesta múltiple.";

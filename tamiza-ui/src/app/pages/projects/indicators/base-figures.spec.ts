@@ -20,6 +20,8 @@ import {
   smallBaseSummary,
   smallBaseTableNote,
   smallBaseTooltip,
+  smallBaseMarksText,
+  statNLine,
 } from './base-figures';
 import cases from './testing/base-figures.json';
 import { IndicatorFormat } from '../../../core/projects/pipeline.service';
@@ -302,5 +304,71 @@ describe('the shared cases of base-figures.json', () => {
 
       expect(written[c.kind](), c.kind).toEqual(c[lang]);
     });
+  });
+});
+
+
+describe('statNLine (improve-widget-text-hierarchy, design D6, task 5.2)', () => {
+  const ratio = { numerator: 'numerator', denominator: 'denominator' };
+  const names = (column: string) => ({ denominator: 'Hogares', hogares: 'Hogares encuestados' })[column as 'denominator' | 'hogares'] ?? column;
+  const tile = { ratio, statistic: undefined, display: undefined };
+
+  it('is none while neither the tile nor its dashboard shows the n', () => {
+    expect(statNLine(tile, names, { showN: false, baseColumn: null }, 476, 'en-US')).toBeNull();
+    expect(statNLine({ ...tile, display: { secondary: ['unfiltered'] } }, names, { showN: false, baseColumn: null }, 476, 'en-US')).toBeNull();
+  });
+
+  it('names the denominator of a ratio, or the base column the indicator declares', () => {
+    expect(statNLine({ ...tile, display: { secondary: ['n'] } }, names, { showN: false, baseColumn: null }, 476, 'en-US')).toBe('n = 476 Hogares');
+    expect(statNLine(tile, names, { showN: true, baseColumn: 'hogares' }, 12450, 'en-US')).toBe('n = 12,450 Hogares encuestados');
+  });
+
+  it('says a number of values for a statistic, with the name of the base column only when there is one', () => {
+    const median = { ratio: null, statistic: 'median' as const, display: { secondary: ['n' as const] } };
+    expect(statNLine(median, names, { showN: false, baseColumn: null }, 37, 'en-US')).toBe('n = 37');
+    expect(statNLine(median, names, { showN: false, baseColumn: 'hogares' }, 4, 'en-US')).toBe('n = 4 Hogares encuestados');
+    // Never the denominator of the ratio a statistic runs over.
+    expect(statNLine({ ...median, ratio }, names, { showN: false, baseColumn: null }, 12, 'en-US')).toBe('n = 12');
+  });
+
+  it('is none for a tile with no n', () => {
+    expect(statNLine({ ...tile, display: { secondary: ['n'] } }, names, { showN: true, baseColumn: null }, null, 'en-US')).toBeNull();
+    expect(statNLine({ ...tile, display: { secondary: ['n'] } }, names, { showN: true, baseColumn: null }, undefined, 'en-US')).toBeNull();
+  });
+});
+
+describe('smallBaseMarksText (improve-widget-text-hierarchy, design D5)', () => {
+  const t = (key: string, params?: Record<string, unknown>) => {
+    const words = key.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown>)[part], en) as string;
+    return words.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, name: string) => String(params?.[name]));
+  };
+  const marks = (count: number) => Array.from({ length: count }, (_, i) => ({ name: `COMUNA ${i + 1}`, n: 10 + i }));
+
+  it('names every mark of up to five, with its n, and says they are drawn dimmed', () => {
+    expect(smallBaseMarksText([{ name: 'COMUNA 7', n: 16 }, { name: 'SIN NOMBRE', n: 20 }], 30, 'en-US', t)).toBe(
+      'Small base (below 30): COMUNA 7 (n = 16), SIN NOMBRE (n = 20). Their marks are drawn dimmed.',
+    );
+    expect(smallBaseMarksText(marks(5), 30, 'en-US', t)).not.toContain('more');
+  });
+
+  it('names the first five and says how many more', () => {
+    expect(smallBaseMarksText(marks(8), 30, 'en-US', t)).toBe(
+      'Small base (below 30): COMUNA 1 (n = 10), COMUNA 2 (n = 11), COMUNA 3 (n = 12), COMUNA 4 (n = 13), COMUNA 5 (n = 14) and 3 more. Their marks are drawn dimmed.',
+    );
+  });
+
+  it('writes the numbers with the thousands separators of the locale', () => {
+    expect(smallBaseMarksText([{ name: 'A', n: 1200 }], 1500, 'en-US', t)).toBe('Small base (below 1,500): A (n = 1,200). Their marks are drawn dimmed.');
+  });
+
+  it('has the words of the foot in each language', () => {
+    for (const words of [en, es]) {
+      for (const key of ['small', 'smallText', 'more', 'noData', 'lines', 'detail', 'note', 'smallStat', 'smallStatShort', 'smallChart']) {
+        expect((words.indicators.foot as Record<string, string>)[key], key).toBeTruthy();
+      }
+    }
+    expect(es.indicators.foot.note).toBe('Nota');
+    expect(es.indicators.foot.detail).toBe('Detalle');
+    expect(es.indicators.foot.small).toBe('{{count}} con base pequeña');
   });
 });

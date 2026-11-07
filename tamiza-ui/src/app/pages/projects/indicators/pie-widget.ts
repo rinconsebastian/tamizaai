@@ -1,14 +1,14 @@
 import { LOCALE_ID, Component, ElementRef, computed, effect, inject, input, output, viewChild } from '@angular/core';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { QueryRow, QuerySeries, WidgetConfig } from '../../../core/projects/indicators.service';
-import { ChartBases, figureNames, figureTooltip, hasNColumn, isSmallBase, markSmall, nCell, noChartBases, smallBaseDash, smallBaseOpacity, smallBaseStroke, summaryWithSmall } from './base-figures';
+import { ChartBases, SmallMark, figureNames, figureTooltip, hasNColumn, isSmallBase, markSmall, nCell, noChartBases, smallBaseDash, smallBaseOpacity, smallBaseStroke, summaryWithSmall } from './base-figures';
 import { CategoryOrders, arrange, entryOf } from './category-order';
 import { ChartColors, SeriesKey } from './chart-colors';
 import { registerExportParts } from './export-parts';
 import { observeSize, pivot } from './chart-data';
 import { Box, labelGap, textWidth } from './chart-annotations';
 import { seriesCount, slicePath } from './chart-scales';
-import { ColumnNamer, ValueFormatter, captionShown, named, ownCaption, plotted, rawNames } from './format';
+import { ColumnNamer, ValueFormatter, captionInFoot, captionSeen, named, ownCaption, plotted, rawNames } from './format';
 import { MarkGrid, markTooltips } from './mark-tooltips';
 import { Label, writeDataLabel } from './series-plot';
 import { CellFigures } from './series-table';
@@ -60,7 +60,10 @@ const otherKey: SeriesKey = { value: null, kind: 'other' };
   imports: [PctPipe, TranslocoDirective, WidgetTable],
   template: `
     <ng-container *transloco="let t">
-      <p class="shrink-0 text-xs text-body" [class.sr-only]="!captionShown(config())" data-testid="chart-caption">{{ t('indicators.chart.caption', { what: what(), group: groupShown() }) }}</p>
+      @if (!ownTextInFoot()) {
+        <!-- An own text that a subtitle takes out of sight is the foot's caption chip, which screen readers hear once (design D2). -->
+        <p class="shrink-0 text-xs text-body" [class.sr-only]="!captionSeen()" data-testid="chart-caption">{{ t('indicators.chart.caption', { what: what(), group: groupShown() }) }}</p>
+      }
       @if (asTable()) {
         <app-widget-table class="flex-1 overflow-auto" [model]="table(t)" />
       } @else {
@@ -123,7 +126,7 @@ const otherKey: SeriesKey = { value: null, kind: 'other' };
               }
             }
             @for (label of dataLabels(); track $index) {
-              <text class="fill-heading stroke-neutral-primary-soft" font-size="11" stroke-width="3" stroke-linejoin="round" paint-order="stroke" aria-hidden="true" [attr.x]="label.x" [attr.y]="label.y" [attr.text-anchor]="label.anchor" data-testid="data-label">{{ label.text }}</text>
+              <text class="fill-heading stroke-neutral-primary-soft paper:stroke-white" font-size="11" stroke-width="3" stroke-linejoin="round" paint-order="stroke" aria-hidden="true" [attr.x]="label.x" [attr.y]="label.y" [attr.text-anchor]="label.anchor" data-testid="data-label">{{ label.text }}</text>
             }
           </svg>
           <p [id]="marks.helpId" class="sr-only">{{ t('indicators.series.keyHelpGroups') }}</p>
@@ -155,7 +158,10 @@ export class PieWidget {
   readonly rows = input.required<QueryRow[]>();
   readonly config = input.required<WidgetConfig>();
   /** Whether the line that names what the widget plots is seen: a hidden one stays for screen readers (add-widget-context, design D3). */
-  protected readonly captionShown = captionShown;
+  /** The caption line is seen above the pie: not under a subtitle unless it is kept in sight (design D2). */
+  protected readonly captionSeen = computed(() => captionSeen('pie', this.config()));
+  /** The widget's own caption text is out of sight under its subtitle and shown in the foot's caption chip instead. */
+  protected readonly ownTextInFoot = computed(() => captionInFoot('pie', this.config()));
   /** The indicator's label and the formatter of its values. */
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
@@ -166,7 +172,7 @@ export class PieWidget {
   /** The threshold in force and the indicator's base column, for the figures and the small bases of the slices (add-small-sample-warnings). */
   readonly bases = input<ChartBases>(noChartBases);
   /** How many slices the chart draws dimmed for a small base, so the widget can explain the dimming under it (design D10, D11). */
-  readonly dimmed = output<number>();
+  readonly dimmed = output<SmallMark[]>();
   protected readonly smallStroke = smallBaseStroke;
   protected readonly smallDash = smallBaseDash;
   protected readonly smallOpacity = smallBaseOpacity;
@@ -330,7 +336,7 @@ export class PieWidget {
 
   // What an image of the pie says (add-widget-export): the caption, the whole legend with each slice's value and share, what was not drawn.
   constructor() {
-    effect(() => this.dimmed.emit(this.slices().filter((slice) => slice.small).length));
+    effect(() => this.dimmed.emit(this.slices().filter((slice) => slice.small).map((slice) => ({ name: slice.name, n: slice.figures?.n ?? 0 }))));
     registerExportParts({
       plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
       settle: () => undefined,

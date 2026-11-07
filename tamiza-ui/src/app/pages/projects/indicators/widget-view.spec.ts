@@ -10,10 +10,9 @@ import { WidgetView } from './widget-view';
 
 @Component({
   imports: [WidgetView],
-  template: `<app-widget-view projectId="p1" [chartType]="type()" [config]="config()" [colors]="colors()" [indicator]="coverage()" [tileRows]="tileRows()" />`,
+  template: `<app-widget-view projectId="p1" [chartType]="type()" [config]="config()" [colors]="colors()" [indicator]="coverage()" />`,
 })
 class Host {
-  readonly tileRows = signal<number | null>(null);
   readonly type = signal<ChartType>('column');
   readonly config = signal<WidgetConfig | null>(config());
   readonly colors = signal<DashboardColors>(defaultColors);
@@ -292,7 +291,7 @@ describe('WidgetView colors (add-dashboard-palettes, design D3, D7)', () => {
 
   describe('the footnote (add-widget-context, design D5)', () => {
     const note = 'No suman 100 %: respuesta múltiple.';
-    const footnoteOf = (fixture: { nativeElement: HTMLElement }) => fixture.nativeElement.querySelector<HTMLElement>('[data-testid="widget-footnote"]');
+    const footnoteOf = (fixture: { nativeElement: HTMLElement }) => fixture.nativeElement.querySelector<HTMLElement>('[data-testid="foot-line-note"]');
     /** The box the chart is drawn in: the parent of the axis chart. */
     const boxOf = (fixture: { nativeElement: HTMLElement }) => fixture.nativeElement.querySelector('app-axis-chart')!.parentElement as HTMLElement;
 
@@ -304,7 +303,7 @@ describe('WidgetView colors (add-dashboard-palettes, design D3, D7)', () => {
 
       const line = footnoteOf(fixture)!;
       expect(line.textContent!.trim()).toBe(note);
-      expect(line.getAttribute('title')).toBe(note);
+      expect(fixture.nativeElement.querySelector('[data-testid="foot-chip-note"]').textContent.trim()).toBe('Note');
       expect(boxOf(fixture).classList.contains('overflow-hidden')).toBe(true);
       expect(boxOf(fixture).compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
@@ -333,22 +332,16 @@ describe('WidgetView colors (add-dashboard-palettes, design D3, D7)', () => {
       expect(footnoteOf(fixture)!.textContent!.trim()).toBe(note);
     });
 
-    it('shows one line on a tile two rows high or less, and two on a taller one or none', async () => {
+    it('is the "Note" chip of the foot, whose line holds the whole text and prints whole (Footnote under the chart)', async () => {
       const { host, settle, fixture } = await render();
       host.config.set(config({ display: { footnote: note } }));
       await settle();
-      const classes = () => footnoteOf(fixture)!.classList;
 
-      expect(classes().contains('line-clamp-2')).toBe(true);
-      expect(classes().contains('line-clamp-1')).toBe(false);
-      host.tileRows.set(4);
-      await settle();
-      expect(classes().contains('line-clamp-2')).toBe(true);
-      host.tileRows.set(2);
-      await settle();
-      expect(classes().contains('line-clamp-1')).toBe(true);
-      expect(classes().contains('line-clamp-2')).toBe(false);
-      expect(classes().contains('paper:line-clamp-none')).toBe(true);
+      const chip = fixture.nativeElement.querySelector('[data-testid="foot-chip-note"]') as HTMLElement;
+      const line = footnoteOf(fixture)!;
+      expect(chip.getAttribute('aria-describedby')).toBe(line.id);
+      expect(line.closest('ul')!.classList.contains('paper:block')).toBe(true);
+      expect(chip.closest('[data-testid="widget-foot"]')!.classList.contains('paper:hidden')).toBe(true);
     });
 
     it('is not shown while the rows load, nor when the query fails', async () => {
@@ -461,13 +454,14 @@ describe('WidgetView colors (add-dashboard-palettes, design D3, D7)', () => {
       expect(sent[0].request.body).not.toHaveProperty('unfiltered');
     });
 
-    it('draws no base n line under a stat tile: the tile draws it once (Base n line of the dashboard)', async () => {
+    it('draws the base n line of a stat tile once, as the n chip of its foot, and none inside the tile (Base n line of the dashboard)', async () => {
       const { fixture } = await renderTile({ showN: true });
       const element = fixture.nativeElement as HTMLElement;
 
-      expect(element.querySelector('[data-testid="widget-n-line"]')).toBeNull();
-      expect(element.querySelectorAll('[data-testid="stat-line"]')).toHaveLength(1);
-      expect(element.querySelector('[data-testid="stat-line"]')!.textContent!.trim()).toBe('n = 476 denominator');
+      expect(element.querySelectorAll('[data-testid="foot-line-n"]')).toHaveLength(1);
+      expect(element.querySelector('[data-testid="foot-line-n"]')!.textContent!.trim()).toBe('n = 476 denominator');
+      expect(element.querySelector('[data-testid="stat"] [data-testid="foot-line-n"]')).toBeNull();
+      expect(element.querySelectorAll('[data-testid="stat-line"]')).toHaveLength(0);
     });
 
     it('shows a warning with the message in place of the figures, and gives it as the reason it cannot be exported (Card over two reasons)', async () => {

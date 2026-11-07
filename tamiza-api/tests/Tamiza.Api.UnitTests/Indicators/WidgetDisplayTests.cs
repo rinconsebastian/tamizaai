@@ -277,7 +277,6 @@ public sealed class WidgetDisplayTests
     [InlineData("""{"indicator":"encuesta_hoy","display":{"footnote":""}}""")]
     [InlineData("""{"indicator":"encuesta_hoy","display":{"unit":" "}}""")]
     [InlineData("""{"indicator":"encuesta_hoy","display":{"showDescription":false}}""")]
-    [InlineData("""{"indicator":"encuesta_hoy","display":{"caption":{"hidden":false}}}""")]
     [InlineData("""{"indicator":"encuesta_hoy","display":{"caption":{"text":" "}}}""")]
     [InlineData("""{"indicator":"encuesta_hoy","display":{"caption":{}}}""")]
     [InlineData("""{"indicator":"encuesta_hoy","display":{"caption":null,"subtitle":null,"footnote":null,"unit":null,"showDescription":null}}""")]
@@ -292,10 +291,37 @@ public sealed class WidgetDisplayTests
     [Fact]
     public void Blank_texts_and_false_next_to_a_real_setting_are_left_out()
     {
-        var config = Read("""{"indicator":"encuesta_hoy","display":{"color":2,"subtitle":" ","showDescription":false,"caption":{"hidden":false,"text":""}}}""");
+        var config = Read("""{"indicator":"encuesta_hoy","display":{"color":2,"subtitle":" ","showDescription":false,"caption":{"text":""}}}""");
 
         Assert.Equal(new WidgetDisplay(Color: 2), config.Display);
         Assert.Contains(""","display":{"color":2},""", JsonSerializer.Serialize(config, Json));
+    }
+
+    [Theory]
+    [InlineData("""{"indicator":"encuesta_hoy","display":{"caption":{"hidden":false}}}""", null, false)]
+    [InlineData("""{"indicator":"encuesta_hoy","display":{"caption":{"text":"% de los hogares que asistieron","hidden":false}}}""", "% de los hogares que asistieron", false)]
+    [InlineData("""{"indicator":"encuesta_hoy","display":{"caption":{"text":"  % de los hogares  ","hidden":false}}}""", "% de los hogares", false)]
+    [InlineData("""{"indicator":"encuesta_hoy","display":{"caption":{"text":"","hidden":false}}}""", null, false)]
+    [InlineData("""{"indicator":"encuesta_hoy","display":{"caption":{"hidden":true}}}""", null, true)]
+    public void A_caption_keeps_hidden_as_given_false_included_and_round_trips(string stored, string? text, bool hidden)
+    {
+        // Design D2 of improve-widget-text-hierarchy: hidden false keeps the line in sight under a subtitle, so it is a stored value.
+        var config = Read(stored);
+
+        Assert.Equal(new WidgetCaption(text, hidden), config.Display!.Caption);
+        var json = JsonSerializer.Serialize(config, Json);
+        Assert.Contains($"\"hidden\":{(hidden ? "true" : "false")}", json);
+        Assert.Equal(json, JsonSerializer.Serialize(Read(json), Json));
+    }
+
+    [Fact]
+    public void A_caption_with_hidden_false_next_to_a_subtitle_is_kept_in_the_members_order()
+    {
+        var config = Read("""{"indicator":"encuesta_hoy","display":{"caption":{"hidden":false,"text":"Texto"},"subtitle":"Pregunta"}}""");
+
+        var display = JsonNode.Parse(JsonSerializer.Serialize(config, Json))!["display"]!.AsObject();
+        Assert.Equal(["subtitle", "caption"], display.Select(member => member.Key));
+        Assert.Equal(["text", "hidden"], display["caption"]!.AsObject().Select(member => member.Key));
     }
 
     [Fact]

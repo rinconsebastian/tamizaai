@@ -39,6 +39,9 @@ const contextShapes = [
   'stat tile with an own caption text, a footnote and a description button',
   'map with four tooltip columns, a basemap and a unit',
   'Likert widget with a subtitle',
+  // improve-widget-text-hierarchy, task 1.2: `hidden: false` keeps the caption line in sight under a subtitle.
+  'column chart with a subtitle and a caption kept in sight',
+  'bar chart with a subtitle and an own caption text kept in sight',
 ];
 
 /**
@@ -161,8 +164,8 @@ describe('the production shapes', () => {
   afterEach(clearOverlay);
 
   it('lists the shapes the design names, once each', () => {
-    expect(shapes).toHaveLength(32);
-    expect(new Set(shapes.map((s) => s.name)).size).toBe(32);
+    expect(shapes).toHaveLength(34);
+    expect(new Set(shapes.map((s) => s.name)).size).toBe(34);
     expect(shapes.every(hasQueryGoldens)).toBe(true);
   });
 
@@ -170,13 +173,19 @@ describe('the production shapes', () => {
     expect(shapes.filter((s) => !hasFormGolden(s)).map((s) => s.name)).toEqual([]);
   });
 
-  it('has the stat tile shapes last, and only the last holds a statistic or secondary lines', () => {
-    expect(shapes.slice(30).map((s) => s.name)).toEqual(statShapes);
+  it('has the stat tile shapes after the base settings, and only the last of them holds a statistic or secondary lines', () => {
+    expect(shapes.slice(30, 32).map((s) => s.name)).toEqual(statShapes);
     const holding = shapes.filter((s) => {
       const config = JSON.parse(s.stored);
       return 'statistic' in config || 'secondary' in (config.display ?? {});
     });
     expect(holding.map((s) => s.name)).toEqual([statShapes[1]]);
+  });
+
+  it('has the shapes of the caption kept in sight last, and only they hold a caption with hidden false', () => {
+    expect(shapes.slice(32).map((s) => s.name)).toEqual(contextShapes.slice(-2));
+    const kept = shapes.filter((s) => JSON.parse(s.stored).display?.caption?.hidden === false);
+    expect(kept.map((s) => s.name)).toEqual(contextShapes.slice(-2));
   });
 
   it('has the shapes of the widget context, and only they hold its texts', () => {

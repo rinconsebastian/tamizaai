@@ -7,6 +7,7 @@ import { Point, bandScale, charWidth, linePath, linearScale, niceAxis, stepPath,
 import {
   Box,
   PlotEdges,
+  ReferenceLabel,
   ReferenceMark,
   ReferenceStroke,
   TextAt,
@@ -117,11 +118,15 @@ export interface SeriesPlot {
   marks: MarkGrid;
   /** The reference lines across the plot, and the texts that fit at their ends (design D5). Empty for a chart without lines. */
   references: ReferenceStroke[];
-  referenceLabels: Label[];
+  referenceLabels: ReferenceLabel[];
+  /** The reference lines whose text was not drawn at the line (improve-widget-text-hierarchy, design D7): the widget's foot names them. */
+  unplaced: ReferenceMark[];
   /** The values written on the marks (design D7). Empty for a chart without data labels. */
   dataLabels: Label[];
   /** How many marks have a small base: what the chart's summary says and whether it explains the dimming (design D10). */
   small: number;
+  /** Where each dimmed mark is, as its group and series indexes, in drawing order (improve-widget-text-hierarchy, design D5). */
+  smallAt: { g: number; s: number }[];
 }
 
 /** The top margin of a plain chart; a chart with reference lines or data labels grows it by the room their texts need. */
@@ -223,8 +228,15 @@ export function seriesPlot(input: SeriesPlotInput): SeriesPlot {
   /** The boxes of the texts already placed, which no later text may cover: the reference labels first, then the data labels. */
   const taken: Box[] = [];
   const marks: (MarkPoint | null)[][] = rows.map(() => Array.from({ length: kind === 'line' ? 1 : series }, () => null));
-  /** Writes a data label unless it would cover a text already placed. */
-  const writeLabel = (label: TextAt) => writeDataLabel(label, taken, dataLabels);
+  /**
+   * The data labels, in drawing order, written once the reference texts are placed: those come first and keep the room they take, and a
+   * label that would cover one is left out (improve-widget-text-hierarchy, design D7, D8). The reference texts are placed after the marks,
+   * to keep clear of them.
+   */
+  const pending: TextAt[] = [];
+  const writeLabel = (label: TextAt) => {
+    pending.push(label);
+  };
 
   const smallOf = (row: SeriesRow, s: number) => isSmallBase(row.figures?.[s]?.n, input.figures?.minN);
   const content = (row: SeriesRow, s: number, value: number, share: number | null): ChartTooltipContent => {
@@ -245,6 +257,7 @@ export function seriesPlot(input: SeriesPlotInput): SeriesPlot {
     };
   };
   let small = 0;
+  const smallAt: { g: number; s: number }[] = [];
 
   if (kind === 'line') {
     return linePlot(input, rows, categories, axis, { grid, ticks, labels, rects, lines, dots, hits, marks, dataLabels, taken, top, refs });
@@ -297,7 +310,6 @@ export function seriesPlot(input: SeriesPlotInput): SeriesPlot {
       }
     });
   }
-  const placed = placeReferences(refs, horizontal, v, plot, taken);
   const rectOf = (v0: number, v1: number, c0: number, size: number) =>
     horizontal ? { x: Math.min(v0, v1), y: c0, width: Math.abs(v1 - v0), height: size } : { x: c0, y: Math.min(v0, v1), width: size, height: Math.abs(v1 - v0) };
 
@@ -306,6 +318,9 @@ export function seriesPlot(input: SeriesPlotInput): SeriesPlot {
     const cell = rows[g].cells[s] ?? value;
     const dim = smallOf(rows[g], s);
     small += dim ? 1 : 0;
+    if (dim) {
+      smallAt.push({ g, s });
+    }
     rects.push({ ...rect, color: input.colors[s], title: '', at: { g, s }, ...(dim ? { dim } : {}) });
     hits.push({ ...hit, at: { g, s } });
     marks[g][s] = { content: content(rows[g], s, cell, share), x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
@@ -372,7 +387,13 @@ export function seriesPlot(input: SeriesPlotInput): SeriesPlot {
     }
   });
 
-  return { grid, ticks, labels, rects, lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, dataLabels, small };
+  // A horizontal line's text keeps clear of the marks, which are all drawn now; a bar chart's lines are vertical and need no room among them.
+  const obstacles = horizontal ? [] : rects.map((rect): Box => ({ x0: rect.x, y0: rect.y, x1: rect.x + rect.width, y1: rect.y + rect.height }));
+  const placed = placeReferences(refs, horizontal, v, plot, taken, obstacles);
+  for (const label of pending) {
+    writeDataLabel(label, taken, dataLabels);
+  }
+  return { grid, ticks, labels, rects, lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, unplaced: placed.unplaced, dataLabels, small, smallAt };
 }
 
 /** The thickness of a bar drawn side by side with the others of its group (design D5): at most 24 px, with the surface between them. */
@@ -417,7 +438,6 @@ function linePlot(
   const bottom = 26;
   const y = linearScale([axis.min, axis.max], [h - bottom, top]);
   const bands = bandScale(count, [left, w - right], 0);
-  const placed = placeReferences(refs, false, y, { left, right: w - right, top, bottom: h - bottom }, taken);
   axis.ticks.forEach((tick, i) => {
     grid.push({ x1: left, y1: y(tick), x2: w - right, y2: y(tick), zero: tick === 0 });
     ticks.push({ x: left - 6, y: y(tick) + 4, text: tickTexts[i], anchor: 'end' });
@@ -433,6 +453,10 @@ function linePlot(
   });
 
   let small = 0;
+  const smallAt: { g: number; s: number }[] = [];
+  /** The points' discs, which a reference text keeps clear of, and the data labels, written once the reference texts are placed (design D7). */
+  const discs: Box[] = [];
+  const pending: TextAt[] = [];
   table.columns.forEach((_, s) => {
     // The runs of groups that have a value: a gap in the data is a gap in the line, and a lone point is a dot with no segment.
     const runs: Point[][] = [[]];
@@ -446,9 +470,13 @@ function linePlot(
       }
       const point = { x: centerOf(g), y: y(value) };
       runs.at(-1)!.push(point);
+      discs.push({ x0: point.x - 5, y0: point.y - 5, x1: point.x + 5, y1: point.y + 5 });
       // A point with a small base is hollow with a dashed ring, and is drawn whatever the number of points (design D10).
       const dim = isSmallBase(row.figures?.[s]?.n, input.figures?.minN);
       small += dim ? 1 : 0;
+      if (dim) {
+        smallAt.push({ g, s });
+      }
       if (count <= maxLinePoints || dim) {
         dots.push({ cx: point.x, cy: point.y, color: input.colors[s], title: '', ...(dim ? { hollow: true } : {}) });
       }
@@ -457,7 +485,7 @@ function linePlot(
         const text = input.value(value);
         const box = boxOf({ x: point.x, y: point.y - pointGap, text, anchor: 'middle' });
         if (box.x0 >= left && box.x1 <= w - labelGap) {
-          writeDataLabel({ x: point.x, y: point.y - pointGap, text, anchor: 'middle' }, taken, dataLabels);
+          pending.push({ x: point.x, y: point.y - pointGap, text, anchor: 'middle' });
         }
       }
     });
@@ -483,5 +511,9 @@ function linePlot(
     hits.push({ x: bands.start(g) - (bands.step - bands.bandwidth) / 2, y: top, width: bands.step, height: h - bottom - top, at: { g, s: 0 }, guide: { x1: x, y1: top, x2: x, y2: h - bottom, zero: false } });
   });
 
-  return { grid, ticks, labels, rects: [], lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, dataLabels, small };
+  const placed = placeReferences(refs, false, y, { left, right: w - right, top, bottom: h - bottom }, taken, discs);
+  for (const label of pending) {
+    writeDataLabel(label, taken, dataLabels);
+  }
+  return { grid, ticks, labels, rects: [], lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, unplaced: placed.unplaced, dataLabels, small, smallAt };
 }

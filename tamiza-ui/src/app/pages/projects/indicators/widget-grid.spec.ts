@@ -590,7 +590,7 @@ describe('the texts of a widget in its tile (add-widget-context, design D5, D6)'
   });
 
   it('shows the subtitle of a stat tile under its title, above its figure (Subtitle of a stat tile)', async () => {
-    const stat = widget('w1', { chartType: 'stat', title: 'Centro cultural', layout: { x: 0, y: 0, w: 3, h: 2 }, config: config({ groupBy: null, display: { subtitle: '% de quienes asistieron (E4)' } }) });
+    const stat = widget('w1', { chartType: 'stat', title: 'Centro cultural', layout: { x: 0, y: 0, w: 4, h: 3 }, config: config({ groupBy: null, display: { subtitle: '% de quienes asistieron (E4)' } }) });
     const context = await open('viewer', [stat], result([row(null, 0.2422)]));
 
     const line = subtitleOf(context, 'w1')!;
@@ -627,12 +627,125 @@ describe('the texts of a widget in its tile (add-widget-context, design D5, D6)'
 
     for (const id of ['w1', 'w2']) {
       const header = headerOf(context, id);
-      expect(header.className).toBe('flex shrink-0 items-center gap-1 border-b border-default px-3 py-1.5');
-      expect(Array.from(header.children).map((child) => child.tagName.toLowerCase())).toEqual(['button', 'h3', 'tmz-dropdown-menu']);
+      expect(header.className).toBe('flex shrink-0 items-start gap-1 border-b border-default px-3 pt-2 pb-1.5');
+      expect(Array.from(header.children).map((child) => child.tagName.toLowerCase())).toEqual(['button', 'div', 'tmz-dropdown-menu']);
+      expect(header.children[1].querySelector('h3')).not.toBeNull();
       expect(subtitleOf(context, id)).toBeNull();
       expect(articleOf(context, id).hasAttribute('aria-describedby')).toBe(false);
       expect(item(context, id).querySelector('[data-testid="widget-description"]')).toBeNull();
     }
+  });
+
+  // The type scale (improve-widget-text-hierarchy, design D1, task 2.2)
+
+  it('draws the title at 15 px, weight 600, on up to two lines, with its whole text (Title of two lines)', async () => {
+    const title = '2.6. Lo que pagó por la última boleta: mediana y dispersión';
+    const context = await open('viewer', [widget('w1', { title, layout: { x: 0, y: 0, w: 3, h: 4 } })], rows);
+
+    const h3 = item(context, 'w1').querySelector<HTMLElement>('[data-testid="widget-title"]')!;
+    for (const name of ['text-[15px]', 'leading-[1.35]', 'font-semibold', 'text-heading', 'line-clamp-2', 'break-words', 'paper:line-clamp-none']) {
+      expect(h3.classList.contains(name), name).toBe(true);
+    }
+    expect(h3.classList.contains('truncate')).toBe(false);
+    expect(h3.classList.contains('font-medium')).toBe(false);
+    expect(text(h3)).toBe(title);
+    expect(h3.getAttribute('title')).toBe(title);
+  });
+
+  it('keeps the whole text of a title cut at two lines in the heading, in title and in the accessible name (Title longer than two lines)', async () => {
+    const title = 'T'.repeat(120);
+    const context = await open('viewer', [widget('w1', { title, layout: { x: 0, y: 0, w: 2, h: 4 } })], rows);
+
+    const h3 = item(context, 'w1').querySelector<HTMLElement>('[data-testid="widget-title"]')!;
+    expect(h3.textContent!.trim()).toBe(title);
+    expect(h3.getAttribute('title')).toBe(title);
+    expect(h3.classList.contains('line-clamp-2')).toBe(true);
+    expect(articleOf(context, 'w1').getAttribute('aria-labelledby')).toBe(h3.id);
+  });
+
+  it('puts the handle, the title and the menu on one row that stays as high as the buttons, with the padding of the scale', async () => {
+    const context = await open('analyst', [withDisplay('w1', { subtitle })], rows);
+
+    const header = headerOf(context, 'w1');
+    expect(header.className).toContain('pt-2');
+    expect(header.className).toContain('pb-1.5');
+    expect(header.children[0].classList.contains('items-start')).toBe(true);
+    const box = header.querySelector('h3')!.parentElement!;
+    expect(box.classList.contains('min-h-9')).toBe(true);
+    expect(box.classList.contains('items-center')).toBe(true);
+  });
+
+  it('draws the subtitle at 13 px in the darker body gray, one line on a tile two rows high and two on a taller one (Subtitle size and color)', async () => {
+    const tall = withDisplay('w1', { subtitle });
+    const low = withDisplay('w2', { subtitle }, { layout: { x: 6, y: 0, w: 6, h: 2 } });
+    const context = await open('viewer', [tall, low], rows);
+
+    for (const id of ['w1', 'w2']) {
+      const line = subtitleOf(context, id)!;
+      for (const name of ['text-[13px]', 'leading-[1.45]', 'text-body-strong', 'paper:line-clamp-none']) {
+        expect(line.classList.contains(name), `${id} ${name}`).toBe(true);
+      }
+      expect(line.classList.contains('text-xs')).toBe(false);
+      expect(line.classList.contains('text-body')).toBe(false);
+    }
+    expect(subtitleOf(context, 'w1')!.classList.contains('line-clamp-2')).toBe(true);
+    expect(subtitleOf(context, 'w2')!.classList.contains('line-clamp-1')).toBe(true);
+  });
+
+  // Compact stat tiles (design D6, task 2.3)
+
+  const statTile = (id: string, w: number, h: number, extra: Partial<Widget> = {}) =>
+    widget(id, { chartType: 'stat', title: `Tile ${id}`, layout: { x: 0, y: 0, w, h }, config: config({ groupBy: null, display: { subtitle } }), ...extra });
+  const visibleUnderTitle = (context: Context, id: string) => !subtitleOf(context, id)!.classList.contains('hidden');
+
+  it('keeps the subtitle under the title of a stat tile 3 columns wide and 3 rows high, and of one 3 wide and 6 high (Tile 3 columns wide)', async () => {
+    const context = await open('viewer', [statTile('w1', 3, 3), statTile('w2', 3, 6, { layout: { x: 3, y: 0, w: 3, h: 6 } })], result([row(null, 0.2422)]));
+
+    expect(visibleUnderTitle(context, 'w1')).toBe(true);
+    expect(visibleUnderTitle(context, 'w2')).toBe(true);
+    expect(subtitleOf(context, 'w1')!.classList.contains('hidden')).toBe(false);
+  });
+
+  it('keeps the subtitle under the title of a stat tile 4 columns wide and 3 rows high (Tile 4 columns wide and 3 rows high)', async () => {
+    const context = await open('viewer', [statTile('w1', 4, 3)], result([row(null, 0.2422)]));
+
+    expect(visibleUnderTitle(context, 'w1')).toBe(true);
+    expect(subtitleOf(context, 'w1')!.classList.contains('line-clamp-2')).toBe(true);
+  });
+
+  it('takes the subtitle of a stat tile 4 columns wide and 2 rows high off the screen and prints it under the title, still describing the tile (Tile 4 columns wide and 2 rows high)', async () => {
+    const context = await open('viewer', [statTile('w1', 4, 2), statTile('w2', 3, 2, { layout: { x: 4, y: 0, w: 3, h: 2 } })], result([row(null, 0.2422)]));
+
+    for (const id of ['w1', 'w2']) {
+      const line = subtitleOf(context, id)!;
+      expect(line.classList.contains('hidden'), id).toBe(true);
+      // Not on paper either: its text is the foot's Detail line there, under the figure (task 9.3). `paper:line-clamp-none` would show
+      // it again, since it sets `display: block` after `hidden`, so a compact tile has `paper:hidden` and not that class.
+      expect(line.classList.contains('paper:hidden'), id).toBe(true);
+      expect(line.classList.contains('paper:block'), id).toBe(false);
+      expect(line.classList.contains('paper:line-clamp-none'), id).toBe(false);
+      expect(line.classList.contains('line-clamp-1')).toBe(false);
+      expect(line.classList.contains('line-clamp-2')).toBe(false);
+      expect(articleOf(context, id).getAttribute('aria-describedby')).toBe(`widget-subtitle-${id}`);
+      expect(text(line)).toBe(subtitle);
+    }
+  });
+
+  it('does not take the subtitle of a chart 4 columns wide and 2 rows high off the screen', async () => {
+    const context = await open('viewer', [withDisplay('w1', { subtitle }, { layout: { x: 0, y: 0, w: 4, h: 2 } })], rows);
+
+    expect(visibleUnderTitle(context, 'w1')).toBe(true);
+    expect(subtitleOf(context, 'w1')!.classList.contains('line-clamp-1')).toBe(true);
+  });
+
+  it('counts only the height, with no breakpoint class, so a tile of 2 rows is compact on a phone and a 3 by 3 tile keeps its subtitle there (Phone)', async () => {
+    const context = await open('viewer', [statTile('w1', 4, 2), statTile('w2', 3, 3, { layout: { x: 4, y: 0, w: 3, h: 3 } })], result([row(null, 0.2422)]));
+
+    for (const id of ['w1', 'w2']) {
+      expect(Array.from(subtitleOf(context, id)!.classList).filter((name) => name.startsWith('md:') || name.startsWith('sm:'))).toEqual([]);
+    }
+    expect(visibleUnderTitle(context, 'w1')).toBe(false);
+    expect(visibleUnderTitle(context, 'w2')).toBe(true);
   });
 
   describe('the description button', () => {
@@ -665,7 +778,7 @@ describe('the texts of a widget in its tile (add-widget-context, design D5, D6)'
       const context = await open('viewer', [offering('w1')], rows, { indicators: [described] });
 
       const kinds = Array.from(headerOf(context, 'w1').children).map((child) => child.tagName.toLowerCase());
-      expect(kinds).toEqual(['h3', 'app-description-popover', 'tmz-dropdown-menu']);
+      expect(kinds).toEqual(['div', 'app-description-popover', 'tmz-dropdown-menu']);
       expect(headerOf(context, 'w1').querySelector('app-description-popover')!.classList.contains('paper:hidden')).toBe(true);
     });
 

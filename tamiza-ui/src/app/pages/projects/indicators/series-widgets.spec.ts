@@ -61,6 +61,37 @@ const rampSet = (element: Element | null, step: number) => {
 const households = indicator('households_visited');
 const sources = { indicator: 'households_visited', groupBy: 'municipality', seriesBy: 'water_source' } as const;
 
+describe('the caption of a widget with a series under a subtitle (improve-widget-text-hierarchy, design D2, task 3.1)', () => {
+  afterEach(clearOverlay);
+
+  const subtitle = 'Pregunta de la tabla';
+  const own = { text: 'Hogares por fuente' };
+  const answer = () => seriesResult([cell('Armenia', 'Piped', 100), cell('Armenia', 'Well', 20), cell('Buga', 'Piped', 40)], ['Piped', 'Well']);
+
+  it('keeps the line of a heat map in sight, under its subtitle too (Heat map keeps its line)', async () => {
+    const context = await show('heatmap', { ...sources, display: { subtitle, caption: own } }, answer(), [households]);
+
+    const line = byTestId(context.root, 'chart-caption')!;
+    expect(line.classList).not.toContain('sr-only');
+    expect(text(line)).toBe('Hogares por fuente by municipality and water_source');
+  });
+
+  it('keeps the line of a cross table in sight, under its subtitle too', async () => {
+    const context = await show('crosstab', { ...sources, display: { subtitle, caption: own } }, answer(), [households]);
+
+    const line = byTestId(context.root, 'chart-caption')!;
+    expect(line.classList).not.toContain('sr-only');
+    expect(text(line)).toBe('Hogares por fuente by municipality and water_source');
+  });
+
+  it('keeps the legend of a stacked column chart under a subtitle and draws no caption line (Series legend kept)', async () => {
+    const context = await show('column', { ...sources, layout: 'stacked', display: { subtitle, caption: own } }, answer(), [households]);
+
+    expect(all(context.root, 'legend-name').map(text)).toEqual(['Piped', 'Well']);
+    expect(byTestId(context.root, 'chart-caption')).toBeNull();
+  });
+});
+
 describe('heat map', () => {
   afterEach(clearOverlay);
 

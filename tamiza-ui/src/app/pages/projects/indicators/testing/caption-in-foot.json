@@ -1,0 +1,30 @@
+{
+ "_comment": "Shared by the API's WidgetCaptionTests and the UI's format spec (improve-widget-text-hierarchy, design D2 and D11). Each case gives a widget's chart type, its seriesBy and its display (subtitle and caption), and whether the caption's own text is out of sight under the subtitle and shown in the widget's foot: a bar, column or line chart with no series, or a pie, that has a subtitle and an own caption text and leaves caption.hidden unset. The widget form's warning, the foot's caption chip and the MCP note all follow this one rule. Invented names and values only.",
+ "cases": [
+  { "name": "Column chart with a subtitle and an own text", "chartType": "column", "seriesBy": null, "display": { "subtitle": "E1, % de los hogares de cada estrato que asistieron", "caption": { "text": "% de los hogares que asistieron" } }, "inFoot": true },
+  { "name": "Bar chart with a subtitle and an own text", "chartType": "bar", "seriesBy": null, "display": { "subtitle": "¿En qué lugares ha visto teatro?", "caption": { "text": "% de quienes asistieron" } }, "inFoot": true },
+  { "name": "Line chart with a subtitle and an own text", "chartType": "line", "seriesBy": null, "display": { "subtitle": "Evolución por ronda", "caption": { "text": "% de los hogares" } }, "inFoot": true },
+  { "name": "Pie chart with a subtitle and an own text", "chartType": "pie", "seriesBy": null, "display": { "subtitle": "¿Cómo se enteró?", "caption": { "text": "% de quienes se enteraron" } }, "inFoot": true },
+  { "name": "Subtitle and text padded with spaces", "chartType": "column", "seriesBy": null, "display": { "subtitle": "  Pregunta  ", "caption": { "text": "  % de los hogares  " } }, "inFoot": true },
+  { "name": "Empty series column counts as none", "chartType": "column", "seriesBy": "", "display": { "subtitle": "Pregunta", "caption": { "text": "% de los hogares" } }, "inFoot": true },
+  { "name": "No subtitle", "chartType": "column", "seriesBy": null, "display": { "caption": { "text": "% de los hogares" } }, "inFoot": false },
+  { "name": "Blank subtitle", "chartType": "column", "seriesBy": null, "display": { "subtitle": "   ", "caption": { "text": "% de los hogares" } }, "inFoot": false },
+  { "name": "Default caption line", "chartType": "column", "seriesBy": null, "display": { "subtitle": "Pregunta" }, "inFoot": false },
+  { "name": "Caption with a blank text", "chartType": "column", "seriesBy": null, "display": { "subtitle": "Pregunta", "caption": { "text": "  " } }, "inFoot": false },
+  { "name": "Caption hidden", "chartType": "column", "seriesBy": null, "display": { "subtitle": "Pregunta", "caption": { "hidden": true } }, "inFoot": false },
+  { "name": "Caption kept in sight with a text", "chartType": "column", "seriesBy": null, "display": { "subtitle": "Pregunta", "caption": { "text": "% de los hogares", "hidden": false } }, "inFoot": false },
+  { "name": "Caption kept in sight with the default line", "chartType": "column", "seriesBy": null, "display": { "subtitle": "Pregunta", "caption": { "hidden": false } }, "inFoot": false },
+  { "name": "Column chart with a series", "chartType": "column", "seriesBy": "barrera_tipo", "display": { "subtitle": "Pregunta", "caption": { "text": "% de los hogares" } }, "inFoot": false },
+  { "name": "Bar chart with a series", "chartType": "bar", "seriesBy": "respuesta", "display": { "subtitle": "Pregunta", "caption": { "text": "% de los hogares" } }, "inFoot": false },
+  { "name": "Line chart with a series", "chartType": "line", "seriesBy": "ronda", "display": { "subtitle": "Pregunta", "caption": { "text": "% de los hogares" } }, "inFoot": false },
+  { "name": "Heat map keeps its line", "chartType": "heatmap", "seriesBy": "comuna", "display": { "subtitle": "Pregunta", "caption": { "text": "% de los hogares" } }, "inFoot": false },
+  { "name": "Cross table keeps its line", "chartType": "crosstab", "seriesBy": "comuna", "display": { "subtitle": "Pregunta", "caption": { "text": "% de los hogares" } }, "inFoot": false },
+  { "name": "Map keeps its line", "chartType": "map", "seriesBy": null, "display": { "subtitle": "Pregunta", "caption": { "text": "% de los hogares" } }, "inFoot": false },
+  { "name": "Histogram keeps its line", "chartType": "histogram", "seriesBy": null, "display": { "subtitle": "Pregunta", "caption": { "text": "Hogares" } }, "inFoot": false },
+  { "name": "Stat tile keeps its label", "chartType": "stat", "seriesBy": null, "display": { "subtitle": "Pregunta", "caption": { "text": "de los hogares asistió" } }, "inFoot": false },
+  { "name": "Pyramid draws no caption line", "chartType": "pyramid", "seriesBy": "sexo", "display": { "subtitle": "Pregunta", "caption": { "text": "Personas" } }, "inFoot": false },
+  { "name": "Likert draws no caption line", "chartType": "likert", "seriesBy": "respuesta", "display": { "subtitle": "Pregunta", "caption": { "text": "Acuerdo" } }, "inFoot": false },
+  { "name": "Box plot draws no caption line", "chartType": "boxplot", "seriesBy": null, "display": { "subtitle": "Pregunta", "caption": { "text": "Pesos" } }, "inFoot": false },
+  { "name": "No display at all", "chartType": "column", "seriesBy": null, "display": null, "inFoot": false }
+ ]
+}

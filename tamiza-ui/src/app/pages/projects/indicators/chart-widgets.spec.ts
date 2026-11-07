@@ -142,8 +142,8 @@ describe('chart widgets', () => {
       const { root } = await show('stat', { indicator: 'piped_water_rate', display: { footnote: 'Sin ponderar.' } }, [row(null, 0.42)]);
 
       expect(text(byTestId(root, 'stat-value'))).toBe('42%');
-      expect(text(byTestId(root, 'widget-footnote'))).toBe('Sin ponderar.');
-      expect(byTestId(root, 'stat-label')!.compareDocumentPosition(byTestId(root, 'widget-footnote')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(text(byTestId(root, 'foot-line-note'))).toBe('Sin ponderar.');
+      expect(byTestId(root, 'stat-label')!.compareDocumentPosition(byTestId(root, 'foot-line-note')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('shows a rate stored as a fraction as a percentage', async () => {
@@ -1591,17 +1591,217 @@ describe('the caption of a widget (add-widget-context, design D3)', () => {
     });
   });
 
-  it('shows the line of a widget with no caption setting, with no sr-only on it', async () => {
-    const context = await show('column', { ...bars, display: { caption: {}, subtitle: 'Pregunta' } }, categories, [teatro]);
+  it('shows the line of a widget with no caption setting and no subtitle, with no sr-only on it (Without a subtitle)', async () => {
+    const context = await show('column', { ...bars, display: { caption: {} } }, categories, [teatro]);
 
     expect(caption(context).classList).not.toContain('sr-only');
     expect(text(caption(context))).toBe('Teatro hoy: numerator / denominator by categoria');
+  });
+
+  describe('under a subtitle (improve-widget-text-hierarchy, design D2, task 3.1)', () => {
+    const subtitle = 'E1, % de los hogares de cada estrato que asistieron en el último año';
+    const own = { text: '% de los hogares que asistieron' };
+
+    it('takes the default line of a column chart out of sight, for screen readers still, and names what is plotted in the tooltip', async () => {
+      const context = await show('column', { ...bars, display: { subtitle } }, categories, [teatro]);
+
+      expect(caption(context).classList).toContain('sr-only');
+      expect(text(caption(context))).toBe('Teatro hoy: numerator / denominator by categoria');
+      expect(label(context)).toContain('Teatro hoy: numerator / denominator');
+    });
+
+    it('draws no line for an own text, which is the foot\'s caption chip, and still names it in the accessible name (Own text under a subtitle)', async () => {
+      const context = await show('column', { ...bars, display: { subtitle, caption: own } }, categories, [teatro]);
+
+      expect(caption(context)).toBeNull();
+      expect(label(context)).toContain('% de los hogares que asistieron');
+    });
+
+    it('does the same above a bar chart', async () => {
+      const context = await show('bar', { ...bars, display: { subtitle, caption: own } }, categories, [teatro]);
+
+      expect(caption(context)).toBeNull();
+    });
+
+    it('does the same above a line chart', async () => {
+      const context = await show('line', { indicator: 'teatro_hoy', groupBy: 'ronda', display: { subtitle, caption: own } }, [row('1', 60), row('2', 70)], [teatro]);
+
+      expect(caption(context)).toBeNull();
+    });
+
+    it('does the same above a pie (Pie under a subtitle)', async () => {
+      const context = await show('pie', { ...bars, display: { subtitle, caption: own } }, categories, [teatro]);
+
+      expect(caption(context)).toBeNull();
+    });
+
+    it('takes the default line of a pie out of sight and keeps it for screen readers', async () => {
+      const context = await show('pie', { ...bars, display: { subtitle } }, categories, [teatro]);
+
+      expect(caption(context).classList).toContain('sr-only');
+    });
+
+    it('keeps the line of a column chart in sight, with its own text, when the caption is kept (Caption kept in sight)', async () => {
+      const context = await show('column', { ...bars, display: { subtitle, caption: { ...own, hidden: false } } }, categories, [teatro]);
+
+      expect(caption(context).classList).not.toContain('sr-only');
+      expect(text(caption(context))).toBe('% de los hogares que asistieron by categoria');
+    });
+
+    it('keeps the default line of a pie in sight when the caption is kept', async () => {
+      const context = await show('pie', { ...bars, display: { subtitle, caption: { hidden: false } } }, categories, [teatro]);
+
+      expect(caption(context).classList).not.toContain('sr-only');
+      expect(text(caption(context))).toBe('Teatro hoy: numerator / denominator by categoria');
+    });
+
+    it('keeps the line of a column chart with a blank subtitle', async () => {
+      const context = await show('column', { ...bars, display: { subtitle: '   ', caption: own } }, categories, [teatro]);
+
+      expect(caption(context).classList).not.toContain('sr-only');
+    });
+
+    it('leaves the line of a histogram where it is (Histogram keeps its line)', async () => {
+      const context = await show('histogram', { indicator: 'teatro_hoy', groupBy: null, buckets: 4, display: { subtitle, caption: { text: 'Ingreso por hogar' } } }, [row(null, 1), row(null, 5)], [teatro]);
+
+      expect(caption(context).classList).not.toContain('sr-only');
+      expect(text(caption(context))).toBe('Rows per range of Ingreso por hogar, in 4 ranges');
+    });
+
+    it('leaves the label of a stat tile where it is (Stat tile keeps its label)', async () => {
+      const context = await show('stat', { indicator: 'teatro_hoy', groupBy: null, ratio, display: { subtitle, caption: { text: 'de los hogares asistió en el último año' } } }, [row(null, 0.2422)], [teatro]);
+
+      expect(text(byTestId(context.root, 'stat-label'))).toBe('de los hogares asistió en el último año');
+      expect(byTestId(context.root, 'stat-label')!.classList).not.toContain('sr-only');
+    });
+
+    it('still heads the value column of the table with the own text (Table header)', async () => {
+      const context = await show('column', { ...bars, display: { subtitle, caption: own } }, categories, [teatro]);
+
+      await toggle(context);
+
+      expect(tableHeaders(context)).toEqual(['categoria', '% de los hogares que asistieron']);
+    });
   });
 
   it('shows the line of a widget with no display at all, with no sr-only on it', async () => {
     const context = await show('column', bars, categories, [teatro]);
 
     expect(caption(context).classList).not.toContain('sr-only');
+  });
+});
+
+describe('the title of the value axis (improve-widget-text-hierarchy, design D3, task 3.4)', () => {
+  afterEach(clearOverlay);
+
+  const ratio = { numerator: 'numerator', denominator: 'denominator' };
+  const categories = [row('Teatro', 0.5), row('Cine', 0.25)];
+  const subtitle = 'E1, % de los hogares de cada estrato que asistieron en el último año';
+  const bars = { indicator: 'teatro_hoy', groupBy: 'categoria', ratio } as const;
+  const percent = indicator('teatro_hoy', { label: 'Teatro hoy', format: 'percent', unit: 'de los hogares' });
+  const title = (context: Context) => byTestId(context.root, 'axis-title');
+  /** The whole text of the title: its text when it fits, else the one in its `<title>`. */
+  const whole = (context: Context) => title(context)?.querySelector('title')?.textContent?.trim() ?? text(title(context));
+
+  it('writes the unit, with the percent before it, above the value axis of a column chart whose line is out of sight (Own text in the foot, unit on the axis)', async () => {
+    const context = await show('column', { ...bars, display: { subtitle, caption: { text: '% de los hogares que asistieron' } } }, categories, [percent]);
+
+    expect(whole(context)).toBe('% de los hogares');
+    expect(title(context)!.getAttribute('text-anchor')).toBe('start');
+    expect(title(context)!.getAttribute('aria-hidden')).toBe('true');
+    // The own text is the foot's caption chip, not the axis' title.
+    expect(svgTexts(context).join(' ')).not.toContain('que asistieron');
+  });
+
+  it('writes the unit of a line chart above its value axis too', async () => {
+    const context = await show('line', { indicator: 'teatro_hoy', groupBy: 'ronda', display: { subtitle } }, [row('1', 0.6), row('2', 0.7)], [percent]);
+
+    expect(whole(context)).toBe('% de los hogares');
+    expect(title(context)!.getAttribute('text-anchor')).toBe('start');
+  });
+
+  it('writes the unit of a bar chart under its value ticks, ending at the plot (Bar chart)', async () => {
+    const context = await show('bar', { ...bars, display: { subtitle } }, categories, [percent]);
+
+    const at = title(context)!;
+    expect(whole(context)).toBe('% de los hogares');
+    expect(at.getAttribute('text-anchor')).toBe('end');
+    const ticks = Array.from(context.root.querySelectorAll('[data-testid="chart-svg"] text.fill-body')).filter((node) => /%$/.test(text(node)) && node !== at);
+    expect(ticks.length).toBeGreaterThan(0);
+    // The ticks sit above the title, so neither covers the other.
+    expect(Math.max(...ticks.map((tick) => Number(tick.getAttribute('y'))))).toBeLessThan(Number(at.getAttribute('y')));
+  });
+
+  it('writes the unit alone for an indicator that is not a percent, such as a count of homes', async () => {
+    const homes = indicator('households_visited', { label: 'Hogares', format: 'count', unit: 'hogares' });
+    const context = await show('column', { indicator: 'households_visited', groupBy: 'zona', display: { subtitle } }, [row('Zona 1', 40), row('Zona 2', 20)], [homes]);
+
+    expect(whole(context)).toBe('hogares');
+  });
+
+  it('writes the title too when the caption is hidden', async () => {
+    const context = await show('column', { ...bars, display: { caption: { hidden: true } } }, categories, [percent]);
+
+    expect(whole(context)).toBe('% de los hogares');
+  });
+
+  it('writes nothing while the caption line is in sight (Caption in sight)', async () => {
+    const without = await show('column', { ...bars }, categories, [percent]);
+    expect(title(without)).toBeNull();
+  });
+
+  it('writes nothing for a column chart whose caption is kept in sight under a subtitle', async () => {
+    const context = await show('column', { ...bars, display: { subtitle, caption: { hidden: false } } }, categories, [percent]);
+
+    expect(title(context)).toBeNull();
+  });
+
+  it('writes nothing for a percent indicator with no unit (Percent with no unit)', async () => {
+    const bare = indicator('teatro_hoy', { label: 'Teatro hoy', format: 'percent', unit: null });
+    const context = await show('column', { ...bars, display: { subtitle } }, categories, [bare]);
+
+    expect(title(context)).toBeNull();
+  });
+
+  it('writes nothing for a unit of the percent sign alone', async () => {
+    const sign = indicator('teatro_hoy', { label: 'Teatro hoy', format: 'percent', unit: '%' });
+    const context = await show('column', { ...bars, display: { subtitle } }, categories, [sign]);
+
+    expect(title(context)).toBeNull();
+  });
+
+  it('writes nothing for a widget with a series, whose legend takes the caption\'s place', async () => {
+    const answer = seriesResult([cell('Zona 1', 'Sí', 30, 3), cell('Zona 1', 'No', 10, 2), cell('Zona 2', 'Sí', 20, 1)], ['Sí', 'No']);
+    const context = await showAnswer('column', { indicator: 'households_visited', groupBy: 'zona', seriesBy: 'respuesta', layout: 'grouped', display: { subtitle } }, answer, [households]);
+
+    expect(title(context)).toBeNull();
+  });
+
+  it('writes nothing for a histogram', async () => {
+    const context = await show('histogram', { indicator: 'teatro_hoy', groupBy: null, buckets: 4, display: { subtitle } }, [row(null, 1), row(null, 5)], [percent]);
+
+    expect(title(context)).toBeNull();
+  });
+
+  it('keeps the unit in the tooltip of every value, as before', async () => {
+    const context = await show('column', { ...bars, display: { subtitle } }, categories, [percent]);
+
+    all(context.root, 'chart-hit')[0].dispatchEvent(new MouseEvent('pointerenter', { clientX: 40, clientY: 30 }));
+    await settle(context.harness);
+    expect(Array.from(overlay().querySelectorAll('[data-testid="tooltip-line"]')).map(text).join(' ')).toContain('de los hogares');
+  });
+
+  it('cuts a title longer than the plot with an ellipsis and keeps the whole text in its tooltip (Long title)', async () => {
+    const long = 'de los hogares de cada estrato que asistieron a algún espectáculo en el último año calendario';
+    const wide = indicator('teatro_hoy', { label: 'Teatro hoy', format: 'percent', unit: long });
+    const context = await show('column', { ...bars, display: { subtitle } }, categories, [wide]);
+
+    const at = title(context)!;
+    expect(at.querySelector('title')!.textContent!.trim()).toBe(`% ${long}`);
+    // What is drawn is the text node beside the `<title>`.
+    const drawn = Array.from(at.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join('').trim();
+    expect(drawn.endsWith('…')).toBe(true);
+    expect(drawn.length).toBeLessThan(`% ${long}`.length);
   });
 });
 
@@ -1617,10 +1817,17 @@ describe('chart annotations (add-chart-annotations)', () => {
   const svgOf = (context: Context) => byTestId(context.root, 'chart-svg')!;
   const referenceLines = (context: Context) => all(context.root, 'reference-line');
   const referenceTexts = (context: Context) => all(context.root, 'reference-label').map(text);
-  const keyTexts = (context: Context) => all(context.root, 'reference-key-text').map(text);
+  /** The texts the foot names for the lines whose text did not fit at the line (the key under the chart is gone, improve-widget-text-hierarchy, design D7). */
+  const footTexts = (context: Context) => {
+    const line = byTestId(context.root, 'foot-line-lines');
+    return line ? text(line).split('; ') : [];
+  };
+  const boxes = (context: Context) => all(context.root, 'reference-box');
   const dataLabels = (context: Context) => all(context.root, 'data-label');
   const dataTexts = (context: Context) => dataLabels(context).map(text);
   const num = (element: Element, name: string) => Number(element.getAttribute(name));
+  /** The width the text of a reference label takes, as the chart measures it (5.5 px a character). */
+  const labelWidth = (element: Element) => text(element).length * 5.5;
   /** The text of the axis tick that reads `tick`. */
   const tickOf = (context: Context, tick: string) => Array.from(svgOf(context).querySelectorAll('text')).find((t) => text(t) === tick)!;
   /** The grid lines of the plot: the hairlines of the axis, not the reference lines. */
@@ -1695,29 +1902,106 @@ describe('chart annotations (add-chart-annotations)', () => {
       expect(Math.min(...gridOf(context).map((l) => num(l, 'y1')))).toBeCloseTo(8, 6);
     });
 
-    it('grows the top margin of a chart with lines by one text line', async () => {
+    it('grows the top margin of a chart with lines by one text line and the room of its box', async () => {
       const context = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'mean' }] } }, zones, [teatro]);
 
-      expect(Math.min(...gridOf(context).map((l) => num(l, 'y1')))).toBeCloseTo(20, 6);
+      expect(Math.min(...gridOf(context).map((l) => num(l, 'y1')))).toBeCloseTo(24, 6);
     });
 
-    it('writes only the first of two lines so close that their texts would overlap, and the key lists both (Lines close together)', async () => {
+    it('writes the first of two lines so close that their texts would overlap, and names the second in the foot when no stretch is free for it (Lines close together)', async () => {
       const context = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'mean' }, { kind: 'median' }] } }, zones, [teatro]);
 
       expect(referenceLines(context)).toHaveLength(2);
       expect(referenceLines(context).map((l) => l.getAttribute('stroke-dasharray'))).toEqual(['6 4', '2 3']);
       expect(referenceTexts(context)).toEqual(['Mean: 42.5% de los hogares']);
-      expect(keyTexts(context)).toEqual(['Mean: 42.5% de los hogares', 'Median: 45% de los hogares']);
+      expect(footTexts(context)).toEqual(['Median: 45% de los hogares']);
     });
 
-    it('draws no text at a line whose text is wider than the plot, and the key lists the whole text (Text too wide for the plot)', async () => {
+    it('writes both texts of two close lines when the second finds a free stretch to the left of the first', async () => {
+      // Short columns on the left: the second text moves left, clear of the first.
+      const low = [row('Zona 1', 0.1), row('Zona 2', 0.1), row('Zona 3', 0.1), row('Zona 4', 0.1)];
+      const context = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'value', value: 0.3, label: 'Meta' }, { kind: 'value', value: 0.32, label: 'Objetivo' }] } }, low, [teatro]);
+
+      expect(referenceTexts(context)).toEqual(['Meta: 30% de los hogares', 'Objetivo: 32% de los hogares']);
+      const [first, second] = all(context.root, 'reference-label');
+      expect(num(second, 'x')).toBeLessThan(num(first, 'x') - labelWidth(first));
+      expect(footTexts(context)).toEqual([]);
+      expect(byTestId(context.root, 'foot-chip-lines')).toBeNull();
+    });
+
+    it('draws each text on a box in the tile\'s color with a hairline, under the text, and keeps the halo on the text', async () => {
+      const context = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'mean' }] } }, zones, [teatro]);
+
+      const [box] = boxes(context);
+      const [label] = all(context.root, 'reference-label');
+      expect(boxes(context)).toHaveLength(1);
+      expect(box.tagName.toLowerCase()).toBe('rect');
+      expect(box.getAttribute('rx')).toBe('3');
+      for (const name of ['fill-neutral-primary-soft', 'stroke-default', 'paper:fill-white']) {
+        expect(box.classList, name).toContain(name);
+      }
+      // The box comes before its text in the drawing, so the text is over it, and both are over the marks.
+      expect(box.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(marks(context)[0].compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // The text sits inside its box, which has 3 px beside it and 2 above and below.
+      expect(num(box, 'x') + num(box, 'width')).toBeCloseTo(num(label, 'x') + 3, 6);
+      expect(num(box, 'height')).toBe(16);
+      for (const name of ['stroke-neutral-primary-soft', 'paper:stroke-white']) {
+        expect(label.classList, name).toContain(name);
+      }
+      expect(label.getAttribute('paint-order')).toBe('stroke');
+    });
+
+    it('writes the text of a line at the first free stretch from the right, not over the last columns (Free stretch on the left)', async () => {
+      // The last two columns rise above the line at the right end, as Estrato 4 does in "3.1. Clases hoy, por estrato".
+      const rising = [row('Zona 1', 0.1), row('Zona 2', 0.1), row('Zona 3', 0.1), row('Zona 4', 0.3), row('Zona 5', 0.3)];
+      const context = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'value', value: 0.2, label: 'Total Duitama' }] } }, rising, [teatro]);
+
+      const [label] = all(context.root, 'reference-label');
+      const [box] = boxes(context);
+      const tall = marks(context).slice(3).map((mark) => ({ x0: num(mark, 'x'), x1: num(mark, 'x') + num(mark, 'width') }));
+      expect(text(label)).toBe('Total Duitama: 20% de los hogares');
+      for (const column of tall) {
+        expect(num(box, 'x') + num(box, 'width') <= column.x0 || num(box, 'x') >= column.x1).toBe(true);
+      }
+    });
+
+    it('keeps the text at the right end, over the columns, on its box, when every column rises above the line (No free stretch)', async () => {
+      const high = [row('Zona 1', 0.5), row('Zona 2', 0.6), row('Zona 3', 0.7), row('Zona 4', 0.8)];
+      const context = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'value', value: 0.1, label: 'Mínimo' }] } }, high, [teatro]);
+
+      const [label] = all(context.root, 'reference-label');
+      expect(label.getAttribute('text-anchor')).toBe('end');
+      expect(num(label, 'x')).toBe(num(referenceLines(context)[0], 'x2'));
+      expect(boxes(context)).toHaveLength(1);
+      expect(footTexts(context)).toEqual([]);
+    });
+
+    it('draws a bar chart\'s text above the plot beside its line, on its box (Bar chart)', async () => {
+      const context = await show('bar', { ...plainColumn, display: { referenceLines: [{ kind: 'value', value: 0.1, label: 'Mínimo' }] } }, [row('Zona 1', 0.2), row('Zona 2', 0.4), row('Zona 3', 0.6)], [teatro]);
+
+      const [label] = all(context.root, 'reference-label');
+      expect(label.getAttribute('text-anchor')).toBe('start');
+      expect(num(label, 'y')).toBeLessThan(num(gridOf(context)[0], 'y1'));
+      expect(boxes(context)).toHaveLength(1);
+    });
+
+    it('draws no text at a line whose text is wider than the plot, and the foot\'s reference-lines chip opens the whole text (Text left out)', async () => {
       const unit = 'de los hogares encuestados en la zona urbana del municipio';
       const context = await show('column', { ...plainColumn, display: { unit, referenceLines: [{ kind: 'value', value: 0.5, label: 'Meta del plan de desarrollo municipal' }] } }, zones, [teatro]);
 
       expect(referenceLines(context)).toHaveLength(1);
       expect(referenceTexts(context)).toEqual([]);
-      expect(keyTexts(context)).toEqual([`Meta del plan de desarrollo municipal: 50% ${unit}`]);
-      expect(all(context.root, 'reference-label').every((label) => text(label).length < 200)).toBe(true);
+      expect(boxes(context)).toHaveLength(0);
+      expect(footTexts(context)).toEqual([`Meta del plan de desarrollo municipal: 50% ${unit}`]);
+      expect(text(byTestId(context.root, 'foot-chip-lines')!)).toBe('Reference lines');
+    });
+
+    it('draws no key under the chart, whatever lines it has (Key above the footnote)', async () => {
+      const context = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'mean' }, { kind: 'value', value: 0.5, label: 'Meta' }] } }, zones, [teatro]);
+
+      expect(all(context.root, 'reference-key')).toHaveLength(0);
+      expect(context.root.querySelector('app-reference-key')).toBeNull();
     });
 
     it('draws the overall line of grouped columns at the total of all their rows (Overall line on grouped columns)', async () => {
@@ -1736,7 +2020,8 @@ describe('chart annotations (add-chart-annotations)', () => {
       const context = await showAnswer('column', { ...plainColumn, ratio, display: { referenceLines: [{ kind: 'mean' }, { kind: 'overall' }] } }, result(zones, { overall: 0.4599 }), [teatro]);
 
       expect(context.query).toMatchObject({ chartType: 'column' });
-      expect(keyTexts(context)).toEqual(['Mean: 42.5% de los hogares', 'Overall: 45.99% de los hogares']);
+      expect(referenceTexts(context)).toEqual(['Mean: 42.5% de los hogares']);
+      expect(footTexts(context)).toEqual(['Overall: 45.99% de los hogares']);
     });
 
     it('leaves out an overall line the engine could not give', async () => {
@@ -1752,7 +2037,7 @@ describe('chart annotations (add-chart-annotations)', () => {
 
       const [line] = referenceLines(context);
       expect(num(line, 'x1')).toBeCloseTo((num(tickOf(context, '0%'), 'x') + num(tickOf(context, '100%'), 'x')) / 2, 6);
-      expect(keyTexts(context)).toEqual(['Reference: 50%']);
+      expect(referenceTexts(context)).toEqual(['Reference: 50%']);
     });
 
     it('draws the lines of a stacked chart at their own numbers, on an axis that reaches them', async () => {
@@ -1781,21 +2066,21 @@ describe('chart annotations (add-chart-annotations)', () => {
       const context = await show('column', { indicator: 'piped_water_rate', groupBy: 'zona', display: { referenceLines: [{ kind: 'value', value: 0.5, label: 'Meta' }] } }, [row('Zona 1', 0.3)], [rate]);
 
       expect(referenceTexts(context)).toEqual(['Meta: 50%']);
-      expect(keyTexts(context)).toEqual(['Meta: 50%']);
+      expect(footTexts(context)).toEqual([]);
     });
 
     it('writes a count with its unit (Count with a unit)', async () => {
       const context = await show('column', { indicator: 'teatro_conteo', groupBy: 'zona', display: { referenceLines: [{ kind: 'value', value: 100 }] } }, [row('Zona 1', 80)], [conteo]);
 
       expect(referenceTexts(context)).toEqual(['Reference: 100 hogares']);
-      expect(keyTexts(context)).toEqual(['Reference: 100 hogares']);
+      expect(footTexts(context)).toEqual([]);
     });
 
     it('writes a target on a percent indicator with its unit (Target on a percent indicator)', async () => {
       const context = await show('bar', { indicator: 'teatro_hoy', groupBy: 'categoria', display: { referenceLines: [{ kind: 'value', value: 0.25, label: 'Meta' }] } }, [row('Cine', 0.1), row('Teatro', 0.3)], [teatro]);
 
       expect(referenceTexts(context)).toEqual(['Meta: 25% de los hogares']);
-      expect(keyTexts(context)).toEqual(['Meta: 25% de los hogares']);
+      expect(footTexts(context)).toEqual([]);
     });
 
     it('writes the default label in the interface language, with the browser entry that chose it (Default label in Spanish)', async () => {
@@ -1804,7 +2089,6 @@ describe('chart annotations (add-chart-annotations)', () => {
       await settle(context.harness);
 
       // The percent sign follows the region's own pattern (a space before it or none, by the ICU data of the runtime).
-      expect(keyTexts(context)).toEqual([expect.stringMatching(/^Promedio: 34,17\s?% de los hogares$/)]);
       expect(referenceTexts(context)).toEqual([expect.stringMatching(/^Promedio: 34,17\s?% de los hogares$/)]);
     });
 
@@ -1826,40 +2110,81 @@ describe('chart annotations (add-chart-annotations)', () => {
     });
   });
 
-  describe('the key (design D5)', () => {
-    it('lists every line under the plot, each with a dashed swatch, and nothing for a chart without lines', async () => {
-      const context = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'mean' }, { kind: 'value', value: 0.5, label: 'Meta' }] } }, zones, [teatro]);
-
-      const key = byTestId(context.root, 'reference-key')!;
-      expect(key.getAttribute('aria-label')).toBe('Reference lines');
-      expect(all(context.root, 'reference-key-item')).toHaveLength(2);
-      expect(all(context.root, 'reference-key-swatch').map((swatch) => swatch.querySelector('line')!.getAttribute('stroke-dasharray'))).toEqual(['6 4', '2 3']);
-      // A sibling of the plot box in the chart's column, after it, that does not shrink: it takes its room before the plot does.
-      const host = key.closest('app-reference-key')!;
-      expect(host.classList).toContain('shrink-0');
-      expect(byTestId(context.root, 'chart-box')!.nextElementSibling).toBe(host);
-    });
-
-    it('cuts the plot at its own box while a key follows (Key above the footnote)', async () => {
-      const withLine = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'mean' }] } }, zones, [teatro]);
-      const box = byTestId(withLine.root, 'chart-box')!;
-      expect(box.style.overflow).toBe('clip');
-      expect(box.style.getPropertyValue('overflow-clip-margin')).not.toBe('');
-    });
-
-    it('leaves the plot box as it was in a chart without lines', async () => {
+  describe('the plot and the foot (improve-widget-text-hierarchy, design D7)', () => {
+    it('leaves the plot box as it was, with or without lines: the texts are in the plot and nothing follows it (Key above the footnote)', async () => {
       const without = await show('column', plainColumn, zones, [teatro]);
-      const plainBox = byTestId(without.root, 'chart-box')!;
-      expect(plainBox.className).toBe('relative min-h-0 flex-1');
-      expect(plainBox.getAttribute('style')).toBeNull();
+      expect(byTestId(without.root, 'chart-box')!.className).toBe('relative min-h-0 flex-1');
+      expect(byTestId(without.root, 'chart-box')!.getAttribute('style')).toBeNull();
     });
 
-    it('keeps the key above the widget\'s footnote (Key above the footnote)', async () => {
-      const context = await show('column', { ...plainColumn, display: { footnote: 'No suman 100 %: respuesta múltiple.', referenceLines: [{ kind: 'mean' }] } }, zones, [teatro]);
+    it('keeps the plot box of a chart with lines without a clip of its own', async () => {
+      const withLine = await show('column', { ...plainColumn, display: { referenceLines: [{ kind: 'mean' }] } }, zones, [teatro]);
 
-      const key = byTestId(context.root, 'reference-key')!;
-      const footnote = byTestId(context.root, 'widget-footnote')!;
-      expect(key.compareDocumentPosition(footnote) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const box = byTestId(withLine.root, 'chart-box')!;
+      expect(box.style.overflow).toBe('');
+      expect(box.nextElementSibling === null || box.nextElementSibling.tagName.toLowerCase() !== 'app-reference-key').toBe(true);
+    });
+
+    it('puts the reference-lines chip of a line left out before the footnote (Lines above the footnote)', async () => {
+      const unit = 'de los hogares encuestados en la zona urbana del municipio';
+      const context = await show('column', { ...plainColumn, display: { unit, footnote: 'No suman 100 %.', referenceLines: [{ kind: 'value', value: 0.5, label: 'Meta del plan de desarrollo municipal' }] } }, zones, [teatro]);
+
+      const chips = Array.from(context.root.querySelectorAll('[data-testid="widget-foot"] > button')).map((chip) => chip.getAttribute('data-testid'));
+      expect(chips).toEqual(['foot-chip-lines', 'foot-chip-note']);
+    });
+
+    it('names every line left out in the chip, joined by a semicolon, and none of the others', async () => {
+      const unit = 'de los hogares encuestados en la zona urbana del municipio';
+      const context = await show('column', { ...plainColumn, display: { unit, referenceLines: [{ kind: 'value', value: 0.5, label: 'Meta del plan de desarrollo municipal' }, { kind: 'value', value: 0.3, label: 'Mínimo del plan de desarrollo municipal' }] } }, zones, [teatro]);
+
+      expect(footTexts(context)).toEqual([`Meta del plan de desarrollo municipal: 50% ${unit}`, `Mínimo del plan de desarrollo municipal: 30% ${unit}`]);
+    });
+
+    it('draws no chip for the lines of a widget shown as a table, which lists every line under the table', async () => {
+      const unit = 'de los hogares encuestados en la zona urbana del municipio';
+      const context = await show('column', { ...plainColumn, display: { unit, referenceLines: [{ kind: 'value', value: 0.5, label: 'Meta del plan de desarrollo municipal' }] } }, zones, [teatro]);
+      expect(byTestId(context.root, 'foot-chip-lines')).not.toBeNull();
+
+      await toggle(context);
+
+      expect(byTestId(context.root, 'foot-chip-lines')).toBeNull();
+      expect(all(context.root, 'reference-list-item').map(text)).toEqual([`Meta del plan de desarrollo municipal: 50% ${unit}`]);
+    });
+  });
+
+  describe('data labels over the lines (improve-widget-text-hierarchy, design D8)', () => {
+    const level = [row('Zona 1', 0.5), row('Zona 2', 0.5)];
+
+    it('draws a data label after the reference lines, whole and on a halo in the tile\'s color, on screen and on paper (Line crossing a label)', async () => {
+      const context = await show('column', { ...plainColumn, display: { dataLabels: true, referenceLines: [{ kind: 'value', value: 0.55, label: 'Meta' }] } }, level, [teatro]);
+
+      const [line] = referenceLines(context);
+      const labels = dataLabels(context);
+      expect(labels.length).toBeGreaterThan(0);
+      for (const label of labels) {
+        expect(line.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        for (const name of ['stroke-neutral-primary-soft', 'paper:stroke-white']) {
+          expect(label.classList, name).toContain(name);
+        }
+        expect(label.getAttribute('paint-order')).toBe('stroke');
+      }
+    });
+
+    it('leaves out a data label that would cover a reference line\'s text, and the tooltip of the column still gives its value (Label under a line\'s text)', async () => {
+      // Both columns reach the line: its text sits over the last column's slot, on the baseline its label would use.
+      const context = await show('column', { ...plainColumn, display: { dataLabels: true, referenceLines: [{ kind: 'value', value: 0.5, label: 'Meta del plan' }] } }, level, [teatro]);
+
+      expect(referenceTexts(context)).toEqual(['Meta del plan: 50% de los hogares']);
+      expect(dataTexts(context)).toHaveLength(1);
+      all(context.root, 'chart-hit')[1].dispatchEvent(new MouseEvent('pointerenter', { clientX: 400, clientY: 100 }));
+      await settle(context.harness);
+      expect(Array.from(overlay().querySelectorAll('[data-testid="tooltip-line"]')).map(text).join(' ')).toContain('50% de los hogares');
+    });
+
+    it('keeps every data label of a chart whose lines leave them room', async () => {
+      const context = await show('column', { ...plainColumn, display: { dataLabels: true, referenceLines: [{ kind: 'value', value: 0.9, label: 'Meta' }] } }, level, [teatro]);
+
+      expect(dataTexts(context)).toHaveLength(2);
     });
   });
 
@@ -1873,6 +2198,7 @@ describe('chart annotations (add-chart-annotations)', () => {
       expect(tableRows(context)).toEqual(before);
       expect(all(context.root, 'reference-list-item').map(text)).toEqual(['Mean: 42.5% de los hogares', 'Overall: 45.99% de los hogares']);
       expect(all(context.root, 'reference-key')).toHaveLength(0);
+      expect(all(context.root, 'reference-box')).toHaveLength(0);
       const table = byTestId(context.root, 'widget-table')!;
       expect(table.compareDocumentPosition(byTestId(context.root, 'reference-list')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
@@ -2190,6 +2516,12 @@ describe('stat tile statistic and secondary lines (improve-stat-cards, design D2
   /** The same, with the households each row stands for declared as its base. */
   const priced = indicator('teatro_precio_hogar', { label: 'Teatro precio hogar', format: 'count', unit: 'pesos', columns: { hogares: { label: 'Hogares', base: true } } });
   const lines = (context: Pick<Context, 'root'>) => all(context.root, 'stat-line').map(text);
+  /** The n of a tile is the n chip of its foot (improve-widget-text-hierarchy, design D6): its whole text is the line that describes the chip. */
+  const nOf = (context: Pick<Context, 'root'>) => {
+    const line = byTestId(context.root, 'foot-line-whole') ?? byTestId(context.root, 'foot-line-n');
+    return line ? text(line) : null;
+  };
+  const nChip = (context: Pick<Context, 'root'>) => byTestId(context.root, 'foot-chip-n');
 
   /** Opens a dashboard with one stat tile and answers its one query with `answer`. */
   async function showTile(settings: Partial<WidgetConfig>, indicators: IndicatorEntry[], answer: QueryResult, at: Parameters<typeof open>[4] = {}) {
@@ -2238,72 +2570,104 @@ describe('stat tile statistic and secondary lines (improve-stat-cards, design D2
     const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['n'] } }, [teatro], result([row(null, 0.4685)], { n: 476 }));
 
     expect(text(byTestId(context.root, 'stat-value'))).toBe('46.85% de los hogares');
-    expect(lines(context)).toEqual(['n = 476 Hogares']);
-    expect(byTestId(context.root, 'stat-line')!.classList).toContain('text-xs');
+    expect(nOf(context)).toBe('n = 476 Hogares');
+    expect(nChip(context)!.getAttribute('data-tone')).toBe('neutral');
+    // The n is no line under the figure: the tile keeps its room for its label.
+    expect(lines(context)).toEqual([]);
+    expect(byTestId(context.root, 'stat')!.contains(nChip(context))).toBe(false);
   });
 
-  it('draws the base n line of the dashboard once, inside the tile, and none under the widget (Base n line of the dashboard)', async () => {
+  it('draws the base n line of the dashboard once, as the chip of the foot, and none inside the tile (Base n line of the dashboard)', async () => {
     const context = await showTile({ indicator: 'teatro_hoy', ratio }, [teatro], result([row(null, 0.4685)], { n: 476 }), { bases: { showN: true } });
 
-    expect(lines(context)).toEqual(['n = 476 Hogares']);
-    expect(byTestId(context.root, 'widget-n-line')).toBeNull();
+    expect(all(context.root, 'foot-line-n')).toHaveLength(1);
+    expect(nOf(context)).toBe('n = 476 Hogares');
+    expect(lines(context)).toEqual([]);
   });
 
   it('lets the widget turn the dashboard line off', async () => {
     const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { showN: false } }, [teatro], result([row(null, 0.4685)], { n: 476 }), { bases: { showN: true } });
 
     expect(lines(context)).toEqual([]);
+    expect(nChip(context)).toBeNull();
   });
 
   it('shows the n of a tile that chose it whatever the dashboard says', async () => {
     const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { showN: false, secondary: ['n'] } }, [teatro], result([row(null, 0.4685)], { n: 476 }));
 
-    expect(lines(context)).toEqual(['n = 476 Hogares']);
+    expect(nOf(context)).toBe('n = 476 Hogares');
   });
 
   it('shows no n line for a tile whose indicator declares nothing (Nothing declared)', async () => {
     const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['n'] } }, [teatro], result([row(null, 0.4685)]));
 
-    expect(lines(context)).toEqual([]);
+    expect(nChip(context)).toBeNull();
     expect(text(byTestId(context.root, 'stat-value'))).toBe('46.85% de los hogares');
   });
 
   it('shows no n line for a measure with no base (Measure with no base)', async () => {
     const context = await showTile({ indicator: 'households_visited', measure: 'value', display: { secondary: ['n'] } }, [households], result([row(null, 120)]));
 
-    expect(lines(context)).toEqual([]);
+    expect(nChip(context)).toBeNull();
     expect(text(byTestId(context.root, 'stat-value'))).toBe('120 households');
   });
 
   it('words the n of a statistic as a number of values, with no name (Number of values of a median)', async () => {
     const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median', display: { secondary: ['n'] } }, [price], result([row(null, 40000, null, { n: 37 })], { n: 37 }));
 
-    expect(lines(context)).toEqual(['n = 37']);
+    expect(nOf(context)).toBe('n = 37');
   });
 
   it('words it with the name of the base column when the indicator declares one (Base column of a statistic)', async () => {
     const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'mean', display: { secondary: ['n'] } }, [priced], result([row(null, 60000, null, { n: 4 })], { n: 4 }));
 
-    expect(lines(context)).toEqual(['n = 4 Hogares']);
+    expect(nOf(context)).toBe('n = 4 Hogares');
   });
 
   it('never names the denominator of a ratio for the n of its statistic', async () => {
     const context = await showTile({ indicator: 'teatro_hoy', ratio, statistic: 'median', display: { secondary: ['n'] } }, [teatro], result([row(null, 0.4, null, { n: 12 })], { n: 12 }));
 
-    expect(lines(context)).toEqual(['n = 12']);
+    expect(nOf(context)).toBe('n = 12');
   });
 
-  it('dims the figure of a statistic whose number of values is below the threshold (Small base of a median)', async () => {
+  it('keeps the figure of a statistic whose number of values is below the threshold at full contrast, and makes its n chip amber (Small base of a median)', async () => {
     const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median', display: { secondary: ['n'] } }, [price], result([row(null, 35000, null, { n: 6 })], { n: 6 }), { bases: { minN: 30 } });
 
-    expect(byTestId(context.root, 'stat-value')!.style.opacity).toBe('0.35');
-    expect(lines(context)).toEqual(['n = 6']);
+    const figure = byTestId(context.root, 'stat-value')!;
+    expect(figure.style.opacity).toBe('');
+    expect(figure.getAttribute('data-small')).toBe('true');
+    expect(nChip(context)!.getAttribute('data-tone')).toBe('warning');
+    expect(text(nChip(context)!)).toBe('n = 6');
+    expect(nOf(context)).toBe('Small base: the figure rests on n = 6, below the 30 this dashboard asks for. Read it with caution.');
+    expect(lines(context)).toEqual([]);
   });
 
-  it('draws the figure of a statistic over the threshold as it is', async () => {
-    const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median' }, [price], result([row(null, 40000, null, { n: 37 })], { n: 37 }), { bases: { minN: 30 } });
+  it('shows the amber n chip of a tile with a small base whether or not the tile or its dashboard shows its n (Small base with the n not shown)', async () => {
+    const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median' }, [price], result([row(null, 35000, null, { n: 6 })], { n: 6 }), { bases: { minN: 30 } });
+
+    expect(nChip(context)!.getAttribute('data-tone')).toBe('warning');
+    expect(text(nChip(context)!)).toBe('n = 6');
+  });
+
+  it('has no chip for a tile with a small base that has no n at all', async () => {
+    const context = await showTile({ indicator: 'teatro_hoy', ratio }, [teatro], result([row(null, 0.4685)]), { bases: { minN: 30 } });
+
+    expect(nChip(context)).toBeNull();
+  });
+
+  it('keeps the n chip gray when the threshold is off for the tile, whatever its n (Threshold off)', async () => {
+    const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median', display: { secondary: ['n'], minN: 0 } }, [price], result([row(null, 35000, null, { n: 6 })], { n: 6 }), { bases: { minN: 30 } });
+
+    expect(nChip(context)!.getAttribute('data-tone')).toBe('neutral');
+    expect(nOf(context)).toBe('n = 6');
+  });
+
+  it('draws the figure of a statistic over the threshold as it is, with a gray n chip', async () => {
+    const context = await showTile({ indicator: 'teatro_precio_hogar', measure: 'value', statistic: 'median', display: { secondary: ['n'] } }, [price], result([row(null, 40000, null, { n: 37 })], { n: 37 }), { bases: { minN: 30 } });
 
     expect(byTestId(context.root, 'stat-value')!.style.opacity).toBe('');
+    expect(byTestId(context.root, 'stat-value')!.hasAttribute('data-small')).toBe(false);
+    expect(nChip(context)!.getAttribute('data-tone')).toBe('neutral');
   });
 
   it('writes the value without the dashboard filters with the format of the tile (Value without the dashboard filters)', async () => {
@@ -2320,11 +2684,12 @@ describe('stat tile statistic and secondary lines (improve-stat-cards, design D2
     expect(lines(context)).toEqual([]);
   });
 
-  it('shows the n line first and the line without filters second, whatever order they were saved in', async () => {
+  it('shows the line without filters under the label and the n in the foot, whatever order they were saved in', async () => {
     const answer = result([row(null, 0.31)], { n: 121, unfiltered: 0.4685 });
     const context = await showTile({ indicator: 'teatro_hoy', ratio, display: { secondary: ['unfiltered', 'n'] } }, [teatro], answer);
 
-    expect(lines(context)).toEqual(['n = 121 Hogares', 'Without filters: 46.85% de los hogares']);
+    expect(lines(context)).toEqual(['Without filters: 46.85% de los hogares']);
+    expect(nOf(context)).toBe('n = 121 Hogares');
   });
 
   it('shows no line for the secondary lines a tile did not choose, and asks for no figure without filters', async () => {
@@ -2374,7 +2739,7 @@ describe('stat tile statistic and secondary lines (improve-stat-cards, design D2
 
     expect(text(byTestId(context.root, 'stat-value'))).toBe('46.85% de los hogares');
     expect(byTestId(context.root, 'stat-label')!.classList).toContain('sr-only');
-    expect(lines(context)).toEqual(['n = 476 Hogares']);
+    expect(nOf(context)).toBe('n = 476 Hogares');
   });
 
   it('words the statistic, the base and the line without filters in Spanish', async () => {
@@ -2385,7 +2750,8 @@ describe('stat tile statistic and secondary lines (improve-stat-cards, design D2
     await settle(context.harness);
 
     expect(text(byTestId(context.root, 'stat-label'))).toBe('Mediana de Teatro precio hogar: value');
-    expect(lines(context)).toEqual(['n = 6', expect.stringMatching(/^Sin filtros: 40\.000\s?pesos$/)]);
+    expect(lines(context)).toEqual([expect.stringMatching(/^Sin filtros: 40\.000\s?pesos$/)]);
+    expect(nOf(context)).toBe('n = 6');
   });
 
   it('has the words of the statistics and of the line without filters in each language', () => {

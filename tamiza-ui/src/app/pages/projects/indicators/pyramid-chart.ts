@@ -2,7 +2,7 @@ import { Component, ElementRef, LOCALE_ID, computed, effect, inject, input, outp
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
-import { ChartBases, SeriesFigures, isSmallBase, noChartBases, seriesFigures, smallBaseDash, smallBaseOpacity, smallBaseStroke, summaryWithSmall } from './base-figures';
+import { ChartBases, SeriesFigures, SmallMark, isSmallBase, noChartBases, seriesFigures, smallBaseDash, smallBaseOpacity, smallBaseStroke, summaryWithSmall } from './base-figures';
 import { observeSize } from './chart-data';
 import { ChartColors } from './chart-colors';
 import { registerExportParts } from './export-parts';
@@ -33,6 +33,8 @@ export interface PyramidPlot {
   groups: (string | null)[];
   /** How many bars have a small base (add-small-sample-warnings, design D10). */
   small: number;
+  /** The marks drawn dimmed, by name and n, in drawing order (improve-widget-text-hierarchy, design D5). */
+  smallMarks: SmallMark[];
 }
 
 export interface PyramidPlotInput {
@@ -95,6 +97,7 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
   const hits: Hit[] = [];
   const marks: (MarkPoint | null)[][] = rows.map(() => [null, null]);
   let small = 0;
+  const smallMarks: SmallMark[] = [];
 
   for (const tick of axis.ticks) {
     const text = input.value.tick(tick);
@@ -123,6 +126,9 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
       const bar = { x, y, width: Math.max(1, length), height: thickness };
       const dim = isSmallBase(row.figures?.[column]?.n, input.figures?.minN);
       small += dim ? 1 : 0;
+      if (dim) {
+        smallMarks.push({ name: `${input.groupLabel(row.group)} · ${input.names[side]}`, n: row.figures?.[column]?.n ?? 0 });
+      }
       rectsOut.push({ ...bar, color: input.colors[side], title: '', at: { g: visual, s: side }, ...(dim ? { dim } : {}) });
       // The hit area is the whole row's half, the gap above and below the bar included.
       hits.push({ x: side === 0 ? left : center, y: bands.start(visual) - (bands.step - bands.bandwidth) / 2, width: (w - right - left) / 2, height: bands.step, at: { g: visual, s: side } });
@@ -141,7 +147,7 @@ export function pyramidPlot(input: PyramidPlotInput): PyramidPlot {
       };
     });
   });
-  return { width: w, height: h, grid, ticks, labels, rects: rectsOut, values, hits, marks, groups: rows.map(({ row }) => row.group), small };
+  return { width: w, height: h, grid, ticks, labels, rects: rectsOut, values, hits, marks, groups: rows.map(({ row }) => row.group), small, smallMarks };
 }
 
 /**
@@ -254,7 +260,7 @@ export class PyramidChart {
   /** The threshold in force and the indicator's base column, for the figures and the small bases of the bars (add-small-sample-warnings). */
   readonly bases = input<ChartBases>(noChartBases);
   /** How many bars the chart draws dimmed for a small base, so the widget can explain the dimming under it (design D10, D11). */
-  readonly dimmed = output<number>();
+  readonly dimmed = output<SmallMark[]>();
   protected readonly smallStroke = smallBaseStroke;
   protected readonly smallDash = smallBaseDash;
   protected readonly smallOpacity = smallBaseOpacity;
@@ -320,7 +326,7 @@ export class PyramidChart {
 
   // What an image of the pyramid says around its bars (add-widget-export): the two sides' legend and the rows it left out.
   constructor() {
-    effect(() => this.dimmed.emit(this.plot().small));
+    effect(() => this.dimmed.emit(this.plot().smallMarks));
     registerExportParts({
       plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
       settle: () => this.marks.reset(),

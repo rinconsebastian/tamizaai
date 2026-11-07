@@ -6,14 +6,14 @@ import { CategoryOrders, arrangeColumns, groupTexts, seriesTexts, shown } from '
 import { histogram, observeSize, pivot } from './chart-data';
 import { bandScale, charWidth, compactNumber, linePath, linearScale, niceAxis, stepPath, truncate, Point } from './chart-scales';
 import { Box, ReferenceMark, dashOf, dataLabelMargin, labelGap, minLabelBar, placeReferences, pointGap, referenceMargin, textWidth, boxOf } from './chart-annotations';
-import { ChartBases, overOnAnswers, figureNames, figureTooltip, hasNColumn, histogramTooltip, isSmallBase, markSmall, nCell, noChartBases, seriesFigures, smallBaseStroke, smallBaseDash, smallBaseOpacity, summaryWithSmall } from './base-figures';
+import { ChartBases, SmallMark, overOnAnswers, figureNames, figureTooltip, hasNColumn, histogramTooltip, isSmallBase, markSmall, nCell, noChartBases, seriesFigures, smallBaseStroke, smallBaseDash, smallBaseOpacity, summaryWithSmall } from './base-figures';
 import { ChartColors } from './chart-colors';
 import { CrosstabWidget, crossTableModel } from './crosstab-widget';
 import { registerExportParts } from './export-parts';
-import { ColumnNamer, ValueFormatter, captionShown, named, ownCaption, plotted, rawNames } from './format';
+import { ColumnNamer, ValueFormatter, captionInFoot, captionSeen, named, ownCaption, plotted, rawNames } from './format';
 import { MarkGrid, MarkPoint, markTooltips } from './mark-tooltips';
 import { referenceLineValues } from './reference-lines';
-import { LegendEntry, ReferenceEntry, ReferenceKey, ReferenceList, SeriesLegend, SeriesNotes, seriesName, seriesNoteTexts } from './series-legend';
+import { LegendEntry, ReferenceEntry, ReferenceList, SeriesLegend, SeriesNotes, seriesName, seriesNoteTexts } from './series-legend';
 import { Dot, Hit, Label, Line, Path, Rect, SeriesPlot, hitSpan, seriesPlot, writeDataLabel } from './series-plot';
 import { SeriesTable, buildSeriesTable, isSeriesAnswer } from './series-table';
 import { TableModel, WidgetTable } from './widget-table';
@@ -25,6 +25,16 @@ export type AxisKind = 'bar' | 'column' | 'line' | 'histogram';
 type Translate = (key: string, params?: Record<string, unknown>) => string;
 
 const maxThickness = 40;
+/** The room a value axis' title takes: a line of 11 px text and its gap (improve-widget-text-hierarchy, design D3). */
+const axisTitleRoom = 14;
+/** Where the value axis' title is written, cut to the plot with its whole text in `title`. */
+interface AxisTitle {
+  x: number;
+  y: number;
+  text: string;
+  anchor: 'start' | 'end';
+  title?: string;
+}
 const minSlot = 14;
 
 /**
@@ -46,14 +56,15 @@ const minSlot = 14;
  */
 @Component({
   selector: 'app-axis-chart',
-  imports: [TranslocoDirective, CrosstabWidget, ReferenceKey, ReferenceList, SeriesLegend, SeriesNotes, WidgetTable],
+  imports: [TranslocoDirective, CrosstabWidget, ReferenceList, SeriesLegend, SeriesNotes, WidgetTable],
   template: `
     <ng-container *transloco="let t">
       @if (legend().length > 1) {
         <!-- With a series the legend takes the caption's place: it names what the colors mean. -->
         <app-series-legend [entries]="legend()" [shape]="kind() === 'line' ? 'line' : 'square'" />
-      } @else {
-        <p class="shrink-0 text-xs text-body" [class.sr-only]="!captionShown(config())" data-testid="chart-caption">{{ caption(t) }}</p>
+      } @else if (!ownTextInFoot()) {
+        <!-- An own text that a subtitle takes out of sight is the foot's caption chip, which screen readers hear once (design D2). -->
+        <p class="shrink-0 text-xs text-body" [class.sr-only]="!captionSeen()" data-testid="chart-caption">{{ caption(t) }}</p>
       }
       @if (asTable()) {
         @if (seriesTable()) {
@@ -68,8 +79,7 @@ const minSlot = 14;
           <p class="shrink-0 text-xs text-body" data-testid="overall-note">{{ t('indicators.referenceLines.noOverall') }}</p>
         }
       } @else {
-        <!-- With a key under it the plot is cut at its own box, never the key (design D5): the clip margin keeps the focus ring and stays inside the gap. -->
-        <div #box class="relative min-h-0 flex-1" [style.overflow]="referenceEntries().length > 0 ? 'clip' : null" [style.overflow-clip-margin]="referenceEntries().length > 0 ? '4px' : null" data-testid="chart-box">
+        <div #box class="relative min-h-0 flex-1" data-testid="chart-box">
           <svg
             #chartSvg
             role="application"
@@ -90,6 +100,15 @@ const minSlot = 14;
             }
             @for (tick of layout().ticks; track $index) {
               <text class="fill-body" font-size="11" [attr.x]="tick.x" [attr.y]="tick.y" [attr.text-anchor]="tick.anchor">{{ tick.text }}</text>
+            }
+            @if (axisTitleLabel(); as title) {
+              <!-- The unit at the end of the value axis, while the caption line is out of sight (design D3): the accessible summary already names what is plotted. -->
+              <text class="fill-body" font-size="11" aria-hidden="true" [attr.x]="title.x" [attr.y]="title.y" [attr.text-anchor]="title.anchor" data-testid="axis-title">
+                @if (title.title) {
+                  <title>{{ title.title }}</title>
+                }
+                {{ title.text }}
+              </text>
             }
             @for (label of layout().labels; track $index) {
               <text class="fill-body" font-size="11" [attr.x]="label.x" [attr.y]="label.y" [attr.text-anchor]="label.anchor">
@@ -151,10 +170,22 @@ const minSlot = 14;
               </line>
             }
             @for (label of layout().dataLabels; track $index) {
-              <text class="fill-heading stroke-neutral-primary-soft" font-size="11" stroke-width="3" stroke-linejoin="round" paint-order="stroke" aria-hidden="true" [attr.x]="label.x" [attr.y]="label.y" [attr.text-anchor]="label.anchor" data-testid="data-label">{{ label.text }}</text>
+              <text class="fill-heading stroke-neutral-primary-soft paper:stroke-white" font-size="11" stroke-width="3" stroke-linejoin="round" paint-order="stroke" aria-hidden="true" [attr.x]="label.x" [attr.y]="label.y" [attr.text-anchor]="label.anchor" data-testid="data-label">{{ label.text }}</text>
             }
             @for (label of layout().referenceLabels; track $index) {
-              <text class="fill-heading stroke-neutral-primary-soft" font-size="11" stroke-width="3" stroke-linejoin="round" paint-order="stroke" [attr.x]="label.x" [attr.y]="label.y" [attr.text-anchor]="label.anchor" data-testid="reference-label">{{ label.text }}</text>
+              <!-- A reference text is drawn on a box in the tile's color, so it reads over the marks whatever they are (improve-widget-text-hierarchy, design D7). -->
+              <rect
+                rx="3"
+                class="fill-neutral-primary-soft stroke-default paper:fill-white"
+                stroke-width="1"
+                aria-hidden="true"
+                [attr.x]="label.box.x0"
+                [attr.y]="label.box.y0"
+                [attr.width]="label.box.x1 - label.box.x0"
+                [attr.height]="label.box.y1 - label.box.y0"
+                data-testid="reference-box"
+              />
+              <text class="fill-heading stroke-neutral-primary-soft paper:stroke-white" font-size="11" stroke-width="3" stroke-linejoin="round" paint-order="stroke" [attr.x]="label.x" [attr.y]="label.y" [attr.text-anchor]="label.anchor" data-testid="reference-label">{{ label.text }}</text>
             }
             <!-- The areas that answer the pointer are larger than the marks (the gap between them included) and sit on top of them. -->
             @for (hit of layout().hits; track $index) {
@@ -178,10 +209,6 @@ const minSlot = 14;
           <p [id]="marks.helpId" class="sr-only">{{ t(keyHelp()) }}</p>
           <p class="sr-only" role="status" aria-live="polite" data-testid="marks-announcement">{{ marks.announcement() }}</p>
         </div>
-        <!-- The key belongs to the chart: it takes its room from the plot as the caption does, above the widget's footnote (design D5). -->
-        @if (referenceEntries().length) {
-          <app-reference-key [entries]="referenceEntries()" />
-        }
         @if (overallLeftOut()) {
           <p class="shrink-0 text-xs text-body" data-testid="overall-note">{{ t('indicators.referenceLines.noOverall') }}</p>
         }
@@ -203,10 +230,22 @@ export class AxisChart {
   readonly answer = input<QueryResult | null>(null);
   readonly config = input.required<WidgetConfig>();
   /** Whether the line that names what the widget plots is seen: a hidden one stays for screen readers (add-widget-context, design D3). */
-  protected readonly captionShown = captionShown;
+  /** The caption line is seen above the plot (a histogram keeps its line under a subtitle; bar, column and line give it up, design D2). */
+  protected readonly captionSeen = computed(() => captionSeen(this.kind(), this.config()));
+  /** The title of the value axis (design D3): the unit, while a bar, column or line chart with no series has its caption line out of sight. */
+  private readonly axisTitleText = computed(() => (this.kind() === 'histogram' || this.legend().length > 1 || this.captionSeen() ? null : this.axisTitle()));
+  /** Where the title is drawn, from the plain layout; a widget with a series has none. */
+  protected readonly axisTitleLabel = computed(() => (this.seriesMarks() ? null : this.plain().axisTitle));
+  /** The widget's own caption text is out of sight under its subtitle and shown in the foot's caption chip instead. */
+  protected readonly ownTextInFoot = computed(() => this.kind() !== 'histogram' && captionInFoot(this.kind(), this.config()));
   /** The indicator's label and the formatter of its values. */
   readonly label = input.required<string>();
   readonly format = input.required<ValueFormatter>();
+  /**
+   * The unit as the widget writes it, for the title of the value axis (improve-widget-text-hierarchy, design D3). The chart writes it only
+   * while it has no series and its caption line is out of sight; a histogram never does.
+   */
+  readonly axisTitle = input<string | null>(null);
   /** The name shown for each column (add-indicator-column-metadata); the columns' own names when none is given. */
   readonly names = input<ColumnNamer>(rawNames);
   /** What the widget declares for the order of its values and the text they are shown with (add-declared-category-order, design D8). */
@@ -214,7 +253,12 @@ export class AxisChart {
   /** The threshold in force and the indicator's base column, for the figures and the small bases of the marks (add-small-sample-warnings). */
   readonly bases = input<ChartBases>(noChartBases);
   /** How many marks the chart draws dimmed for a small base, so the widget can explain the dimming under it (design D10, D11). */
-  readonly dimmed = output<number>();
+  readonly dimmed = output<SmallMark[]>();
+  /**
+   * The whole texts of the reference lines that could not be drawn at their line (improve-widget-text-hierarchy, design D7): the widget's
+   * foot names them. Empty while every text fits, and while the widget is shown as a table, which lists every line under it.
+   */
+  readonly unplaced = output<string[]>();
   protected readonly smallStroke = smallBaseStroke;
   protected readonly smallDash = smallBaseDash;
   protected readonly smallOpacity = smallBaseOpacity;
@@ -326,14 +370,28 @@ export class AxisChart {
     });
   });
 
-  /** How many marks have a small base: the cells of a chart with a series, the bars, columns or points of one without (a histogram has none). */
-  protected readonly smallCount = computed(() => {
+  /**
+   * The marks that have a small base, by name and n (improve-widget-text-hierarchy, design D5): the cells of a chart with a series, named
+   * "group · series", the bars, columns or points of one without (a histogram has none).
+   */
+  protected readonly smallMarks = computed<SmallMark[]>(() => {
     if (this.kind() === 'histogram') {
-      return 0;
+      return [];
     }
     const marks = this.seriesMarks();
-    return marks ? marks.small : this.data().figures.filter((figures) => isSmallBase(figures?.n, this.bases().minN)).length;
+    const table = this.seriesTable();
+    if (marks && table) {
+      const t: Translate = (key, params) => this.transloco.translate(key, params);
+      return marks.smallAt.map(({ g, s }) => ({
+        name: `${shown(this.groupText(), table.rows[g].group) ?? t('indicators.chart.noGroup')} · ${seriesName(table.columns[s], t, this.seriesText())}`,
+        n: table.rows[g].figures?.[s]?.n ?? 0,
+      }));
+    }
+    const { categories, figures } = this.data();
+    return categories.flatMap((category, i) => (isSmallBase(figures[i]?.n, this.bases().minN) ? [{ name: category, n: figures[i]!.n! }] : []));
   });
+  /** How many marks have a small base: what the chart's summary says. */
+  protected readonly smallCount = computed(() => this.smallMarks().length);
   /** The tooltips and the keyboard of the marks of a chart with a series. */
   protected readonly marks = markTooltips({
     host: () => this.svg()?.nativeElement,
@@ -343,7 +401,8 @@ export class AxisChart {
 
   // What an image of the chart says around its plot (add-widget-export): the series legend in the caption's place, or the caption.
   constructor() {
-    effect(() => this.dimmed.emit(this.smallCount()));
+    effect(() => this.dimmed.emit(this.smallMarks()));
+    effect(() => this.unplaced.emit(this.asTable() || this.kind() === 'histogram' ? [] : (this.seriesMarks() ?? this.plain()).unplaced.map((mark) => mark.text)));
     registerExportParts({
       plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
       settle: () => this.marks.reset(),
@@ -359,10 +418,9 @@ export class AxisChart {
         const overall = this.overallLeftOut() ? [t('indicators.referenceLines.noOverall')] : [];
         const entries = [
           ...(withLegend ? legend.map((entry) => ({ label: entry.name, color: entry.color, swatch: this.kind() === 'line' ? ('line' as const) : ('square' as const) })) : []),
-          ...(this.asTable() ? [] : lines.map((mark) => ({ label: mark.text, color: 'var(--color-heading, #111827)', swatch: 'dashed' as const, dash: mark.place }))),
         ];
         const shared = {
-          caption: withLegend ? null : this.caption(t),
+          caption: withLegend || !this.captionSeen() ? null : this.caption(t),
           legend: entries.length ? { kind: 'entries' as const, entries } : null,
           stat: null,
         };
@@ -453,14 +511,17 @@ export class AxisChart {
       (marks[i] as (MarkPoint | null)[])[0]!.x = at.x;
       (marks[i] as (MarkPoint | null)[])[0]!.y = at.y;
     };
-    const top = 8 + (references.length ? referenceMargin : 0) + (labelsOn && kind !== 'bar' ? dataLabelMargin : 0);
+    // The value axis' title takes a line of its own: above the plot of a column or line chart, below the ticks of a bar chart (design D3).
+    const titleText = this.axisTitleText();
+    const top = 8 + (titleText && kind !== 'bar' ? axisTitleRoom : 0) + (references.length ? referenceMargin : 0) + (labelsOn && kind !== 'bar' ? dataLabelMargin : 0);
     const right = 14;
+    let axisTitle: AxisTitle | null = null;
 
     if (kind === 'bar') {
       const longest = Math.max(0, ...categories.map((c) => c.length));
       const labelChars = Math.max(3, Math.min(Math.floor((w * 0.35) / charWidth), longest));
       const left = labelChars * charWidth + 14;
-      const bottom = 24;
+      const bottom = 24 + (titleText ? axisTitleRoom : 0);
       const bands = bandScale(count, [top, h - bottom], 0.25);
       const thickness = Math.min(maxThickness, Math.max(1, bands.bandwidth));
       // A bar thinner than a text line has no label, and the others keep the room past their end for the longest.
@@ -471,7 +532,11 @@ export class AxisChart {
       const stride = Math.max(1, Math.ceil(minSlot / (bands.step || 1)));
       for (const tick of axis.ticks) {
         grid.push({ x1: x(tick), y1: top, x2: x(tick), y2: h - bottom, zero: tick === 0 });
-        ticks.push({ x: x(tick), y: h - 8, text: tickText(tick), anchor: 'middle' });
+        ticks.push({ x: x(tick), y: h - 8 - (titleText ? axisTitleRoom : 0), text: tickText(tick), anchor: 'middle' });
+      }
+      if (titleText) {
+        const fit = truncate(titleText, Math.max(3, Math.floor((w - edge - left) / charWidth)));
+        axisTitle = { x: w - edge, y: h - 8, text: fit, anchor: 'end', ...(fit === titleText ? {} : { title: titleText }) };
       }
       categories.forEach((category, i) => {
         if (i % stride === 0) {
@@ -492,7 +557,7 @@ export class AxisChart {
           }
         }
       });
-      return { width: w, height: h, grid, ticks, labels, rects, lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
+      return { width: w, height: h, grid, ticks, labels, rects, lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, unplaced: placed.unplaced, dataLabels, axisTitle };
     }
 
     const tickTexts = axis.ticks.map((tick) => tickText(tick));
@@ -500,7 +565,27 @@ export class AxisChart {
     const bottom = 26;
     const y = linearScale([axis.min, axis.max], [h - bottom, top]);
     const bands = bandScale(count, [left, w - right], kind === 'line' ? 0 : kind === 'histogram' ? 0.06 : 0.3);
-    const placed = placeReferences(references, false, y, { left, right: w - right, top, bottom: h - bottom }, taken);
+    // A horizontal line's text keeps clear of the marks and of the points (improve-widget-text-hierarchy, design D7): their boxes, before they are drawn.
+    const obstacles: Box[] = [];
+    if (references.length) {
+      if (kind === 'line') {
+        values.forEach((value, i) => {
+          const px = bands.start(i) + bands.bandwidth / 2;
+          obstacles.push({ x0: px - 5, y0: y(value) - 5, x1: px + 5, y1: y(value) + 5 });
+        });
+      } else {
+        const wide = Math.min(maxThickness, Math.max(1, bands.bandwidth));
+        values.forEach((value, i) => {
+          const x0 = bands.start(i) + (bands.bandwidth - wide) / 2;
+          obstacles.push({ x0, y0: Math.min(y(0), y(value)), x1: x0 + wide, y1: Math.max(y(0), y(value)) });
+        });
+      }
+    }
+    const placed = placeReferences(references, false, y, { left, right: w - right, top, bottom: h - bottom }, taken, obstacles);
+    if (titleText) {
+      const fit = truncate(titleText, Math.max(3, Math.floor((w - right - left) / charWidth)));
+      axisTitle = { x: left, y: 11, text: fit, anchor: 'start', ...(fit === titleText ? {} : { title: titleText }) };
+    }
     axis.ticks.forEach((tick, i) => {
       grid.push({ x1: left, y1: y(tick), x2: w - right, y2: y(tick), zero: tick === 0 });
       ticks.push({ x: left - 6, y: y(tick) + 4, text: tickTexts[i], anchor: 'end' });
@@ -536,7 +621,7 @@ export class AxisChart {
       });
       const path = this.steps() ? stepPath : linePath;
       lines.push({ d: points.length > 1 ? path(points) : '', color, name: ownCaption(this.config()) ?? this.label() });
-      return { width: w, height: h, grid, ticks, labels, rects, lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
+      return { width: w, height: h, grid, ticks, labels, rects, lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, unplaced: placed.unplaced, dataLabels, axisTitle };
     }
 
     const thickness = Math.min(maxThickness, Math.max(1, bands.bandwidth));
@@ -557,7 +642,7 @@ export class AxisChart {
         }
       }
     });
-    return { width: w, height: h, grid, ticks, labels, rects, lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, dataLabels };
+    return { width: w, height: h, grid, ticks, labels, rects, lines, dots, hits, marks, references: placed.strokes, referenceLabels: placed.labels, unplaced: placed.unplaced, dataLabels, axisTitle };
   });
 
   /**

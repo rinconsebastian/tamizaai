@@ -3174,7 +3174,7 @@ describe('the widget dialog text on the widget (add-widget-context, design D11)'
     const context = await openDialog({ existing: edit(undefined) });
     await previewAnswer(context, result([row('Cali', 75)]));
     const preview = () => field('dialog-preview');
-    expect(preview().querySelector('[data-testid="widget-footnote"]')).toBeNull();
+    expect(preview().querySelector('[data-testid="foot-line-note"]')).toBeNull();
     expect(preview().querySelector('[data-testid="chart-caption"]')!.classList.contains('sr-only')).toBe(false);
 
     await typeAndSettle(context, 'dialog-subtitle', '¿Quién fue al evento?');
@@ -3185,7 +3185,7 @@ describe('the widget dialog text on the widget (add-widget-context, design D11)'
 
     expect(context.http.match(isQuery).filter((r) => !r.cancelled)).toHaveLength(0);
     expect(text(preview().querySelector('[data-testid="dialog-preview-subtitle"]'))).toBe('¿Quién fue al evento?');
-    expect(text(preview().querySelector('[data-testid="widget-footnote"]'))).toBe('No suman 100 %: respuesta múltiple.');
+    expect(text(preview().querySelector('[data-testid="foot-line-note"]'))).toBe('No suman 100 %: respuesta múltiple.');
     expect(preview().querySelector('[data-testid="chart-caption"]')!.classList.contains('sr-only')).toBe(true);
   });
 
@@ -3194,6 +3194,7 @@ describe('the widget dialog text on the widget (add-widget-context, design D11)'
     await typeAndSettle(context, 'dialog-subtitle', 'Hogares por zona');
     await click(context, radio('text'));
     await typeAndSettle(context, 'dialog-caption-own', 'Hogares con niños');
+    await click(context, field('dialog-caption-keep'));
     await previewAnswer(context, result([row('Cali', 12450)]));
 
     expect(text(field('dialog-preview').querySelector('[data-testid="dialog-preview-subtitle"]'))).toBe('Hogares por zona');
@@ -3221,6 +3222,155 @@ describe('the widget dialog text on the widget (add-widget-context, design D11)'
       caption: { text: '% de quienes asistieron' },
       unit: 'de quienes asistieron',
     });
+  });
+
+  // The caption under a subtitle (improve-widget-text-hierarchy, design D2, task 3.3)
+
+  const keep = () => field<HTMLInputElement>('dialog-caption-keep');
+  const inFootNote = () => dialog().querySelector('[data-testid="dialog-caption-in-foot"]');
+  const previewCaption = () => field('dialog-preview').querySelector<HTMLElement>('[data-testid="chart-caption"]');
+
+  it('shows the caption line above the columns in the preview, with no new query, once the caption is kept in sight (Caption kept in sight in the form)', async () => {
+    const context = await openDialog({ existing: edit({ subtitle: 'Pregunta', caption: { text: '% de los hogares' } }, { chartType: 'column' }) });
+    await previewAnswer(context, result([row('Cali', 75)]));
+    expect(previewCaption()).toBeNull();
+
+    await click(context, keep());
+    await wait(previewDelayMs + 100);
+    await settle(context.harness);
+
+    expect(context.http.match(isQuery).filter((r) => !r.cancelled)).toHaveLength(0);
+    expect(text(previewCaption())).toBe('% de los hogares by municipality');
+    expect(previewCaption()!.classList.contains('sr-only')).toBe(false);
+  });
+
+  it('makes the option unavailable while the caption is hidden (Keep in sight with a hidden caption)', async () => {
+    const context = await openDialog({ existing: edit({ subtitle: 'Pregunta' }, { chartType: 'column' }) });
+    expect(keep().disabled).toBe(false);
+
+    await click(context, radio('hidden'));
+
+    expect(keep().disabled).toBe(true);
+    await click(context, radio('default'));
+    expect(keep().disabled).toBe(false);
+  });
+
+  it('says in its help where the text goes (Help of the keep-in-sight option)', async () => {
+    const context = await openDialog({ existing: edit({ subtitle: 'Pregunta', caption: { text: '% de los hogares' } }, { chartType: 'column' }) });
+
+    expect(text(field('dialog-caption-keep-help'))).toBe("With a subtitle, this line is out of sight and its text shows in the widget's foot.");
+    expect(keep().getAttribute('aria-describedby')).toBe('widgetCaptionKeepHelp');
+    expect(context).toBeDefined();
+  });
+
+  it.each(['bar', 'column', 'line', 'pie'] as const)('offers the option for a %s chart', async (type) => {
+    await openDialog({ existing: edit({ subtitle: 'Pregunta' }, { chartType: type }) });
+
+    expect(fields('dialog-caption-keep')).toHaveLength(1);
+  });
+
+  it.each(['stat', 'histogram', 'map'] as const)('offers no option for a %s widget, whose line always stays in sight (Option on a heat map)', async (type) => {
+    await openDialog({ existing: edit({ subtitle: 'Pregunta' }, { chartType: type, config: config({ display: { subtitle: 'Pregunta' }, groupBy: type === 'map' ? 'municipality' : null }) }) });
+
+    expect(fields('dialog-caption-keep')).toHaveLength(0);
+  });
+
+  it('warns beside the caption, in amber, when an own text goes to the foot, whether the caption or the subtitle was typed last (Warning for an own text out of sight)', async () => {
+    const context = await openDialog({ existing: edit(undefined, { chartType: 'column' }) });
+    await click(context, radio('text'));
+    await typeAndSettle(context, 'dialog-caption-own', '% de los hogares que asistieron');
+    expect(inFootNote()).toBeNull();
+
+    await typeAndSettle(context, 'dialog-subtitle', 'Pregunta');
+
+    const note = inFootNote()!;
+    expect(note).not.toBeNull();
+    expect(note.getAttribute('role')).toBe('status');
+    expect(note.className).toContain('bg-warning-soft');
+    expect(text(note)).toContain("it shows in the widget's foot");
+    expect(field('dialog-caption-own').getAttribute('aria-describedby')).toContain(note.id);
+    // A notice, never a refusal: the form still saves, and the text is saved as it was typed.
+    expect(field<HTMLButtonElement>('dialog-save').disabled).toBe(false);
+    expect((await saved(context)).config.display).toEqual({ subtitle: 'Pregunta', caption: { text: '% de los hogares que asistieron' } });
+  });
+
+  it('warns too when the subtitle is typed first', async () => {
+    const context = await openDialog({ existing: edit(undefined, { chartType: 'pie' }) });
+    await typeAndSettle(context, 'dialog-subtitle', 'Pregunta');
+    await click(context, radio('text'));
+    expect(inFootNote()).toBeNull();
+
+    await typeAndSettle(context, 'dialog-caption-own', 'Proporción');
+
+    expect(inFootNote()).not.toBeNull();
+  });
+
+  it('stops warning once the caption is kept in sight, hidden or back to the default (No warning when nothing moves)', async () => {
+    const context = await openDialog({ existing: edit({ subtitle: 'Pregunta', caption: { text: '% de los hogares' } }, { chartType: 'column' }) });
+    expect(inFootNote()).not.toBeNull();
+
+    await click(context, keep());
+    expect(inFootNote()).toBeNull();
+    await click(context, keep());
+    expect(inFootNote()).not.toBeNull();
+    await click(context, radio('hidden'));
+    expect(inFootNote()).toBeNull();
+    await click(context, radio('default'));
+    expect(inFootNote()).toBeNull();
+  });
+
+  it('does not warn for a widget with no subtitle, a blank one, a series or a kind that keeps its line (No warning when nothing moves)', async () => {
+    const none = await openDialog({ existing: edit({ caption: { text: '% de los hogares' } }, { chartType: 'column' }) });
+    expect(inFootNote()).toBeNull();
+    await typeAndSettle(none, 'dialog-subtitle', '   ');
+    expect(inFootNote()).toBeNull();
+  });
+
+  it('does not warn for a histogram or a stat tile with a subtitle and an own text', async () => {
+    await openDialog({ existing: edit({ subtitle: 'Pregunta', caption: { text: 'Hogares' } }, { chartType: 'histogram', config: config({ groupBy: null, display: { subtitle: 'Pregunta', caption: { text: 'Hogares' } } }) }) });
+
+    expect(inFootNote()).toBeNull();
+  });
+
+  it('saves a caption kept in sight as hidden false, alone or with its own text, and nothing for an unchecked box', async () => {
+    const context = await openDialog({ existing: edit({ subtitle: 'Pregunta' }, { chartType: 'column' }) });
+    await click(context, keep());
+    expect((await saved(context)).config.display).toEqual({ subtitle: 'Pregunta', caption: { hidden: false } });
+  });
+
+  it('saves a caption with an own text kept in sight with both members', async () => {
+    const context = await openDialog({ existing: edit({ subtitle: 'Pregunta' }, { chartType: 'column' }) });
+    await click(context, radio('text'));
+    await typeAndSettle(context, 'dialog-caption-own', '% de las viviendas');
+    await click(context, keep());
+
+    expect((await saved(context)).config.display).toEqual({ subtitle: 'Pregunta', caption: { text: '% de las viviendas', hidden: false } });
+  });
+
+  it('shows a saved caption kept in sight with the default line as checked, and saves it back unchanged (Form saved unchanged)', async () => {
+    const display = { subtitle: 'Pregunta', caption: { hidden: false } };
+    const context = await openDialog({ existing: edit(display, { chartType: 'column' }) });
+    expect(keep().checked).toBe(true);
+    expect(radio('default').checked).toBe(true);
+
+    expect((await saved(context)).config.display).toEqual(display);
+  });
+
+  it('shows a saved caption kept in sight with an own text as checked, and saves it back unchanged', async () => {
+    const display = { subtitle: 'Pregunta', caption: { text: '% de las viviendas', hidden: false } };
+    const context = await openDialog({ existing: edit(display, { chartType: 'column' }) });
+    expect(keep().checked).toBe(true);
+    expect(radio('text').checked).toBe(true);
+
+    expect((await saved(context)).config.display).toEqual(display);
+  });
+
+  it('keeps hidden false on a heat map saved through MCP, though the form offers no option', async () => {
+    const display = { subtitle: 'Pregunta', caption: { hidden: false } };
+    const context = await openDialog({ existing: edit(display, { chartType: 'heatmap', config: config({ seriesBy: 'water_source', display }) }) });
+
+    expect(fields('dialog-caption-keep')).toHaveLength(0);
+    expect((await saved(context)).config.display).toEqual(display);
   });
 
   it('saves a hidden caption as hidden, and the default caption as nothing', async () => {
@@ -4271,7 +4421,7 @@ describe('the widget dialog and the base settings (add-small-sample-warnings, de
   };
   const hint = () => dialog().querySelector('[data-testid="dialog-n-hint"]');
   const fieldIn = (id: string) => field(id).closest('tmz-form-field')!;
-  const small = () => dialog().querySelector('[data-testid="dialog-preview"] [data-testid="widget-small-note"]');
+  const small = () => dialog().querySelector('[data-testid="dialog-preview"] [data-testid="foot-line-small"]');
   const comunas = () => result([row('COMUNA 7', 0.5, null, { numerator: 8, denominator: 16, n: 16 }), row('COMUNA 1', 56 / 121, null, { numerator: 56, denominator: 121, n: 121 })], { n: 137 });
 
   describe('the group', () => {
@@ -4358,7 +4508,7 @@ describe('the widget dialog and the base settings (add-small-sample-warnings, de
       await settle(context.harness);
 
       expect(context.http.match(isQuery).filter((r) => !r.cancelled)).toHaveLength(0);
-      expect(text(small())).toBe('Marks with a base below 30 are dimmed.');
+      expect(text(small())).toContain('Small base (below 30): ');
 
       await change(context, field('dialog-min-n'), '16');
       await wait(previewDelayMs + 100);
@@ -4375,13 +4525,13 @@ describe('the widget dialog and the base settings (add-small-sample-warnings, de
       await settle(context.harness);
 
       expect(context.http.match(isQuery).filter((r) => !r.cancelled)).toHaveLength(0);
-      expect(text(dialog().querySelector('[data-testid="dialog-preview"] [data-testid="widget-n-line"]'))).toContain('n = 137');
+      expect(text(dialog().querySelector('[data-testid="dialog-preview"] [data-testid="foot-line-n"]'))).toContain('n = 137');
     });
 
     it('applies the dashboard\'s threshold to the widget until it sets its own', async () => {
       const context = await openDialog({ existing: edit(undefined, ratio), bases: { minN: 30, showN: false } });
       await previewAnswer(context, comunas());
-      expect(text(small())).toBe('Marks with a base below 30 are dimmed.');
+      expect(text(small())).toContain('Small base (below 30): ');
 
       await change(context, field('dialog-min-n-choice'), 'off');
       expect(small()).toBeNull();
@@ -4836,7 +4986,7 @@ describe('the widget dialog and the stat tile (improve-stat-cards, design D5, D6
       await click(context, field('dialog-secondary-n'));
 
       expect(await quiet(context)).toHaveLength(0);
-      expect(dialog().querySelector('[data-testid="dialog-preview"] [data-testid="stat-line"]')!.textContent!.trim()).toBe('n = 476');
+      expect(dialog().querySelector('[data-testid="dialog-preview"] [data-testid="foot-line-n"]')!.textContent!.trim()).toBe('n = 476');
     });
 
     it('asks again, with the flag, and shows the line when the value without filters is chosen (Line without filters chosen in the form)', async () => {

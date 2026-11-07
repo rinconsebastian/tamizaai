@@ -58,8 +58,9 @@ public sealed class McpDashboardTools(
     /// <summary>The widget's texts (design D12 of the widget context): said once, after <see cref="DisplayHelp"/>, whose pinned sentence stays as it is.</summary>
     private const string ContextHelp =
         "config.display also takes the widget's texts, on every chart type: subtitle (1 to 200 characters), footnote (1 to 500), " +
-        "caption = { text } (1 to 200; it replaces the indicator's name wherever the widget names what it plots) or { hidden: true } (no caption line; tooltips and tables still name what is plotted), " +
-        "unit (1 to 32; it replaces the indicator's unit for this widget) and showDescription: true (a button that shows the indicator's description). None of them may hold a line break.";
+        "caption = { text } (1 to 200; it replaces the indicator's name wherever the widget names what it plots), { hidden: true } (no caption line; tooltips and tables still name what is plotted) or { hidden: false } (keeps the line in sight under the subtitle), " +
+        "unit (1 to 32; it replaces the indicator's unit for this widget) and showDescription: true (a button that shows the indicator's description). None of them may hold a line break. " +
+        "A bar, column, line or pie widget with a subtitle shows its caption's own text in its foot, not above the chart, unless caption.hidden is false.";
 
     /// <summary>
     /// A stat tile's statistic and secondary lines (design D8 of improve-stat-cards): said once, after <see cref="ContextHelp"/>, in
@@ -604,7 +605,18 @@ public sealed class McpDashboardTools(
         widget.Layout,
         widget.UpdatedAt,
         dashboardVersions,
+        // Left out when empty, as every other result's notes are (design D11 of improve-widget-text-hierarchy).
+        notes = CaptionNotes(widget),
     };
+
+    /// <summary>
+    /// What a client that never sees the page must be told: while a subtitle takes the widget's own caption text out of sight, the text shows
+    /// in the widget's foot and not above the chart. It never refuses the save; null when there is nothing to tell.
+    /// </summary>
+    private static IReadOnlyList<string>? CaptionNotes(Widget widget) =>
+        WidgetCaption.TextInFoot(widget.ChartType, widget.Config) is { } text
+            ? [$"The caption text \"{text}\" is out of sight under the subtitle: it shows in the widget's foot, not above the chart. Set caption.hidden to false to keep it above."]
+            : null;
 
     // Helpers
 
