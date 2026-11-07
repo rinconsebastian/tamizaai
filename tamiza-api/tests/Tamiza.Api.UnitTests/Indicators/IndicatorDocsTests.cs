@@ -231,14 +231,16 @@ public sealed class IndicatorDocsTests
         var text = File.ReadAllText(dashboard);
         const string link = "(#reference-lines-steps-and-data-labels)";
 
-        // The key takes room from the plot as the texts do.
-        Assert.Contains($"The key of a chart's [reference lines]{link} takes its room from the plot in the same way, above the footnote.", text, StringComparison.Ordinal);
+        // The texts are on the plot, which takes no room for them, and there is no key (improve-widget-text-hierarchy, design D7).
+        Assert.Contains($"The texts of a chart's [reference lines]{link} are drawn on the plot and take no room of their own.", text, StringComparison.Ordinal);
+        Assert.Contains("There is **no key under the chart**", text, StringComparison.Ordinal);
+        Assert.Contains("the **Reference lines** chip of the widget's [foot](#the-foot-of-a-widget) opens it whole", text, StringComparison.Ordinal);
         // Show as table, images, workbook and paper.
         Assert.Contains($"A bar, column or line chart with [reference lines]{link} lists them under its table", text, StringComparison.Ordinal);
-        Assert.Contains($"The legend lists each [reference line]{link} with a dashed sample of its pattern", text, StringComparison.Ordinal);
+        Assert.Contains($"The legend lists no [reference line]{link}: each is drawn with its text on its box", text, StringComparison.Ordinal);
         Assert.Contains($"what is plotted, its [reference lines]{link} when it has some", text, StringComparison.Ordinal);
         Assert.Contains("The data sheet holds the widget's table, with no row or column for the lines.", text, StringComparison.Ordinal);
-        Assert.Contains("The key of the lines prints whole and takes its room from the plot like the subtitle and the footnote", text, StringComparison.Ordinal);
+        Assert.Contains("A text that did not fit at its line prints as a line of the foot, whole.", text, StringComparison.Ordinal);
         // A copy, a move and a version keep them.
         Assert.Contains($"and so are its [reference lines, steps and data labels]{link}", text, StringComparison.Ordinal);
         Assert.Contains($"and its [reference lines, steps and data labels]{link}, and goes to the left edge", text, StringComparison.Ordinal);

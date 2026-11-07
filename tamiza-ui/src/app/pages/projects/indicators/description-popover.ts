@@ -3,11 +3,17 @@ import { Component, DestroyRef, Injectable, Injector, afterNextRender, computed,
 import { TranslocoDirective } from '@jsverse/transloco';
 import { Button } from '../../../shared/ui';
 
-/** Which description is open: one at a time, so opening another closes the first (add-widget-context, design D6). */
+/**
+ * Which panel of a tile is open: a widget's description or a chip of its foot, one at a time, so opening another closes the first
+ * (add-widget-context, design D6; improve-widget-text-hierarchy, design D9). It holds the id of whatever is open.
+ */
 @Injectable({ providedIn: 'root' })
-export class DescriptionPopovers {
+export class TilePopovers {
   readonly open = signal<string | null>(null);
 }
+
+/** The service's name before the foot's chips shared it. */
+export { TilePopovers as DescriptionPopovers };
 
 /** Below the button and aligned to its end first, then above, then the same from its start: whichever fits in the viewport. */
 const positions: ConnectedPosition[] = [
@@ -75,7 +81,7 @@ const positions: ConnectedPosition[] = [
 export class DescriptionPopover {
   private static next = 0;
 
-  private readonly popovers = inject(DescriptionPopovers);
+  private readonly popovers = inject(TilePopovers);
   private readonly injector = inject(Injector);
 
   /** The indicator's label, which names the button and the panel. */

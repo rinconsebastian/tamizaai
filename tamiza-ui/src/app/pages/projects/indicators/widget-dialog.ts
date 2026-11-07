@@ -74,7 +74,7 @@ import { Alert, ApiLang, Button, Disclosure, FormField, Input, markApiText, numb
 import { DataFilterDialog, DataFilterDialogData, DataFilterDialogResult } from '../data-filter-dialog';
 import { describeFilter, normalizeFilter } from '../data-view';
 import { FilterValues, activeFilters } from './dashboard-filters';
-import { columnLabels, textsCrowd } from './format';
+import { captionInFoot, columnLabels, textsCrowd } from './format';
 import { defaultSize } from './grid-layout';
 import { ValueOrderEditor } from './value-order-editor';
 import { answerColumnsOf, baseColumnOf, noDataValuesOf, settingsInForce } from './base-figures';
@@ -856,9 +856,36 @@ export class LineField {
             <p id="widgetCaption-error" class="mt-1 text-sm text-fg-danger-strong" [tmzApiLang]="message" data-testid="field-error">{{ message }}</p>
           }
           @if (captionMode() === 'text') {
-            <tmz-form-field class="mt-2" [label]="t('indicators.dialog.context.caption.textLabel')" fieldId="widgetCaptionText" [error]="shown().captionText" [hint]="captionHint(t)">
+            <tmz-form-field
+              class="mt-2"
+              [label]="t('indicators.dialog.context.caption.textLabel')"
+              fieldId="widgetCaptionText"
+              [error]="shown().captionText"
+              [hint]="captionHint(t)"
+              [alsoDescribedBy]="captionInFootNote() ? 'widgetCaptionInFoot' : null"
+            >
               <input tmzInput id="widgetCaptionText" autocomplete="off" [attr.maxlength]="maxCaptionLength" [value]="captionText()" (input)="setText('captionText', $any($event.target).value)" data-testid="dialog-caption-own" />
             </tmz-form-field>
+          }
+          @if (captionInFootNote()) {
+            <!-- The own text is going to the widget's foot, not above the chart (improve-widget-text-hierarchy, design D2): a notice, never a refusal. -->
+            <tmz-alert id="widgetCaptionInFoot" class="mt-2" tone="warning" [announce]="true" data-testid="dialog-caption-in-foot">{{ t('indicators.dialog.context.caption.inFoot') }}</tmz-alert>
+          }
+          @if (takesKeptCaption()) {
+            <!-- The line stays out of sight under a subtitle unless it is kept (design D2): for the kinds that give it up. -->
+            <label class="mt-2 flex min-h-10 items-start gap-3 py-1 text-sm" [class.cursor-pointer]="captionMode() !== 'hidden'" [class.opacity-60]="captionMode() === 'hidden'">
+              <input
+                type="checkbox"
+                class="mt-0.5 size-4 shrink-0"
+                aria-describedby="widgetCaptionKeepHelp"
+                [checked]="captionKept()"
+                [disabled]="captionMode() === 'hidden'"
+                (change)="captionKept.set($any($event.target).checked)"
+                data-testid="dialog-caption-keep"
+              />
+              <span class="min-w-0 flex-1 break-words text-heading">{{ t('indicators.dialog.context.caption.keep') }}</span>
+            </label>
+            <p id="widgetCaptionKeepHelp" class="text-sm text-body" data-testid="dialog-caption-keep-help">{{ t('indicators.dialog.context.caption.keepHelp') }}</p>
           }
         </fieldset>
 
@@ -1204,7 +1231,9 @@ export class LineField {
         <div class="flex flex-col gap-2 rounded-base border border-default p-3" [class]="chartType() === 'stat' ? 'h-40' : 'h-72'" data-testid="dialog-preview">
           <!-- The subtitle sits in a tile's header, which the preview does not draw; the footnote is the widget's own. -->
           @if (draftSubtitle(); as subtitle) {
-            <p class="shrink-0 text-xs text-body" [class.line-clamp-1]="tileRows() <= 2" [class.line-clamp-2]="tileRows() > 2" [attr.title]="subtitle" data-testid="dialog-preview-subtitle">{{ subtitle }}</p>
+            @if (!previewCompactStat()) {
+              <p class="shrink-0 text-[13px] leading-[1.45] text-body-strong" [class.line-clamp-1]="tileRows() <= 2" [class.line-clamp-2]="tileRows() > 2" [attr.title]="subtitle" data-testid="dialog-preview-subtitle">{{ subtitle }}</p>
+            }
           }
           <div class="min-h-0 flex-1">
             <app-widget-view
@@ -1217,7 +1246,7 @@ export class LineField {
               [dashboardFilters]="previewFilters()"
               [colors]="data.colors"
               [bases]="dashboardBases"
-              [tileRows]="tileRows()"
+              [compactStat]="previewCompactStat()"
               (valuesShown)="valuesNow.set($event)"
             />
           </div>
@@ -1373,9 +1402,14 @@ export class WidgetDialog {
   protected readonly subtitle = signal(this.start.display?.subtitle ?? '');
   protected readonly footnote = signal(this.start.display?.footnote ?? '');
   protected readonly captionMode = signal<CaptionMode>(
-    this.start.display?.caption?.hidden ? 'hidden' : this.start.display?.caption?.text ? 'text' : 'default',
+    this.start.display?.caption?.hidden === true ? 'hidden' : this.start.display?.caption?.text ? 'text' : 'default',
   );
   protected readonly captionText = signal(this.start.display?.caption?.text ?? '');
+  /**
+   * The caption is kept in sight under the widget's subtitle (improve-widget-text-hierarchy, design D2): `hidden: false` in the saved
+   * display. Kept as the form holds it whatever the kind, so a widget saved with it by another client saves it again unchanged.
+   */
+  protected readonly captionKept = signal(this.start.display?.caption?.hidden === false);
   protected readonly unit = signal(this.start.display?.unit ?? '');
   protected readonly showDescription = signal(this.start.display?.showDescription === true);
   /** The dashboard's base settings, or the shown version's: what a widget that says nothing of its own follows. */
@@ -1434,10 +1468,19 @@ export class WidgetDialog {
   private readonly tile = computed(() => this.data.widget?.layout ?? defaultSize(this.chartType()));
   /** The rows of that tile, which the texts of the preview are cut by as they are on the dashboard. */
   protected readonly tileRows = computed(() => this.tile().h);
+  /** A stat tile 2 rows high or less shows its subtitle as the foot's Detail chip, as the grid's tile does (improve-widget-text-hierarchy, design D6). */
+  protected readonly previewCompactStat = computed(() => this.chartType() === 'stat' && this.tile().h <= 2);
   /** The subtitle as the draft saves it, or null: the preview shows it above the widget. */
   protected readonly draftSubtitle = computed(() => singleLine(this.subtitle()) || null);
   /** Whether the subtitle and footnote are likely to crowd the tile (design D5): a hint, never a refusal. */
   protected readonly crowded = computed(() => textsCrowd(this.tile(), singleLine(this.subtitle()), singleLine(this.footnote())));
+  /** A bar, column, line and pie chart give up their caption line under a subtitle, so they offer to keep it in sight (design D2). */
+  protected readonly takesKeptCaption = computed(() => ['bar', 'column', 'line', 'pie'].includes(this.chartType()));
+  /** The own caption text of the draft goes to the widget's foot, not above the chart: the form says so, as a notice (design D2). */
+  protected readonly captionInFootNote = computed(() => {
+    const draft = this.draft();
+    return captionInFoot(this.chartType(), { display: draft.display, seriesBy: draft.seriesBy });
+  });
   /** A bar, column or line chart with no series, a histogram and a box plot take a color; any other chart takes its colors from its values. */
   protected readonly offersColor = computed(
     () => this.chartType() === 'histogram' || this.chartType() === 'boxplot' || (takesSeries(this.chartType()) && !this.seriesBy()),
@@ -1736,8 +1779,15 @@ export class WidgetDialog {
     const footnote = singleLine(this.footnote());
     const unit = singleLine(this.unit());
     const captionText = singleLine(this.captionText());
+    const kept = this.captionKept();
     const caption: WidgetCaption | null =
-      this.captionMode() === 'hidden' ? { hidden: true } : this.captionMode() === 'text' && captionText ? { text: captionText } : null;
+      this.captionMode() === 'hidden'
+        ? { hidden: true }
+        : this.captionMode() === 'text' && captionText
+          ? { text: captionText, ...(kept ? { hidden: false } : {}) }
+          : kept
+            ? { hidden: false }
+            : null;
     const description = this.showDescription();
     const lines = this.draftLines();
     const interpolation = this.interpolation();

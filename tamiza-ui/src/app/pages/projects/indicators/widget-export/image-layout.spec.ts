@@ -180,39 +180,18 @@ describe('composeImage', () => {
     expect(svg.querySelectorAll('rect[stroke="#999"]')).toHaveLength(1);
   });
 
-  it('draws a dashed swatch in the heading color and in the pattern of the line it stands for (Mean line in an image)', () => {
-    const { svg, texts } = compose(
-      {},
-      {
-        legend: {
-          kind: 'entries',
-          entries: [
-            { label: 'Mean: 34.17% de los hogares', color: 'var(--c1)', swatch: 'dashed', dash: 0 },
-            { label: 'Meta: 50%', color: 'var(--c1)', swatch: 'dashed', dash: 1 },
-            { label: 'Third: 20%', color: 'var(--c1)', swatch: 'dashed', dash: 2 },
-          ],
-        },
-      },
-    );
-
-    const dashed = Array.from(svg.querySelectorAll('line[stroke-dasharray]'));
-    expect(dashed.map((line) => line.getAttribute('stroke-dasharray'))).toEqual(['6 4', '2 3', '8 3 2 3']);
-    expect(dashed.every((line) => line.getAttribute('stroke') === '#111' && Number(line.getAttribute('x2')) - Number(line.getAttribute('x1')) === 14)).toBe(true);
-    expect(names(texts)).toContain('Mean: 34.17% de los hogares');
-  });
-
-  it('draws the legend of the lines under the plot, above the footnote and the footer (Lines above the footnote)', () => {
+  it('draws the legend under the plot, above the footnote and the footer (Lines above the footnote)', () => {
     const plot = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     plot.setAttribute('width', '300');
     plot.setAttribute('height', '120');
     const { texts } = compose(
       { plot, footnote: 'No suman 100 %.', footer: ['Household survey'] },
-      { legend: { kind: 'entries', entries: [{ label: 'Mean: 34.17%', color: 'var(--c1)', swatch: 'dashed', dash: 0 }] } },
+      { legend: { kind: 'entries', entries: [{ label: 'Piped', color: 'var(--c1)', swatch: 'square' }] } },
     );
 
     const at = (text: string) => texts.find((t) => t.text === text)!.y;
-    expect(at('Mean: 34.17%')).toBeGreaterThan(Number(plot.getAttribute('y')) + 120 - 1);
-    expect(at('No suman 100 %.')).toBeGreaterThan(at('Mean: 34.17%'));
+    expect(at('Piped')).toBeGreaterThan(Number(plot.getAttribute('y')) + 120 - 1);
+    expect(at('No suman 100 %.')).toBeGreaterThan(at('Piped'));
     expect(at('Household survey')).toBeGreaterThan(at('No suman 100 %.'));
   });
 
@@ -431,12 +410,10 @@ describe('an image with small bases (add-small-sample-warnings, design D10, D11)
     expect(none.height).toBe(plain.height);
   });
 
-  it('writes the figure of a stat tile with a small base at the reduced opacity of the page, and a whole one as it was (Dimmed stat figure)', () => {
-    const dimmed = compose({}, { stat: { ...stat('40%', 'Teatro hoy', 24), dimmed: true } });
+  it('writes the figure of a stat tile at full contrast, whatever its base, at the size its tile gave it (Small base in the image)', () => {
     const whole = compose({}, { stat: stat('40%', 'Teatro hoy', 24) });
 
     const figure = (svg: SVGSVGElement) => Array.from(svg.querySelectorAll('text')).find((node) => node.textContent === '40%')!;
-    expect(figure(dimmed.svg).getAttribute('fill-opacity')).toBe('0.35');
     expect(figure(whole.svg).hasAttribute('fill-opacity')).toBe(false);
     expect(figure(whole.svg).getAttribute('font-size')).toBe('24');
   });

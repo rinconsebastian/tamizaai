@@ -363,11 +363,13 @@ export const lineInterpolations: readonly LineInterpolation[] = ['linear', 'step
 
 /**
  * The line that names what a widget plots (add-widget-context, design D1): its own `text` in place of the indicator's name, or `hidden`
- * to take the line out of sight (tooltips, tables and screen readers still name what is plotted). Never both; neither is the default line.
+ * to take the line out of sight (tooltips, tables and screen readers still name what is plotted). `hidden: false` keeps the line in
+ * sight under the widget's subtitle (improve-widget-text-hierarchy, design D2). A text is never saved with `hidden: true`; neither
+ * member is the default line.
  */
 export interface WidgetCaption {
   text?: string;
-  hidden?: true;
+  hidden?: boolean;
 }
 
 /** A widget's query. At most one of `measure` and `ratio` is set; with neither, the table's default measure is plotted. */

@@ -2,7 +2,7 @@ import { Component, ElementRef, LOCALE_ID, computed, effect, inject, input, outp
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { LikertSide, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
-import { ChartBases, SeriesFigures, isSmallBase, noChartBases, seriesFigures, smallBaseDash, smallBaseOpacity, smallBaseStroke, summaryWithSmall } from './base-figures';
+import { ChartBases, SeriesFigures, SmallMark, isSmallBase, noChartBases, seriesFigures, smallBaseDash, smallBaseOpacity, smallBaseStroke, summaryWithSmall } from './base-figures';
 import { observeSize } from './chart-data';
 import { bandScale, charWidth, linearScale, niceAxis, truncate } from './chart-scales';
 import { CrosstabWidget } from './crosstab-widget';
@@ -55,6 +55,8 @@ export interface LikertPlot {
   marks: (MarkPoint | null)[][];
   /** How many segments have a small base: a segment has the n of its group (add-small-sample-warnings, design D2, D10). */
   small: number;
+  /** The marks drawn dimmed, by name and n, in drawing order (improve-widget-text-hierarchy, design D5). */
+  smallMarks: SmallMark[];
 }
 
 export interface LikertPlotInput {
@@ -126,6 +128,7 @@ export function likertPlot(input: LikertPlotInput): LikertPlot {
   const hits: Hit[] = [];
   const marks: (MarkPoint | null)[][] = rows.map((row) => row.cells.map(() => null));
   let small = 0;
+  const smallMarks: SmallMark[] = [];
 
   for (const tick of axis.ticks) {
     grid.push({ x1: x(tick), y1: top, x2: x(tick), y2: h - bottomRoom, zero: tick === 0 });
@@ -156,6 +159,9 @@ export function likertPlot(input: LikertPlotInput): LikertPlot {
       const width = Math.max(1, x1 - x0);
       const dim = isSmallBase(row.figures?.[s]?.n, input.figures?.minN);
       small += dim ? 1 : 0;
+      if (dim) {
+        smallMarks.push({ name: `${texts[g]} · ${input.names[s]}`, n: row.figures?.[s]?.n ?? 0 });
+      }
       rects.push({ x: x0, y, width, height: thickness, color: input.colors[s], title: '', at: { g, s }, ...(dim ? { dim } : {}) });
       const length = width >= minHit ? { x: x0 - (first ? 0 : 1), width: width + (first ? 0 : 1) + (last ? 0 : 1) } : { x: x0 + (width - minHit) / 2, width: minHit };
       hits.push({ x: length.x, y: bands.start(g) - (bands.step - bands.bandwidth) / 2, width: length.width, height: bands.step, at: { g, s } });
@@ -183,7 +189,7 @@ export function likertPlot(input: LikertPlotInput): LikertPlot {
       if (toRight > 0) ends.push({ x: x(extents[g].end) + 4, y: y + thickness / 2 + 4, text: input.share(toRight), anchor: 'start' });
     }
   });
-  return { width: w, height: h, grid, ticks, labels, rects, ends, hits, marks, small };
+  return { width: w, height: h, grid, ticks, labels, rects, ends, hits, marks, small, smallMarks };
 }
 
 /**
@@ -298,7 +304,7 @@ export class LikertChart {
   /** The threshold in force and the indicator's base column, for the figures and the small bases of the segments (add-small-sample-warnings). */
   readonly bases = input<ChartBases>(noChartBases);
   /** How many segments the chart draws dimmed for a small base, so the widget can explain the dimming under it (design D10, D11). */
-  readonly dimmed = output<number>();
+  readonly dimmed = output<SmallMark[]>();
   protected readonly smallStroke = smallBaseStroke;
   protected readonly smallDash = smallBaseDash;
   protected readonly smallOpacity = smallBaseOpacity;
@@ -347,7 +353,7 @@ export class LikertChart {
 
   // What an image of the Likert bars says around them (add-widget-export): the scale's legend, neutral outlined, and the rows left out.
   constructor() {
-    effect(() => this.dimmed.emit(this.plot().small));
+    effect(() => this.dimmed.emit(this.plot().smallMarks));
     registerExportParts({
       plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
       settle: () => this.marks.reset(),

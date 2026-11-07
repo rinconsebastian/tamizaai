@@ -332,6 +332,30 @@ describe('queryFor and savedConfig with the texts of a widget (add-widget-contex
     }
   });
 
+  it('keeps a caption kept in sight, alone or with its own text, and a text with hidden true as the text alone (improve-widget-text-hierarchy, design D2, task 3.2)', () => {
+    expect(savedConfig('column', withTexts({ display: { caption: { hidden: false } } })).display).toEqual({ caption: { hidden: false } });
+    expect(savedConfig('bar', withTexts({ display: { subtitle: 'Pregunta', caption: { text: '% de las viviendas', hidden: false } } })).display).toEqual({
+      subtitle: 'Pregunta',
+      caption: { text: '% de las viviendas', hidden: false },
+    });
+    expect(savedConfig('pie', withTexts({ display: { caption: { text: 'Texto', hidden: true } } })).display).toEqual({ caption: { text: 'Texto' } });
+    // A blank text next to hidden false is the caption kept in sight with the default line.
+    expect(savedConfig('column', withTexts({ display: { caption: { text: '  ', hidden: false } } })).display).toEqual({ caption: { hidden: false } });
+    // Every kind keeps it: a chart type change never drops the setting, and none of them is part of the query.
+    for (const type of chartTypes) {
+      expect(savedConfig(type, withTexts({ display: { caption: { hidden: false } } })).display).toEqual({ caption: { hidden: false } });
+    }
+  });
+
+  it('does not query again when a caption is kept in sight or not', () => {
+    for (const type of chartTypes) {
+      const seriesBy = type === 'heatmap' ? 'water_source' : undefined;
+      const kept = queryFor(type, withTexts({ seriesBy, display: { caption: { text: 'Texto', hidden: false }, subtitle: 'Otro' } }));
+      expect('display' in kept).toBe(false);
+      expect(JSON.stringify(kept)).toBe(JSON.stringify(queryFor(type, withTexts({ seriesBy, display: { caption: { text: 'Texto' }, subtitle: 'Otro' } }))));
+    }
+  });
+
   it('saves what a widget without texts saved before', () => {
     for (const type of chartTypes) {
       expect(JSON.stringify(savedConfig(type, { ...config(null), display: { color: 3, ramp: 'green' } }))).toBe(

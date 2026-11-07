@@ -8,7 +8,7 @@ import { noBaseSettings } from './base-figures';
 import { defaultColors } from './chart-colors';
 import { ActiveDashboardFilter } from './dashboard-filters';
 import { DashboardPrint } from './dashboard-print';
-import { DescriptionPopover } from './description-popover';
+import { DescriptionPopover, TilePopovers } from './description-popover';
 import { Placed, changed, movedBy, readingOrder, reflow, resizedBy, unitsFor } from './grid-layout';
 import { WidgetFileExtension } from './widget-export/file-name';
 import { ExportState, WidgetView } from './widget-view';
@@ -60,23 +60,31 @@ const fallbackWidth = 1200;
             [attr.aria-labelledby]="'widget-title-' + widget.id"
             [attr.aria-describedby]="subtitleOf(widget) ? 'widget-subtitle-' + widget.id : null"
           >
-            <!-- A widget with a subtitle has a header of two rows, the usual row and the subtitle; one without keeps its one row. -->
+            <!--
+              A widget with a subtitle has a header of two rows, the usual row and the subtitle; one without keeps its one row. The subtitle
+              is 13 px in the darker body gray (improve-widget-text-hierarchy, design D1). A compact stat tile, 2 rows high or less, has no room
+              for it: it is out of sight on screen and shows in the foot's Detail chip, and prints as a line of the foot, under the figure: over it, the subtitle left the figure no room on paper (design D6, task 9.3). The article's
+              aria-describedby still names it, since a hidden element still gives its text.
+            -->
             @if (subtitleOf(widget); as subtitle) {
-              <header class="flex shrink-0 flex-col gap-0.5 border-b border-default px-3 py-1.5">
-                <div class="flex min-w-0 items-center gap-1">
+              <header class="flex shrink-0 flex-col gap-0.5 border-b border-default px-3 pt-2 pb-1.5">
+                <div class="flex min-w-0 items-start gap-1">
                   <ng-container *ngTemplateOutlet="headerRow" />
                 </div>
                 <p
                   [id]="'widget-subtitle-' + widget.id"
-                  class="text-xs text-body paper:line-clamp-none"
-                  [class.line-clamp-1]="spanOf(widget) <= 2"
-                  [class.line-clamp-2]="spanOf(widget) > 2"
+                  class="text-[13px] leading-[1.45] text-body-strong"
+                  [class.hidden]="compactStat(widget)"
+                  [class.paper:hidden]="compactStat(widget)"
+                  [class.paper:line-clamp-none]="!compactStat(widget)"
+                  [class.line-clamp-1]="!compactStat(widget) && spanOf(widget) <= 2"
+                  [class.line-clamp-2]="!compactStat(widget) && spanOf(widget) > 2"
                   [attr.title]="subtitle"
                   data-testid="widget-subtitle"
                 >{{ subtitle }}</p>
               </header>
             } @else {
-              <header class="flex shrink-0 items-center gap-1 border-b border-default px-3 py-1.5">
+              <header class="flex shrink-0 items-start gap-1 border-b border-default px-3 pt-2 pb-1.5">
                 <ng-container *ngTemplateOutlet="headerRow" />
               </header>
             }
@@ -94,7 +102,19 @@ const fallbackWidth = 1200;
                   <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg>
                 </button>
               }
-              <h3 [id]="'widget-title-' + widget.id" class="min-w-0 flex-1 truncate text-sm font-medium text-heading" [attr.title]="widget.title" data-testid="widget-title">{{ widget.title }}</h3>
+              <!--
+                The title: 15 px at weight 600, up to two lines (improve-widget-text-hierarchy, design D1). line-clamp cuts only the drawing, so
+                the whole text stays in the <h3> for screen readers, and in title for pointing. The box is as high as the buttons beside it, so a
+                one-line title stays centered on them and a two-line one fills it.
+              -->
+              <div class="flex min-h-9 min-w-0 flex-1 items-center">
+                <h3
+                  [id]="'widget-title-' + widget.id"
+                  class="min-w-0 flex-1 break-words text-[15px] leading-[1.35] font-semibold text-heading line-clamp-2 paper:line-clamp-none"
+                  [attr.title]="widget.title"
+                  data-testid="widget-title"
+                >{{ widget.title }}</h3>
+              </div>
               <!-- The indicator's description on demand, for a widget that offers it (add-widget-context, design D6): never on paper. -->
               @if (descriptionOf(widget); as description) {
                 <app-description-popover class="paper:hidden" [label]="indicatorOf(widget)!.label" [description]="description" />
@@ -122,7 +142,8 @@ const fallbackWidth = 1200;
                 [dashboardFilters]="filtersOf().get(widget.id) ?? none"
                 [colors]="colors()"
                 [bases]="bases()"
-                [tileRows]="spanOf(widget)"
+                [compactStat]="compactStat(widget)"
+                [columns]="widget.layout.w"
                 (tableAvailable)="setDrawable(widget.id, $event)"
               />
             </div>
@@ -222,6 +243,7 @@ const fallbackWidth = 1200;
 export class WidgetGrid {
   private readonly transloco = inject(TranslocoService);
   private readonly tooltips = inject(ChartTooltips);
+  private readonly popovers = inject(TilePopovers);
   /** The dashboard page's paper mode; none where the grid is used without it. */
   private readonly print = inject(DashboardPrint, { optional: true });
   private readonly grid = viewChild.required<ElementRef<HTMLElement>>('grid');
@@ -376,6 +398,15 @@ export class WidgetGrid {
     return widget.config.display?.subtitle?.trim() || null;
   }
 
+  /**
+   * A stat tile 2 rows high or less (improve-widget-text-hierarchy, design D6): it has no room for a subtitle under its title, so the subtitle
+   * is the foot's Detail chip. Only the height counts, at every width: a tile keeps its height in rows on the one-column layout of a phone,
+   * so a tile of 2 rows is as short there as anywhere.
+   */
+  protected compactStat(widget: Widget): boolean {
+    return widget.chartType === 'stat' && widget.layout.h <= 2;
+  }
+
   /** The description its button opens: the widget offers it and the indicator the project lists has one (design D6); null otherwise. */
   protected descriptionOf(widget: Widget): string | null {
     return widget.config.display?.showDescription === true ? (this.indicatorOf(widget)?.description?.trim() || null) : null;
@@ -408,6 +439,8 @@ export class WidgetGrid {
   /** A tile moves from under the pointer: a tooltip left open over it would point at nothing. */
   protected tileMoving(): void {
     this.tooltips.closeAll();
+    // A chip's panel or a description is anchored to its tile, which is about to move.
+    this.popovers.open.set(null);
   }
 
   protected dragMoved(widget: Widget, event: CdkDragMove): void {

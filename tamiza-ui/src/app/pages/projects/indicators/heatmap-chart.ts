@@ -2,7 +2,7 @@ import { Component, ElementRef, LOCALE_ID, computed, effect, inject, input, outp
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
-import { ChartBases, isSmallBase, noChartBases, seriesFigures, smallBaseDash, smallBaseStroke, summaryWithSmall } from './base-figures';
+import { ChartBases, SmallMark, isSmallBase, noChartBases, seriesFigures, smallBaseDash, smallBaseStroke, summaryWithSmall } from './base-figures';
 import { observeSize } from './chart-data';
 import { ChartColors } from './chart-colors';
 import { registerExportParts } from './export-parts';
@@ -284,7 +284,7 @@ export class HeatmapChart {
   /** The threshold in force and the indicator's base column, for the figures and the small bases of the cells (add-small-sample-warnings). */
   readonly bases = input<ChartBases>(noChartBases);
   /** How many cells the chart hatches for a small base, so the widget can explain the hatching under it (design D10, D11). */
-  readonly dimmed = output<number>();
+  readonly dimmed = output<SmallMark[]>();
   protected readonly smallStroke = smallBaseStroke;
   protected readonly smallDash = smallBaseDash;
 
@@ -322,6 +322,18 @@ export class HeatmapChart {
     });
   });
   private readonly smallCount = computed(() => this.plot().cells.filter((cell) => cell.small).length);
+  /** The cells hatched for a small base, named "group · series" with their n (improve-widget-text-hierarchy, design D5). */
+  private readonly smallMarks = computed<SmallMark[]>(() => {
+    const table = this.table();
+    const plot = this.plot();
+    const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
+    return plot.cells
+      .filter((cell) => cell.small)
+      .map((cell) => ({
+        name: `${shown(this.groupText(), table.rows[cell.g].group) ?? t('indicators.chart.noGroup')} · ${seriesName(table.columns[cell.s], t, this.seriesText())}`,
+        n: table.rows[cell.g].figures?.[cell.s]?.n ?? 0,
+      }));
+  });
 
   /** A cell's tooltip: its group, its series and its value, or that it has no value. */
   private readonly marksGrid = computed<(MarkPoint | null)[][]>(() => {
@@ -350,7 +362,7 @@ export class HeatmapChart {
 
   // What an image of the heat map says around its grid (add-widget-export): its caption and its scale, from the smallest value to the largest.
   constructor() {
-    effect(() => this.dimmed.emit(this.smallCount()));
+    effect(() => this.dimmed.emit(this.smallMarks()));
     registerExportParts({
       plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),
       settle: () => this.marks.reset(),

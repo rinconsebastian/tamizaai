@@ -22,6 +22,8 @@ export class FormField {
   readonly fieldId = input.required<string>();
   readonly error = input<string | null | undefined>(null);
   readonly hint = input<string | null>(null);
+  /** Another element that describes the control, such as a notice the form shows beside it: named after the error, which comes first. */
+  readonly alsoDescribedBy = input<string | null>(null);
 
   private readonly control = contentChild(Input);
 
@@ -30,7 +32,8 @@ export class FormField {
       const control = this.control();
       const hasError = !!this.error();
       control?.invalid.set(hasError);
-      control?.describedBy.set(hasError ? `${this.fieldId()}-error` : null);
+      const ids = [hasError ? `${this.fieldId()}-error` : null, this.alsoDescribedBy()].filter((id): id is string => !!id);
+      control?.describedBy.set(ids.length ? ids.join(' ') : null);
     });
   }
 }

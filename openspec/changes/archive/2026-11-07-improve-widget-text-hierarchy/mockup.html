@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tamiza · Jerarquía de texto en los widgets (propuesta)</title>
+<style>
+  /* Tokens tomados de Tamiza: fuente del sistema (la CSP bloquea fuentes web), grises de Flowbite, marca teal, paleta «earth». */
+  :root {
+    color-scheme: light;
+    --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    --page: #f3f4f6;
+    --card: #ffffff;
+    --line: #e5e7eb;
+    --line-strong: #d1d5db;
+    --heading: #111827;
+    --body: #4b5563;
+    --muted: #6b7280;
+    --brand: #0f766e;
+    --brand-soft: #ccfbf1;
+    --bar: #09a3a0;
+    --ref: #374151;
+    --warn-ink: #92400e;
+    --warn-bg: #fef3c7;
+    --warn-line: #fcd34d;
+    --chip-bg: #f3f4f6;
+    --chip-hover: #e5e7eb;
+    --pop-bg: #111827;
+    --pop-ink: #f9fafb;
+    --focus: #0d9488;
+    --old-tag: #6b7280;
+    --new-tag: #0f766e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0f1419; --card: #1a2027; --line: #2b333d; --line-strong: #3a4450;
+      --heading: #f3f4f6; --body: #c3cad3; --muted: #9aa4b0; --brand: #5eead4; --brand-soft: #134e4a;
+      --bar: #2cc3bf; --ref: #d1d5db; --warn-ink: #fcd34d; --warn-bg: #3b2f12; --warn-line: #a16207;
+      --chip-bg: #252d36; --chip-hover: #313b46; --pop-bg: #f3f4f6; --pop-ink: #111827; --focus: #5eead4;
+      --old-tag: #9aa4b0; --new-tag: #5eead4;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0f1419; --card: #1a2027; --line: #2b333d; --line-strong: #3a4450;
+    --heading: #f3f4f6; --body: #c3cad3; --muted: #9aa4b0; --brand: #5eead4; --brand-soft: #134e4a;
+    --bar: #2cc3bf; --ref: #d1d5db; --warn-ink: #fcd34d; --warn-bg: #3b2f12; --warn-line: #a16207;
+    --chip-bg: #252d36; --chip-hover: #313b46; --pop-bg: #f3f4f6; --pop-ink: #111827; --focus: #5eead4;
+    --old-tag: #9aa4b0; --new-tag: #5eead4;
+  }
+
+  :root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  *, *::before, *::after { box-sizing: inherit; }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body { margin: 0; background: var(--page); color: var(--body); font: 14px/1.5 var(--font); }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 20px 64px; }
+  .intro { max-width: 70ch; }
+  .intro h1 { color: var(--heading); font-size: 26px; line-height: 1.25; font-weight: 650; margin: 0 0 10px; letter-spacing: -0.01em; }
+  .intro p { margin: 0 0 10px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; margin: 22px 0 8px; }
+  .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; background: var(--card); }
+  .seg button { border: 0; background: transparent; padding: 6px 14px; cursor: pointer; color: var(--body); }
+  .seg button[aria-pressed="true"] { background: var(--brand-soft); color: var(--heading); font-weight: 600; }
+  .controls .hint { color: var(--muted); font-size: 13px; }
+
+  section.case { margin-top: 40px; }
+  section.case > h2 { color: var(--heading); font-size: 17px; font-weight: 650; margin: 0 0 4px; }
+  section.case > p { margin: 0 0 14px; max-width: 75ch; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  .col-label { font-size: 13px; font-weight: 600; margin: 0 0 6px; }
+  .col-label.old { color: var(--old-tag); }
+  .col-label.new { color: var(--new-tag); }
+  @media (max-width: 860px) { .pair { grid-template-columns: 1fr; } }
+
+  /* Tarjeta de widget (igual a Tamiza: borde, radio 8 px, sombra mínima) */
+  .card { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.04); display: flex; flex-direction: column; }
+  .card header { padding: 6px 12px; border-bottom: 1px solid var(--line); }
+  .card .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .menu { margin-left: auto; color: var(--muted); padding: 0 4px; border: 0; background: transparent; cursor: default; }
+  .handle { color: var(--muted); margin-right: 6px; }
+
+  /* HOY: todo en 12 px y gris, título truncado */
+  .old .row { display: flex; align-items: center; min-width: 0; }
+  .old h3 { margin: 0; font-size: 14px; font-weight: 500; color: var(--heading); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+  .old .sub { font-size: 12px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .old .small { font-size: 12px; color: var(--muted); margin: 0; }
+
+  /* PROPUESTA: escala clara y un solo pie */
+  .new .row { display: flex; align-items: flex-start; gap: 4px; }
+  .new h3 { margin: 0; font-size: 15px; line-height: 1.35; font-weight: 600; color: var(--heading); flex: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .new header { padding: 10px 14px 8px; }
+  .new .sub { font-size: 13px; line-height: 1.45; color: var(--body); margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .new .body { padding: 10px 14px 0; }
+
+  .foot { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line); margin-top: 6px; position: relative; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid transparent; background: var(--chip-bg); color: var(--body); border-radius: 999px; padding: 2px 10px 2px 7px; font-size: 12px; font-weight: 500; line-height: 20px; cursor: pointer; }
+  .chip:hover { background: var(--chip-hover); }
+  .chip svg { width: 14px; height: 14px; flex: none; }
+  .chip.warn { background: var(--warn-bg); color: var(--warn-ink); border-color: var(--warn-line); }
+  .chip[aria-expanded="true"] { border-color: var(--line-strong); }
+  .pop { position: absolute; left: 10px; right: 10px; bottom: calc(100% + 6px); background: var(--pop-bg); color: var(--pop-ink); font-size: 13px; line-height: 1.45; border-radius: 8px; padding: 10px 12px; box-shadow: 0 8px 24px rgba(0,0,0,.18); z-index: 5; }
+  .pop[hidden] { display: none; }
+  .pop strong { font-weight: 600; }
+
+  /* Vista impresa: el pie se despliega como texto completo */
+  .print-lines { display: none; padding: 8px 14px 12px; border-top: 1px solid var(--line); margin-top: 6px; }
+  .print-lines p { margin: 0 0 3px; font-size: 12px; color: var(--body); }
+  body.printing .new .foot { display: none; }
+  body.printing .new .print-lines { display: block; }
+
+  /* Gráficos */
+  svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+  svg.chart text { font-family: var(--font); fill: var(--body); }
+  .legend-old { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+
+  /* Tarjetas de cifra */
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .stat-old .fig { font-size: 26px; font-weight: 500; color: var(--heading); line-height: 1.1; }
+  .stat-old .fig.dim { color: var(--muted); opacity: .55; }
+  .stat-new .fig { font-size: 30px; font-weight: 650; color: var(--heading); line-height: 1.05; letter-spacing: -0.01em; }
+  .stat-new .cap { font-size: 13px; color: var(--body); }
+  .badge-chip { font-weight: 600; }
+  .fig-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
+  .stat-new .body { position: relative; }
+  .clip { height: 152px; overflow: hidden; }
+
+  /* Escala tipográfica */
+  table.scale { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; font-size: 13px; }
+  .scale-wrap { overflow-x: auto; }
+  table.scale th, table.scale td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.scale th { color: var(--heading); font-weight: 600; background: var(--chip-bg); }
+  table.scale tr:last-child td { border-bottom: 0; }
+  .note { font-size: 13px; color: var(--muted); margin-top: 10px; max-width: 80ch; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="intro">
+    <h1>Jerarquía de texto en los widgets</h1>
+    <p>Hoy una tarjeta puede apilar hasta siete líneas de texto del mismo tamaño: título, subtítulo, leyenda del gráfico, nota de base pequeña, línea n, sin dato y nota al pie. La propuesta deja tres niveles claros y reúne todo lo que acompaña al gráfico en un solo pie con iconos, que se abren al pasar el cursor o al hacer clic.</p>
+    <p>Los datos son los del estudio de Duitama. Las cifras conservan el formato de hoy para que solo se note el cambio de jerarquía; el formato colombiano va en <code>add-locale-formatting</code>.</p>
+  </div>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Medio">
+      <button type="button" aria-pressed="true" data-medium="screen">Pantalla</button>
+      <button type="button" aria-pressed="false" data-medium="print">Impresión</button>
+    </div>
+    <span class="hint">En impresión y exportación el pie se despliega como texto completo, porque en papel no hay cursor.</span>
+  </div>
+
+  <!-- Caso 1 -->
+  <section class="case" aria-labelledby="c1">
+    <h2 id="c1">Barras con línea de total y bases pequeñas</h2>
+    <p>Teatro, 2.1 por comuna. Es el caso más cargado: leyenda interna, leyenda de la línea de total, nota de bases pequeñas, n y nota al pie.</p>
+    <div class="pair">
+      <div>
+        <p class="col-label old">Hoy</p>
+        <article class="card old" aria-label="Versión actual">
+          <header>
+            <div class="row"><span class="handle" aria-hidden="true">⠿</span><h3 title="2.1. Asistió a espectáculos, por comuna">2.1. Asistió a espectáculos, por comuna</h3><button class="menu" type="button" aria-label="Menú">⋮</button></div>
+            <div class="sub">¿Cuánta gente va hoy? E1, % de los hogares de cada comuna que asistieron en el último año</div>
+          </header>
+          <div class="body">
+            <p class="small">% de los hogares que asistieron por Comuna</p>
+            <svg class="chart" id="bars-old" viewBox="0 0 520 250" role="img" aria-label="Barras por comuna, versión actual"></svg>
+            <div class="legend-old"><svg width="18" height="6" aria-hidden="true"><line x1="0" y1="3" x2="18" y2="3" stroke="currentColor" stroke-dasharray="4 3" stroke-width="1.5"/></svg>Total Duitama: 46.74%</div>
+            <p class="small">Las marcas con una base menor que 30 aparecen atenuadas.</p>
+            <p class="small">n = 475 Hogares</p>
+            <p class="small">Comuna asignada desde la manzana de la encuesta (A1); un hogar sin manzana queda fuera.</p>
+          </div>
+        </article>
+      </div>
+      <div>
+        <p class="col-label new">Propuesta</p>
+        <article class="card new" aria-label="Versión propuesta">
+          <header>
+            <div class="row"><h3>2.1. Asistió a espectáculos, por comuna</h3><button class="menu" type="button" aria-label="Menú">⋮</button></div>
+            <p class="sub">¿Cuánta gente va hoy? E1, % de los hogares de cada comuna que asistieron en el último año</p>
+          </header>
+          <div class="body">
+            <svg class="chart" id="bars-new" viewBox="0 0 520 250" role="img" aria-label="Barras por comuna, versión propuesta"></svg>
+          </div>
+          <div class="foot">
+            <button class="chip" type="button" aria-expanded="false" data-pop="p1n"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M1.5 14c.6-2.6 2.3-4 4.5-4s3.9 1.4 4.5 4" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="11.5" cy="5.5" r="2" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M12 10c1.6.3 2.6 1.6 3 4" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>n = 475 hogares</button>
+            <button class="chip warn" type="button" aria-expanded="false" data-pop="p1w"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6.2v3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.8" r=".9" fill="currentColor"/></svg>2 con base pequeña</button>
+            <button class="chip" type="button" aria-expanded="false" data-pop="p1i"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 7.2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="4.9" r=".9" fill="currentColor"/></svg>Nota</button>
+            <div class="pop" id="p1n" role="tooltip" hidden><strong>Base:</strong> 475 hogares con encuesta completa y comuna conocida. La línea punteada es el total de Duitama, 46.74%.</div>
+            <div class="pop" id="p1w" role="tooltip" hidden><strong>Base pequeña:</strong> COMUNA 7 (n = 16) y SIN NOMBRE (n = 20) tienen menos de 30 hogares. Sus barras se dibujan atenuadas; léelas con cautela.</div>
+            <div class="pop" id="p1i" role="tooltip" hidden>Comuna asignada desde la manzana de la encuesta (A1); un hogar sin manzana queda fuera.</div>
+          </div>
+          <div class="print-lines">
+            <p>n = 475 hogares. La línea punteada es el total de Duitama, 46.74%.</p>
+            <p>Base pequeña: COMUNA 7 (n = 16) y SIN NOMBRE (n = 20), atenuadas.</p>
+            <p>Comuna asignada desde la manzana de la encuesta (A1); un hogar sin manzana queda fuera.</p>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- Caso 2 -->
+  <section class="case" aria-labelledby="c2">
+    <h2 id="c2">Columnas con total y una nota de lectura</h2>
+    <p>Escuelas, 3.1 por estrato. La leyenda interna («% de los hogares por Estrato») repite el subtítulo; en la propuesta desaparece y la unidad queda en el eje.</p>
+    <div class="pair">
+      <div>
+        <p class="col-label old">Hoy</p>
+        <article class="card old" aria-label="Versión actual">
+          <header>
+            <div class="row"><span class="handle" aria-hidden="true">⠿</span><h3 title="3.1. Clases hoy, por estrato">3.1. Clases hoy, por estrato</h3><button class="menu" type="button" aria-label="Menú">⋮</button></div>
+            <div class="sub">F1, % de los hogares de cada estrato que tienen a alguien en clases</div>
+          </header>
+          <div class="body">
+            <p class="small">% de los hogares por Estrato</p>
+            <svg class="chart" id="cols-old" viewBox="0 0 420 200" role="img" aria-label="Columnas por estrato, versión actual"></svg>
+            <div class="legend-old"><svg width="18" height="6" aria-hidden="true"><line x1="0" y1="3" x2="18" y2="3" stroke="currentColor" stroke-dasharray="4 3" stroke-width="1.5"/></svg>Total Duitama: 16.67%</div>
+            <p class="small">Las marcas con una base menor que 30 aparecen atenuadas.</p>
+            <p class="small">n = 474 Hogares</p>
+          </div>
+        </article>
+      </div>
+      <div>
+        <p class="col-label new">Propuesta</p>
+        <article class="card new" aria-label="Versión propuesta">
+          <header>
+            <div class="row"><h3>3.1. Clases hoy, por estrato</h3><button class="menu" type="button" aria-label="Menú">⋮</button></div>
+            <p class="sub">F1, % de los hogares de cada estrato que tienen a alguien en clases</p>
+          </header>
+          <div class="body">
+            <svg class="chart" id="cols-new" viewBox="0 0 420 200" role="img" aria-label="Columnas por estrato, versión propuesta"></svg>
+          </div>
+          <div class="foot">
+            <button class="chip" type="button" aria-expanded="false" data-pop="p2n"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M1.5 14c.6-2.6 2.3-4 4.5-4s3.9 1.4 4.5 4" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="11.5" cy="5.5" r="2" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M12 10c1.6.3 2.6 1.6 3 4" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>n = 474 hogares</button>
+            <button class="chip warn" type="button" aria-expanded="false" data-pop="p2w"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6.2v3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.8" r=".9" fill="currentColor"/></svg>1 con base pequeña</button>
+            <button class="chip" type="button" aria-expanded="false" data-pop="p2d"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3.6 12.4 12.4 3.6" stroke="currentColor" stroke-width="1.4"/></svg>Sin dato 0.4%</button>
+            <div class="pop" id="p2n" role="tooltip" hidden><strong>Base:</strong> 474 hogares con encuesta completa y estrato conocido. La línea punteada es el total de Duitama, 16.67%.</div>
+            <div class="pop" id="p2w" role="tooltip" hidden><strong>Base pequeña:</strong> Estrato 4 (n = 7) tiene menos de 30 hogares. Su columna se dibuja atenuada.</div>
+            <div class="pop" id="p2d" role="tooltip" hidden><strong>Sin dato:</strong> 2 hogares no saben su estrato (0.4%). No entran en ninguna columna.</div>
+          </div>
+          <div class="print-lines">
+            <p>n = 474 hogares. La línea punteada es el total de Duitama, 16.67%.</p>
+            <p>Base pequeña: Estrato 4 (n = 7), atenuado.</p>
+            <p>Sin dato: 2 hogares no saben su estrato (0.4%).</p>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- Caso 3 -->
+  <section class="case" aria-labelledby="c3">
+    <h2 id="c3">Tarjetas de cifra</h2>
+    <p>Con 2 filas de alto, hoy la tarjeta corta sus últimas líneas y la cifra con base pequeña se destiñe hasta perder contraste. En la propuesta la cifra conserva su contraste y el n vive siempre en el mismo lugar del pie: gris si la base alcanza, ámbar si es pequeña.</p>
+    <div class="pair">
+      <div>
+        <p class="col-label old">Hoy</p>
+        <div class="tiles">
+          <article class="card old stat-old" aria-label="Tarjeta actual">
+            <header>
+              <div class="row"><span class="handle" aria-hidden="true">⠿</span><h3>2.1. Asistió a espectáculos en el…</h3><button class="menu" type="button" aria-label="Menú">⋮</button></div>
+              <div class="sub">¿Cuánta gente va hoy? E1, % de los hogares con…</div>
+            </header>
+            <div class="body clip">
+              <div class="fig">46.85%</div>
+              <p class="small">de los hogares asistió en el último año</p>
+              <p class="small">n = 476 Hogares</p>
+            </div>
+          </article>
+          <article class="card old stat-old" aria-label="Tarjeta actual con base pequeña">
+            <header>
+              <div class="row"><span class="handle" aria-hidden="true">⠿</span><h3>3.4. Mediana de lo que paga…</h3><button class="menu" type="button" aria-label="Menú">⋮</button></div>
+              <div class="sub">F6 (esc_pago_mes), hogares con alguien en clases…</div>
+            </header>
+            <div class="body clip">
+              <div class="fig dim">60,000 pesos</div>
+              <p class="small">Mediana de lo que pagan al mes</p>
+              <p class="small">Las marcas con una base menor que 30 aparecen atenuadas.</p>
+              <p class="small">n = 26</p>
+            </div>
+          </article>
+        </div>
+      </div>
+      <div>
+        <p class="col-label new">Propuesta</p>
+        <div class="tiles">
+          <article class="card new stat-new" aria-label="Tarjeta propuesta">
+            <header>
+              <div class="row"><h3>2.1. Asistió a espectáculos en el último año</h3></div>
+            </header>
+            <div class="body">
+              <div class="fig">46.85%</div>
+              <div class="cap">de los hogares asistió en el último año</div>
+            </div>
+            <div class="foot">
+              <button class="chip" type="button" aria-expanded="false" data-pop="p3n"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M1.5 14c.6-2.6 2.3-4 4.5-4s3.9 1.4 4.5 4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>n = 476</button>
+              <button class="chip" type="button" aria-expanded="false" data-pop="p3i"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 7.2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="4.9" r=".9" fill="currentColor"/></svg>Detalle</button>
+              <div class="pop" id="p3n" role="tooltip" hidden><strong>Base:</strong> 476 hogares con encuesta completa.</div>
+              <div class="pop" id="p3i" role="tooltip" hidden>¿Cuánta gente va hoy? E1, % de los hogares con encuesta completa. El subtítulo pasa aquí cuando la tarjeta es angosta.</div>
+            </div>
+            <div class="print-lines"><p>n = 476 hogares. E1, % de los hogares con encuesta completa.</p></div>
+          </article>
+          <article class="card new stat-new" aria-label="Tarjeta propuesta con base pequeña">
+            <header>
+              <div class="row"><h3>3.4. Mediana de lo que pagan hoy al mes</h3></div>
+            </header>
+            <div class="body">
+              <div class="fig">60,000 pesos</div>
+              <div class="cap">mediana de lo que pagan al mes</div>
+            </div>
+            <div class="foot">
+              <button class="chip warn" type="button" aria-expanded="false" data-pop="p4w"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6.2v3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.8" r=".9" fill="currentColor"/></svg>n = 26</button>
+              <div class="pop" id="p4w" role="tooltip" hidden><strong>Base pequeña:</strong> la mediana sale de 26 hogares que pagan, menos de los 30 que pide el tablero. Léela con cautela.</div>
+              <button class="chip" type="button" aria-expanded="false" data-pop="p4i"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 7.2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="4.9" r=".9" fill="currentColor"/></svg>Detalle</button>
+              <div class="pop" id="p4i" role="tooltip" hidden>F6 (esc_pago_mes), hogares con alguien en clases que pagan.</div>
+            </div>
+            <div class="print-lines"><p>Base pequeña: 26 hogares que pagan (menos de 30).</p><p>F6 (esc_pago_mes), hogares con alguien en clases que pagan.</p></div>
+          </article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Escala -->
+  <section class="case" aria-labelledby="c4">
+    <h2 id="c4">Escala tipográfica propuesta</h2>
+    <p>Tres niveles en la cabecera y el cuerpo, y un pie que no compite con el gráfico.</p>
+    <div class="scale-wrap">
+      <table class="scale">
+        <thead><tr><th scope="col">Elemento</th><th scope="col">Hoy</th><th scope="col">Propuesta</th></tr></thead>
+        <tbody>
+          <tr><td>Título</td><td>14 px, peso 500, una línea con «…»</td><td>15 px, peso 600, hasta dos líneas; el texto completo nunca se pierde</td></tr>
+          <tr><td>Subtítulo</td><td>12 px, gris 500, una línea si la tarjeta mide 2 columnas o menos</td><td>13 px, gris 600, hasta dos líneas; en tarjetas angostas pasa al chip «Detalle»</td></tr>
+          <tr><td>Leyenda del gráfico</td><td>12 px sobre el gráfico («% de los hogares por Comuna»)</td><td>Oculta por defecto si hay subtítulo; la unidad va en el eje y en el tooltip</td></tr>
+          <tr><td>Línea de referencia</td><td>Etiqueta sobre la línea y además una leyenda debajo</td><td>Solo la etiqueta sobre la línea, con fondo para no montarse en las barras</td></tr>
+          <tr><td>Base pequeña, n, sin dato, nota</td><td>Hasta cuatro líneas de 12 px</td><td>Un pie de chips de 12 px: n, base pequeña (ámbar), sin dato y nota; cada uno abre su texto completo</td></tr>
+          <tr><td>Cifra de tarjeta</td><td>Atenuada si la base es pequeña</td><td>Contraste completo; el chip del n en el pie pasa de gris a ámbar («⚠ n = 26») y se abre para explicar la base</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">En impresión, PDF y exportación de imagen, los chips se despliegan como líneas de texto, como hoy. El lector de pantalla recibe el mismo texto completo aunque el chip esté cerrado.</p>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  function el(name, attrs, text) {
+    var n = document.createElementNS(NS, name);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+  function pct(v) { return (Math.round(v * 100) / 100) + "%"; }
+  // Halo del color de la tarjeta: la etiqueta sigue legible si la cruza la línea de total.
+  function halo(t, color) { t.setAttribute("stroke", color); t.setAttribute("stroke-width", "3"); t.setAttribute("paint-order", "stroke"); t.setAttribute("stroke-linejoin", "round"); }
+
+  var comunas = [
+    ["COMUNA 1", 48.76, false], ["COMUNA 2", 27.91, false], ["COMUNA 3", 45.76, false], ["COMUNA 4", 46.15, false],
+    ["COMUNA 5", 50.00, false], ["COMUNA 6", 52.50, false], ["COMUNA 7", 50.00, true], ["SIN NOMBRE", 45.00, true]
+  ];
+  var estratos = [["Estrato 1", 7.55, false], ["Estrato 2", 14.62, false], ["Estrato 3", 21.43, false], ["Estrato 4", 28.57, true]];
+
+  // Barras horizontales. "proposed" pone fondo a la etiqueta de la línea de total.
+  function bars(svg, data, total, proposed) {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    var bar = css("--bar"), ref = css("--ref"), card = css("--card"), line = css("--line"), heading = css("--heading");
+    var x0 = 96, w = 380, max = 60, top = proposed ? 26 : 22, h = 21, gap = 6;
+    function X(v) { return x0 + v / max * w; }
+    [0, 20, 40, 60].forEach(function (t) {
+      svg.appendChild(el("line", { x1: X(t), x2: X(t), y1: top - 4, y2: top + data.length * (h + gap), stroke: line }));
+      svg.appendChild(el("text", { x: X(t), y: top + data.length * (h + gap) + 14, "text-anchor": "middle", "font-size": 11 }, t + "%"));
+    });
+    var tx = X(total);
+    var refLine = el("line", { x1: tx, x2: tx, y1: top - 8, y2: top + data.length * (h + gap) - gap, stroke: ref, "stroke-dasharray": "4 3", "stroke-width": 1.5 });
+    data.forEach(function (d, i) {
+      var y = top + i * (h + gap);
+      svg.appendChild(el("text", { x: x0 - 8, y: y + h / 2 + 4, "text-anchor": "end", "font-size": 11 }, d[0]));
+      var r = el("rect", { x: x0, y: y, width: X(d[1]) - x0, height: h, fill: bar, rx: 2 });
+      if (d[2]) { r.setAttribute("fill-opacity", "0.35"); r.setAttribute("stroke", bar); r.setAttribute("stroke-dasharray", "3 2"); }
+      svg.appendChild(r);
+    });
+    // En la propuesta la línea va debajo de las etiquetas; hoy va encima de todo.
+    if (proposed) svg.appendChild(refLine);
+    data.forEach(function (d, i) {
+      var y = top + i * (h + gap);
+      var t = el("text", { x: X(d[1]) + 5, y: y + h / 2 + 4, "font-size": 11, fill: heading }, pct(d[1]));
+      if (proposed) halo(t, card);
+      svg.appendChild(t);
+    });
+    if (!proposed) svg.appendChild(refLine);
+    var label = "Total Duitama: " + total + "%";
+    if (proposed) {
+      var lw = label.length * 6.1 + 10;
+      svg.appendChild(el("rect", { x: tx - lw / 2, y: top - 24, width: lw, height: 16, rx: 3, fill: card, stroke: line }));
+      svg.appendChild(el("text", { x: tx, y: top - 12, "text-anchor": "middle", "font-size": 11, fill: heading, "font-weight": 600 }, label));
+    } else {
+      svg.appendChild(el("text", { x: tx, y: top - 10, "text-anchor": "middle", "font-size": 11 }, label));
+    }
+  }
+
+  // Columnas verticales.
+  function cols(svg, data, total, proposed) {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    var bar = css("--bar"), ref = css("--ref"), card = css("--card"), line = css("--line"), heading = css("--heading");
+    var left = 40, bottom = 172, height = 140, max = 30, slot = 88, bw = 46;
+    function Y(v) { return bottom - v / max * height; }
+    [0, 10, 20, 30].forEach(function (t) {
+      svg.appendChild(el("line", { x1: left, x2: left + slot * data.length, y1: Y(t), y2: Y(t), stroke: line }));
+      svg.appendChild(el("text", { x: left - 6, y: Y(t) + 4, "text-anchor": "end", "font-size": 11 }, t + "%"));
+    });
+    var ty = Y(total);
+    var refLine = el("line", { x1: left, x2: left + slot * data.length, y1: ty, y2: ty, stroke: ref, "stroke-dasharray": "4 3", "stroke-width": 1.5 });
+    data.forEach(function (d, i) {
+      var cx = left + slot * i + slot / 2;
+      var r = el("rect", { x: cx - bw / 2, y: Y(d[1]), width: bw, height: bottom - Y(d[1]), fill: bar, rx: 2 });
+      if (d[2]) { r.setAttribute("fill-opacity", "0.35"); r.setAttribute("stroke", bar); r.setAttribute("stroke-dasharray", "3 2"); }
+      svg.appendChild(r);
+      svg.appendChild(el("text", { x: cx, y: bottom + 16, "text-anchor": "middle", "font-size": 11 }, d[0]));
+    });
+    if (proposed) svg.appendChild(refLine);
+    data.forEach(function (d, i) {
+      var cx = left + slot * i + slot / 2;
+      var t = el("text", { x: cx, y: Y(d[1]) - 5, "text-anchor": "middle", "font-size": 11, fill: heading }, pct(d[1]));
+      if (proposed) halo(t, card);
+      svg.appendChild(t);
+    });
+    if (!proposed) svg.appendChild(refLine);
+    var label = "Total Duitama: " + total + "%";
+    var lx = left + slot * data.length - 4;
+    if (proposed) {
+      // La etiqueta busca el tramo libre: sobre la línea, donde las columnas no la alcanzan (aquí, a la izquierda).
+      var lw = label.length * 6.1 + 10;
+      svg.appendChild(el("rect", { x: left + 4, y: ty - 19, width: lw, height: 16, rx: 3, fill: card, stroke: line }));
+      svg.appendChild(el("text", { x: left + 4 + lw / 2, y: ty - 7, "text-anchor": "middle", "font-size": 11, fill: heading, "font-weight": 600 }, label));
+    } else {
+      // Hoy la etiqueta se monta sobre la columna de Estrato 4.
+      svg.appendChild(el("text", { x: lx, y: ty - 4, "text-anchor": "end", "font-size": 11 }, label));
+    }
+  }
+
+  function draw() {
+    bars(document.getElementById("bars-old"), comunas, 46.74, false);
+    bars(document.getElementById("bars-new"), comunas, 46.74, true);
+    cols(document.getElementById("cols-old"), estratos, 16.67, false);
+    cols(document.getElementById("cols-new"), estratos, 16.67, true);
+  }
+  draw();
+  if (window.matchMedia) {
+    var mq = window.matchMedia("(prefers-color-scheme: dark)");
+    if (mq.addEventListener) mq.addEventListener("change", draw);
+  }
+
+  // Chips: un solo texto abierto a la vez; se abre con clic, foco o cursor y se cierra con Escape o clic fuera.
+  var chips = Array.prototype.slice.call(document.querySelectorAll(".chip[data-pop]"));
+  function closeAll(except) {
+    chips.forEach(function (c) {
+      if (c === except) return;
+      c.setAttribute("aria-expanded", "false");
+      document.getElementById(c.dataset.pop).hidden = true;
+    });
+  }
+  chips.forEach(function (c) {
+    var pop = document.getElementById(c.dataset.pop);
+    c.setAttribute("aria-describedby", c.dataset.pop);
+    function open() { closeAll(c); c.setAttribute("aria-expanded", "true"); pop.hidden = false; }
+    function close() { c.setAttribute("aria-expanded", "false"); pop.hidden = true; }
+    c.addEventListener("click", function (e) { e.stopPropagation(); pop.hidden ? open() : close(); });
+    c.addEventListener("mouseenter", open);
+    c.addEventListener("mouseleave", close);
+    c.addEventListener("focus", open);
+    c.addEventListener("blur", close);
+  });
+  document.addEventListener("click", function () { closeAll(null); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeAll(null); });
+
+  // Pantalla / impresión
+  var segs = Array.prototype.slice.call(document.querySelectorAll(".seg button"));
+  segs.forEach(function (b) {
+    b.addEventListener("click", function () {
+      segs.forEach(function (o) { o.setAttribute("aria-pressed", String(o === b)); });
+      document.body.classList.toggle("printing", b.dataset.medium === "print");
+      closeAll(null);
+    });
+  });
+})();
+</script>
+</body>
+</html>

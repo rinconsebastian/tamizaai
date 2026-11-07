@@ -1120,6 +1120,33 @@ public sealed class DashboardTests(PostgresFixture postgres)
     // Widget texts duplicated (dashboard-indicators: Widget context kept with the widget)
 
     [Fact]
+    public async Task A_duplicate_holds_a_caption_kept_in_sight_as_it_is_stored()
+    {
+        // improve-widget-text-hierarchy, task 1.3: `hidden: false` is a stored value, so a copy holds it with its own text.
+        await using var h = await PublishedAsync();
+        await h.AddWidgetAsync(new
+        {
+            title = "2.1. Asistió, por estrato", chartType = "column",
+            config = new { indicator = "coverage", groupBy = "municipality", display = new { subtitle = "¿Cuántos asistieron?", caption = new { text = "% de los hogares que asistieron", hidden = false } } },
+        });
+
+        var response = await DuplicateAsync(h, h.DashboardId, "Housing (copy)");
+        var copyId = (await ReadAsync(response)).GetProperty("id").GetGuid();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var caption = (await h.GetWidgetsAsync(copyId))[0].GetProperty("config").GetProperty("display").GetProperty("caption");
+        Assert.Equal("% de los hogares que asistieron", caption.GetProperty("text").GetString());
+        Assert.False(caption.GetProperty("hidden").GetBoolean());
+        Assert.Equal(1L, await TestData.ScalarAsync<long>(h.Db,
+            """
+            SELECT count(*) FROM tamiza.dashboard_widgets AS c
+            JOIN tamiza.dashboard_widgets AS o ON o.dashboard_id = @original AND o.config = c.config AND o.config -> 'display' -> 'caption' -> 'hidden' = 'false'::jsonb
+            WHERE c.dashboard_id = @copy
+            """,
+            ("original", h.DashboardId), ("copy", copyId)));
+    }
+
+    [Fact]
     public async Task A_duplicate_holds_the_texts_of_the_originals_widgets_as_they_are_stored()
     {
         await using var h = await PublishedAsync();

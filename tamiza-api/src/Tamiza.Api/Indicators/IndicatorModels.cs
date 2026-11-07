@@ -202,24 +202,45 @@ public sealed record WidgetTooltipItem(string Column, string? Label = null, stri
 
 /// <summary>
 /// The line that names what a widget plots (design D1 of the widget context): its own <paramref name="Text"/> in place of the
-/// indicator's name, or <paramref name="Hidden"/> to take the line out of sight. Both left out is the default line, and both set is
-/// refused. Each member is left out of the JSON while it is not set.
+/// indicator's name, or <paramref name="Hidden"/> to take the line out of sight. Both left out is the default line, and a text with
+/// <c>hidden: true</c> is refused. Each member is left out of the JSON while it is not set.
 /// </summary>
 /// <param name="Text">1 to <see cref="WidgetDisplay.MaxCaptionLength"/> characters once trimmed, with no line break.</param>
-/// <param name="Hidden">Only <c>true</c> is stored.</param>
+/// <param name="Hidden"><c>true</c> takes the line out of sight; <c>false</c> keeps it in sight under the widget's subtitle (design D2 of
+/// improve-widget-text-hierarchy); left out, the line is in sight unless a bar, column, line or pie widget has a subtitle.</param>
 public sealed record WidgetCaption(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
      Description("The caption's own text, 1 to 200 characters with no line break; it replaces the indicator's name wherever the widget names what it plots.")] string? Text = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("true takes the caption line out of sight; tooltips and tables still name what is plotted. Not together with text.")] bool? Hidden = null)
+     Description("true takes the caption line out of sight, false keeps it in sight under the widget's subtitle; left out, a bar, column, line or pie widget with a subtitle shows its own caption text in its foot instead of above the chart. Tooltips and tables still name what is plotted. true is not taken together with text.")] bool? Hidden = null)
 {
-    /// <summary>The caption as saved: a text is trimmed and a blank one is none, <c>hidden: false</c> is none, and a caption with neither is none (null).</summary>
+    /// <summary>The caption as saved: a text is trimmed and a blank one is none, <c>hidden</c> is kept as given (<c>false</c> included), and a caption with neither is none (null).</summary>
     public WidgetCaption? Normalize()
     {
         var text = WidgetDisplay.NormalizeText(Text);
-        var hidden = Hidden is true ? true : (bool?)null;
-        return text is null && hidden is null ? null : new WidgetCaption(text, hidden);
+        return text is null && Hidden is null ? null : new WidgetCaption(text, Hidden);
     }
+
+    /// <summary>
+    /// The caption's own text when a subtitle takes it out of sight and the widget's foot shows it instead (design D2 of
+    /// improve-widget-text-hierarchy), else null. That is a bar, column or line chart with no series, or a pie, that has a subtitle and an own
+    /// caption text and leaves <c>hidden</c> unset: <c>true</c> hides the line and <c>false</c> keeps it in sight. Twin of the UI's
+    /// <c>captionInFoot</c>; both are tested against <c>testing/caption-in-foot.json</c>.
+    /// </summary>
+    public static string? TextInFoot(string chartType, WidgetConfig config)
+    {
+        var onChart = chartType is ChartTypes.Pie || (ChartTypes.TakesSeries(chartType) && string.IsNullOrEmpty(config.SeriesBy));
+        var display = config.Display;
+        if (!onChart || display?.Caption is not { Hidden: null } caption || WidgetDisplay.NormalizeText(display.Subtitle) is null)
+        {
+            return null;
+        }
+
+        return WidgetDisplay.NormalizeText(caption.Text);
+    }
+
+    /// <summary>Whether <see cref="TextInFoot"/> has a text for the widget.</summary>
+    public static bool InFoot(string chartType, WidgetConfig config) => TextInFoot(chartType, config) is not null;
 }
 
 /// <summary>
@@ -277,7 +298,7 @@ public sealed record WidgetCategoryOrder(
 /// </param>
 /// <param name="Subtitle">Every kind: the question the chart answers, 1 to <see cref="WidgetDisplay.MaxSubtitleLength"/> characters (design D1 of the widget context).</param>
 /// <param name="Footnote">Every kind: a note at the widget's foot, 1 to <see cref="WidgetDisplay.MaxFootnoteLength"/> characters.</param>
-/// <param name="Caption">Every kind: the line that names what the widget plots, with its own text or hidden; left out, the default line.</param>
+/// <param name="Caption">Every kind: the line that names what the widget plots, with its own text, hidden, or kept in sight under a subtitle; left out, the default line.</param>
 /// <param name="Unit">Every kind: replaces the indicator's unit for this widget, 1 to <see cref="ScriptEndpoints.MaxUnitLength"/> characters.</param>
 /// <param name="ShowDescription">Every kind: shows a button that opens the indicator's description. Only <c>true</c> is stored.</param>
 /// <param name="ReferenceLines">Bar, column and line only: up to <see cref="WidgetDisplay.MaxReferenceLines"/> lines to compare the bars with, in the order given (design D1 of the chart annotations).</param>
@@ -302,7 +323,7 @@ public sealed record WidgetDisplay(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
      Description("A note at the widget's foot, such as how to read it: 1 to 500 characters with no line break. For every kind; left out, no footnote.")] string? Footnote = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
-     Description("The line that names what the widget plots: { text } replaces the indicator's name there and in tooltips and tables, { hidden: true } leaves the line out of sight (tooltips and tables still name what is plotted). Never both. For every kind; left out, the default line.")] WidgetCaption? Caption = null,
+     Description("The line that names what the widget plots: { text } replaces the indicator's name there and in tooltips and tables, { hidden: true } leaves the line out of sight, { hidden: false } keeps it in sight under the widget's subtitle (tooltips and tables still name what is plotted). A text is not taken with hidden: true. For every kind; left out, the default line.")] WidgetCaption? Caption = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),
      Description("The unit of this widget's values, 1 to 32 characters with no line break; it replaces the indicator's unit for this widget only. For every kind; left out, the indicator's unit.")] string? Unit = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull),

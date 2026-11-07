@@ -1,6 +1,6 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { Component, DestroyRef, ElementRef, LOCALE_ID, computed, effect, inject, input, model, output, signal, viewChild } from '@angular/core';
-import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { catchError, distinctUntilChanged, map, of, switchMap, tap, timer } from 'rxjs';
@@ -27,7 +27,7 @@ import {
 } from '../../../core/projects/indicators.service';
 import { Alert, ApiLang, Button, Skeleton } from '../../../shared/ui';
 import { AxisChart, AxisKind } from './axis-chart';
-import { ChartBases, answerColumnsOf, baseColumnOf, figureNames, nLine, noBaseSettings, noDataLine, overOnAnswers, settingsInForce, smallBaseNote } from './base-figures';
+import { ChartBases, SmallMark, answerColumnsOf, baseColumnOf, figureNames, isSmallBase, nLine, noBaseSettings, noDataLine, overOnAnswers, settingsInForce, smallBaseMarksText, statNLine } from './base-figures';
 import { CategoryOrders, arrange, entryOf, ordersFor } from './category-order';
 import { pivot } from './chart-data';
 import { isSeriesAnswer, orderedSeriesTable } from './series-table';
@@ -36,7 +36,7 @@ import { ChartColors, chartColors, defaultColors } from './chart-colors';
 import { CrosstabWidget } from './crosstab-widget';
 import { HeatmapChart } from './heatmap-chart';
 import { LikertChart } from './likert-chart';
-import { boxIndicator, columnLabels, plainIndicator, valueFormatter, withWidgetUnit } from './format';
+import { boxIndicator, captionInFoot, columnLabels, figureFormatter, named, ownCaption, plainIndicator, valueAxisTitle, valueFormatter, withWidgetUnit } from './format';
 import { ActiveDashboardFilter, appliedOf } from './dashboard-filters';
 import { DashboardPrint } from './dashboard-print';
 import { WidgetExportHost } from './export-parts';
@@ -44,7 +44,8 @@ import { MapPicture } from './map-engine';
 import { MapReadiness, MapWidget } from './map-widget';
 import { PieWidget } from './pie-widget';
 import { PyramidChart } from './pyramid-chart';
-import { StatWidget } from './stat-widget';
+import { StatWidget, statDescription } from './stat-widget';
+import { FootItem, WidgetFoot } from './widget-foot';
 
 /**
  * Whether the widget can be exported now (add-widget-export, design D3). `null` means the format is available; a string is the reason
@@ -91,7 +92,15 @@ function displayFor(type: ChartType, config: WidgetConfig): { display?: WidgetDi
   const { color, ramp, orientation, labels, subtitle, footnote, caption, unit, showDescription, referenceLines, interpolation, dataLabels, order, minN, showN, secondary } = config.display ?? {};
   const named = labels ? Object.entries(labels).filter(([, label]) => label.trim()) : [];
   const captionText = caption?.text?.trim() ? caption.text : null;
-  const captionKept: WidgetCaption | null = caption?.hidden && !captionText ? { hidden: true } : captionText ? { text: captionText } : null;
+  // A caption keeps `hidden: false` (improve-widget-text-hierarchy, design D2): it keeps the line in sight under a subtitle. A text with
+  // `hidden: true` is still saved as the text alone, as the form never offers both.
+  const captionKept: WidgetCaption | null = captionText
+    ? { text: captionText, ...(caption?.hidden === false ? { hidden: false } : {}) }
+    : caption?.hidden === true
+      ? { hidden: true }
+      : caption?.hidden === false
+        ? { hidden: false }
+        : null;
   const lines = referenceLinesOf(type, config);
   // Data labels: a saved `false` is kept as it is on the kinds that take them; `true` is not taken by a stacked or 100% layout.
   const layout = layoutOf(type, config);
@@ -331,7 +340,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
  */
 @Component({
   selector: 'app-widget-view',
-  imports: [NgTemplateOutlet, RouterLink, TranslocoDirective, Alert, ApiLang, Button, Skeleton, AxisChart, BoxplotChart, CrosstabWidget, HeatmapChart, LikertChart, MapWidget, PieWidget, PyramidChart, StatWidget],
+  imports: [NgTemplateOutlet, RouterLink, TranslocoDirective, Alert, ApiLang, Button, Skeleton, WidgetFoot, AxisChart, BoxplotChart, CrosstabWidget, HeatmapChart, LikertChart, MapWidget, PieWidget, PyramidChart, StatWidget],
   template: `
     <div class="flex h-full min-h-0 flex-col gap-2" *transloco="let t" [attr.aria-busy]="state().kind === 'loading'">
       @switch (state().kind) {
@@ -374,8 +383,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
               }
               @if (result.rows.length === 0) {
                 <p class="text-sm text-body" data-testid="widget-empty">{{ t('indicators.widget.empty') }}</p>
-                <ng-container *ngTemplateOutlet="baseLines" />
-                <ng-container *ngTemplateOutlet="footnoteLine" />
+                <app-widget-foot [items]="footItems()" />
               } @else {
                 @if (showToggle() && chartType() !== 'stat') {
                   <div class="flex shrink-0 justify-end">
@@ -385,10 +393,10 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
                   </div>
                 }
                 <!-- With a footnote or a line of bases the box cuts what does not fit, so a chart too big for its room never paints over the text (add-widget-context, design D5; add-small-sample-warnings, design D11). -->
-                <div class="min-h-0 flex-1" [class.overflow-hidden]="!!footnote() || hasBaseLines()">
+                <div class="min-h-0 flex-1" [class.overflow-hidden]="footItems().length > 0" [class]="statBoxClass()">
                   @switch (chartType()) {
                     @case ('stat') {
-                      <app-stat-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [bases]="chartBases()" [n]="result.n" [unfiltered]="result.unfiltered" (dimmed)="dimmedMarks.set($event)" />
+                      <app-stat-widget [rows]="result.rows" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [bases]="chartBases()" [n]="result.n" [unfiltered]="result.unfiltered" />
                     }
                     @case ('pie') {
                       <app-pie-widget [rows]="result.rows" [domain]="result.domain" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [orders]="orders()" [colors]="resolvedColors()" [bases]="chartBases()" [asTable]="asTable()" (dimmed)="dimmedMarks.set($event)" />
@@ -425,8 +433,7 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
                     }
                   }
                 </div>
-                <ng-container *ngTemplateOutlet="baseLines" />
-                <ng-container *ngTemplateOutlet="footnoteLine" />
+                <app-widget-foot [items]="footItems()" [compact]="chartType() === 'stat'" />
               }
             }
           }
@@ -434,37 +441,9 @@ export function savedConfig(type: ChartType, config: WidgetConfig): WidgetConfig
       }
     </div>
 
-    <!-- The lines of the bases (add-small-sample-warnings, design D11): the small-base note, the base n and what was left out as no data, under the chart and above the footnote. They take their room from the plot as the footnote does. -->
-    <ng-template #baseLines>
-      <ng-container *transloco="let t">
-        @if (smallMinBelow(); as min) {
-          <p class="shrink-0 text-xs text-body paper:line-clamp-none" [class.line-clamp-1]="compact()" [class.line-clamp-2]="!compact()" [attr.title]="smallNote(min, t)" data-testid="widget-small-note">{{ smallNote(min, t) }}</p>
-        }
-        @if (nLineText(); as line) {
-          <p class="shrink-0 text-xs text-body paper:line-clamp-none" [class.line-clamp-1]="compact()" [class.line-clamp-2]="!compact()" [attr.title]="line" data-testid="widget-n-line">{{ line }}</p>
-        }
-        @if (noDataText(); as line) {
-          <p class="shrink-0 text-xs text-body paper:line-clamp-none" [class.line-clamp-1]="compact()" [class.line-clamp-2]="!compact()" [attr.title]="line" data-testid="widget-no-data-line">{{ line }}</p>
-        }
-      </ng-container>
-    </ng-template>
-
-    <!-- The widget's footnote, at the foot of its chart, its table or its message that no row matches. -->
-    <ng-template #footnoteLine>
-      @if (footnote(); as footnote) {
-        <p
-          class="shrink-0 text-xs text-body paper:line-clamp-none"
-          [class.line-clamp-1]="compact()"
-          [class.line-clamp-2]="!compact()"
-          [attr.title]="footnote"
-          data-testid="widget-footnote"
-        >{{ footnote }}</p>
-      }
-    </ng-template>
-
     <!-- A bar, column or line chart with a series is given the whole answer, which holds the series and the totals. -->
     <ng-template #axis>
-      <app-axis-chart [kind]="axisKind()!" [rows]="result()!.rows" [answer]="result()" [config]="config()!" [label]="label()" [format]="formatter()" [names]="names()" [orders]="orders()" [colors]="resolvedColors()" [bases]="chartBases()" [asTable]="asTable()" (dimmed)="dimmedMarks.set($event)" />
+      <app-axis-chart [kind]="axisKind()!" [rows]="result()!.rows" [answer]="result()" [config]="config()!" [label]="label()" [format]="formatter()" [axisTitle]="axisTitle()" [names]="names()" [orders]="orders()" [colors]="resolvedColors()" [bases]="chartBases()" [asTable]="asTable()" (dimmed)="dimmedMarks.set($event)" (unplaced)="unplacedLines.set($event)" />
     </ng-template>
 
     <ng-template #notPublished>
@@ -501,8 +480,28 @@ export class WidgetView {
   readonly placeholder = input('');
   /** The colors of the dashboard the widget is on, or of the version shown (add-dashboard-palettes, design D7). */
   readonly colors = input<DashboardColors>(defaultColors);
-  /** The rows of the tile the widget is in; its footnote shows one line on a tile two rows high or less, else two (add-widget-context, design D5). */
-  readonly tileRows = input<number | null>(null);
+  /**
+   * The tile is a stat tile 2 rows high or less (improve-widget-text-hierarchy, design D6): its subtitle is not under its title but in the
+   * foot's Detail chip. Set by the grid; false anywhere else.
+   */
+  readonly compactStat = input(false);
+  /** The grid columns the tile spans, which the stat box on paper reads to guess whether the label takes two lines; 0 when not known. */
+  readonly columns = input(0);
+  /**
+   * What a stat tile's box keeps on paper (design D6): the room of its figure and a label of one line, or of two when the label is longer
+   * than a line of that many columns holds (about 10.5 characters of 14 px per column; the text it measures is the one the tile draws as its label, the statistic included). A tile two rows high gives the foot what is left,
+   * so a short label lets the Detail line and the notes print. Not known, it keeps the room of two lines.
+   */
+  protected readonly statBoxClass = computed(() => {
+    if (this.chartType() !== 'stat') {
+      return '';
+    }
+    this.lang();
+    const config = this.config();
+    const drawn = config ? statDescription(config, this.label(), this.names(), (key, params) => this.transloco.translate(key, params)) : '';
+    const perLine = Math.max(1, this.columns()) * 10.5;
+    return this.columns() > 0 && drawn.length <= perLine ? 'paper:min-h-[2.6rem]' : 'paper:min-h-[3.7rem]';
+  });
   /**
    * The base settings of the dashboard the widget is on, or of the version shown (add-small-sample-warnings, design D7, D8): the small-base
    * threshold and whether widgets show their n line. The widget's own settings in its display win over them.
@@ -555,8 +554,6 @@ export class WidgetView {
   });
   /** The widget's footnote, trimmed, or null while it has none. */
   protected readonly footnote = computed(() => this.config()?.display?.footnote?.trim() || null);
-  /** The texts of the tile show one line, not two, on a tile two rows high or less. */
-  protected readonly compact = computed(() => (this.tileRows() ?? Infinity) <= 2);
   /** The indicator is listed and has no table yet: the widget says so without asking. */
   protected readonly blocked = computed(() => !!this.indicator() && !this.indicator()!.published);
   /** What the widget calls its indicator: the label, or the name when the project lists none. */
@@ -572,22 +569,102 @@ export class WidgetView {
   protected readonly inForce = computed(() => settingsInForce(this.config()?.display, this.bases()));
   /** What a chart is given to write its figures and mark its small bases: the threshold in force and the indicator's base column. */
   protected readonly chartBases = computed<ChartBases>(() => ({ minN: this.inForce().minN, showN: this.inForce().showN, baseColumn: baseColumnOf(this.indicator()?.columns), answerColumns: answerColumnsOf(this.indicator()?.columns) }));
-  /** How many marks the chart drew dimmed for a small base, told by the chart itself (design D10): the note under the chart explains them. */
-  protected readonly dimmedMarks = signal(0);
-  /** The threshold of the note under the chart, while a mark is dimmed: a table says it with its own note, a cross table by its cells. */
-  protected readonly smallMin = computed(() => (this.inForce().minN !== null && !this.asTable() && this.chartType() !== 'crosstab' && this.dimmedMarks() > 0 ? this.inForce().minN : null));
   /**
-   * The base n line (design D11): "n = 223 Hogares que asistieron", while the widget shows it and has an n. A stat tile draws its own inside
-   * (improve-stat-cards, design D3), so none is drawn under it.
+   * The marks the chart drew dimmed for a small base, named and with their n, told by the chart itself (design D10; improve-widget-text-hierarchy,
+   * design D5): the foot's small-base chip names them.
    */
-  protected readonly nLineText = computed(() =>
-    this.inForce().showN && this.chartType() !== 'stat' ? nLine(this.result()?.n, figureNames(this.config() ?? emptyConfig(), this.names(), baseColumnOf(this.indicator()?.columns)).base, this.locale) : null,
-  );
+  protected readonly dimmedMarks = signal<SmallMark[]>([]);
+  /** The threshold of the small-base chip, while a mark is dimmed: a table says it with its own note, a cross table by its cells. */
+  protected readonly smallMin = computed(() => (this.inForce().minN !== null && !this.asTable() && this.chartType() !== 'crosstab' && this.dimmedMarks().length > 0 ? this.inForce().minN : null));
+  /** The widget's n: the query's, else a stat tile's own row's (improve-stat-cards, design D2). */
+  private readonly widgetN = computed(() => this.result()?.n ?? (this.chartType() === 'stat' ? this.result()?.rows[0]?.n : undefined));
+  /**
+   * The base n line (design D11): "n = 223 Hogares que asistieron", while the widget shows it and has an n. A stat tile shows it when it
+   * chooses it or its dashboard does, by the rules it always had (`statNLine`, improve-widget-text-hierarchy, design D6); it is the n chip of the
+   * foot, for a tile as for a chart.
+   */
+  protected readonly nLineText = computed(() => {
+    const config = this.config() ?? emptyConfig();
+    return this.chartType() === 'stat'
+      ? statNLine(config, this.names(), this.chartBases(), this.widgetN(), this.locale)
+      : this.inForce().showN
+        ? nLine(this.result()?.n, figureNames(config, this.names(), baseColumnOf(this.indicator()?.columns)).base, this.locale)
+        : null;
+  });
   /** What the widget left out as no data, in the widget's formatter and unit (design D6, D11). */
   protected readonly noDataText = computed(() => noDataLine(this.result()?.noData, this.formatter(), this.inForce().showN, this.locale));
   /** The note under the chart: a stat tile draws its own inside (improve-stat-cards, design D1), so none is drawn under it. */
   protected readonly smallMinBelow = computed(() => (this.chartType() === 'stat' ? null : this.smallMin()));
-  protected readonly hasBaseLines = computed(() => this.smallMinBelow() !== null || this.nLineText() !== null || this.noDataText() !== null);
+
+  /** The language the foot's texts are written in: they are worked out in a computed signal, so a change of language must redo them. */
+  private readonly lang = toSignal(this.transloco.langChanges$, { initialValue: this.transloco.getActiveLang() });
+  /**
+   * The reference lines whose text could not be drawn at the line, with their whole texts (design D7): a chart tells the widget, and the
+   * foot's reference-lines chip names them. Empty while every text fits.
+   */
+  readonly unplacedLines = signal<string[]>([]);
+
+  /**
+   * The chips of the widget's foot, in their order (improve-widget-text-hierarchy, design D4): the caption's own text when a subtitle took it
+   * out of sight, the base n, the small bases, the no-data value, the reference lines whose text did not fit, a compact stat tile's subtitle
+   * and the footnote. A chip with nothing to say is left out. The page shows them as chips, paper and an image as lines of whole text.
+   */
+  protected readonly footItems = computed<FootItem[]>(() => {
+    this.lang();
+    const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
+    const config = this.config();
+    const display = config?.display;
+    const items: FootItem[] = [];
+    const own = config ? ownCaption(config) : null;
+    if (config && own && captionInFoot(this.chartType(), config)) {
+      items.push({ kind: 'caption', label: own, text: t('indicators.chart.caption', { what: own, group: named(this.names(), config.groupBy) }), tone: 'neutral' });
+    }
+    // The n chip is gray while the base is enough and amber below the threshold in force, which a stat tile says whether or not it shows its
+    // n: it has no other mark of a small base now that its figure is no longer dimmed (design D6).
+    const n = this.nLineText();
+    const widgetN = this.widgetN();
+    const smallN = typeof widgetN === 'number' && isSmallBase(widgetN, this.inForce().minN);
+    if (n || (this.chartType() === 'stat' && smallN)) {
+      if (smallN) {
+        const number = figureFormatter(this.locale);
+        items.push({
+          kind: 'n',
+          label: `n = ${number(widgetN)}`,
+          text: t(this.chartType() === 'stat' ? 'indicators.foot.smallStat' : 'indicators.foot.smallChart', { n: number(widgetN), min: number(this.inForce().minN!) }),
+          tone: 'warning',
+          // A tile two rows high has no room for the whole sentence on paper: the sheet prints a line short enough to keep the warning.
+          printText: this.chartType() === 'stat' ? t('indicators.foot.smallStatShort', { n: number(widgetN), min: number(this.inForce().minN!) }) : undefined,
+        });
+      } else if (n) {
+        items.push({ kind: 'n', label: n, text: n, tone: 'neutral' });
+      }
+    }
+    const min = this.smallMinBelow();
+    if (min !== null) {
+      const marks = this.dimmedMarks();
+      items.push({ kind: 'small', label: t('indicators.foot.small', { count: marks.length }), text: smallBaseMarksText(marks, min, this.locale, t), tone: 'warning' });
+    }
+    const noData = this.noDataText();
+    if (noData) {
+      const lost = this.result()?.noData;
+      const share = typeof lost?.share === 'number' ? new Intl.NumberFormat(this.locale, { style: 'percent', maximumFractionDigits: 1 }).format(lost.share) : null;
+      const figure = share ?? (typeof lost?.value === 'number' ? this.formatter()(lost.value) : '');
+      items.push({ kind: 'noData', label: t('indicators.foot.noData', { figure }).trim(), text: noData, tone: 'neutral' });
+    }
+    const lines = this.axisKind() ? this.unplacedLines() : [];
+    if (lines.length) {
+      items.push({ kind: 'lines', label: t('indicators.foot.lines'), text: lines.join('; '), tone: 'neutral' });
+    }
+    const subtitle = display?.subtitle?.trim();
+    if (this.compactStat() && subtitle) {
+      items.push({ kind: 'detail', label: t('indicators.foot.detail'), text: subtitle, tone: 'neutral' });
+    }
+    const footnote = this.footnote();
+    if (footnote) {
+      items.push({ kind: 'note', label: t('indicators.foot.note'), text: footnote, tone: 'neutral' });
+    }
+    return items;
+  });
 
   /** The message of a widget that would add up several answers of a multiple-choice question, naming the column (improve-stat-cards, design D4b). */
   protected readonly combinedColumn = computed(() => {
@@ -595,9 +672,6 @@ export class WidgetView {
     return column ? this.names()(column) : '';
   });
 
-  protected smallNote(min: number, t: (key: string, params?: Record<string, unknown>) => string): string {
-    return smallBaseNote(min, this.locale, t);
-  }
   private readonly drawn = computed<ShownValues | null>(() => {
     const result = this.result();
     const config = this.config();
@@ -609,6 +683,8 @@ export class WidgetView {
    */
   protected readonly unitOf = computed(() => withWidgetUnit(this.indicator() ?? plainIndicator, this.config()));
   protected readonly formatter = computed(() => valueFormatter(this.unitOf(), this.locale));
+  /** The unit a bar, column or line chart writes at the end of its value axis while its caption line is out of sight (design D3). */
+  protected readonly axisTitle = computed(() => valueAxisTitle(this.unitOf()));
   /** A box plot's figures are written as a decimal for a count (quartiles and means fall between whole numbers). */
   protected readonly boxFormatter = computed(() => valueFormatter(boxIndicator(this.unitOf()), this.locale));
   protected readonly isPercent = computed(() => (this.indicator() ?? plainIndicator).format === 'percent');
@@ -654,14 +730,11 @@ export class WidgetView {
   });
 
   /**
-   * What the tile says under its chart (add-small-sample-warnings, design D11): the small-base note, the base n line and the no-data line,
-   * which an image draws among its notes below, before the footnote.
+   * What the tile says under its chart (improve-widget-text-hierarchy, design D10): the texts its foot opens, as lines of whole text, in the
+   * foot's order, which an image draws among its notes below, before the footnote. The subtitle of a compact stat tile and the footnote are
+   * the image's own parameters, so they are not here.
    */
-  readonly exportNotesBelow = computed(() => {
-    const t = (key: string, params?: Record<string, unknown>) => this.transloco.translate(key, params);
-    const min = this.smallMin();
-    return [min !== null ? this.smallNote(min, t) : null, this.nLineText(), this.noDataText()].filter((line): line is string => !!line);
-  });
+  readonly exportNotesBelow = computed(() => this.footItems().filter((item) => item.kind !== 'detail' && item.kind !== 'note').map((item) => item.text));
 
   /** What a map as a chart says about itself; a map shown as a table has no engine and is read as a table. */
   readonly mapReadiness = signal<MapReadiness>('drawing');

@@ -717,6 +717,24 @@ public sealed class DashboardWidgetTests(PostgresFixture postgres)
         Assert.Equal(segments, (await TestData.ScalarAsync<Guid>(h.Db, "SELECT dashboard_id FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id))));
     }
 
+    [Fact]
+    public async Task A_widget_moved_to_another_dashboard_keeps_a_caption_kept_in_sight()
+    {
+        // improve-widget-text-hierarchy, task 1.3.
+        await using var h = await PublishedAsync();
+        var segments = await h.InsertDashboardAsync("Segmentos");
+        var created = await h.AddWidgetAsync(Texted("column", new { subtitle = "¿En qué lugares?", caption = new { hidden = false } }));
+        var id = created.GetProperty("id").GetGuid();
+        var before = await TestData.ScalarAsync<string>(h.Db, "SELECT config::text FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id));
+
+        var response = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id), new { dashboardId = segments });
+        var moved = await ReadAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(moved.GetProperty("config").GetProperty("display").GetProperty("caption").GetProperty("hidden").GetBoolean());
+        Assert.Equal(before, await TestData.ScalarAsync<string>(h.Db, "SELECT config::text FROM tamiza.dashboard_widgets WHERE id = @id", ("id", id)));
+    }
+
     private static async Task<long> VersionCountAsync(IndicatorsHarness h) =>
         await TestData.ScalarAsync<long>(h.Db, "SELECT count(*) FROM tamiza.dashboard_versions WHERE project_id = @id", ("id", h.ProjectId));
 

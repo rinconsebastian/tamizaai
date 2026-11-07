@@ -703,6 +703,40 @@ public sealed class ReportDataTests(PostgresFixture postgres)
         Assert.Equal("% de quienes asistieron", widgets[1].StatColumn!.Header);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_caption_text_under_a_subtitle_is_kept_in_the_email_with_or_without_hidden_false(bool keptInSight)
+    {
+        // improve-widget-text-hierarchy, task 1.5 (dashboard-reports "Caption under a subtitle in the email"): nothing in Reports changes.
+        await using var h = await AsistenciaAsync();
+        object caption = keptInSight ? new { text = "% de quienes asistieron", hidden = false } : new { text = "% de quienes asistieron" };
+        await h.AddWidgetAsync(Context("column", new { subtitle = "¿Cuántos asistieron?", caption }));
+
+        var model = await BuildAsync(h);
+        var widget = model.Widgets.Single();
+        var (html, shown) = ReportHtml.Write(model, true, new ReportOptions());
+        var text = ReportPlainText.Write(model, true, shown, new ReportOptions());
+
+        Assert.False(widget.CaptionHidden);
+        Assert.Equal("% de quienes asistieron", widget.Caption);
+        Assert.Equal("¿Cuántos asistieron?", widget.Subtitle);
+        Assert.Contains(">% de quienes asistieron</p>", html);
+        Assert.Contains("% de quienes asistieron" + Environment.NewLine, text);
+    }
+
+    [Fact]
+    public async Task A_caption_hidden_false_is_not_a_hidden_caption_for_the_email()
+    {
+        await using var h = await AsistenciaAsync();
+        await h.AddWidgetAsync(Context("column", new { subtitle = "S", caption = new { hidden = false } }));
+
+        var widget = (await BuildAsync(h)).Widgets.Single();
+
+        Assert.False(widget.CaptionHidden);
+        Assert.Equal("Encuesta hoy: value", widget.Caption);
+    }
+
     [Fact]
     public async Task A_hidden_caption_keeps_what_is_plotted_in_the_value_columns_header()
     {
@@ -1274,6 +1308,29 @@ public sealed class ReportDataTests(PostgresFixture postgres)
         Assert.Equal(["n = 156 Hogares"], model.Widgets[0].StatLines);
         Assert.Empty(model.Widgets[1].StatLines);
         Assert.Empty(model.Widgets[1].Notes);
+    }
+
+    [Fact]
+    public async Task A_stat_tile_with_a_small_base_is_written_plainly_with_its_n_line_and_the_small_base_text_of_the_page_is_not_in_the_email()
+    {
+        // improve-widget-text-hierarchy, task 1.5 (dashboard-reports "Stat tile with a small base"): the n of 156 is under the tile's own threshold of 200.
+        await using var h = await LongTeatroAsync();
+        await h.AddWidgetAsync(Widget("Pocos", "stat",
+            new { indicator = "teatro_hoy", ratio = TeatroRatio, filters = Attended, display = new { secondary = new[] { "n" }, minN = 200 } }, y: 0, w: 3));
+
+        var model = await BuildAsync(h);
+        var tile = model.Widgets.Single();
+        var (html, shown) = ReportHtml.Write(model, true, new ReportOptions());
+        var text = ReportPlainText.Write(model, true, shown, new ReportOptions());
+
+        Assert.Equal(["n = 156 Hogares"], tile.StatLines);
+        Assert.Empty(tile.Notes);
+        foreach (var body in new[] { html, text })
+        {
+            Assert.Contains("n = 156 Hogares", body);
+            Assert.DoesNotContain("small base", body, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("opacity", body);
+        }
     }
 
     [Fact]

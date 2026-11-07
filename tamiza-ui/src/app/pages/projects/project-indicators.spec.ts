@@ -3077,8 +3077,8 @@ describe('ProjectIndicators base sizes (add-small-sample-warnings, design D8)', 
   const form = () => document.querySelector<HTMLElement>('[data-testid="dashboard-bases-dialog"]');
   const menuItems = () => Array.from(document.querySelectorAll<HTMLElement>('[cdkmenuitem]')).map((i) => i.dataset['testid']);
   const toasts = () => TestBed.inject(ToastService).toasts().map((t) => t.message);
-  const smallNote = (context: Pick<Context, 'root'>) => byTestId(context.root, 'widget-small-note');
-  const nLine = (context: Pick<Context, 'root'>) => byTestId(context.root, 'widget-n-line');
+  const smallNote = (context: Pick<Context, 'root'>) => byTestId(context.root, 'foot-line-small');
+  const nLine = (context: Pick<Context, 'root'>) => byTestId(context.root, 'foot-line-n');
 
   async function openMenu(context: Context): Promise<HTMLElement> {
     const trigger = byTestId(context.root, 'dashboard-menu')!;
@@ -3139,7 +3139,7 @@ describe('ProjectIndicators base sizes (add-small-sample-warnings, design D8)', 
     expect(byTestId(context.root, 'dashboard-menu')).toBeNull();
     expect(item('dashboard-bases')).toBeNull();
     // The dashboard's settings still reach what a viewer sees.
-    expect(text(smallNote(context))).toBe('Marks with a base below 30 are dimmed.');
+    expect(text(smallNote(context))).toContain('Small base (below 30): ');
   });
 
   it('shows no n line and no small base on a dashboard without base settings (Widgets and dashboards without base settings)', async () => {
@@ -3178,7 +3178,7 @@ describe('ProjectIndicators base sizes (add-small-sample-warnings, design D8)', 
     await settle(context.harness);
 
     expect(form()).toBeNull();
-    expect(text(smallNote(context))).toBe('Marks with a base below 30 are dimmed.');
+    expect(text(smallNote(context))).toContain('Small base (below 30): ');
     expect(text(nLine(context)).startsWith('n = 137')).toBe(true);
     expect(context.http.match(isQuery)).toHaveLength(0);
     expect(toasts()).toContain('Base sizes saved.');
@@ -3226,7 +3226,7 @@ describe('ProjectIndicators base sizes (add-small-sample-warnings, design D8)', 
     await settle(context.harness);
 
     context.http.expectNone(basesUrl);
-    expect(text(smallNote(context))).toBe('Marks with a base below 30 are dimmed.');
+    expect(text(smallNote(context))).toContain('Small base (below 30): ');
   });
 
   it('reads the settings of the dashboard that opens, not those of the one left', async () => {
@@ -3274,7 +3274,7 @@ describe('ProjectIndicators base sizes (add-small-sample-warnings, design D8)', 
       const moved = widget('w9', { dashboardId: 'd2', title: 'Moved', config: config({ ratio }) });
       const context = await open('analyst', [moved], comunas, {}, { dashboardId: 'd2', dashboards: indicatorsAndField, bases: { minN: 30, showN: false } });
 
-      expect(text(smallNote(context))).toBe('Marks with a base below 30 are dimmed.');
+      expect(text(smallNote(context))).toContain('Small base (below 30): ');
     });
 
     it('keeps the n line a widget hides when it moves to a dashboard that shows it (Own setting kept by a move)', async () => {
@@ -3282,7 +3282,7 @@ describe('ProjectIndicators base sizes (add-small-sample-warnings, design D8)', 
       const shows = widget('w8', { dashboardId: 'd2', title: 'Follows', config: config({ ratio }), layout: { x: 6, y: 0, w: 6, h: 4 } });
       const context = await open('analyst', [hides, shows], comunas, {}, { dashboardId: 'd2', dashboards: indicatorsAndField, bases: { minN: null, showN: true } });
 
-      const lines = Array.from(context.root.querySelectorAll<HTMLElement>('[data-widget-id]')).map((tile) => ({ id: tile.dataset['widgetId'], line: !!tile.querySelector('[data-testid="widget-n-line"]') }));
+      const lines = Array.from(context.root.querySelectorAll<HTMLElement>('[data-widget-id]')).map((tile) => ({ id: tile.dataset['widgetId'], line: !!tile.querySelector('[data-testid="foot-line-n"]') }));
       expect(lines).toEqual([
         { id: 'w9', line: false },
         { id: 'w8', line: true },
@@ -3804,8 +3804,8 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
       const ratio = { numerator: 'numerator', denominator: 'denominator' };
       const rated = widget('w1', { title: 'Coverage by municipality', config: config({ ratio }) });
       const comunas = result([row('COMUNA 7', 0.5, null, { numerator: 8, denominator: 16, n: 16 }), row('COMUNA 1', 56 / 121, null, { numerator: 56, denominator: 121, n: 121 })], { n: 137 });
-      const smallNote = (context: Pick<Context, 'root'>) => byTestId(context.root, 'widget-small-note');
-      const nLine = (context: Pick<Context, 'root'>) => byTestId(context.root, 'widget-n-line');
+      const smallNote = (context: Pick<Context, 'root'>) => byTestId(context.root, 'foot-line-small');
+      const nLine = (context: Pick<Context, 'root'>) => byTestId(context.root, 'foot-line-n');
       const exportBody = async (context: Context) => {
         all(context.root, 'widget-menu')[0].click();
         await settle(context.harness);
@@ -3825,7 +3825,7 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
         await view(context, historyOf([12, 9]), versionOf(9, [rated], { minN: 30, showN: true }));
         await answerQueries(context, comunas);
 
-        expect(text(smallNote(context))).toBe('Marks with a base below 30 are dimmed.');
+        expect(text(smallNote(context))).toContain('Small base (below 30): ');
         expect(text(nLine(context)).startsWith('n = 137')).toBe(true);
         // Nothing of the version is a setting to change: the actions are gone with the rest of the editing.
         expect(byTestId(context.root, 'dashboard-menu')).toBeNull();
@@ -3850,7 +3850,7 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
         byTestId(context.root, 'dashboard-version-back')!.click();
         await settle(context.harness);
         await answerQueries(context, comunas);
-        expect(text(smallNote(context))).toBe('Marks with a base below 30 are dimmed.');
+        expect(text(smallNote(context))).toContain('Small base (below 30): ');
       });
 
       it('sends the settings of the version shown with a workbook request, and none for a version without them (Threshold in force on screen and Version without a threshold, UI parts)', async () => {
@@ -4216,7 +4216,7 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
     it('takes the base settings the restore brought back before the dashboard is read again, and none for a version recorded before them (Base settings restored and Version recorded before base settings, UI part)', async () => {
       const rated = widget('w1', { title: 'Coverage by municipality', config: config({ ratio: { numerator: 'numerator', denominator: 'denominator' } }) });
       const comunas = result([row('COMUNA 7', 0.5, null, { numerator: 8, denominator: 16, n: 16 })], { n: 16 });
-      const note = (c: Context) => byTestId(c.root, 'widget-small-note');
+      const note = (c: Context) => byTestId(c.root, 'foot-line-small');
       const context = await open('analyst', [rated], comunas, {}, { bases: { minN: 30, showN: true } });
       expect(note(context)).not.toBeNull();
 
@@ -4228,7 +4228,7 @@ describe('ProjectIndicators version history (add-dashboard-versions, design D11)
       await restore(context, historyOf([10, 3]), 3, restoreOf(11, 3, [rated], { dashboard: dashboard([rated], { version: 11, minN: 50, showN: true }) }));
       await answerLoad(context, [rated], {}, 'd1', [], undefined, undefined, { minN: 50, showN: true });
       await answerQueries(context, comunas);
-      expect(text(note(context))).toBe('Marks with a base below 50 are dimmed.');
+      expect(text(note(context))).toContain('Small base (below 50): ');
     });
 
     it('asks first, then restores, reads the dashboard again and says so in one message, with focus on the heading (Removed widget brought back)', async () => {

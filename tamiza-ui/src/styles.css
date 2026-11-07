@@ -38,6 +38,8 @@
   --color-fg-brand-subtle: var(--color-teal-200);
   --color-fg-brand: var(--color-teal-700);
   --color-fg-brand-strong: var(--color-teal-900);
+  /* The subtitle of a widget (improve-widget-text-hierarchy, design D1): a gray darker than the body text, about 10:1 on the tile. */
+  --color-body-strong: var(--color-gray-700);
 }
 
 @layer base {
@@ -245,6 +247,8 @@
 }
 
 .dark {
+  /* the darker body gray of the widget subtitle, as light as the dark theme needs to stay readable on the tile (design D1) */
+  --color-body-strong: var(--color-gray-300);
   /* tamiza: today's colors, and the default palette */
   --tmz-pal-tamiza-1: #3987e5;
   --tmz-pal-tamiza-2: #d95926;

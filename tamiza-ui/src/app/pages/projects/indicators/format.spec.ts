@@ -1,6 +1,7 @@
-import { WidgetConfig, WidgetDisplay } from '../../../core/projects/indicators.service';
+import { ChartType, WidgetConfig, WidgetDisplay } from '../../../core/projects/indicators.service';
 import { ColumnMetadataMap } from '../../../core/projects/pipeline.service';
-import { IndicatorUnit, captionShown, columnLabels, figureFormatter, isCurrencyCode, plotted, rawNames, textsCrowd, valueFormatter, withWidgetUnit } from './format';
+import { IndicatorUnit, captionInFoot, captionInSight, captionShown, columnLabels, figureFormatter, isCurrencyCode, plotted, rawNames, textsCrowd, valueFormatter, withWidgetUnit } from './format';
+import captionCases from './testing/caption-in-foot.json';
 import columnCases from './testing/column-labels.json';
 
 const format = (indicator: IndicatorUnit) => valueFormatter(indicator, 'en-US');
@@ -125,6 +126,46 @@ describe('captionShown', () => {
     for (const display of [undefined, null, {}, { caption: {} }, { caption: { text: 'Mi línea' } }, { subtitle: 'Pregunta' }, { caption: { hidden: undefined } }]) {
       expect(captionShown({ display })).toBe(true);
     }
+  });
+});
+
+describe('captionInSight (improve-widget-text-hierarchy, design D2)', () => {
+  const subtitle = 'E1, % de los hogares de cada estrato que asistieron';
+
+  it('is false for a hidden caption, whatever else the widget has', () => {
+    expect(captionInSight({ display: { caption: { hidden: true } } })).toBe(false);
+    expect(captionInSight({ display: { subtitle, caption: { hidden: true } } })).toBe(false);
+  });
+
+  it('is true for a caption kept in sight, with or without a subtitle', () => {
+    expect(captionInSight({ display: { subtitle, caption: { hidden: false } } })).toBe(true);
+    expect(captionInSight({ display: { subtitle, caption: { text: 'Texto', hidden: false } } })).toBe(true);
+    expect(captionInSight({ display: { caption: { hidden: false } } })).toBe(true);
+  });
+
+  it('is false while the widget has a subtitle and the caption is left as it is, with its own text or without', () => {
+    expect(captionInSight({ display: { subtitle } })).toBe(false);
+    expect(captionInSight({ display: { subtitle, caption: { text: '% de los hogares que asistieron' } } })).toBe(false);
+    expect(captionInSight({ display: { subtitle: '  Pregunta  ' } })).toBe(false);
+  });
+
+  it('is true for a widget with no subtitle or a blank one, as before', () => {
+    expect(captionInSight({})).toBe(true);
+    expect(captionInSight({ display: { caption: { text: 'Texto' } } })).toBe(true);
+    expect(captionInSight({ display: { subtitle: '   ' } })).toBe(true);
+  });
+});
+
+describe('captionInFoot (improve-widget-text-hierarchy, design D2, D11)', () => {
+  it('reads the shared cases that the API tests read', () => {
+    expect(captionCases.cases.length).toBeGreaterThanOrEqual(20);
+    expect(new Set(captionCases.cases.map((c) => c.name)).size).toBe(captionCases.cases.length);
+  });
+
+  it.each(captionCases.cases.map((c) => [c.name, c] as const))('says whether the own text is in the foot: %s', (_name, c) => {
+    const config = { seriesBy: c.seriesBy ?? null, display: (c.display ?? undefined) as WidgetDisplay | undefined } as Pick<WidgetConfig, 'display' | 'seriesBy'>;
+
+    expect(captionInFoot(c.chartType as ChartType, config)).toBe(c.inFoot);
   });
 });
 

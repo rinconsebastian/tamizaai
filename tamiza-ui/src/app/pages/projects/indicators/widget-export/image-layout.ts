@@ -1,5 +1,3 @@
-import { smallBaseOpacity } from '../small-base-style';
-import { dashOf } from '../chart-annotations';
 import { ExportKeyGlyph, ExportLegend, ExportLegendEntry, ExportParts } from '../export-parts';
 import { clampFigure } from '../stat-figure';
 import { TableLabels, TableTheme, drawTable, fitText } from './svg-table';
@@ -185,12 +183,12 @@ export function composeImage(input: ImageInput): ImageLayout {
     holder.appendChild(table.node);
     y += table.height + gap;
   } else if (stat) {
-    // A figure with a small base is drawn at the reduced opacity the page gives it (add-small-sample-warnings, design D10), at the size
-    // its tile gave it on screen (improve-stat-cards, design D1), broken only between words.
+    // The figure is drawn at full contrast, whatever its base, at the size its tile gave it on screen (improve-stat-cards, design D1),
+    // broken only between words.
     const lines = wrapWords(stat.value, width - margin * 2, (text) => measure(text, figureSize, 600));
     const lineHeight = Math.round(figureSize * 1.2);
     lines.forEach((line, index) => {
-      add(body, 'text', { x: margin, y: y + index * lineHeight + figureSize, 'font-size': figureSize, 'font-weight': 600, fill: theme.heading, ...(stat.dimmed ? { 'fill-opacity': smallBaseOpacity } : {}) }, line);
+      add(body, 'text', { x: margin, y: y + index * lineHeight + figureSize, 'font-size': figureSize, 'font-weight': 600, fill: theme.heading }, line);
     });
     y += lines.length * lineHeight + gap;
     if (stat.description) {
@@ -284,11 +282,9 @@ export function composeImage(input: ImageInput): ImageLayout {
     return top + (row + 1) * line + gap;
   }
 
-  /** A legend swatch: a square, a short stroke, a dashed stroke in the heading color (a reference line), or a square with a hairline. */
+  /** A legend swatch: a square, a short stroke, or a square with a hairline. */
   function swatch(parent: Element, entry: ExportLegendEntry, at: { x: number; y: number }, color: string): void {
-    if (entry.swatch === 'dashed') {
-      add(parent, 'line', { x1: at.x, y1: at.y + 7, x2: at.x + 14, y2: at.y + 7, stroke: theme.heading, 'stroke-width': 1.5, 'stroke-dasharray': dashOf(entry.dash ?? 0) });
-    } else if (entry.swatch === 'line') {
+    if (entry.swatch === 'line') {
       add(parent, 'line', { x1: at.x, y1: at.y + 7, x2: at.x + 14, y2: at.y + 7, stroke: color, 'stroke-width': 2, 'stroke-linecap': 'round' });
     } else {
       add(parent, 'rect', { x: at.x, y: at.y + 2, width: 10, height: 10, rx: 2, fill: color, ...(entry.swatch === 'outlined' ? { stroke: theme.strong, 'stroke-width': 1 } : {}) });

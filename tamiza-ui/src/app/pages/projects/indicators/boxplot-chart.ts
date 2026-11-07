@@ -3,7 +3,7 @@ import { TranslocoDirective, TranslocoService } from '@jsverse/transloco';
 import { countKey } from '../../../core/i18n/plural';
 import { BoxOrientation, QueryBox, QueryResult, WidgetConfig } from '../../../core/projects/indicators.service';
 import { ChartTooltip, ChartTooltipContent, ChartTooltips } from '../../../shared/ui';
-import { ChartBases, isSmallBase, noChartBases, smallBaseDash, smallBaseTooltip, summaryWithSmall } from './base-figures';
+import { ChartBases, SmallMark, isSmallBase, noChartBases, smallBaseDash, smallBaseTooltip, summaryWithSmall } from './base-figures';
 import { CategoryOrders, arrange, entryOf, shown, shownValues } from './category-order';
 import { ChartColors } from './chart-colors';
 import { registerExportParts } from './export-parts';
@@ -70,6 +70,8 @@ export interface BoxplotPlot {
   notDrawn: number;
   /** How many boxes have a small base. */
   small: number;
+  /** The boxes drawn dimmed, by name and number of values, in drawing order (improve-widget-text-hierarchy, design D5). */
+  smallMarks: SmallMark[];
 }
 
 /** The words of a box's tooltip and of the key, already translated. */
@@ -216,6 +218,7 @@ export function boxplotPlot(input: BoxplotPlotInput): BoxplotPlot {
 
   let notDrawn = 0;
   let small = 0;
+  const smallMarks: SmallMark[] = [];
   boxes.forEach((box, g) => {
     const color = input.color(box);
     const bandStart = bands.start(g);
@@ -251,6 +254,9 @@ export function boxplotPlot(input: BoxplotPlotInput): BoxplotPlot {
       small: isSmallBase(box.values, input.minN),
     });
     small += isSmallBase(box.values, input.minN) ? 1 : 0;
+    if (isSmallBase(box.values, input.minN)) {
+      smallMarks.push({ name: input.groupLabel(box.group), n: box.values });
+    }
 
     // The hit area covers the box and its whiskers across the box's width; an outlier's own hit area is drawn after it.
     const nearest = Math.min(upper, lower, q1, q3, meanAt);
@@ -292,7 +298,7 @@ export function boxplotPlot(input: BoxplotPlotInput): BoxplotPlot {
     marks[g][0] = { content, x: horizontal ? median : center, y: horizontal ? center : median };
   });
 
-  return { width: w, height: h, axis, grid, ticks, labels, boxes: boxesOut, outliers, hits, marks, notDrawn, small };
+  return { width: w, height: h, axis, grid, ticks, labels, boxes: boxesOut, outliers, hits, marks, notDrawn, small, smallMarks };
 }
 
 /**
@@ -488,7 +494,7 @@ export class BoxplotChart {
   /** The threshold in force (a box's n is its number of values), for the small bases of the boxes (add-small-sample-warnings). */
   readonly bases = input<ChartBases>(noChartBases);
   /** How many boxes the chart draws dimmed for a small base, so the widget can explain the dimming under it (design D10, D11). */
-  readonly dimmed = output<number>();
+  readonly dimmed = output<SmallMark[]>();
   protected readonly smallDash = smallBaseDash;
 
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
@@ -555,7 +561,7 @@ export class BoxplotChart {
   private watch: AbortController | null = null;
 
   constructor() {
-    effect(() => this.dimmed.emit(this.plot().small));
+    effect(() => this.dimmed.emit(this.plot().smallMarks));
     // What an image of the box plot says around its boxes (add-widget-export): the key of its marks, and the outliers it did not draw.
     registerExportParts({
       plot: () => (this.asTable() ? null : (this.svg()?.nativeElement ?? null)),

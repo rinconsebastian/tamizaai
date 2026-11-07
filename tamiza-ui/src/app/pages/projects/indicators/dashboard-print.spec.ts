@@ -537,13 +537,59 @@ describe('the words around a widget on paper (add-widget-context, "Subtitle on p
     await paperOn(context);
 
     expect(byTestId(context.root, 'widget-subtitle')!.classList).toContain('paper:line-clamp-none');
-    expect(byTestId(context.root, 'widget-footnote')!.classList).toContain('paper:line-clamp-none');
+    // The footnote is a line of the foot, which prints as lines in place of its chips (improve-widget-text-hierarchy, design D10).
+    expect(byTestId(context.root, 'foot-line-note')!.closest('ul')!.classList).toContain('paper:block');
+    expect(byTestId(context.root, 'foot-chip-note')!.closest('[data-testid="widget-foot"]')!.classList).toContain('paper:hidden');
     expect(text(byTestId(context.root, 'widget-subtitle'))).toBe(subtitle);
-    expect(text(byTestId(context.root, 'widget-footnote'))).toBe(footnote);
+    expect(text(byTestId(context.root, 'foot-line-note'))).toBe(footnote);
     expect(byTestId(context.root, 'widget-subtitle')!.closest('.paper\:hidden')).toBeNull();
-    expect(byTestId(context.root, 'widget-footnote')!.closest('.paper\:hidden')).toBeNull();
+    expect(byTestId(context.root, 'foot-line-note')!.closest('.paper\:hidden')).toBeNull();
     expect(byTestId(context.root, 'chart-svg')!.getAttribute('viewBox')).toBe('0 0 333 222');
     expect(widthBefore).not.toBe('0 0 333 222');
+  });
+
+  it('prints the title whole: its two-line clamp is lifted, as the subtitle\'s is (Whole texts on paper)', async () => {
+    const context = await show({ subtitle });
+
+    await paperOn(context);
+
+    const title = byTestId(context.root, 'widget-title')!;
+    expect(title.classList).toContain('paper:line-clamp-none');
+    expect(title.classList).toContain('line-clamp-2');
+    expect(title.closest('.paper\:hidden')).toBeNull();
+  });
+
+  it('prints the own caption text out of sight under a subtitle as the first line of the foot, whole, with no line above the chart (Own caption text on paper)', async () => {
+    const context = await show({ subtitle, caption: { text: '% de los hogares que asistieron' }, footnote: 'No suman 100 %.' });
+
+    await paperOn(context);
+
+    expect(byTestId(context.root, 'chart-caption')).toBeNull();
+    const line = byTestId(context.root, 'foot-line-caption')!;
+    expect(text(line)).toBe('% de los hogares que asistieron by municipality');
+    expect(line.closest('ul')!.classList).toContain('paper:block');
+    expect(line.closest('.paper\:hidden')).toBeNull();
+    const foot = Array.from(line.closest('ul')!.children).map((item) => item.getAttribute('data-testid'));
+    expect(foot).toEqual(['foot-line-caption', 'foot-line-note']);
+    expect(byTestId(context.root, 'foot-chip-caption')!.closest('[data-testid="widget-foot"]')!.classList).toContain('paper:hidden');
+  });
+
+  it('prints no caption line above the chart of a widget with a subtitle and the default line, and none in its foot (Hidden caption on paper)', async () => {
+    const context = await show({ subtitle });
+
+    await paperOn(context);
+
+    expect(byTestId(context.root, 'chart-caption')!.classList).toContain('sr-only');
+    expect(byTestId(context.root, 'foot-line-caption')).toBeNull();
+  });
+
+  it('prints the caption above the chart when it is kept in sight under the subtitle, and none in the foot', async () => {
+    const context = await show({ subtitle, caption: { text: '% de los hogares que asistieron', hidden: false } });
+
+    await paperOn(context);
+
+    expect(byTestId(context.root, 'chart-caption')!.classList).not.toContain('sr-only');
+    expect(byTestId(context.root, 'foot-line-caption')).toBeNull();
   });
 
   it('prints a widget with a hidden caption without a visible caption line, as on screen (Hidden caption on paper)', async () => {
@@ -574,10 +620,10 @@ describe('the words around a widget on paper (add-widget-context, "Subtitle on p
 
     await paperOn(context);
 
-    const box = byTestId(context.root, 'widget-footnote')!.previousElementSibling as HTMLElement;
+    const box = context.root.querySelector('app-widget-foot')!.previousElementSibling as HTMLElement;
     expect(box.classList).toContain('overflow-hidden');
     expect(box.contains(byTestId(context.root, 'chart-svg'))).toBe(true);
-    expect(box.contains(byTestId(context.root, 'widget-footnote'))).toBe(false);
+    expect(box.contains(byTestId(context.root, 'foot-line-note'))).toBe(false);
   });
 
   it('keeps the chart box of a widget without a footnote as it is on paper', async () => {
@@ -585,7 +631,7 @@ describe('the words around a widget on paper (add-widget-context, "Subtitle on p
 
     await paperOn(context);
 
-    expect(byTestId(context.root, 'widget-footnote')).toBeNull();
+    expect(byTestId(context.root, 'foot-line-note')).toBeNull();
     const box = byTestId(context.root, 'chart-svg')!.closest('.min-h-0.flex-1') as HTMLElement;
     expect(box.classList).not.toContain('overflow-hidden');
   });
@@ -615,7 +661,7 @@ describe('chart annotations on paper (add-chart-annotations, "Chart annotations 
 
   const zones = result([row('Zona 1', 0.5), row('Zona 2', 0.4), row('Zona 3', 0.6), row('Zona 4', 0.2)], { overall: 0.4599 });
 
-  it('prints both dashed lines across the columns and the key that lists them, inside the widget\'s box (Reference lines printed)', async () => {
+  it('prints both dashed lines across the columns, each text at its line on its box or, when it did not fit there, in the foot, and no key (Reference lines printed)', async () => {
     const context = await show('column', { ratio, display: { referenceLines: [{ kind: 'mean' }, { kind: 'overall' }] } }, zones);
     boxOf(333, 222);
 
@@ -625,15 +671,22 @@ describe('chart annotations on paper (add-chart-annotations, "Chart annotations 
     expect(lines).toHaveLength(2);
     expect(lines.map((line) => line.getAttribute('stroke-dasharray'))).toEqual(['6 4', '2 3']);
     expect(lines.every((line) => Number(line.getAttribute('x1')) < Number(line.getAttribute('x2')) && Number(line.getAttribute('x2')) <= 333)).toBe(true);
-    const key = byTestId(context.root, 'reference-key')!;
-    expect(all(context.root, 'reference-key-text').map(text)).toEqual(['Mean: 42.5%', 'Overall: 45.99%']);
-    expect(key.closest('.paper\:hidden')).toBeNull();
-    // The key is the chart's own, a sibling of the plot's box (it takes its room before the plot does) and in the widget's box.
-    const host = key.closest('app-reference-key')!;
-    expect(host.classList).toContain('shrink-0');
-    expect(host.previousElementSibling!.contains(byTestId(context.root, 'chart-svg'))).toBe(true);
-    expect(key.closest('app-widget-view')).not.toBeNull();
+    // The texts are in the plot, on boxes in the tile's color that print white.
+    expect(all(context.root, 'reference-label').map(text)).toEqual(expect.arrayContaining(['Mean: 42.5%']));
+    expect(all(context.root, 'reference-box').length).toBeGreaterThan(0);
+    for (const box of all(context.root, 'reference-box')) {
+      expect(box.classList).toContain('paper:fill-white');
+    }
+    expect(all(context.root, 'reference-key')).toHaveLength(0);
+    expect(context.root.querySelector('app-reference-key')).toBeNull();
+    expect(byTestId(context.root, 'chart-svg')!.closest('app-widget-view')).not.toBeNull();
     expect(byTestId(context.root, 'chart-svg')!.getAttribute('viewBox')).toBe('0 0 333 222');
+    // A text that did not fit at its line prints as a line of the foot, whole, with no chip.
+    const footLine = byTestId(context.root, 'foot-line-lines');
+    if (footLine) {
+      expect(footLine.closest('ul')!.classList).toContain('paper:block');
+      expect(footLine.closest('.paper\:hidden')).toBeNull();
+    }
   });
 
   const barsOf = (count: number) => result(Array.from({ length: count }, (_, i) => row(`Zona ${i + 1}`, 0.1 + i / 100)));
@@ -775,12 +828,19 @@ describe('small bases on paper (add-small-sample-warnings, "Small bases on paper
     expect(marks.map((mark) => mark.getAttribute('stroke-dasharray'))).toEqual(['3 2', null, '3 2']);
     expect(marks.map((mark) => mark.getAttribute('fill-opacity'))).toEqual(['0.35', null, '0.35']);
     // The lines print whole, in their order, above the footnote.
-    const lines = ['widget-small-note', 'widget-n-line', 'widget-no-data-line', 'widget-footnote'].map((id) => byTestId(context.root, id)!);
-    expect(lines.map(text)).toEqual(['Marks with a base below 30 are dimmed.', 'n = 157 Hogares', 'No sabe: 2.24%', footnote]);
+    const lines = ['foot-line-n', 'foot-line-small', 'foot-line-noData', 'foot-line-note'].map((id) => byTestId(context.root, id)!);
+    expect(lines.map(text)).toEqual([
+      'n = 157 Hogares',
+      'Small base (below 30): COMUNA 7 (n = 16), SIN NOMBRE (n = 20). Their marks are drawn dimmed.',
+      'No sabe: 2.24%',
+      footnote,
+    ]);
     for (const line of lines) {
-      expect(line.classList).toContain('paper:line-clamp-none');
+      expect(line.closest('ul')!.classList).toContain('paper:block');
       expect(line.closest('.paper\:hidden')).toBeNull();
     }
+    // No chip is printed: they are hidden on paper, whole text or not.
+    expect(byTestId(context.root, 'foot-chip-n')!.closest('[data-testid="widget-foot"]')!.classList).toContain('paper:hidden');
     lines.slice(1).forEach((line, i) => expect(lines[i].compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy());
     expect(byTestId(context.root, 'chart-svg')!.querySelector(movedElements)).toBeNull();
   });
@@ -790,10 +850,10 @@ describe('small bases on paper (add-small-sample-warnings, "Small bases on paper
 
     await paperOn(context);
 
-    const box = byTestId(context.root, 'widget-n-line')!.previousElementSibling as HTMLElement;
+    const box = context.root.querySelector('app-widget-foot')!.previousElementSibling as HTMLElement;
     expect(box.classList).toContain('overflow-hidden');
     expect(box.contains(byTestId(context.root, 'chart-svg'))).toBe(true);
-    expect(box.contains(byTestId(context.root, 'widget-n-line'))).toBe(false);
+    expect(box.contains(byTestId(context.root, 'foot-line-n'))).toBe(false);
   });
 
   it('prints the hatch of a heat map inside the chart\'s own SVG, so it prints with the chart', async () => {
@@ -811,7 +871,65 @@ describe('small bases on paper (add-small-sample-warnings, "Small bases on paper
     const pattern = small.getAttribute('fill')!.match(/url\(#(.+)\)/)![1];
     expect(svg.querySelector(`pattern[id="${pattern}"]`)).not.toBeNull();
     expect(small.getAttribute('stroke-dasharray')).toBe('3 2');
-    expect(text(byTestId(context.root, 'widget-small-note'))).toBe('Marks with a base below 30 are dimmed.');
+    expect(text(byTestId(context.root, 'foot-line-small'))).toBe('Small base (below 30): A · x (n = 10). Their marks are drawn dimmed.');
+  });
+
+  it('prints the amber n of a stat tile as the line that says its figure rests on that n, and the figure at full contrast (Amber n of a stat tile on paper)', async () => {
+    const context = await show('stat', { groupBy: null, display: { minN: 30 } }, result([row(null, 0.4, null, { numerator: 2, denominator: 5, n: 26 })]));
+
+    await paperOn(context);
+
+    expect(byTestId(context.root, 'stat-value')!.style.opacity).toBe('');
+    const line = byTestId(context.root, 'foot-line-n')!;
+    // The page keeps the whole sentence for screen readers; paper prints a short line, so a tile two rows high keeps the warning.
+    expect(text(byTestId(line, 'foot-line-whole')!)).toBe('Small base: the figure rests on n = 26, below the 30 this dashboard asks for. Read it with caution.');
+    const printed = byTestId(line, 'foot-line-print')!;
+    expect(text(printed)).toBe('Small base: n = 26, below 30.');
+    expect(printed.classList).toContain('hidden');
+    expect(printed.classList).toContain('paper:inline');
+    // Not part of the chip's description, which is the whole sentence: a screen reader must not hear the warning twice.
+    expect(printed.getAttribute('aria-hidden')).toBe('true');
+    expect(byTestId(line, 'foot-line-whole')!.classList).toContain('paper:hidden');
+    expect(line.closest('ul')!.classList).toContain('paper:block');
+    expect(line.closest('.paper\:hidden')).toBeNull();
+    expect(byTestId(context.root, 'foot-chip-n')!.getAttribute('data-tone')).toBe('warning');
+    expect(byTestId(context.root, 'foot-chip-n')!.closest('[data-testid="widget-foot"]')!.classList).toContain('paper:hidden');
+  });
+
+  it('prints the text of a reference line that did not fit at its line as a line of the foot (Line chip on paper)', async () => {
+    const unit = 'de los hogares encuestados en la zona urbana del municipio';
+    const context = await show('column', { display: { unit, referenceLines: [{ kind: 'value', value: 0.5, label: 'Meta del plan de desarrollo municipal' }] } });
+
+    await paperOn(context);
+
+    const line = byTestId(context.root, 'foot-line-lines')!;
+    expect(text(line)).toBe(`Meta del plan de desarrollo municipal: 50% ${unit}`);
+    expect(line.closest('ul')!.classList).toContain('paper:block');
+    expect(line.closest('.paper\:hidden')).toBeNull();
+    expect(all(context.root, 'reference-line')).toHaveLength(1);
+    expect(all(context.root, 'reference-label')).toHaveLength(0);
+  });
+
+  it('prints the subtitle of a compact stat tile as the Detail line of its foot, under the figure, and not under the title (Tile 4 columns wide and 2 rows high)', async () => {
+    const tile = widget('w1', { chartType: 'stat', layout: { x: 0, y: 0, w: 4, h: 2 }, config: config({ indicator: 'teatro_hoy', ratio, groupBy: null, display: { subtitle: 'E1, % de los hogares con encuesta completa' } }) });
+    const context = await open('viewer', [tile], null, { indicators: [teatro] });
+    context.http.match(isQuery)[0].flush(result([row(null, 0.4685)], { n: 476 }));
+    await settle(context.harness);
+
+    await paperOn(context);
+
+    const subtitleLine = byTestId(context.root, 'widget-subtitle')!;
+    // Over the figure it left the figure no room on a tile 2 rows high (checked on the stack): the header keeps the title alone.
+    expect(subtitleLine.classList).toContain('hidden');
+    expect(subtitleLine.classList).toContain('paper:hidden');
+    expect(subtitleLine.classList).not.toContain('paper:block');
+    expect(subtitleLine.classList).not.toContain('paper:line-clamp-none');
+    const detail = byTestId(context.root, 'foot-line-detail')!;
+    expect(text(detail)).toBe('E1, % de los hogares con encuesta completa');
+    expect(detail.classList).not.toContain('paper:hidden');
+    expect(detail.closest('ul')!.classList).toContain('paper:block');
+    expect(detail.closest('.paper\:hidden')).toBeNull();
+    expect(byTestId(context.root, 'foot-chip-detail')!.closest('[data-testid="widget-foot"]')!.classList).toContain('paper:hidden');
   });
 
   it('prints the table of a widget with its n column, its marks and the note that explains them', async () => {
@@ -884,12 +1002,15 @@ describe('stat tiles on paper (improve-stat-cards, "Stat tile on paper")', () =>
 
     const column = byTestId(context.root, 'stat')!;
     expect(text(byTestId(context.root, 'stat-label'))).toBe('Median of Households visited: numerator / Hogares');
-    expect(all(context.root, 'stat-line').map(text)).toEqual(['n = 121', expect.stringMatching(/^Without filters: /)]);
+    expect(all(context.root, 'stat-line').map(text)).toEqual([expect.stringMatching(/^Without filters: /)]);
     for (const line of all(context.root, 'stat-line')) {
       expect(column.contains(line)).toBe(true);
       expect(line.closest('.paper\:hidden')).toBeNull();
     }
-    expect(text(byTestId(context.root, 'widget-footnote'))).toBe('Sin ponderar.');
+    // The n is a line of the tile's foot on paper, before the footnote (improve-widget-text-hierarchy, design D10).
+    expect(text(byTestId(context.root, 'foot-line-n'))).toBe('n = 121');
+    expect(text(byTestId(context.root, 'foot-line-note'))).toBe('Sin ponderar.');
+    expect(byTestId(context.root, 'foot-line-n')!.closest('.paper\:hidden')).toBeNull();
   });
 
   it('prints the message of a widget that would add up several answers in place of its figure (Card over two reasons)', async () => {

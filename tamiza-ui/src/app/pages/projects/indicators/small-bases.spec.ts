@@ -322,31 +322,35 @@ describe('the figures and small bases of the charts with a series (add-small-sam
       expect(all(long.root, 'chart-dot')[0].getAttribute('data-small')).toBe('true');
     });
 
-    it('dims the figure of a stat tile whose row has a small base (Stat tile)', async () => {
+    it('keeps the figure of a stat tile whose row has a small base at full contrast, and marks the tile (Stat tile)', async () => {
       const context = await show('stat', { groupBy: null, display: { minN: 30 } }, result([row(null, 0.4, null, { numerator: 2, denominator: 5, n: 5 })]));
-      expect(byTestId(context.root, 'stat-value')!.style.opacity).toBe('0.35');
+      expect(byTestId(context.root, 'stat-value')!.style.opacity).toBe('');
+      expect(byTestId(context.root, 'stat-value')!.getAttribute('data-small')).toBe('true');
+      expect(byTestId(context.root, 'foot-chip-n')!.getAttribute('data-tone')).toBe('warning');
       clearOverlay();
       TestBed.resetTestingModule();
 
       const plain = await show('stat', { groupBy: null }, result([row(null, 0.4, null, { numerator: 2, denominator: 5, n: 5 })]));
       expect(byTestId(plain.root, 'stat-value')!.style.opacity).toBe('');
+      expect(byTestId(plain.root, 'stat-value')!.hasAttribute('data-small')).toBe(false);
     });
 
-    it('draws the small-base note of a stat tile inside the tile and none under it, and always centers its column safely (Tile with texts and the n line)', async () => {
+    it('says the small base of a stat tile in the n chip of its foot, none inside the tile, and always centers its column safely (Tile with texts and the n line)', async () => {
       const context = await show('stat', { groupBy: null, display: { minN: 30, subtitle: 'Subtitle', footnote: 'Footnote' } }, result([row(null, 0.4, null, { numerator: 2, denominator: 5, n: 5 })]));
       const tile = byTestId(context.root, 'stat')!;
-      const note = byTestId(context.root, 'widget-small-note')!;
+      const note = byTestId(context.root, 'foot-line-n')!;
 
-      expect(tile.contains(note)).toBe(true);
-      expect(all(context.root, 'widget-small-note')).toHaveLength(1);
-      expect(note.textContent!.trim()).toBe('Marks with a base below 30 are dimmed.');
+      expect(tile.contains(note)).toBe(false);
+      expect(all(context.root, 'foot-line-n')).toHaveLength(1);
+      expect(byTestId(context.root, 'widget-small-note')).toBeNull();
+      expect(byTestId(note, 'foot-line-whole')!.textContent!.trim()).toBe('Small base: the figure rests on n = 5, below the 30 this dashboard asks for. Read it with caution.');
       expect(tile.classList.contains('justify-center-safe')).toBe(true);
       expect(tile.classList.contains('justify-center')).toBe(false);
       clearOverlay();
       TestBed.resetTestingModule();
 
       const plain = await show('stat', { groupBy: null }, result([row(null, 0.4, null, { numerator: 2, denominator: 5, n: 50 })]));
-      expect(byTestId(plain.root, 'widget-small-note')).toBeNull();
+      expect(byTestId(plain.root, 'foot-line-n')).toBeNull();
       expect(byTestId(plain.root, 'stat')!.classList.contains('justify-center-safe')).toBe(true);
     });
 

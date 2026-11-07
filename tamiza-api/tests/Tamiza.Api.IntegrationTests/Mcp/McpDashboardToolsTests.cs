@@ -2129,6 +2129,126 @@ public sealed class McpDashboardToolsTests(PostgresFixture postgres)
         Assert.Contains("\"formatted\":\"90%\"", result.Text());
     }
 
+    // Caption kept in sight and caption out of sight (mcp-server "Caption kept in sight through MCP", "Caption out of sight told through MCP")
+
+    private const string CaptionRequest = "Say where the caption goes";
+
+    private static string[] NotesOf(JsonDocument body) =>
+        body.RootElement.TryGetProperty("notes", out var notes) ? [.. notes.EnumerateArray().Select(n => n.GetString()!)] : [];
+
+    [Fact]
+    public async Task The_tool_descriptions_say_where_a_caption_with_a_subtitle_goes_and_how_to_keep_it_in_sight()
+    {
+        await using var h = await CreateAsync();
+        var tools = (await (await h.ClientAsync("analyst")).ListToolsAsync()).ToDictionary(t => t.Name);
+
+        foreach (var tool in new[] { "create_widget", "update_widget" })
+        {
+            Assert.Contains("hidden: false", tools[tool].Description);
+            Assert.Contains("with a subtitle shows its caption's own text in its foot", tools[tool].Description);
+        }
+    }
+
+    [Fact]
+    public async Task A_caption_kept_in_sight_is_saved_read_back_as_given_and_has_no_note()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+        var widget = await AddWidgetAsync(h, dashboard, "By municipality", "bar", WithDisplay(new { subtitle = "Before" }));
+
+        var updated = await h.CallAsync("analyst", "update_widget", new
+        {
+            dashboardId = dashboard, widgetId = widget, change = CaptionRequest,
+            config = WithDisplay(new { subtitle = "% of homes with piped water", caption = new { text = "% de los hogares", hidden = false } }),
+        });
+
+        Assert.Null(updated.Code());
+        using var result = updated.Json();
+        Assert.Empty(NotesOf(result));
+        using var viewed = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = dashboard })).Json();
+        var caption = viewed.RootElement.GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("caption");
+        Assert.Equal(("% de los hogares", false), (caption.GetProperty("text").GetString(), caption.GetProperty("hidden").GetBoolean()));
+    }
+
+    [Fact]
+    public async Task A_widget_saved_with_a_subtitle_and_an_own_caption_text_says_in_its_result_that_the_text_shows_in_the_foot()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+
+        var created = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = dashboard, title = "By municipality", chartType = "bar", change = CaptionRequest,
+            config = WithDisplay(new { subtitle = "% of homes with piped water", caption = new { text = "% de los hogares" } }),
+        });
+
+        Assert.Null(created.Code());
+        using var result = created.Json();
+        var note = Assert.Single(NotesOf(result));
+        Assert.Contains("% de los hogares", note);
+        Assert.Contains("foot", note);
+        Assert.Contains("caption.hidden", note);
+        // The rest of the result is as it was, and the widget is saved with the caption as given.
+        Assert.True(result.RootElement.TryGetProperty("dashboardVersions", out _));
+        using var viewed = (await h.CallAsync("viewer", "get_dashboard", new { dashboardId = dashboard })).Json();
+        Assert.False(viewed.RootElement.GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("caption").TryGetProperty("hidden", out _));
+    }
+
+    [Theory]
+    [InlineData("bar", "subtitle-only")]
+    [InlineData("bar", "hidden")]
+    [InlineData("bar", "blank-subtitle")]
+    public async Task A_widget_whose_caption_text_does_not_move_has_no_note(string chartType, string case_)
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+        object display = case_ switch
+        {
+            "subtitle-only" => new { subtitle = "Pregunta" },
+            "hidden" => new { subtitle = "Pregunta", caption = new { hidden = true } },
+            _ => new { subtitle = " ", caption = new { text = "% de los hogares" } },
+        };
+
+        var created = await h.CallAsync("analyst", "create_widget", new { dashboardId = dashboard, title = "W", chartType, config = WithDisplay(display), change = CaptionRequest });
+
+        Assert.Null(created.Code());
+        using var result = created.Json();
+        Assert.Empty(NotesOf(result));
+    }
+
+    [Fact]
+    public async Task A_stat_tile_and_a_column_chart_with_a_series_have_no_caption_note()
+    {
+        await using var h = await CreateAsync();
+        await SeedAsync(h);
+        await SeedSourcesAsync(h);
+        var dashboard = await FirstDashboardAsync(h);
+
+        var series = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = dashboard, title = "Stacked", chartType = "column", change = CaptionRequest,
+            config = new
+            {
+                indicator = "households_by_source", measure = "value", groupBy = "municipality", seriesBy = "water_source", layout = "stacked",
+                display = new { subtitle = "Pregunta", caption = new { text = "% de los hogares" } },
+            },
+        });
+        Assert.Null(series.Code());
+        using var seriesResult = series.Json();
+        Assert.Empty(NotesOf(seriesResult));
+
+        var stat = await h.CallAsync("analyst", "create_widget", new
+        {
+            dashboardId = dashboard, title = "Tile", chartType = "stat", change = CaptionRequest,
+            config = new { indicator = "piped_water_rate", ratio = new { numerator = "numerator", denominator = "denominator" }, display = new { subtitle = "Pregunta", caption = new { text = "de los hogares" } } },
+        });
+        using var statResult = stat.Json();
+        Assert.Empty(NotesOf(statResult));
+    }
+
     [Fact]
     public async Task Caption_refused_through_MCP_has_the_error_on_the_caption_and_saves_nothing()
     {

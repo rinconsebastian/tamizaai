@@ -179,6 +179,35 @@ export function nLine(n: number | null | undefined, name: string | null | undefi
   return name ? `${text} ${name}` : text;
 }
 
+/**
+ * A mark drawn dimmed for a small base, as a chart tells the widget (improve-widget-text-hierarchy, design D5): its name as the widget
+ * shows it (a group, or "group · series" for a cell of a chart with a series) and its n, so the small-base chip can name it.
+ */
+export interface SmallMark {
+  name: string;
+  n: number;
+}
+
+/**
+ * A stat tile's n line, "n = 476 Hogares" (add-small-sample-warnings, design D11), when the tile chooses it (`display.secondary` holds
+ * `n`) or the base n line is in force for it (improve-stat-cards, design D3), and it has an n; null otherwise. A tile with a statistic
+ * names the base column or nothing ("n = 37": a number of values); one without names the base column, else the denominator. It was the
+ * tile's own, and is the n chip of the widget's foot now (improve-widget-text-hierarchy, design D6).
+ */
+export function statNLine(
+  config: Pick<WidgetConfig, 'ratio' | 'statistic' | 'display'>,
+  names: ColumnNamer,
+  bases: Pick<ChartBases, 'showN' | 'baseColumn'>,
+  n: number | null | undefined,
+  locale: string,
+): string | null {
+  if (!config.display?.secondary?.includes('n') && !bases.showN) {
+    return null;
+  }
+  const name = config.statistic ? (bases.baseColumn ? names(bases.baseColumn) : null) : figureNames(config, names, bases.baseColumn ?? null).base;
+  return nLine(n, name, locale);
+}
+
 /** The note under a chart while a mark is dimmed: "Marks with a base below 30 are dimmed." */
 export function smallBaseNote(minN: number, locale: string, t: Translate): string {
   return t('indicators.bases.smallNote', { min: figureFormatter(locale)(minN) });
@@ -198,6 +227,20 @@ export function summaryWithSmall(words: string, count: number, t: Translate): st
 /** The note under a table that marks small bases: "* Base below 30." */
 export function smallBaseTableNote(minN: number, locale: string, t: Translate): string {
   return t('indicators.bases.tableNote', { min: figureFormatter(locale)(minN) });
+}
+
+/** How many dimmed marks the small-base chip names before it says how many more there are (improve-widget-text-hierarchy, design D5). */
+export const maxSmallNamed = 5;
+
+/**
+ * What the small-base chip opens: "Small base (below 30): COMUNA 7 (n = 16), SIN NOMBRE (n = 20). Their marks are drawn dimmed." It names at
+ * most five marks, in the chart's order, each with its n, then says how many more there are.
+ */
+export function smallBaseMarksText(marks: readonly SmallMark[], minN: number, locale: string, t: Translate): string {
+  const number = figureFormatter(locale);
+  const named = marks.slice(0, maxSmallNamed).map((mark) => `${mark.name} (n = ${number(mark.n)})`).join(', ');
+  const more = marks.length - maxSmallNamed;
+  return t('indicators.foot.smallText', { min: number(minN), marks: more > 0 ? `${named} ${t('indicators.foot.more', { count: more })}` : named });
 }
 
 /** How many values the no-data line names before it ends with an ellipsis. */

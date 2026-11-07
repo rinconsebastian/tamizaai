@@ -2049,6 +2049,34 @@ public sealed class DashboardVersionTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_caption_kept_in_sight_is_held_by_its_version_restored_and_saved_unchanged_without_a_new_version()
+    {
+        // improve-widget-text-hierarchy, task 1.3: `hidden: false` travels with the widget through versions, restores and a form saved unchanged.
+        await using var h = await PublishedAsync();
+        var housing = await h.AddDashboardAsync("Housing");
+        var id = await AddWidgetAsync(h, "Coverage", housing, Layout(0, 0));
+        var display = new { subtitle = "¿En qué lugares?", caption = new { text = "% de los hogares", hidden = false } };
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { config = new { indicator = "coverage", groupBy = "municipality", display } })).StatusCode);
+        var kept = (await ContentAsync(h, housing, (await NumbersAsync(h, housing)).Max())).GetProperty("widgets")[0].GetProperty("config").GetProperty("display").GetProperty("caption");
+        Assert.Equal(("% de los hogares", false), (kept.GetProperty("text").GetString(), kept.GetProperty("hidden").GetBoolean()));
+
+        var stored = await h.StoredWidgetsAsync();
+        var versions = await AllVersionsAsync(h);
+        var read = (await h.GetWidgetsAsync(housing)).EnumerateArray().Single();
+        var form = await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { title = read.GetProperty("title").GetString(), chartType = read.GetProperty("chartType").GetString(), config = read.GetProperty("config") });
+        Assert.Equal(HttpStatusCode.OK, form.StatusCode);
+        Assert.Equal(stored, await h.StoredWidgetsAsync());
+        Assert.Equal(versions, await AllVersionsAsync(h));
+
+        // The widget changed after that version, and a restore brings the caption back as it was.
+        var number = (await NumbersAsync(h, housing)).Max();
+        Assert.Equal(HttpStatusCode.OK, (await h.Analyst.PatchJsonAsync(h.WidgetUrl(id, housing), new { config = new { indicator = "coverage", groupBy = "municipality", display = new { subtitle = "Otra pregunta" } } })).StatusCode);
+        await RestoredAsync(h, housing, number);
+        var back = (await h.GetWidgetsAsync(housing)).EnumerateArray().Single().GetProperty("config").GetProperty("display").GetProperty("caption");
+        Assert.Equal(("% de los hogares", false), (back.GetProperty("text").GetString(), back.GetProperty("hidden").GetBoolean()));
+    }
+
+    [Fact]
     public async Task Widget_with_texts_saved_unchanged_makes_no_version_and_leaves_its_stored_text()
     {
         await using var h = await PublishedAsync();

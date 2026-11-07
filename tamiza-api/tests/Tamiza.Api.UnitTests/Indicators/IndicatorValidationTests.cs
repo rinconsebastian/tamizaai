@@ -1346,6 +1346,9 @@ public sealed class IndicatorValidationTests
         Assert.Equal(["Give the caption its own text or hide it, not both."], error.Value);
         Assert.Empty(CheckContext(new WidgetDisplay(Caption: new WidgetCaption(null, true))));
         Assert.Empty(CheckContext(new WidgetDisplay(Caption: new WidgetCaption("% de quienes asistieron"))));
+        // Kept in sight under a subtitle (design D2 of improve-widget-text-hierarchy): an own text with hidden false is valid.
+        Assert.Empty(CheckContext(new WidgetDisplay(Caption: new WidgetCaption("% de quienes asistieron", false))));
+        Assert.Empty(CheckContext(new WidgetDisplay(Caption: new WidgetCaption(null, false))));
     }
 
     [Theory]

@@ -1836,7 +1836,10 @@
           "text": "Texto propio",
           "hidden": "Oculto",
           "textLabel": "Texto del epígrafe",
-          "line": "Se lee: {{ line }}"
+          "line": "Se lee: {{ line }}",
+          "keep": "Mantener visible con subtítulo",
+          "keepHelp": "Con subtítulo, esta línea no se muestra y su texto aparece en el pie del widget.",
+          "inFoot": "Este texto no se mostrará encima del gráfico porque el widget tiene subtítulo: aparecerá en el pie del widget. Marque «Mantener visible con subtítulo» para mostrarlo arriba."
         },
         "unit": {
           "label": "Unidad",
@@ -2148,6 +2151,18 @@
     "combined": {
       "title": "Esta cifra contaría a las personas más de una vez",
       "text": "{{ column }} contiene las respuestas de una pregunta de selección múltiple. Sumar varias de ellas cuenta a cada persona una vez por respuesta. Deja una sola respuesta, agrupa o divide el widget por {{ column }}, o grafica una fila que el indicador publique para cualquiera de ellas."
+    },
+    "foot": {
+      "small": "{{count}} con base pequeña",
+      "smallText": "Base pequeña (menos de {{min}}): {{marks}}. Sus marcas se dibujan atenuadas.",
+      "more": "y {{count}} más",
+      "noData": "Sin dato {{figure}}",
+      "lines": "Líneas de referencia",
+      "detail": "Detalle",
+      "note": "Nota",
+      "smallStat": "Base pequeña: la cifra sale de n = {{n}}, menos de los {{min}} que pide el tablero. Léala con cautela.",
+      "smallStatShort": "Base pequeña: n = {{n}}, menos de {{min}}.",
+      "smallChart": "Base pequeña: las cifras salen de n = {{n}}, menos de los {{min}} que pide el tablero. Léalas con cautela."
     }
   },
   "dashboards": {

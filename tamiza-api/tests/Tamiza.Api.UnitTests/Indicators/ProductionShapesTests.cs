@@ -189,7 +189,7 @@ public sealed class ProductionShapesTests
         }
 
         var names = shapes.Select(s => s!["name"]!.GetValue<string>()).ToList();
-        Assert.Equal(32, names.Count);
+        Assert.Equal(34, names.Count);
         Assert.Equal(names.Count, names.Distinct().Count());
         Assert.Equal(
             [ChartTypes.Column, ChartTypes.Column, ChartTypes.Bar, ChartTypes.Bar, ChartTypes.Bar, ChartTypes.Bar, ChartTypes.Stat, ChartTypes.Stat, ChartTypes.Line,
@@ -203,7 +203,9 @@ public sealed class ProductionShapesTests
              // The shapes of the base settings (add-small-sample-warnings)
              ChartTypes.Column, ChartTypes.Column,
              // The shapes of the stat tiles (improve-stat-cards)
-             ChartTypes.Stat, ChartTypes.Stat],
+             ChartTypes.Stat, ChartTypes.Stat,
+             // The shapes of the caption kept in sight (improve-widget-text-hierarchy)
+             ChartTypes.Column, ChartTypes.Bar],
             shapes.Select(s => s!["chartType"]!.GetValue<string>()));
         Assert.All(shapes, s => Assert.True(ChartTypes.IsKnown(s!["chartType"]!.GetValue<string>())));
     }
@@ -270,7 +272,7 @@ public sealed class ProductionShapesTests
         Assert.Equal(shape["stored"]!.GetValue<string>(), Write(Read(formSaved.ToJsonString())));
     }
 
-    /// <summary>The shape of a stat tile with a statistic and secondary lines (improve-stat-cards, task 1.5), the last of the fixture.</summary>
+    /// <summary>The shape of a stat tile with a statistic and secondary lines (improve-stat-cards, task 1.5), the last of its own change.</summary>
     private const string StatisticShape = "stat tile with a median and both secondary lines";
 
     /// <summary>The members of a widget's display that the widget context adds (design D1).</summary>
@@ -331,7 +333,7 @@ public sealed class ProductionShapesTests
             .Where(display => display is not null && ContextMembers.Any(display.ContainsKey))
             .ToList();
 
-        Assert.Equal(5, held.Count);
+        Assert.Equal(7, held.Count);
         foreach (var member in ContextMembers)
         {
             Assert.Contains(held, display => display!.ContainsKey(member));
